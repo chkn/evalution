@@ -1,0 +1,11 @@
+import { anthropic } from '@ai-sdk/anthropic';
+
+export function personalizedReview(username: string, codeSnippet: string) {
+  return {
+    model: 'anthropic/claude-sonnet-4-20250514',
+    system: 'You are a code reviewer for ' + username,
+    messages: [
+      { role: 'user', content: 'Review this code: ' + codeSnippet }
+    ]
+  };
+}
