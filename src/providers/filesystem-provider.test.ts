@@ -140,12 +140,12 @@ export function myPrompt() {
     ).rejects.toThrow("Property 'nonexistent' not found");
   });
 
-  it('should support watching (supportsWatching = true)', () => {
-    expect(provider.supportsWatching).toBe(true);
+  it('should support watching', () => {
+    expect(provider.watch).toBeDefined();
   });
 
-  it('should support editing (supportsEditing = true)', () => {
-    expect(provider.supportsEditing).toBe(true);
+  it('should support editing', () => {
+    expect(provider.updatePromptProperties).toBeDefined();
   });
 
   it('should handle files with multiple exported functions correctly', async () => {

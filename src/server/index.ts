@@ -37,7 +37,7 @@ export async function startServer(options: ServerOptions) {
   });
 
   // Setup file watching if supported
-  if (provider.supportsWatching && provider.watch) {
+  if (provider.watch) {
     provider.watch((event) => {
       // Broadcast to all SSE clients
       const message = `data: ${JSON.stringify({ type: 'prompt-changed', event })}\n\n`;

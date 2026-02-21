@@ -51,6 +51,10 @@ export function setupRoutes(
         const { id } = request.params;
         const decodedId = decodeURIComponent(id);
 
+        if (!provider.updatePromptProperties) {
+          return reply.code(405).send({ error: 'This provider does not support editing' });
+        }
+
         const updatedPrompt = await provider.updatePromptProperties(decodedId, request.body);
 
         return updatedPrompt;

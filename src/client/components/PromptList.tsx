@@ -25,14 +25,14 @@ function buildRawTree(prompts: ParsedPrompt[], rootPath: string): RawTree {
   const root: RawTree = { subdirs: {}, files: {} };
 
   for (const prompt of prompts) {
-    const filePath = (prompt.metadata?.filePath as string) || '';
+    const filePath = (prompt.metadata?.filePath as string) ?? prompt.id;
     let relPath = filePath;
     if (rootPath && filePath.startsWith(rootPath)) {
       relPath = filePath.slice(rootPath.length).replace(/^\//, '');
     }
 
     const parts = relPath.split('/');
-    const fileName = parts[parts.length - 1];
+    const fileName = parts[parts.length - 1].split('#')[0]; // Remove function name suffix if present
     const dirParts = parts.slice(0, -1);
 
     let node = root;

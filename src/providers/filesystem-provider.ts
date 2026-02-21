@@ -6,9 +6,6 @@ import { FileScanner } from '../cli/file-scanner.ts';
 import chokidar from 'chokidar';
 
 export class FileSystemPromptProvider implements PromptProvider {
-  readonly supportsEditing = true;
-  readonly supportsWatching = true;
-
   private parser: PromptParser | null = null;
   private files: string[] = [];
   private rootDir: string;

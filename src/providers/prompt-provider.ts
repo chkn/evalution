@@ -12,18 +12,12 @@ export interface PromptProvider {
   // Get a specific prompt by ID
   getPrompt(id: string): Promise<ParsedPrompt | null>;
 
-  // Update one or more properties in a prompt
-  updatePromptProperties(
+  // Update one or more properties in a prompt (optional — supported if implemented)
+  updatePromptProperties?(
     promptId: string,
     updates: Record<string, any>
   ): Promise<ParsedPrompt>;
 
-  // Watch for changes (optional, for providers that support it)
+  // Watch for changes (optional — supported if implemented)
   watch?(callback: (event: PromptChangeEvent) => void): () => void;
-
-  // Check if provider supports editing
-  readonly supportsEditing: boolean;
-
-  // Check if provider supports hot reload
-  readonly supportsWatching: boolean;
 }
