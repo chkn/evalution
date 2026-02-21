@@ -11,10 +11,11 @@ const __dirname = path.dirname(__filename);
 export interface ServerOptions {
   provider: PromptProvider;
   port: number;
+  rootPath: string;
 }
 
 export async function startServer(options: ServerOptions) {
-  const { provider, port } = options;
+  const { provider, port, rootPath } = options;
 
   const fastify = Fastify({
     logger: {
@@ -26,7 +27,7 @@ export async function startServer(options: ServerOptions) {
   const sseClients = new Set<FastifyReply>();
 
   // Setup API routes
-  setupRoutes(fastify, provider, sseClients);
+  setupRoutes(fastify, provider, sseClients, rootPath);
 
   // Serve static client files
   const clientPath = path.join(__dirname, '..', 'client');

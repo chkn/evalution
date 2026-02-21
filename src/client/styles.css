@@ -22,108 +22,241 @@ code, pre {
   height: 100vh;
 }
 
-.app-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  padding: 1rem 2rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+/* Top bar */
+.top-bar {
+  height: 36px;
+  background: #fff;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 10px;
+  flex-shrink: 0;
+  z-index: 10;
 }
 
-.app-header h1 {
-  margin: 0;
-  font-size: 1.8rem;
+.top-bar-logo {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a1a2e;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
 }
 
-.app-header p {
-  margin: 0.5rem 0 0 0;
-  opacity: 0.9;
-  font-size: 0.9rem;
+.top-bar-path {
+  font-size: 11.5px;
+  color: #aaa;
+  font-family: 'Menlo', 'Monaco', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
-.app-layout {
+.icloud-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  color: #aaa;
+}
+
+.icloud-label {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  flex-shrink: 0;
+}
+
+/* App body */
+.app-body {
   display: flex;
   flex: 1;
   overflow: hidden;
 }
 
-.sidebar {
-  width: 300px;
-  background: white;
+/* Icon nav strip */
+.icon-nav {
+  width: 46px;
+  background: #23233a;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 6px;
+  flex-shrink: 0;
+}
+
+.icon-nav-btn {
+  width: 34px;
+  height: 34px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: #7a7a9a;
+  margin-bottom: 2px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.icon-nav-btn:hover {
+  color: #e0e0f0;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.icon-nav-btn.active {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Resize handle */
+.resize-handle {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+  background: #667eea55;
+}
+
+/* Section panel (sidebar content) */
+.section-panel {
   border-right: 1px solid #e0e0e0;
-  overflow-y: auto;
+  overflow: hidden;
+  background: #f5f5f7;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.section-panel-header {
+  padding: 8px 10px 7px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #888;
+  border-bottom: 1px solid #e4e4e6;
+  flex-shrink: 0;
+}
+
+.section-panel-body {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+/* File tree */
+.file-tree {
+  padding: 4px 0;
+}
+
+.tree-dir-label,
+.tree-file-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: #333;
+  text-align: left;
+  border-radius: 0;
+  transition: background 0.1s;
+}
+
+.tree-dir-label:hover,
+.tree-file-label:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.tree-chevron {
+  color: #999;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.tree-folder-icon {
+  color: #e8a838;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.tree-file-icon {
+  color: #7b8fa6;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.tree-label-text {
+  white-space: nowrap;
+  font-family: 'Menlo', 'Monaco', monospace;
+  font-size: 11.5px;
+}
+
+.tree-prompt-btn {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #444;
+  text-align: left;
+  border-radius: 0;
+  transition: background 0.1s;
+  font-family: inherit;
+}
+
+.tree-prompt-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.tree-prompt-btn.selected {
+  background: #667eea;
+  color: white;
+}
+
+.tree-prompt-btn.selected .tree-prompt-params {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.tree-prompt-params {
+  font-size: 10.5px;
+  color: #999;
+  font-family: 'Menlo', 'Monaco', monospace;
+  white-space: nowrap;
+}
+
+.tree-status {
+  padding: 12px 10px;
+  font-size: 12px;
+  color: #888;
+}
+
+.tree-error {
+  color: #e53935;
 }
 
 .main-content {
   flex: 1;
   overflow-y: auto;
   padding: 2rem;
-}
-
-.prompt-list {
-  padding: 1rem;
-}
-
-.prompt-list h2 {
-  margin: 0 0 1rem 0;
-  font-size: 1.2rem;
-  color: #333;
-}
-
-.prompt-group {
-  margin-bottom: 1.5rem;
-}
-
-.file-path {
-  font-size: 0.75rem;
-  color: #666;
-  margin-bottom: 0.5rem;
-  font-family: monospace;
-}
-
-.prompt-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 0.75rem;
-  margin-bottom: 0.5rem;
-  background: #f9f9f9;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.prompt-item:hover {
-  background: #f0f0f0;
-  border-color: #667eea;
-}
-
-.prompt-item.selected {
-  background: #667eea;
-  color: white;
-  border-color: #667eea;
-}
-
-.prompt-name {
-  font-weight: 600;
-  font-size: 0.95rem;
-}
-
-.prompt-signature {
-  font-size: 0.8rem;
-  opacity: 0.8;
-  margin-top: 0.25rem;
-  font-family: monospace;
-}
-
-.loading, .error, .empty-message {
-  padding: 1rem;
-  text-align: center;
-  color: #666;
-}
-
-.error {
-  color: #e53935;
 }
 
 .empty-state {

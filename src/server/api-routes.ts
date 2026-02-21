@@ -6,9 +6,15 @@ import type { ExecuteRequest } from '../shared/types.ts';
 export function setupRoutes(
   fastify: FastifyInstance,
   provider: PromptProvider,
-  sseClients: Set<FastifyReply>
+  sseClients: Set<FastifyReply>,
+  rootPath: string
 ) {
   const executor = new AIExecutor();
+
+  // GET /api/config - Get server configuration
+  fastify.get('/api/config', async () => {
+    return { rootPath };
+  });
 
   // GET /api/prompts - Get all prompts
   fastify.get('/api/prompts', async (request, reply) => {

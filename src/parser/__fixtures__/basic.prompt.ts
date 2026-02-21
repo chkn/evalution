@@ -1,4 +1,3 @@
-import { openai } from '@ai-sdk/openai';
 
 export function checkWeather() {
   return {

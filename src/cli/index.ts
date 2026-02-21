@@ -38,7 +38,7 @@ async function main() {
   console.log(`✅ Found ${files.length} prompt file(s)\n`);
 
   // Start server
-  await startServer({ provider, port });
+  await startServer({ provider, port, rootPath: cwd });
 }
 
 main().catch((error) => {
