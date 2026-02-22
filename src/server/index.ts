@@ -21,6 +21,7 @@ export async function startServer(options: ServerOptions) {
     logger: {
       level: 'info',
     },
+    maxParamLength: 1024,
   });
 
   // Track SSE clients

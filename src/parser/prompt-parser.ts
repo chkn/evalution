@@ -6,8 +6,10 @@ import path from 'path';
 export class PromptParser {
   private program: ts.Program;
   private filePathsMap: Map<string, ts.SourceFile>;
+  private rootDir: string;
 
-  constructor(filePaths: string[]) {
+  constructor(filePaths: string[], rootDir: string = '') {
+    this.rootDir = rootDir;
     const compilerOptions: ts.CompilerOptions = {
       target: ts.ScriptTarget.ES2022,
       module: ts.ModuleKind.ESNext,
@@ -83,8 +85,10 @@ export class PromptParser {
 
     const properties = this.parseObjectLiteral(returnObject, sourceFile, functionParameters.map(p => p.name));
 
+    const relativeFilePath = this.rootDir ? path.relative(this.rootDir, filePath) : filePath;
+
     return {
-      id: `${filePath}#${functionName}`,
+      id: `${relativeFilePath}#${functionName}`,
       name: functionName,
       functionParameters,
       properties,

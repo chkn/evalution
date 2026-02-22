@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ParsedPrompt } from '../../shared/types';
+import { encodePromptId } from '../utils';
 
 interface Props {
   prompt: ParsedPrompt;
@@ -41,7 +42,7 @@ function PlaygroundExecution({ prompt }: Props) {
   };
 
   const executeGenerate = async () => {
-    const res = await fetch(`/api/prompts/${encodeURIComponent(prompt.id)}/execute`, {
+    const res = await fetch(`/api/prompts/${encodePromptId(prompt.id)}/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ stream: false, functionParams: paramValues }),
@@ -52,7 +53,7 @@ function PlaygroundExecution({ prompt }: Props) {
   };
 
   const executeStream = async () => {
-    const res = await fetch(`/api/prompts/${encodeURIComponent(prompt.id)}/execute`, {
+    const res = await fetch(`/api/prompts/${encodePromptId(prompt.id)}/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ stream: true, functionParams: paramValues }),

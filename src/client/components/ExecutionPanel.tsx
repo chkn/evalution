@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ParsedPrompt } from '../../shared/types';
+import { encodePromptId } from '../utils';
 
 interface ExecutionPanelProps {
   prompt: ParsedPrompt;
@@ -48,7 +49,7 @@ function ExecutionPanel({ prompt }: ExecutionPanelProps) {
   };
 
   const executeGenerate = async () => {
-    const response = await fetch(`/api/prompts/${encodeURIComponent(prompt.id)}/execute`, {
+    const response = await fetch(`/api/prompts/${encodePromptId(prompt.id)}/execute`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -69,7 +70,7 @@ function ExecutionPanel({ prompt }: ExecutionPanelProps) {
   };
 
   const executeStream = async () => {
-    const response = await fetch(`/api/prompts/${encodeURIComponent(prompt.id)}/execute`, {
+    const response = await fetch(`/api/prompts/${encodePromptId(prompt.id)}/execute`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

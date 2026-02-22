@@ -37,7 +37,7 @@ export function setupRoutes(
   fastify.get<{ Params: { id: string } }>('/api/prompts/:id', async (request, reply) => {
     try {
       const { id } = request.params;
-      const decodedId = decodeURIComponent(id);
+      const decodedId = Buffer.from(id, 'base64url').toString('utf8');
       const prompt = await provider.getPrompt(decodedId);
 
       if (!prompt) {
@@ -56,7 +56,7 @@ export function setupRoutes(
     async (request, reply) => {
       try {
         const { id } = request.params;
-        const decodedId = decodeURIComponent(id);
+        const decodedId = Buffer.from(id, 'base64url').toString('utf8');
 
         if (!provider.updatePromptProperties) {
           return reply.code(405).send({ error: 'This provider does not support editing' });
@@ -77,7 +77,7 @@ export function setupRoutes(
     async (request, reply) => {
       try {
         const { id } = request.params;
-        const decodedId = decodeURIComponent(id);
+        const decodedId = Buffer.from(id, 'base64url').toString('utf8');
         const { stream = false, functionParams = {} } = request.body;
 
         const prompt = await provider.getPrompt(decodedId);

@@ -1,6 +1,7 @@
 import { useState, useRef, useLayoutEffect, useEffect } from 'react';
 import type { ParsedPrompt, PromptProperty } from '../../shared/types';
 import { POPULAR_MODELS } from '../../shared/constants';
+import { encodePromptId } from '../utils';
 
 interface CallSettingInfo {
   name: string;
@@ -327,7 +328,7 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/prompts/${encodeURIComponent(prompt.id)}/update`, {
+      const res = await fetch(`/api/prompts/${encodePromptId(prompt.id)}/update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [key]: value }),

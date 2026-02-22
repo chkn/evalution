@@ -58,7 +58,7 @@ export function myPrompt() {
 }
 `);
 
-    const promptId = `${filePath}#myPrompt`;
+    const promptId = `test.prompt.ts#myPrompt`;
     const prompt = await provider.getPrompt(promptId);
 
     expect(prompt).not.toBeNull();

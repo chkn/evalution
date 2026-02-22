@@ -1,3 +1,4 @@
+import path from 'path';
 import type { PromptProvider, PromptChangeEvent } from './prompt-provider.ts';
 import type { ParsedPrompt } from '../shared/types.ts';
 import { PromptParser } from '../parser/prompt-parser.ts';
@@ -104,8 +105,8 @@ export class FileSystemPromptProvider implements PromptProvider {
     });
 
     watcher.on('unlink', (filePath) => {
-      const absolutePath = this.resolveFilePath(filePath);
-      callback({ type: 'remove', promptId: absolutePath });
+      // filePath is already relative to rootDir (chokidar cwd)
+      callback({ type: 'remove', promptId: filePath });
     });
 
     return () => watcher.close();
@@ -119,15 +120,20 @@ export class FileSystemPromptProvider implements PromptProvider {
 
   private async refresh(): Promise<void> {
     this.files = await this.scanner.findPromptFiles(this.rootDir);
-    this.parser = new PromptParser(this.files);
+    this.parser = new PromptParser(this.files, this.rootDir);
   }
 
   private parsePromptId(id: string): [string, string] {
-    const parts = id.split('#');
-    if (parts.length !== 2) {
+    const hashIdx = id.lastIndexOf('#');
+    if (hashIdx < 0) {
       throw new Error(`Invalid prompt ID format: ${id}`);
     }
-    return [parts[0], parts[1]];
+    const relativePath = id.slice(0, hashIdx);
+    const functionName = id.slice(hashIdx + 1);
+    const absolutePath = path.isAbsolute(relativePath)
+      ? relativePath
+      : path.join(this.rootDir, relativePath);
+    return [absolutePath, functionName];
   }
 
   private resolveFilePath(relativePath: string): string {

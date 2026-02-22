@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ParsedPrompt } from '../../shared/types';
+import { encodePromptId } from '../utils';
 import ModelSelector from './ModelSelector';
 import MessageBuilder from './MessageBuilder';
 import ParameterEditor from './ParameterEditor';
@@ -18,7 +19,7 @@ function PromptEditor({ prompt, onUpdate }: PromptEditorProps) {
     setUpdateStatus(null);
 
     try {
-      const response = await fetch(`/api/prompts/${encodeURIComponent(prompt.id)}/update`, {
+      const response = await fetch(`/api/prompts/${encodePromptId(prompt.id)}/update`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
