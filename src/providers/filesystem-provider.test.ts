@@ -122,7 +122,7 @@ export function myPrompt() {
     ).rejects.toThrow('Prompt not found');
   });
 
-  it('should throw error for non-existent property', async () => {
+  it('should add a new property when key does not exist', async () => {
     const filePath = path.join(tempDir, 'test.prompt.ts');
     await fs.writeFile(filePath, `
 export function myPrompt() {
@@ -135,9 +135,9 @@ export function myPrompt() {
 
     const promptId = `${filePath}#myPrompt`;
 
-    await expect(
-      provider.updatePromptProperties(promptId, { nonexistent: 'Value' })
-    ).rejects.toThrow("Property 'nonexistent' not found");
+    const updated = await provider.updatePromptProperties(promptId, { temperature: 0.7 });
+    expect(updated.properties['temperature']).toBeDefined();
+    expect(updated.properties['temperature'].value).toBe(0.7);
   });
 
   it('should support watching', () => {

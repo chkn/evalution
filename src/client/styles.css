@@ -255,8 +255,408 @@ code, pre {
 
 .main-content {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  container-type: inline-size;
+  container-name: main;
+}
+
+/* ─── Tabs ─────────────────────────────────────────────────────────────────── */
+
+.tab-bar {
+  display: flex;
+  align-items: stretch;
+  background: #fff;
+  border-bottom: 1px solid #e0e0e0;
+  overflow-x: auto;
+  flex-shrink: 0;
+  height: 34px;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: none;
+  border-right: 1px solid #e8e8e8;
+  background: #fafafa;
+  cursor: pointer;
+  font-size: 12px;
+  color: #777;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  font-family: inherit;
+  transition: background 0.1s, color 0.1s;
+  flex-shrink: 0;
+}
+
+.tab:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.tab.tab-active {
+  background: #fff;
+  color: #1a1a2e;
+  border-bottom-color: #667eea;
+  font-weight: 500;
+}
+
+.tab-label {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-close {
+  font-size: 14px;
+  color: #bbb;
+  line-height: 1;
+  border-radius: 3px;
+  padding: 1px 3px;
+  margin-right: -4px;
+}
+
+.tab-close:hover {
+  color: #555;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* ─── Playground content area ──────────────────────────────────────────────── */
+
+/* Single column (narrow): natural block flow, scroll vertically */
+.pg-content {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 2rem;
+  overflow-x: hidden;
+  padding: 16px;
+  background: #fff;
+}
+
+/* Two-column layout when there's enough horizontal space.
+   column-fill: auto fills column 1 to full height before wrapping to column 2. */
+@container main (min-width: 560px) {
+  .pg-content {
+    column-count: 2;
+    column-fill: auto;
+    column-gap: 12px;
+    overflow-y: hidden;
+  }
+
+  .pg-editor,
+  .pg-exec {
+    display: contents;
+  }
+}
+
+/* ─── Playground cards ─────────────────────────────────────────────────────── */
+
+.pg-editor,
+.pg-exec {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.pg-card {
+  background: #fff;
+  border: 1px solid #e4e4e6;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+/* Model card */
+.pg-model-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 16px;
+  cursor: pointer;
+  position: relative;
+}
+
+.pg-provider-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #999;
+  flex-shrink: 0;
+}
+
+.pg-model-name {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 500;
+  color: #111827;
+}
+
+.pg-model-overlay-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* Message card header / role */
+.pg-msg-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 14px 8px;
+}
+
+.pg-role-label {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #9ca3af;
+}
+
+.pg-role-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+}
+
+.pg-role-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+
+.pg-role-select:focus {
+  outline: none;
+}
+
+.pg-delete-msg {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #d1d5db;
+  font-size: 17px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-family: inherit;
+}
+
+.pg-delete-msg:hover {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
+/* Property card (wraps ParameterEditor) */
+.pg-property-card {
+  padding: 10px 12px;
+}
+
+/* Param description (below label inside ParamCard) */
+.pg-param-description {
+  font-size: 11.5px;
+  color: #b0b7c3;
+  line-height: 1.45;
+  margin-top: 2px;
+  white-space: pre-line;
+}
+.pg-desc-toggle {
+  display: inline;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 4px;
+  font-size: 11.5px;
+  color: #9ca3af;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.pg-desc-toggle:hover {
+  color: #6b7280;
+}
+
+/* Inline param input (used inside ParamCard in the Model panel) */
+.pg-param-input-inline {
+  padding: 0 14px 12px;
+  display: block;
+}
+
+/* Add-param button: pill with overlay select */
+.pg-add-param-btn {
+  position: relative;
+}
+
+/* Param cards (execution panel) */
+.pg-param-card {
+  padding: 11px 14px;
+}
+
+.pg-param-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9ca3af;
+  margin-bottom: 5px;
+}
+
+.pg-param-type {
+  font-weight: 400;
+  color: #d1d5db;
+}
+
+.pg-param-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  color: #111827;
+  font-family: inherit;
+  background: transparent;
+}
+
+.pg-param-input::placeholder {
+  color: #d1d5db;
+}
+
+/* Output card */
+.pg-output-card {}
+
+.pg-output-error {
+  border-color: #f5c6c6;
+}
+
+.pg-output-header {
+  padding: 8px 12px 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #aaa;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.pg-output-error .pg-output-header {
+  color: #e53935;
+}
+
+.pg-output-body {
+  padding: 10px 12px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #1a1a1a;
+}
+
+.pg-output-body pre {
+  margin: 0;
+  font-family: 'Menlo', 'Monaco', monospace;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* ─── Toolbar (shared) ──────────────────────────────────────────────────────── */
+
+.pg-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0 2px;
+  gap: 6px;
+}
+
+.pg-toolbar-left,
+.pg-toolbar-right {
+  display: flex;
+  gap: 6px;
+}
+
+.pg-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 500;
+  transition: background 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+
+.pg-pill-btn:hover:not(:disabled) {
+  background: #f0f0f2;
+  border-color: #ccc;
+}
+
+.pg-pill-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pg-pill-primary {
+  background: #1a1a2e;
+  border-color: #1a1a2e;
+  color: #fff;
+  font-weight: 600;
+}
+
+.pg-pill-primary:hover:not(:disabled) {
+  background: #2d2d4e;
+  border-color: #2d2d4e;
+}
+
+/* ─── Status / error bars ──────────────────────────────────────────────────── */
+
+.pg-status-bar {
+  font-size: 11.5px;
+  color: #aaa;
+  padding: 0 0 6px;
+}
+
+.pg-error-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: #fff0f0;
+  border: 1px solid #f5c6c6;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: #c62828;
+  margin-bottom: 8px;
+}
+
+.pg-dismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #e53935;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.pg-spinner {
+  color: #aaa;
+  font-size: 13px;
 }
 
 .empty-state {
@@ -700,4 +1100,195 @@ code, pre {
 .spinner {
   color: #667eea;
   font-weight: 600;
+}
+
+/* ─── Panel (group card — outer container) ─────────────────────────────────── */
+
+.pg-panel {
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  break-inside: avoid;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06), 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+.pg-panel-header {
+  padding: 16px 16px 0;
+}
+
+.pg-panel-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #9ca3af;
+}
+
+.pg-panel-body {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pg-panel-footer {
+  padding: 0 16px 16px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Panel with no body (header → footer only) */
+.pg-panel-header + .pg-panel-footer {
+  padding-top: 12px;
+}
+
+/* Error panel variant */
+.pg-panel-error {
+  border-color: #fca5a5;
+}
+
+.pg-panel-title-error {
+  color: #dc2626;
+}
+
+/* ─── Panel card (inner card — model, each message, each param) ─────────────── */
+
+.pg-panel-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+
+/* ─── Message textarea / content ──────────────────────────────────────────── */
+
+.pg-msg-textarea {
+  display: block;
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  padding: 0 14px 14px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  color: #111827;
+  line-height: 1.6;
+  background: transparent;
+  min-height: 44px;
+}
+
+.pg-msg-textarea::placeholder {
+  color: #d1d5db;
+  font-weight: 400;
+}
+
+.pg-msg-content {
+  padding: 0 14px 14px;
+  font-size: 15px;
+  font-weight: 500;
+  color: #111827;
+  line-height: 1.6;
+}
+
+/* Tool calls */
+.pg-tool-calls {
+  padding: 0 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pg-tool-call {
+  border: 1px solid #e8e8e8;
+  border-radius: 7px;
+  overflow: hidden;
+  background: #fafafa;
+}
+
+.pg-tool-call-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px 4px;
+  border-bottom: 1px solid #efefef;
+}
+
+.pg-tool-call-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #aaa;
+}
+
+.pg-tool-call-fields {
+  display: flex;
+  gap: 0;
+  padding: 6px 10px 7px;
+}
+
+.pg-tool-name-input,
+.pg-tool-args-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: 'Menlo', 'Monaco', monospace;
+  font-size: 12px;
+  color: #333;
+  padding: 0;
+}
+
+.pg-tool-name-input {
+  width: 30%;
+  min-width: 80px;
+  color: #667eea;
+  font-weight: 600;
+  border-right: 1px solid #e8e8e8;
+  padding-right: 10px;
+  margin-right: 10px;
+}
+
+.pg-tool-name-input::placeholder,
+.pg-tool-args-input::placeholder {
+  color: #ccc;
+}
+
+.pg-tool-args-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.pg-add-tool-call-btn {
+  align-self: flex-start;
+  background: none;
+  border: 1px dashed #d8d8d8;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #aaa;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.pg-add-tool-call-btn:hover {
+  border-color: #aaa;
+  color: #555;
+}
+
+/* Add message row */
+.pg-add-message-row {
+  padding: 8px 12px;
+}
+
+.pg-add-msg-btn {
+  font-size: 12.5px;
+  padding: 4px 12px;
+  color: #888;
+  border-color: #e0e0e0;
 }

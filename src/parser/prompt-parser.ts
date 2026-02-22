@@ -170,15 +170,23 @@ export class PromptParser {
 
         const propertyInfo = this.parsePropertyValue(value, sourceFile, paramNames);
 
+        const fullText = sourceFile.getFullText();
+        let fullEnd = prop.getEnd();
+        if (fullText[fullEnd] === ',') fullEnd++;
+
         properties[name] = {
           name,
           value: propertyInfo.value,
           isEditable: propertyInfo.isEditable,
           hasParameterTokens: propertyInfo.hasParameterTokens,
           sourceText: value.getText(sourceFile),
-          sourceSpan: {
+          valueSpan: {
             start: value.getStart(sourceFile),
             end: value.getEnd(),
+          },
+          fullSpan: {
+            start: prop.getFullStart(),
+            end: fullEnd,
           },
         };
       }

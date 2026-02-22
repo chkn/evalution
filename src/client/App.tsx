@@ -3,8 +3,8 @@ import { usePrompts } from './hooks/usePrompts';
 import { useSSE } from './hooks/useSSE';
 import { useResizable } from './hooks/useResizable';
 import PromptList from './components/PromptList';
-import PromptEditor from './components/PromptEditor';
-import ExecutionPanel from './components/ExecutionPanel';
+import PlaygroundEditor from './components/PlaygroundEditor';
+import PlaygroundExecution from './components/PlaygroundExecution';
 
 function PromptsIcon() {
   return (
@@ -20,7 +20,8 @@ function PromptsIcon() {
 
 function App() {
   const { prompts, loading, error, refetch } = usePrompts();
-  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [rootPath, setRootPath] = useState<string>('');
   const [activeSection, setActiveSection] = useState<'prompts'>('prompts');
   const sidebar = useResizable({ initial: 224, min: 120, max: 600, storageKey: 'sidebar-width' });
@@ -33,21 +34,34 @@ function App() {
   }, []);
 
   const handleSSEMessage = useCallback((data: any) => {
-    if (data.type === 'prompt-changed') {
-      refetch();
-    }
+    if (data.type === 'prompt-changed') refetch();
   }, [refetch]);
 
   useSSE(handleSSEMessage);
 
-  const selectedPrompt = prompts.find(p => p.id === selectedPromptId) || null;
+  const handleSelectPrompt = (id: string) => {
+    setOpenTabs(prev => prev.includes(id) ? prev : [...prev, id]);
+    setActiveTabId(id);
+  };
+
+  const handleCloseTab = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setOpenTabs(prev => {
+      const next = prev.filter(t => t !== id);
+      if (id === activeTabId) {
+        const idx = prev.indexOf(id);
+        setActiveTabId(next[Math.min(idx, next.length - 1)] ?? null);
+      }
+      return next;
+    });
+  };
+
+  const activePrompt = prompts.find(p => p.id === activeTabId) ?? null;
 
   const icloudPrefix = '~/Library/Mobile Documents/com~apple~CloudDocs';
   const tildeRoot = rootPath.replace(/^\/Users\/[^/]+/, '~');
   const isICloud = tildeRoot.startsWith(icloudPrefix);
-  const displayPath = isICloud
-    ? tildeRoot.slice(icloudPrefix.length) || '/'
-    : tildeRoot;
+  const displayPath = isICloud ? tildeRoot.slice(icloudPrefix.length) || '/' : tildeRoot;
 
   return (
     <div className="app">
@@ -83,8 +97,8 @@ function App() {
           {activeSection === 'prompts' && (
             <PromptList
               prompts={prompts}
-              selectedId={selectedPromptId}
-              onSelect={setSelectedPromptId}
+              selectedId={activeTabId}
+              onSelect={handleSelectPrompt}
               loading={loading}
               error={error}
               rootPath={rootPath}
@@ -95,16 +109,36 @@ function App() {
         <div className="resize-handle" onMouseDown={sidebar.onMouseDown} />
 
         <main className="main-content">
-          {selectedPrompt ? (
-            <>
-              <PromptEditor
-                prompt={selectedPrompt}
+          {openTabs.length > 0 && (
+            <div className="tab-bar">
+              {openTabs.map(id => {
+                const p = prompts.find(pr => pr.id === id);
+                return (
+                  <button
+                    key={id}
+                    className={`tab ${id === activeTabId ? 'tab-active' : ''}`}
+                    onClick={() => setActiveTabId(id)}
+                  >
+                    <span className="tab-label">{p?.name ?? id}</span>
+                    <span className="tab-close" onClick={e => handleCloseTab(id, e)}>×</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {activePrompt ? (
+            <div className="pg-content">
+              <PlaygroundEditor
+                key={activeTabId ?? ''}
+                prompt={activePrompt}
                 onUpdate={refetch}
               />
-              <ExecutionPanel
-                prompt={selectedPrompt}
+              <PlaygroundExecution
+                key={activeTabId ?? ''}
+                prompt={activePrompt}
               />
-            </>
+            </div>
           ) : (
             <div className="empty-state">
               <h2>Select a prompt to get started</h2>

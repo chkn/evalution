@@ -264,9 +264,9 @@ describe('PromptParser', () => {
       const prompts = parser.parseFile(filePath);
 
       const system = prompts[0].properties.system;
-      expect(system.sourceSpan).toBeDefined();
-      expect(system.sourceSpan!.start).toBeGreaterThan(0);
-      expect(system.sourceSpan!.end).toBeGreaterThan(system.sourceSpan!.start);
+      expect(system.valueSpan).toBeDefined();
+      expect(system.valueSpan!.start).toBeGreaterThan(0);
+      expect(system.valueSpan!.end).toBeGreaterThan(system.valueSpan!.start);
       expect(system.sourceText).toBeDefined();
     });
   });

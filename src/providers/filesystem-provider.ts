@@ -44,23 +44,28 @@ export class FileSystemPromptProvider implements PromptProvider {
       throw new Error('Prompt not found');
     }
 
-    const [filePath] = this.parsePromptId(promptId);
+    const [filePath, functionName] = this.parsePromptId(promptId);
 
     for (const [propertyName, value] of Object.entries(updates)) {
       const prop = prompt.properties[propertyName];
-      if (!prop) {
-        throw new Error(`Property '${propertyName}' not found`);
-      }
 
-      if (!prop.isEditable) {
-        throw new Error(`Property '${propertyName}' is not editable`);
+      if (value === null) {
+        // null → remove the property
+        if (!prop) throw new Error(`Property '${propertyName}' not found`);
+        await this.editor.removeProperty(filePath, prop);
+      } else if (!prop) {
+        // unknown key → add as a new property
+        await this.editor.addProperty(filePath, functionName, propertyName, value);
+      } else {
+        // existing key → update in place
+        if (!prop.isEditable) {
+          throw new Error(`Property '${propertyName}' is not editable`);
+        }
+        if (!prop.valueSpan) {
+          throw new Error(`Property '${propertyName}' is missing source metadata`);
+        }
+        await this.editor.updateProperty(filePath, prop, value);
       }
-
-      if (!prop.sourceSpan) {
-        throw new Error(`Property '${propertyName}' is missing source metadata`);
-      }
-
-      await this.editor.updateProperty(filePath, prop, value);
     }
 
     // Re-scan and re-parse to get updated prompt

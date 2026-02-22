@@ -9,7 +9,7 @@ export class PromptEditor {
       throw new Error(`Property '${property.name}' is not editable`);
     }
 
-    if (!property.sourceSpan) {
+    if (!property.valueSpan) {
       throw new Error(`Property '${property.name}' is missing source metadata`);
     }
 
@@ -25,12 +25,94 @@ export class PromptEditor {
     const newSourceText = this.valueToSourceText(newValue, property.name);
 
     // Replace character range
-    const before = sourceCode.substring(0, property.sourceSpan.start);
-    const after = sourceCode.substring(property.sourceSpan.end);
+    const before = sourceCode.substring(0, property.valueSpan.start);
+    const after = sourceCode.substring(property.valueSpan.end);
     const newSourceCode = before + newSourceText + after;
 
     // Write back to file
     await fs.writeFile(filePath, newSourceCode, 'utf-8');
+  }
+
+  async addProperty(
+    filePath: string,
+    functionName: string,
+    propertyName: string,
+    value: any
+  ): Promise<void> {
+    let sourceCode = await fs.readFile(filePath, 'utf-8');
+    const sourceFile = ts.createSourceFile(filePath, sourceCode, ts.ScriptTarget.Latest, true);
+
+    const obj = this.findReturnObject(sourceFile, functionName);
+    if (!obj) throw new Error(`Return object not found in function '${functionName}'`);
+
+    const valueText = this.valueToSourceText(value, propertyName);
+
+    // Derive indentation from the first existing property, defaulting to 4 spaces
+    let indent = '    ';
+    if (obj.properties.length > 0) {
+      const firstProp = obj.properties[0];
+      const propPos = firstProp.getStart(sourceFile);
+      let lineStart = propPos;
+      while (lineStart > 0 && sourceCode[lineStart - 1] !== '\n') lineStart--;
+      indent = sourceCode.slice(lineStart, propPos);
+    }
+
+    let insertPos: number;
+    let insertText: string;
+
+    if (obj.properties.length > 0) {
+      // Insert after the last property's trailing comma
+      const lastProp = obj.properties[obj.properties.length - 1];
+      insertPos = lastProp.getEnd();
+      if (sourceCode[insertPos] === ',') insertPos++;
+      insertText = `\n${indent}${propertyName}: ${valueText},`;
+    } else {
+      // Empty return object — insert between { }
+      insertPos = obj.getStart(sourceFile) + 1;
+      insertText = `\n${indent}${propertyName}: ${valueText},\n`;
+    }
+
+    sourceCode = sourceCode.slice(0, insertPos) + insertText + sourceCode.slice(insertPos);
+    await fs.writeFile(filePath, sourceCode, 'utf-8');
+  }
+
+  async removeProperty(filePath: string, property: PromptProperty): Promise<void> {
+    if (!property.fullSpan) {
+      throw new Error(`Property '${property.name}' is missing fullSpan metadata`);
+    }
+    const sourceCode = await fs.readFile(filePath, 'utf-8');
+    const newSourceCode =
+      sourceCode.slice(0, property.fullSpan.start) +
+      sourceCode.slice(property.fullSpan.end);
+    await fs.writeFile(filePath, newSourceCode, 'utf-8');
+  }
+
+  private findReturnObject(
+    sourceFile: ts.SourceFile,
+    functionName: string
+  ): ts.ObjectLiteralExpression | null {
+    let returnObj: ts.ObjectLiteralExpression | null = null;
+
+    const visitFunc = (node: ts.Node) => {
+      if (ts.isFunctionDeclaration(node) && node.name?.text === functionName) {
+        const visitReturn = (n: ts.Node) => {
+          if (
+            ts.isReturnStatement(n) &&
+            n.expression &&
+            ts.isObjectLiteralExpression(n.expression)
+          ) {
+            returnObj = n.expression;
+          }
+          if (!returnObj) ts.forEachChild(n, visitReturn);
+        };
+        if (node.body) visitReturn(node.body);
+        return;
+      }
+      if (!returnObj) ts.forEachChild(node, visitFunc);
+    };
+    visitFunc(sourceFile);
+
+    return returnObj;
   }
 
   private valueToSourceText(value: any, propertyName: string): string {

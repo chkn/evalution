@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { PromptProvider } from '../providers/prompt-provider.ts';
 import { AIExecutor } from './ai-executor.ts';
 import type { ExecuteRequest } from '../shared/types.ts';
+import { getCallSettings } from './call-settings.ts';
 
 export function setupRoutes(
   fastify: FastifyInstance,
@@ -10,10 +11,16 @@ export function setupRoutes(
   rootPath: string
 ) {
   const executor = new AIExecutor();
+  const callSettings = getCallSettings(rootPath);
 
   // GET /api/config - Get server configuration
   fastify.get('/api/config', async () => {
     return { rootPath };
+  });
+
+  // GET /api/call-settings - CallSettings members derived from the AI SDK types
+  fastify.get('/api/call-settings', async () => {
+    return callSettings;
   });
 
   // GET /api/prompts - Get all prompts

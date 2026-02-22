@@ -15,7 +15,8 @@ export interface PromptProperty {
   isEditable: boolean;
   hasParameterTokens: boolean;
   sourceText?: string;
-  sourceSpan?: SourceSpan;
+  valueSpan?: SourceSpan;
+  fullSpan?: SourceSpan; // full "key: value," including leading whitespace and trailing comma
 }
 
 export interface ParsedPrompt {
