@@ -298,8 +298,8 @@ code, pre {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.09);
-  color: rgba(255, 255, 255, 0.5);
+  background: #4a4a68;
+  color: #b8b8d0;
   border: none;
   cursor: pointer;
   font-size: 12px;
@@ -316,8 +316,8 @@ code, pre {
 }
 
 .tab:hover:not(.tab-active) {
-  background: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.75);
+  background: #565678;
+  color: #d8d8ec;
 }
 
 .tab.tab-active {

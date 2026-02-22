@@ -55,6 +55,7 @@ function App() {
   const [activeTabKey, setActiveTabKey] = useState<string | null>(null);
   const [rootPath, setRootPath] = useState<string>('');
   const [activeSection, setActiveSection] = useState<'prompts'>('prompts');
+  const [sectionVisible, setSectionVisible] = useState(true);
   const sidebar = useResizable({ initial: 224, min: 120, max: 600, storageKey: 'sidebar-width' });
 
   useEffect(() => {
@@ -105,7 +106,7 @@ function App() {
         <div className="app-titlebar-icon">
           <AppIcon />
         </div>
-        {rootPath && (
+        {rootPath && sectionVisible && (
           <span className="header-path">
             {isICloud && (
               <svg className="icloud-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
@@ -123,8 +124,15 @@ function App() {
         <div className="icon-strip">
           <nav className="icon-nav">
             <button
-              className={`icon-nav-btn ${activeSection === 'prompts' ? 'active' : ''}`}
-              onClick={() => setActiveSection('prompts')}
+              className={`icon-nav-btn ${activeSection === 'prompts' && sectionVisible ? 'active' : ''}`}
+              onClick={() => {
+                if (activeSection === 'prompts' && sectionVisible) {
+                  setSectionVisible(false);
+                } else {
+                  setActiveSection('prompts');
+                  setSectionVisible(true);
+                }
+              }}
               title="Prompts"
             >
               <PromptsIcon />
@@ -135,7 +143,7 @@ function App() {
         <div className="content-area">
           {/* Tabs aligned to main content column via spacer */}
           <div className="content-header">
-            <div className="content-header-spacer" style={{ width: sidebar.size + 4 }} />
+            <div className="content-header-spacer" style={{ width: sectionVisible ? sidebar.size + 4 : 14 }} />
             {openTabs.map(tab => {
               const key = tabKey(tab);
               const name = tab.type === 'prompt'
@@ -156,20 +164,23 @@ function App() {
           </div>
 
           <div className="content-card">
-            <aside className="section-panel" style={{ width: sidebar.size }}>
-              {activeSection === 'prompts' && (
-                <PromptList
-                  prompts={prompts}
-                  selectedId={selectedPromptId}
-                  onSelect={handleSelectPrompt}
-                  loading={loading}
-                  error={error}
-                  rootPath={rootPath}
-                />
-              )}
-            </aside>
-
-            <div className="resize-handle" onMouseDown={sidebar.onMouseDown} />
+            {sectionVisible && (
+              <>
+                <aside className="section-panel" style={{ width: sidebar.size }}>
+                  {activeSection === 'prompts' && (
+                    <PromptList
+                      prompts={prompts}
+                      selectedId={selectedPromptId}
+                      onSelect={handleSelectPrompt}
+                      loading={loading}
+                      error={error}
+                      rootPath={rootPath}
+                    />
+                  )}
+                </aside>
+                <div className="resize-handle" onMouseDown={sidebar.onMouseDown} />
+              </>
+            )}
 
             <main className="main-content">
               {openTabs.length === 0 && (
