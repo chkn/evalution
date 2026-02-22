@@ -91,34 +91,6 @@ function App() {
 
   const activeTab = openTabs.find(t => tabKey(t) === activeTabKey) ?? null;
 
-  const renderTabContent = (tab: AppTab | null) => {
-    if (!tab) {
-      return (
-        <div className="empty-state">
-          <h2>Select a prompt to get started</h2>
-          <p>Choose a prompt from the list on the left to edit and execute it.</p>
-        </div>
-      );
-    }
-    if (tab.type === 'prompt') {
-      const prompt = prompts.find(p => p.id === tab.promptId) ?? null;
-      if (!prompt) return null;
-      return (
-        <div className="pg-content">
-          <PlaygroundEditor
-            key={tab.promptId}
-            prompt={prompt}
-            onUpdate={refetch}
-          />
-          <PlaygroundExecution
-            key={tab.promptId}
-            prompt={prompt}
-          />
-        </div>
-      );
-    }
-  };
-
   const icloudPrefix = '~/Library/Mobile Documents/com~apple~CloudDocs';
   const tildeRoot = rootPath.replace(/^\/Users\/[^/]+/, '~');
   const isICloud = tildeRoot.startsWith(icloudPrefix);
@@ -200,7 +172,25 @@ function App() {
             <div className="resize-handle" onMouseDown={sidebar.onMouseDown} />
 
             <main className="main-content">
-              {renderTabContent(activeTab)}
+              {openTabs.length === 0 && (
+                <div className="empty-state">
+                  <h2>Select a prompt to get started</h2>
+                  <p>Choose a prompt from the list on the left to edit and execute it.</p>
+                </div>
+              )}
+              {openTabs.map(tab => {
+                const key = tabKey(tab);
+                const prompt = prompts.find(p => p.id === tab.promptId) ?? null;
+                if (!prompt) return null;
+                return (
+                  <div key={key} style={key === activeTabKey ? { display: 'contents' } : { display: 'none' }}>
+                    <div className="pg-content">
+                      <PlaygroundEditor prompt={prompt} onUpdate={refetch} />
+                      <PlaygroundExecution prompt={prompt} />
+                    </div>
+                  </div>
+                );
+              })}
             </main>
           </div>
         </div>
