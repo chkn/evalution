@@ -13,6 +13,8 @@ Evalution is a local development tool that lets you create, edit, and test AI pr
 - 🌊 **Streaming** - Support for both streaming and non-streaming execution
 - 🔌 **Multi-provider** - Works with OpenAI, Anthropic, Google, and custom providers
 - 📝 **Parameterized prompts** - Define functions with parameters for dynamic prompts
+- 🧪 **Playground UI** - OpenAI-style editor with model, messages, and parameter panels
+- 📦 **SDK-aware parameters** - Available call settings pulled directly from your installed AI SDK
 
 ## Installation
 
@@ -98,36 +100,27 @@ Two formats are supported:
 
 ### String Format
 
+Using a bare string for the `model` results in using the [global provider](https://ai-sdk.dev/docs/ai-sdk-core/provider-management#global-provider-configuration).
+
+For example, if you're using the Vercel AI Gateway, which is the default global provider:
+
 ```typescript
-model: 'openai/gpt-4o'
-model: 'anthropic/claude-sonnet-4-20250514'
-model: 'google/gemini-2.5-flash'
+model: 'openai/gpt-5.2-chat'
+model: 'anthropic/claude-sonnet-4.6'
+model: 'google/gemini-3-pro-preview'
 ```
 
-### Function Call Format
+### Provider Format
+
+You can also import a provider and use it:
 
 ```typescript
 import { openai } from '@ai-sdk/openai';
 
-model: openai('gpt-4o')
+model: openai('gpt-5.2-chat')
 ```
 
 The UI allows you to switch between formats and select from popular models.
-
-## Supported Parameters
-
-All Vercel AI SDK parameters are supported:
-
-- `model` - AI model (required)
-- `messages` - Conversation messages (required)
-- `system` - System prompt
-- `temperature` - Randomness (0-2)
-- `maxTokens` - Max output tokens
-- `topP` - Nucleus sampling
-- `frequencyPenalty` - Reduce repetition
-- `presencePenalty` - Encourage new topics
-- `tools` - Tool definitions
-- `maxSteps` - For agentic behavior
 
 ## Environment Variables
 
@@ -173,16 +166,17 @@ npm run dev
 1. **Scanning**: Evalution scans your project for `**/*.prompt.ts` and `**/*.promp.ts` files
 2. **Parsing**: TypeScript AST parser extracts exported functions and their configurations
 3. **Server**: Fastify serves the web UI and API endpoints
-4. **Editing**: When you edit in the UI, changes are written back to source files using precise character-range replacement
-5. **Execution**: Node's native TypeScript support dynamically imports your prompt files and calls the functions with provided parameters
-6. **AI SDK**: The returned configuration is passed directly to Vercel AI SDK's `generateText()` or `streamText()`
+4. **Editing**: When you edit in the UI, changes are written back to source files using precise character-range replacement. Adding or removing parameters updates the source file automatically.
+5. **Parameters**: Available call settings are read at startup from the `CallSettings` type in your locally installed `ai` package, so the list always reflects your SDK version. JSDoc descriptions are extracted and shown in the UI.
+6. **Execution**: Node's native TypeScript support dynamically imports your prompt files and calls the functions with provided parameters
+7. **AI SDK**: The returned configuration is passed directly to Vercel AI SDK's `generateText()` or `streamText()`
 
 ## Architecture
 
-- **Parser**: TypeScript Compiler API for AST parsing
-- **Editor**: Character-range replacement preserving formatting
-- **Server**: Fastify with WebSocket support for hot reload
-- **Client**: React with Server-Sent Events for real-time updates
+- **Parser**: TypeScript Compiler API for AST parsing and call settings introspection
+- **Editor**: Character-range replacement preserving formatting, with add/remove support
+- **Server**: Fastify with Server-Sent Events for hot reload
+- **Client**: React playground UI with Server-Sent Events for real-time updates
 - **Build**: tsup for server, Vite for client
 
 ## License

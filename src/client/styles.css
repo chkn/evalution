@@ -9,7 +9,7 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: #f5f5f5;
+  background: #383856;
 }
 
 code, pre {
@@ -22,68 +22,93 @@ code, pre {
   height: 100vh;
 }
 
-/* Top bar */
-.top-bar {
+/* Full-width title bar */
+.app-titlebar {
   height: 36px;
-  background: #fff;
-  border-bottom: 1px solid #e0e0e0;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  background: #383856;
+}
+
+.app-titlebar-icon {
+  width: 46px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  padding: 0 14px;
-  gap: 10px;
-  flex-shrink: 0;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.65);
   z-index: 10;
 }
 
-.top-bar-logo {
-  font-size: 13px;
-  font-weight: 700;
-  color: #1a1a2e;
-  letter-spacing: -0.02em;
-  flex-shrink: 0;
-}
-
-.top-bar-path {
-  font-size: 11.5px;
-  color: #aaa;
-  font-family: 'Menlo', 'Monaco', monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
-.icloud-icon {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-  color: #aaa;
-}
-
-.icloud-label {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  flex-shrink: 0;
-}
-
-/* App body */
-.app-body {
-  display: flex;
+/* Main row: icon strip + content — pulled up to sit under titlebar */
+.app-main {
   flex: 1;
-  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  margin-top: -36px;
+}
+
+/* Icon nav strip */
+.icon-strip {
+  width: 46px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: #383856;
 }
 
 /* Icon nav strip */
 .icon-nav {
-  width: 46px;
-  background: #23233a;
+  flex: 1;
+  background: transparent;
+  width: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 6px;
+  padding-top: 42px; /* 36px titlebar overlap + 6px gap */
   flex-shrink: 0;
+}
+
+/* Content area (right of icon-strip) */
+.content-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Dark header that holds tabs */
+.content-header {
+  height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+  position: relative;
+  z-index: 10;
+}
+
+/* Spacer inside content-header that mirrors sidebar+resize width */
+.content-header-spacer {
+  flex-shrink: 0;
+  height: 100%;
+}
+
+/* Rounded white card */
+.content-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  border-radius: 12px 12px 0 0;
+  box-shadow:
+    0 -2px 0 rgba(255, 255, 255, 0.07),
+    0 -8px 26px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  background: #fff;
 }
 
 .icon-nav-btn {
@@ -264,64 +289,90 @@ code, pre {
 
 /* ─── Tabs ─────────────────────────────────────────────────────────────────── */
 
-.tab-bar {
-  display: flex;
-  align-items: stretch;
-  background: #fff;
-  border-bottom: 1px solid #e0e0e0;
-  overflow-x: auto;
-  flex-shrink: 0;
-  height: 34px;
-}
-
 .tab {
+  position: relative;
+  flex-shrink: 0;
+  height: 30px;
+  margin-top: 6px;
+  padding: 0 18px;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.5);
   border: none;
-  border-right: 1px solid #e8e8e8;
-  background: #fafafa;
   cursor: pointer;
   font-size: 12px;
-  color: #777;
-  white-space: nowrap;
-  border-bottom: 2px solid transparent;
   font-family: inherit;
-  transition: background 0.1s, color 0.1s;
-  flex-shrink: 0;
+  white-space: nowrap;
+  clip-path: polygon(8px 0%, calc(100% - 8px) 0%, 100% 100%, 0% 100%);
+  z-index: 1;
+  margin-left: -5px;
+  transition: background 0.15s, color 0.15s;
 }
 
-.tab:hover {
-  background: #f0f0f0;
-  color: #333;
+.tab:first-child {
+  margin-left: 0;
+}
+
+.tab:hover:not(.tab-active) {
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .tab.tab-active {
   background: #fff;
   color: #1a1a2e;
-  border-bottom-color: #667eea;
-  font-weight: 500;
+  z-index: 2;
+}
+
+.tab-icon {
+  display: flex;
+  align-items: center;
+  opacity: 0.7;
+}
+
+.tab.tab-active .tab-icon {
+  opacity: 1;
+  color: #667eea;
 }
 
 .tab-label {
-  max-width: 140px;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .tab-close {
   font-size: 14px;
-  color: #bbb;
   line-height: 1;
+  opacity: 0.45;
   border-radius: 3px;
-  padding: 1px 3px;
-  margin-right: -4px;
+  padding: 1px 2px;
+  margin-left: 2px;
+  margin-right: -8px;
 }
 
 .tab-close:hover {
-  color: #555;
-  background: rgba(0, 0, 0, 0.08);
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.header-path {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
+  font-family: 'Menlo', 'Monaco', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-path .icloud-icon {
+  color: rgba(255, 255, 255, 0.3);
+  flex-shrink: 0;
 }
 
 /* ─── Playground content area ──────────────────────────────────────────────── */

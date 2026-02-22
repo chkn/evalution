@@ -6,6 +6,25 @@ import PromptList from './components/PromptList';
 import PlaygroundEditor from './components/PlaygroundEditor';
 import PlaygroundExecution from './components/PlaygroundExecution';
 
+// ─── Tab type abstraction ────────────────────────────────────────────────────
+
+interface PromptTab { type: 'prompt'; promptId: string }
+type AppTab = PromptTab;
+
+const tabKey = (t: AppTab) => `${t.type}:${t.promptId}`;
+
+// ─── Icons ───────────────────────────────────────────────────────────────────
+
+function AppIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="4 17 10 11 4 5"/>
+      <line x1="12" y1="19" x2="20" y2="19"/>
+    </svg>
+  );
+}
+
 function PromptsIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
@@ -18,10 +37,22 @@ function PromptsIcon() {
   );
 }
 
+function PromptTabIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+    </svg>
+  );
+}
+
+// ─── App ─────────────────────────────────────────────────────────────────────
+
 function App() {
   const { prompts, loading, error, refetch } = usePrompts();
-  const [openTabs, setOpenTabs] = useState<string[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [openTabs, setOpenTabs] = useState<AppTab[]>([]);
+  const [activeTabKey, setActiveTabKey] = useState<string | null>(null);
   const [rootPath, setRootPath] = useState<string>('');
   const [activeSection, setActiveSection] = useState<'prompts'>('prompts');
   const sidebar = useResizable({ initial: 224, min: 120, max: 600, storageKey: 'sidebar-width' });
@@ -40,112 +71,139 @@ function App() {
   useSSE(handleSSEMessage);
 
   const handleSelectPrompt = (id: string) => {
-    setOpenTabs(prev => prev.includes(id) ? prev : [...prev, id]);
-    setActiveTabId(id);
+    const tab: AppTab = { type: 'prompt', promptId: id };
+    const key = tabKey(tab);
+    setOpenTabs(prev => prev.some(t => tabKey(t) === key) ? prev : [...prev, tab]);
+    setActiveTabKey(key);
   };
 
-  const handleCloseTab = (id: string, e: React.MouseEvent) => {
+  const handleCloseTab = (key: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setOpenTabs(prev => {
-      const next = prev.filter(t => t !== id);
-      if (id === activeTabId) {
-        const idx = prev.indexOf(id);
-        setActiveTabId(next[Math.min(idx, next.length - 1)] ?? null);
+      const next = prev.filter(t => tabKey(t) !== key);
+      if (key === activeTabKey) {
+        const idx = prev.findIndex(t => tabKey(t) === key);
+        setActiveTabKey(next[Math.min(idx, next.length - 1)] ? tabKey(next[Math.min(idx, next.length - 1)]) : null);
       }
       return next;
     });
   };
 
-  const activePrompt = prompts.find(p => p.id === activeTabId) ?? null;
+  const activeTab = openTabs.find(t => tabKey(t) === activeTabKey) ?? null;
+
+  const renderTabContent = (tab: AppTab | null) => {
+    if (!tab) {
+      return (
+        <div className="empty-state">
+          <h2>Select a prompt to get started</h2>
+          <p>Choose a prompt from the list on the left to edit and execute it.</p>
+        </div>
+      );
+    }
+    if (tab.type === 'prompt') {
+      const prompt = prompts.find(p => p.id === tab.promptId) ?? null;
+      if (!prompt) return null;
+      return (
+        <div className="pg-content">
+          <PlaygroundEditor
+            key={tab.promptId}
+            prompt={prompt}
+            onUpdate={refetch}
+          />
+          <PlaygroundExecution
+            key={tab.promptId}
+            prompt={prompt}
+          />
+        </div>
+      );
+    }
+  };
 
   const icloudPrefix = '~/Library/Mobile Documents/com~apple~CloudDocs';
   const tildeRoot = rootPath.replace(/^\/Users\/[^/]+/, '~');
   const isICloud = tildeRoot.startsWith(icloudPrefix);
   const displayPath = isICloud ? tildeRoot.slice(icloudPrefix.length) || '/' : tildeRoot;
 
+  const selectedPromptId = activeTab?.type === 'prompt' ? activeTab.promptId : null;
+
   return (
     <div className="app">
-      <header className="top-bar">
-        <span className="top-bar-logo">Evalution</span>
+      {/* Full-width title bar: app icon + working directory */}
+      <div className="app-titlebar">
+        <div className="app-titlebar-icon">
+          <AppIcon />
+        </div>
         {rootPath && (
-          <span className="top-bar-path">
+          <span className="header-path">
             {isICloud && (
-              <>
-                <svg className="icloud-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/>
-                </svg>
-                <span className="icloud-label">iCloud Drive</span>
-              </>
+              <svg className="icloud-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/>
+              </svg>
             )}
+            {isICloud && <span>iCloud Drive</span>}
             {displayPath && displayPath !== '/' && displayPath}
           </span>
         )}
-      </header>
+      </div>
 
-      <div className="app-body">
-        <nav className="icon-nav">
-          <button
-            className={`icon-nav-btn ${activeSection === 'prompts' ? 'active' : ''}`}
-            onClick={() => setActiveSection('prompts')}
-            title="Prompts"
-          >
-            <PromptsIcon />
-          </button>
-        </nav>
+      {/* Main area: icon nav + content */}
+      <div className="app-main">
+        <div className="icon-strip">
+          <nav className="icon-nav">
+            <button
+              className={`icon-nav-btn ${activeSection === 'prompts' ? 'active' : ''}`}
+              onClick={() => setActiveSection('prompts')}
+              title="Prompts"
+            >
+              <PromptsIcon />
+            </button>
+          </nav>
+        </div>
 
-        <aside className="section-panel" style={{ width: sidebar.size }}>
-          {activeSection === 'prompts' && (
-            <PromptList
-              prompts={prompts}
-              selectedId={activeTabId}
-              onSelect={handleSelectPrompt}
-              loading={loading}
-              error={error}
-              rootPath={rootPath}
-            />
-          )}
-        </aside>
+        <div className="content-area">
+          {/* Tabs aligned to main content column via spacer */}
+          <div className="content-header">
+            <div className="content-header-spacer" style={{ width: sidebar.size + 4 }} />
+            {openTabs.map(tab => {
+              const key = tabKey(tab);
+              const name = tab.type === 'prompt'
+                ? (prompts.find(p => p.id === tab.promptId)?.name ?? tab.promptId)
+                : key;
+              return (
+                <button
+                  key={key}
+                  className={`tab ${key === activeTabKey ? 'tab-active' : ''}`}
+                  onClick={() => setActiveTabKey(key)}
+                >
+                  <span className="tab-icon"><PromptTabIcon /></span>
+                  <span className="tab-label">{name}</span>
+                  <span className="tab-close" onClick={e => handleCloseTab(key, e)}>×</span>
+                </button>
+              );
+            })}
+          </div>
 
-        <div className="resize-handle" onMouseDown={sidebar.onMouseDown} />
+          <div className="content-card">
+            <aside className="section-panel" style={{ width: sidebar.size }}>
+              {activeSection === 'prompts' && (
+                <PromptList
+                  prompts={prompts}
+                  selectedId={selectedPromptId}
+                  onSelect={handleSelectPrompt}
+                  loading={loading}
+                  error={error}
+                  rootPath={rootPath}
+                />
+              )}
+            </aside>
 
-        <main className="main-content">
-          {openTabs.length > 0 && (
-            <div className="tab-bar">
-              {openTabs.map(id => {
-                const p = prompts.find(pr => pr.id === id);
-                return (
-                  <button
-                    key={id}
-                    className={`tab ${id === activeTabId ? 'tab-active' : ''}`}
-                    onClick={() => setActiveTabId(id)}
-                  >
-                    <span className="tab-label">{p?.name ?? id}</span>
-                    <span className="tab-close" onClick={e => handleCloseTab(id, e)}>×</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+            <div className="resize-handle" onMouseDown={sidebar.onMouseDown} />
 
-          {activePrompt ? (
-            <div className="pg-content">
-              <PlaygroundEditor
-                key={activeTabId ?? ''}
-                prompt={activePrompt}
-                onUpdate={refetch}
-              />
-              <PlaygroundExecution
-                key={activeTabId ?? ''}
-                prompt={activePrompt}
-              />
-            </div>
-          ) : (
-            <div className="empty-state">
-              <h2>Select a prompt to get started</h2>
-              <p>Choose a prompt from the list on the left to edit and execute it.</p>
-            </div>
-          )}
-        </main>
+            <main className="main-content">
+              {renderTabContent(activeTab)}
+            </main>
+          </div>
+        </div>
       </div>
     </div>
   );
