@@ -9,7 +9,7 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: #383856;
+  background: #44445e;
 }
 
 code, pre {
@@ -29,7 +29,7 @@ code, pre {
   display: flex;
   flex-direction: row;
   align-items: center;
-  background: #383856;
+  background: #44445e;
 }
 
 .app-titlebar-icon {
@@ -57,7 +57,7 @@ code, pre {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: #383856;
+  background: #44445e;
 }
 
 /* Icon nav strip */
@@ -103,7 +103,7 @@ code, pre {
   min-height: 0;
   display: flex;
   flex-direction: row;
-  border-radius: 12px 12px 0 0;
+  border-radius: 12px 0 0 0;
   box-shadow:
     0 -2px 0 rgba(255, 255, 255, 0.07),
     0 -8px 26px rgba(0, 0, 0, 0.5);
@@ -279,12 +279,69 @@ code, pre {
 }
 
 .main-content {
-  flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   container-type: inline-size;
   container-name: main;
+}
+
+/* ─── Pane tab bar ──────────────────────────────────────────────────────────── */
+
+.pane-tabbar {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.pane-tabs-scroll {
+  display: flex;
+  align-items: flex-end;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  /* leave room so last tab doesn't slide under the split button */
+  padding-right: 48px;
+}
+.pane-tabs-scroll::-webkit-scrollbar { display: none; }
+
+.pane-drop-target {
+  background: rgba(102, 126, 234, 0.15);
+  border-radius: 4px 4px 0 0;
+}
+
+.pane-resize-divider {
+  width: 4px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  align-self: stretch;
+  transition: background 0.15s;
+}
+.pane-resize-divider:hover { background: #667eea55; }
+
+.tab-split-btn {
+  /* absolutely positioned so it doesn't consume width in the tab bar */
+  position: absolute;
+  right: 10px;
+  bottom: 2px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.tab-split-btn:hover {
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 /* ─── Tabs ─────────────────────────────────────────────────────────────────── */
@@ -363,7 +420,7 @@ code, pre {
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.6);
   font-family: 'Menlo', 'Monaco', monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -371,7 +428,7 @@ code, pre {
 }
 
 .header-path .icloud-icon {
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.6);
   flex-shrink: 0;
 }
 
