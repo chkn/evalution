@@ -6,6 +6,8 @@ export interface PromptChangeEvent {
 }
 
 export interface PromptProvider {
+  readonly id: string;
+
   // Get all available prompts
   getAllPrompts(): Promise<ParsedPrompt[]>;
 
@@ -17,6 +19,9 @@ export interface PromptProvider {
     promptId: string,
     updates: Record<string, any>
   ): Promise<ParsedPrompt>;
+
+  // Execute a prompt with positional params; returns a result object or a text stream
+  execute(promptId: string, params: any[], stream: boolean): Promise<any>;
 
   // Watch for changes (optional — supported if implemented)
   watch?(callback: (event: PromptChangeEvent) => void): () => void;

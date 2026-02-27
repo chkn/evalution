@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { FileSystemPromptProvider } from './filesystem-provider.ts';
 import { PromptEditor } from '../parser/prompt-editor.ts';
-import { FileScanner } from '../cli/file-scanner.ts';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -13,8 +12,7 @@ describe('FileSystemPromptProvider', () => {
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'evalution-provider-test-'));
     const editor = new PromptEditor();
-    const scanner = new FileScanner();
-    provider = new FileSystemPromptProvider(tempDir, editor, scanner);
+    provider = new FileSystemPromptProvider({ rootDir: tempDir, editor });
   });
 
   afterEach(async () => {
@@ -269,5 +267,76 @@ export function myPrompt() {
 
     // Callback should not be called after cleanup
     expect(callback).not.toHaveBeenCalled();
+  });
+
+  describe('file scanning', () => {
+    it('should find .prompt.ts files recursively', async () => {
+      await fs.mkdir(path.join(tempDir, 'subdir'), { recursive: true });
+      await fs.writeFile(path.join(tempDir, 'test.prompt.ts'), `
+export function testPrompt() {
+  return { model: 'openai/gpt-4o', system: 'Test' };
+}
+`);
+      await fs.writeFile(path.join(tempDir, 'subdir', 'nested.prompt.ts'), `
+export function nestedPrompt() {
+  return { model: 'openai/gpt-4o', system: 'Nested' };
+}
+`);
+
+      const prompts = await provider.getAllPrompts();
+      expect(prompts).toHaveLength(2);
+      expect(prompts.some(p => p.name === 'testPrompt')).toBe(true);
+      expect(prompts.some(p => p.name === 'nestedPrompt')).toBe(true);
+    });
+
+    it('should find .promp.ts files (typo pattern)', async () => {
+      await fs.writeFile(path.join(tempDir, 'typo.promp.ts'), `
+export function typoPrompt() {
+  return { model: 'openai/gpt-4o', system: 'Typo' };
+}
+`);
+
+      const prompts = await provider.getAllPrompts();
+      expect(prompts.some(p => p.name === 'typoPrompt')).toBe(true);
+    });
+
+    it('should ignore node_modules directory', async () => {
+      await fs.mkdir(path.join(tempDir, 'node_modules'), { recursive: true });
+      await fs.writeFile(path.join(tempDir, 'node_modules', 'test.prompt.ts'), `
+export function ignored() { return { model: 'openai/gpt-4o', system: 'Ignored' }; }
+`);
+      await fs.writeFile(path.join(tempDir, 'valid.prompt.ts'), `
+export function valid() { return { model: 'openai/gpt-4o', system: 'Valid' }; }
+`);
+
+      const prompts = await provider.getAllPrompts();
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0].name).toBe('valid');
+    });
+
+    it('should use custom includePatterns and ignorePatterns', async () => {
+      const editor = new PromptEditor();
+      const customProvider = new FileSystemPromptProvider({
+        rootDir: tempDir,
+        editor,
+        includePatterns: ['**/*.custom.ts'],
+        ignorePatterns: [],
+      });
+
+      await fs.writeFile(path.join(tempDir, 'test.custom.ts'), `
+export function customPrompt() {
+  return { model: 'openai/gpt-4o', system: 'Custom' };
+}
+`);
+      await fs.writeFile(path.join(tempDir, 'test.prompt.ts'), `
+export function regularPrompt() {
+  return { model: 'openai/gpt-4o', system: 'Regular' };
+}
+`);
+
+      const prompts = await customProvider.getAllPrompts();
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0].name).toBe('customPrompt');
+    });
   });
 });

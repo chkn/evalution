@@ -1,26 +1,46 @@
+import { glob } from 'glob';
 import path from 'path';
+import { pathToFileURL } from 'url';
+import { generateText, streamText } from 'ai';
 import type { PromptProvider, PromptChangeEvent } from './prompt-provider.ts';
 import type { ParsedPrompt } from '../shared/types.ts';
 import { PromptParser } from '../parser/prompt-parser.ts';
 import { PromptEditor } from '../parser/prompt-editor.ts';
-import { FileScanner } from '../cli/file-scanner.ts';
 import chokidar from 'chokidar';
 
+const DEFAULT_INCLUDE_PATTERNS = ['**/*.prompt.ts', '**/*.promp.ts'];
+const DEFAULT_IGNORE_PATTERNS = ['**/node_modules/**', '**/dist/**', '**/.git/**'];
+
+export interface FileSystemPromptProviderOptions {
+  id?: string;
+  rootDir?: string;
+  editor?: PromptEditor;
+  includePatterns?: string[];
+  ignorePatterns?: string[];
+}
+
+let defaultIDCounter = 0;
+
 export class FileSystemPromptProvider implements PromptProvider {
+  readonly id: string;
   private parser: PromptParser | null = null;
-  private files: string[] = [];
   private rootDir: string;
   private editor: PromptEditor;
-  private scanner: FileScanner;
+  private includePatterns: string[];
+  private ignorePatterns: string[];
 
-  constructor(
-    rootDir: string,
-    editor: PromptEditor,
-    scanner: FileScanner
-  ) {
+  constructor({
+    id = 'fs' + (defaultIDCounter++ ? defaultIDCounter : ''), // ensure unique default IDs for multiple instances
+    rootDir = process.cwd(),
+    editor = new PromptEditor(),
+    includePatterns = DEFAULT_INCLUDE_PATTERNS,
+    ignorePatterns = DEFAULT_IGNORE_PATTERNS,
+  }: FileSystemPromptProviderOptions = {}) {
+    this.id = id;
     this.rootDir = rootDir;
     this.editor = editor;
-    this.scanner = scanner;
+    this.includePatterns = includePatterns;
+    this.ignorePatterns = ignorePatterns;
   }
 
   async getAllPrompts(): Promise<ParsedPrompt[]> {
@@ -74,11 +94,34 @@ export class FileSystemPromptProvider implements PromptProvider {
     return (await this.getPrompt(promptId))!;
   }
 
+  async execute(promptId: string, params: any[], stream: boolean): Promise<any> {
+    const [filePath, functionName] = this.parsePromptId(promptId);
+    const module = await import(pathToFileURL(filePath).href);
+    const promptFunction = module[functionName];
+
+    if (typeof promptFunction !== 'function') {
+      throw new Error(`Function '${functionName}' not found in ${filePath}`);
+    }
+
+    const config = promptFunction(...params);
+
+    if (!config || typeof config !== 'object') {
+      throw new Error(`Function '${functionName}' did not return a valid config object`);
+    }
+
+    if (stream) {
+      const result = await streamText(config);
+      return result.textStream;
+    } else {
+      const result = await generateText(config);
+      return { text: result.text, usage: result.usage, finishReason: result.finishReason };
+    }
+  }
+
   watch(callback: (event: PromptChangeEvent) => void): () => void {
-    const patterns = ['**/*.prompt.ts', '**/*.promp.ts'];
-    const watcher = chokidar.watch(patterns, {
+    const watcher = chokidar.watch(this.includePatterns, {
       cwd: this.rootDir,
-      ignored: ['**/node_modules/**', '**/dist/**', '**/.git/**'],
+      ignored: this.ignorePatterns,
       persistent: true,
       ignoreInitial: true,
     });
@@ -119,8 +162,24 @@ export class FileSystemPromptProvider implements PromptProvider {
   }
 
   private async refresh(): Promise<void> {
-    this.files = await this.scanner.findPromptFiles(this.rootDir);
-    this.parser = new PromptParser(this.files, this.rootDir);
+    const files = await this.findPromptFiles();
+    this.parser = new PromptParser(files, this.rootDir);
+  }
+
+  private async findPromptFiles(): Promise<string[]> {
+    const allFiles: string[] = [];
+
+    for (const pattern of this.includePatterns) {
+      const files = await glob(pattern, {
+        cwd: this.rootDir,
+        absolute: true,
+        ignore: this.ignorePatterns,
+      });
+      allFiles.push(...files);
+    }
+
+    const uniqueFiles = Array.from(new Set(allFiles));
+    return uniqueFiles.sort();
   }
 
   private parsePromptId(id: string): [string, string] {
@@ -137,12 +196,9 @@ export class FileSystemPromptProvider implements PromptProvider {
   }
 
   private resolveFilePath(relativePath: string): string {
-    // If already absolute, return as is
     if (relativePath.startsWith('/')) {
       return relativePath;
     }
-
-    // Resolve relative to rootDir
     return `${this.rootDir}/${relativePath}`;
   }
 }

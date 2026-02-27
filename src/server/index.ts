@@ -9,13 +9,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export interface ServerOptions {
-  provider: PromptProvider;
+  providers: PromptProvider[];
   port: number;
   rootPath: string;
 }
 
 export async function startServer(options: ServerOptions) {
-  const { provider, port, rootPath } = options;
+  const { providers, port, rootPath } = options;
+
+  const providerMap = new Map(providers.map(p => [p.id, p]));
 
   const fastify = Fastify({
     logger: {
@@ -28,7 +30,7 @@ export async function startServer(options: ServerOptions) {
   const sseClients = new Set<FastifyReply>();
 
   // Setup API routes
-  setupRoutes(fastify, provider, sseClients, rootPath);
+  setupRoutes(fastify, providerMap, sseClients, rootPath);
 
   // Serve static client files
   const clientPath = path.join(__dirname, '..', 'client');
@@ -37,17 +39,18 @@ export async function startServer(options: ServerOptions) {
     prefix: '/',
   });
 
-  // Setup file watching if supported
-  if (provider.watch) {
-    provider.watch((event) => {
-      // Broadcast to all SSE clients
-      const message = `data: ${JSON.stringify({ type: 'prompt-changed', event })}\n\n`;
-      sseClients.forEach((reply) => {
-        if (!reply.raw.destroyed) {
-          reply.raw.write(message);
-        }
+  // Setup file watching for all providers that support it
+  for (const [providerId, provider] of providerMap) {
+    if (provider.watch) {
+      provider.watch((event) => {
+        const message = `data: ${JSON.stringify({ type: 'prompt-changed', providerId, event })}\n\n`;
+        sseClients.forEach((reply) => {
+          if (!reply.raw.destroyed) {
+            reply.raw.write(message);
+          }
+        });
       });
-    });
+    }
   }
 
   // Start server

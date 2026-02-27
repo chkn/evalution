@@ -1,16 +1,14 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { PromptProvider } from '../providers/prompt-provider.ts';
-import { AIExecutor } from './ai-executor.ts';
 import type { ExecuteRequest } from '../shared/types.ts';
 import { getCallSettings } from './call-settings.ts';
 
 export function setupRoutes(
   fastify: FastifyInstance,
-  provider: PromptProvider,
+  providers: Map<string, PromptProvider>,
   sseClients: Set<FastifyReply>,
   rootPath: string
 ) {
-  const executor = new AIExecutor();
   const callSettings = getCallSettings(rootPath);
 
   // GET /api/config - Get server configuration
@@ -23,85 +21,90 @@ export function setupRoutes(
     return callSettings;
   });
 
-  // GET /api/prompts - Get all prompts
+  // GET /api/prompts - Get all prompts from all providers
   fastify.get('/api/prompts', async (request, reply) => {
     try {
-      const prompts = await provider.getAllPrompts();
-      return prompts;
+      const results = await Promise.all(
+        Array.from(providers.entries()).map(async ([providerId, provider]) => {
+          const prompts = await provider.getAllPrompts();
+          return prompts.map(prompt => ({ ...prompt, providerId }));
+        })
+      );
+      return results.flat();
     } catch (error: any) {
       reply.code(500).send({ error: error.message });
     }
   });
 
-  // GET /api/prompts/:id - Get specific prompt
-  fastify.get<{ Params: { id: string } }>('/api/prompts/:id', async (request, reply) => {
-    try {
-      const { id } = request.params;
-      const decodedId = Buffer.from(id, 'base64url').toString('utf8');
-      const prompt = await provider.getPrompt(decodedId);
-
-      if (!prompt) {
-        return reply.code(404).send({ error: 'Prompt not found' });
-      }
-
-      return prompt;
-    } catch (error: any) {
-      reply.code(500).send({ error: error.message });
-    }
-  });
-
-  // POST /api/prompts/:id/update - Update prompt properties
-  fastify.post<{ Params: { id: string }; Body: Record<string, any> }>(
-    '/api/prompts/:id/update',
+  // GET /api/prompts/:providerId/:id - Get specific prompt
+  fastify.get<{ Params: { providerId: string; id: string } }>(
+    '/api/prompts/:providerId/:id',
     async (request, reply) => {
       try {
-        const { id } = request.params;
+        const { providerId, id } = request.params;
+        const provider = providers.get(providerId);
+        if (!provider) {
+          return reply.code(404).send({ error: 'Provider not found' });
+        }
+
         const decodedId = Buffer.from(id, 'base64url').toString('utf8');
+        const prompt = await provider.getPrompt(decodedId);
+        if (!prompt) {
+          return reply.code(404).send({ error: 'Prompt not found' });
+        }
+
+        return { ...prompt, providerId };
+      } catch (error: any) {
+        reply.code(500).send({ error: error.message });
+      }
+    }
+  );
+
+  // POST /api/prompts/:providerId/:id/update - Update prompt properties
+  fastify.post<{ Params: { providerId: string; id: string }; Body: Record<string, any> }>(
+    '/api/prompts/:providerId/:id/update',
+    async (request, reply) => {
+      try {
+        const { providerId, id } = request.params;
+        const provider = providers.get(providerId);
+        if (!provider) {
+          return reply.code(404).send({ error: 'Provider not found' });
+        }
 
         if (!provider.updatePromptProperties) {
           return reply.code(405).send({ error: 'This provider does not support editing' });
         }
 
+        const decodedId = Buffer.from(id, 'base64url').toString('utf8');
         const updatedPrompt = await provider.updatePromptProperties(decodedId, request.body);
-
-        return updatedPrompt;
+        return { ...updatedPrompt, providerId };
       } catch (error: any) {
         reply.code(400).send({ error: error.message });
       }
     }
   );
 
-  // POST /api/prompts/:id/execute - Execute prompt
-  fastify.post<{ Params: { id: string }; Body: ExecuteRequest }>(
-    '/api/prompts/:id/execute',
+  // POST /api/prompts/:providerId/:id/execute - Execute prompt
+  fastify.post<{ Params: { providerId: string; id: string }; Body: ExecuteRequest }>(
+    '/api/prompts/:providerId/:id/execute',
     async (request, reply) => {
       try {
-        const { id } = request.params;
-        const decodedId = Buffer.from(id, 'base64url').toString('utf8');
-        const { stream = false, functionParams = {} } = request.body;
-
-        const prompt = await provider.getPrompt(decodedId);
-        if (!prompt) {
-          return reply.code(404).send({ error: 'Prompt not found' });
+        const { providerId, id } = request.params;
+        const provider = providers.get(providerId);
+        if (!provider) {
+          return reply.code(404).send({ error: 'Provider not found' });
         }
 
-        // Extract file path and function name from ID
-        const [filePath, functionName] = decodedId.split('#');
+        const decodedId = Buffer.from(id, 'base64url').toString('utf8');
+        const { stream = false, functionParams = [] } = request.body;
 
         if (stream) {
-          // Set headers for SSE
           reply.raw.setHeader('Content-Type', 'text/event-stream');
           reply.raw.setHeader('Cache-Control', 'no-cache');
           reply.raw.setHeader('Connection', 'keep-alive');
 
-          const textStream = await executor.executePrompt(
-            filePath,
-            functionName,
-            functionParams,
-            true
-          );
+          const textStream = await provider.execute(decodedId, functionParams, true);
 
-          // Stream chunks
           for await (const chunk of textStream as AsyncIterable<string>) {
             reply.raw.write(`data: ${JSON.stringify({ chunk })}\n\n`);
           }
@@ -109,13 +112,7 @@ export function setupRoutes(
           reply.raw.write(`data: ${JSON.stringify({ done: true })}\n\n`);
           reply.raw.end();
         } else {
-          const result = await executor.executePrompt(
-            filePath,
-            functionName,
-            functionParams,
-            false
-          );
-          return result;
+          return await provider.execute(decodedId, functionParams, false);
         }
       } catch (error: any) {
         if (!reply.sent) {
@@ -131,13 +128,9 @@ export function setupRoutes(
     reply.raw.setHeader('Cache-Control', 'no-cache');
     reply.raw.setHeader('Connection', 'keep-alive');
 
-    // Add client to set
     sseClients.add(reply);
-
-    // Send initial connection message
     reply.raw.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
 
-    // Remove client when connection closes
     request.raw.on('close', () => {
       sseClients.delete(reply);
     });

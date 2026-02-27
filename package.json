@@ -3,6 +3,12 @@
   "version": "1.0.0",
   "description": "TypeScript AI Prompt Playground - Edit and execute AI prompts with live preview",
   "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "bin": {
     "evalution": "./bin/evalution.js"
   },
@@ -15,7 +21,7 @@
   },
   "scripts": {
     "build": "npm run build:cli && npm run build:client",
-    "build:cli": "tsup src/cli/index.ts --format esm --outDir dist --external typescript --external ai --external fastify --external chokidar --external glob --external pino-pretty",
+    "build:cli": "tsup src/cli/index.ts src/index.ts --format esm --outDir dist --dts --external typescript --external ai --external fastify --external chokidar --external glob --external pino-pretty",
     "build:client": "vite build",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "node src/cli/index.ts",

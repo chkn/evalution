@@ -21,6 +21,7 @@ export interface PromptProperty {
 
 export interface ParsedPrompt {
   id: string;
+  providerId?: string;
   name: string;
   functionParameters: FunctionParameter[];
   properties: Record<string, PromptProperty>;
@@ -36,5 +37,5 @@ export interface ModelValue {
 
 export interface ExecuteRequest {
   stream?: boolean;
-  functionParams?: Record<string, any>;
+  functionParams?: any[];
 }

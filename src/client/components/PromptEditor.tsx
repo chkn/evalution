@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ParsedPrompt } from '../../shared/types';
-import { encodePromptId } from '../utils';
+import { updatePromptProperties } from '../api';
 import ModelSelector from './ModelSelector';
 import MessageBuilder from './MessageBuilder';
 import ParameterEditor from './ParameterEditor';
@@ -17,21 +17,8 @@ function PromptEditor({ prompt, onUpdate }: PromptEditorProps) {
   const handlePropertyUpdate = async (propertyName: string, value: any) => {
     setUpdating(true);
     setUpdateStatus(null);
-
     try {
-      const response = await fetch(`/api/prompts/${encodePromptId(prompt.id)}/update`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ [propertyName]: value }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Update failed');
-      }
-
+      await updatePromptProperties(prompt, { [propertyName]: value });
       setUpdateStatus({ type: 'success', message: 'Updated successfully!' });
       setTimeout(() => setUpdateStatus(null), 3000);
       onUpdate();

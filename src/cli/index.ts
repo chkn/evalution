@@ -1,24 +1,51 @@
-import { FileScanner } from './file-scanner.ts';
-import { PromptEditor } from '../parser/prompt-editor.ts';
+import path from 'path';
+import fs from 'fs/promises';
+import { pathToFileURL } from 'url';
+import type { EvalutionConfig } from '../config.ts';
 import { FileSystemPromptProvider } from '../providers/filesystem-provider.ts';
 import { startServer } from '../server/index.ts';
 
+async function loadConfig(rootDir: string): Promise<EvalutionConfig> {
+  const configPath = path.join(rootDir, '.evalution', 'config.ts');
+  try {
+    await fs.access(configPath);
+  } catch {
+    return {};
+  }
+
+  process.chdir(rootDir);
+  const mod = await import(pathToFileURL(configPath).href);
+  return mod.default ?? {};
+}
+
 async function main() {
-  const cwd = process.cwd();
+  const args = process.argv.slice(2);
+
+  // Accept: (no args) | "ui" | "ui <path>"
+  if (args.length > 0 && args[0] !== 'ui') {
+    console.error(`Unknown command: ${args[0]}`);
+    console.error('Usage: evalution [ui] [path]');
+    process.exit(1);
+  }
+
+  const pathArg = args[1];
+  const rootDir = pathArg ? path.resolve(pathArg) : process.cwd();
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   console.log('🔍 Scanning for .prompt.ts files...');
 
-  // Create filesystem provider (default)
-  const scanner = new FileScanner();
-  const editor = new PromptEditor();
-  const provider = new FileSystemPromptProvider(cwd, editor, scanner);
+  const config = await loadConfig(rootDir);
+  const providers = config.promptProviders ?? [
+    new FileSystemPromptProvider({ rootDir }),
+  ];
 
   // Check if there are any prompt files
-  const files = await scanner.findPromptFiles(cwd);
+  const allPrompts = (
+    await Promise.all(providers.map(p => p.getAllPrompts()))
+  ).flat();
 
-  if (files.length === 0) {
-    console.log('\n❌ No prompt files found in the current directory.');
+  if (allPrompts.length === 0) {
+    console.log(`\n❌ No prompt files found in ${rootDir}.`);
     console.log('Create a .prompt.ts file to get started.\n');
     console.log('Example:');
     console.log('```typescript');
@@ -35,10 +62,9 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`✅ Found ${files.length} prompt file(s)\n`);
+  console.log(`✅ Found ${allPrompts.length} prompt(s)\n`);
 
-  // Start server
-  await startServer({ provider, port, rootPath: cwd });
+  await startServer({ providers, port, rootPath: rootDir });
 }
 
 main().catch((error) => {

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { ParsedPrompt } from '../../shared/types';
+import { getPrompts } from '../api';
 
 export function usePrompts() {
   const [prompts, setPrompts] = useState<ParsedPrompt[]>([]);
@@ -10,14 +11,7 @@ export function usePrompts() {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch('/api/prompts');
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch prompts');
-      }
-
-      const data = await response.json();
-      setPrompts(data);
+      setPrompts(await getPrompts());
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -29,10 +23,5 @@ export function usePrompts() {
     fetchPrompts();
   }, []);
 
-  return {
-    prompts,
-    loading,
-    error,
-    refetch: fetchPrompts,
-  };
+  return { prompts, loading, error, refetch: fetchPrompts };
 }

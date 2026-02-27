@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ParsedPrompt } from '../../shared/types';
-import { encodePromptId } from '../utils';
+import { executePrompt, streamPrompt } from '../api';
 
 interface ExecutionPanelProps {
   prompt: ParsedPrompt;
@@ -49,67 +49,13 @@ function ExecutionPanel({ prompt }: ExecutionPanelProps) {
   };
 
   const executeGenerate = async () => {
-    const response = await fetch(`/api/prompts/${encodePromptId(prompt.id)}/execute`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        stream: false,
-        functionParams: paramValues,
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Execution failed');
-    }
-
-    const data = await response.json();
+    const data = await executePrompt(prompt, paramValues);
     setResult(data.text);
   };
 
   const executeStream = async () => {
-    const response = await fetch(`/api/prompts/${encodePromptId(prompt.id)}/execute`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        stream: true,
-        functionParams: paramValues,
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Execution failed');
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error('No response body');
-    }
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = JSON.parse(line.slice(6));
-          if (data.chunk) {
-            setResult(prev => prev + data.chunk);
-          }
-        }
-      }
+    for await (const chunk of streamPrompt(prompt, paramValues)) {
+      setResult(prev => prev + chunk);
     }
   };
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ParsedPrompt } from '../../shared/types';
-import { encodePromptId } from '../utils';
+import { executePrompt, streamPrompt } from '../api';
 
 interface Props {
   prompt: ParsedPrompt;
@@ -42,40 +42,13 @@ function PlaygroundExecution({ prompt }: Props) {
   };
 
   const executeGenerate = async () => {
-    const res = await fetch(`/api/prompts/${encodePromptId(prompt.id)}/execute`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stream: false, functionParams: paramValues }),
-    });
-    if (!res.ok) throw new Error((await res.json()).error ?? 'Execution failed');
-    const data = await res.json();
+    const data = await executePrompt(prompt, paramValues);
     setResult(data.text);
   };
 
   const executeStream = async () => {
-    const res = await fetch(`/api/prompts/${encodePromptId(prompt.id)}/execute`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stream: true, functionParams: paramValues }),
-    });
-    if (!res.ok) throw new Error((await res.json()).error ?? 'Execution failed');
-
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error('No response body');
-    const decoder = new TextDecoder();
-    let buf = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop() ?? '';
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = JSON.parse(line.slice(6));
-          if (data.chunk) setResult(prev => prev + data.chunk);
-        }
-      }
+    for await (const chunk of streamPrompt(prompt, paramValues)) {
+      setResult(prev => prev + chunk);
     }
   };
 

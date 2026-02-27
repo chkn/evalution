@@ -1,14 +1,7 @@
 import { useState, useRef, useLayoutEffect, useEffect } from 'react';
 import type { ParsedPrompt, PromptProperty } from '../../shared/types';
 import { POPULAR_MODELS } from '../../shared/constants';
-import { encodePromptId } from '../utils';
-
-interface CallSettingInfo {
-  name: string;
-  type: string;
-  defaultValue: any;
-  description: string;
-}
+import { getCallSettings, updatePromptProperties, type CallSettingInfo } from '../api';
 
 interface Props {
   prompt: ParsedPrompt;
@@ -318,22 +311,14 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
   const [callSettings, setCallSettings] = useState<CallSettingInfo[]>([]);
 
   useEffect(() => {
-    fetch('/api/call-settings')
-      .then(r => r.json())
-      .then(setCallSettings)
-      .catch(() => {});
+    getCallSettings().then(setCallSettings).catch(() => {});
   }, []);
 
   const handleUpdate = async (key: string, value: any) => {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/prompts/${encodePromptId(prompt.id)}/update`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [key]: value }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'Update failed');
+      await updatePromptProperties(prompt, { [key]: value });
       onUpdate();
     } catch (e: any) {
       setError(e.message);
