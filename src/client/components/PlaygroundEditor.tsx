@@ -1,7 +1,7 @@
 import { useState, useRef, useLayoutEffect, useEffect } from 'react';
-import type { ParsedPrompt, PromptProperty } from '../../shared/types';
+import type { ParsedPrompt, PromptProperty, ModelParameterInfo } from '../../shared/types';
 import { POPULAR_MODELS } from '../../shared/constants';
-import { getCallSettings, updatePromptProperties, type CallSettingInfo } from '../api';
+import { getModelParameters, updatePromptProperties  } from '../api';
 
 interface Props {
   prompt: ParsedPrompt;
@@ -308,11 +308,13 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
   const [localMessages, setLocalMessages] = useState<Msg[]>(
     Array.isArray(prompt.properties.messages?.value) ? prompt.properties.messages.value : []
   );
-  const [callSettings, setCallSettings] = useState<CallSettingInfo[]>([]);
+  const [modelParameters, setModelParameters] = useState<ModelParameterInfo[]>([]);
 
   useEffect(() => {
-    getCallSettings().then(setCallSettings).catch(() => {});
-  }, []);
+    if (prompt.providerId) {
+      getModelParameters(prompt.providerId).then(setModelParameters).catch(() => {});
+    }
+  }, [prompt.providerId]);
 
   const handleUpdate = async (key: string, value: any) => {
     setSaving(true);
@@ -344,7 +346,7 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
     .filter(([k]) => !modelParamKeys.has(k));
 
   // CallSettings params not yet present in the prompt
-  const addableParams = callSettings.filter(
+  const addableParams = modelParameters.filter(
     cs => prompt.properties[cs.name] === undefined
   );
 
@@ -370,7 +372,7 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
                 key={key}
                 name={key}
                 prop={prop}
-                description={callSettings.find(cs => cs.name === key)?.description ?? ''}
+                description={modelParameters.find(cs => cs.name === key)?.description ?? ''}
                 onDelete={() => handleUpdate(key, null)}
                 onChange={v => handleUpdate(key, v)}
               />
@@ -385,7 +387,7 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
                   value=""
                   onChange={e => {
                     if (!e.target.value) return;
-                    const cs = callSettings.find(p => p.name === e.target.value);
+                    const cs = modelParameters.find(p => p.name === e.target.value);
                     if (cs) handleUpdate(cs.name, cs.defaultValue);
                   }}
                 >

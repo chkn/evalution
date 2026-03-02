@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { PromptProvider } from '../providers/prompt-provider.ts';
 import type { ExecuteRequest } from '../shared/types.ts';
-import { getCallSettings } from './call-settings.ts';
 
 export function setupRoutes(
   fastify: FastifyInstance,
@@ -9,17 +8,23 @@ export function setupRoutes(
   sseClients: Set<FastifyReply>,
   rootPath: string
 ) {
-  const callSettings = getCallSettings(rootPath);
-
   // GET /api/config - Get server configuration
   fastify.get('/api/config', async () => {
     return { rootPath };
   });
 
-  // GET /api/call-settings - CallSettings members derived from the AI SDK types
-  fastify.get('/api/call-settings', async () => {
-    return callSettings;
-  });
+  // GET /api/providers/:providerId/model-parameters
+  fastify.get<{ Params: { providerId: string } }>(
+    '/api/providers/:providerId/model-parameters',
+    async (request, reply) => {
+      const { providerId } = request.params;
+      const provider = providers.get(providerId);
+      if (!provider) {
+        return reply.code(404).send({ error: 'Provider not found' });
+      }
+      return provider.getModelParameters?.() ?? [];
+    }
+  );
 
   // GET /api/prompts - Get all prompts from all providers
   fastify.get('/api/prompts', async (request, reply) => {

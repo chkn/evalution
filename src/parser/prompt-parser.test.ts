@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PromptParser } from './prompt-parser.ts';
+import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -8,12 +9,17 @@ const __dirname = path.dirname(__filename);
 
 const fixturesDir = path.join(__dirname, '__fixtures__');
 
+async function loadFixtures(...fileNames: string[]): Promise<{ paths: string[]; parser: PromptParser; }> {
+  const paths = fileNames.map(f => path.join(fixturesDir, f));
+  const contents = paths.map(p => [p, fs.readFile(p, 'utf-8')] as const);
+  return { paths, parser: await PromptParser.create(contents) };
+}
+
 describe('PromptParser', () => {
   describe('basic parsing', () => {
-    it('should parse file with single exported function (no parameters)', () => {
-      const filePath = path.join(fixturesDir, 'basic.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should parse file with single exported function (no parameters)', async () => {
+      const { paths, parser } = await loadFixtures('basic.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       expect(prompts).toHaveLength(1);
       expect(prompts[0].name).toBe('checkWeather');
@@ -23,31 +29,28 @@ describe('PromptParser', () => {
       expect(prompts[0].properties.messages).toBeDefined();
     });
 
-    it('should parse file with multiple exported functions', () => {
-      const filePath = path.join(fixturesDir, 'multiple-exports.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should parse file with multiple exported functions', async () => {
+      const { paths, parser } = await loadFixtures('multiple-exports.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       expect(prompts).toHaveLength(2);
       expect(prompts[0].name).toBe('promptOne');
       expect(prompts[1].name).toBe('promptTwo');
     });
 
-    it('should extract function names as prompt names', () => {
-      const filePath = path.join(fixturesDir, 'basic.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should extract function names as prompt names', async () => {
+      const { paths, parser } = await loadFixtures('basic.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       expect(prompts[0].name).toBe('checkWeather');
-      expect(prompts[0].id).toBe(`${filePath}#checkWeather`);
+      expect(prompts[0].id).toBe(`${paths[0]}#checkWeather`);
     });
   });
 
   describe('function parameters', () => {
-    it('should parse function parameters (name, type, default value)', () => {
-      const filePath = path.join(fixturesDir, 'parameterized.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should parse function parameters (name, type, default value)', async () => {
+      const { paths, parser } = await loadFixtures('parameterized.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       expect(prompts[0].functionParameters).toHaveLength(2);
       expect(prompts[0].functionParameters[0]).toEqual({
@@ -64,10 +67,9 @@ describe('PromptParser', () => {
   });
 
   describe('property parsing', () => {
-    it('should parse string literal parameters', () => {
-      const filePath = path.join(fixturesDir, 'basic.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should parse string literal parameters', async () => {
+      const { paths, parser } = await loadFixtures('basic.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       const system = prompts[0].properties.system;
       expect(system.value).toBe('You are a weather assistant');
@@ -75,10 +77,9 @@ describe('PromptParser', () => {
       expect(system.hasParameterTokens).toBe(false);
     });
 
-    it('should parse numeric parameters', () => {
-      const filePath = path.join(fixturesDir, 'basic.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should parse numeric parameters', async () => {
+      const { paths, parser } = await loadFixtures('basic.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       const temperature = prompts[0].properties.temperature;
       expect(temperature.value).toBe(0.7);
@@ -88,10 +89,9 @@ describe('PromptParser', () => {
       expect(maxTokens.value).toBe(500);
     });
 
-    it('should parse array parameters (messages)', () => {
-      const filePath = path.join(fixturesDir, 'basic.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should parse array parameters (messages)', async () => {
+      const { paths, parser } = await loadFixtures('basic.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       const messages = prompts[0].properties.messages;
       expect(Array.isArray(messages.value)).toBe(true);
@@ -104,10 +104,9 @@ describe('PromptParser', () => {
   });
 
   describe('parameter tokens', () => {
-    it('should parse template literals with parameter tokens', () => {
-      const filePath = path.join(fixturesDir, 'parameterized.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should parse template literals with parameter tokens', async () => {
+      const { paths, parser } = await loadFixtures('parameterized.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       const system = prompts[0].properties.system;
       expect(system.value).toBe('You are a friendly assistant speaking in ${language}');
@@ -119,10 +118,9 @@ describe('PromptParser', () => {
       expect(messages.hasParameterTokens).toBe(true);
     });
 
-    it('should parse string concatenation with params', () => {
-      const filePath = path.join(fixturesDir, 'concatenation.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should parse string concatenation with params', async () => {
+      const { paths, parser } = await loadFixtures('concatenation.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       const system = prompts[0].properties.system;
       expect(system.value).toBe('You are a code reviewer for ${username}');
@@ -133,10 +131,9 @@ describe('PromptParser', () => {
       expect(messages.hasParameterTokens).toBe(true);
     });
 
-    it('should parse arithmetic expressions with params', () => {
-      const filePath = path.join(fixturesDir, 'complex.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should parse arithmetic expressions with params', async () => {
+      const { paths, parser } = await loadFixtures('complex.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       const temperature = prompts[0].properties.temperature;
       expect(temperature.value).toContain('${baseTemp}');
@@ -147,20 +144,18 @@ describe('PromptParser', () => {
       expect(maxTokens.hasParameterTokens).toBe(true);
     });
 
-    it('should set hasParameterTokens: true when params are used', () => {
-      const filePath = path.join(fixturesDir, 'parameterized.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should set hasParameterTokens: true when params are used', async () => {
+      const { paths, parser } = await loadFixtures('parameterized.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       expect(prompts[0].properties.system.hasParameterTokens).toBe(true);
       expect(prompts[0].properties.messages.hasParameterTokens).toBe(true);
       expect(prompts[0].properties.temperature.hasParameterTokens).toBe(false);
     });
 
-    it('should handle object parameter with field interpolation', () => {
-      const filePath = path.join(fixturesDir, 'object-param.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should handle object parameter with field interpolation', async () => {
+      const { paths, parser } = await loadFixtures('object-param.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       expect(prompts).toHaveLength(1);
       expect(prompts[0].name).toBe('userProfile');
@@ -180,10 +175,9 @@ describe('PromptParser', () => {
       expect(messages.hasParameterTokens).toBe(true);
     });
 
-    it('should handle destructured object parameters', () => {
-      const filePath = path.join(fixturesDir, 'destructured-param.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should handle destructured object parameters', async () => {
+      const { paths, parser } = await loadFixtures('destructured-param.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       expect(prompts).toHaveLength(1);
       expect(prompts[0].name).toBe('userGreeting');
@@ -202,10 +196,9 @@ describe('PromptParser', () => {
       expect(messages.hasParameterTokens).toBe(true);
     });
 
-    it('should handle destructured parameters with default values', () => {
-      const filePath = path.join(fixturesDir, 'destructured-defaults.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should handle destructured parameters with default values', async () => {
+      const { paths, parser } = await loadFixtures('destructured-defaults.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       expect(prompts).toHaveLength(1);
       expect(prompts[0].name).toBe('customGreeting');
@@ -230,10 +223,9 @@ describe('PromptParser', () => {
   });
 
   describe('model parameter', () => {
-    it('should parse model parameter - string format', () => {
-      const filePath = path.join(fixturesDir, 'basic.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should parse model parameter - string format', async () => {
+      const { paths, parser } = await loadFixtures('basic.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       const model = prompts[0].properties.model;
       expect(model.value).toBe('openai/gpt-4o');
@@ -241,10 +233,9 @@ describe('PromptParser', () => {
       expect(model.hasParameterTokens).toBe(false);
     });
 
-    it('should parse model parameter - function call format', () => {
-      const filePath = path.join(fixturesDir, 'function-model.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should parse model parameter - function call format', async () => {
+      const { paths, parser } = await loadFixtures('function-model.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       const model = prompts[0].properties.model;
       expect(model.value).toEqual({
@@ -258,10 +249,9 @@ describe('PromptParser', () => {
   });
 
   describe('source information', () => {
-    it('should extract source spans for all parameters', () => {
-      const filePath = path.join(fixturesDir, 'basic.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should extract source spans for all parameters', async () => {
+      const { paths, parser } = await loadFixtures('basic.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       const system = prompts[0].properties.system;
       expect(system.valueSpan).toBeDefined();
@@ -272,20 +262,18 @@ describe('PromptParser', () => {
   });
 
   describe('editability', () => {
-    it('should identify editable vs read-only parameters', () => {
-      const filePath = path.join(fixturesDir, 'basic.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should identify editable vs read-only parameters', async () => {
+      const { paths, parser } = await loadFixtures('basic.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       // Literals are editable
       expect(prompts[0].properties.system.isEditable).toBe(true);
       expect(prompts[0].properties.temperature.isEditable).toBe(true);
     });
 
-    it('should handle dynamic/computed values (mark as read-only)', () => {
-      const filePath = path.join(fixturesDir, 'dynamic-values.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should handle dynamic/computed values (mark as read-only)', async () => {
+      const { paths, parser } = await loadFixtures('dynamic-values.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       const system = prompts[0].properties.system;
       expect(system.isEditable).toBe(false);
@@ -293,19 +281,17 @@ describe('PromptParser', () => {
   });
 
   describe('edge cases', () => {
-    it('should handle files with syntax errors gracefully', () => {
-      const filePath = path.join(fixturesDir, 'invalid-syntax.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should handle files with syntax errors gracefully', async () => {
+      const { paths, parser } = await loadFixtures('invalid-syntax.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       // Should still parse what it can, or return empty array
       expect(Array.isArray(prompts)).toBe(true);
     });
 
-    it('should handle nested object structures in parameters', () => {
-      const filePath = path.join(fixturesDir, 'complex.prompt.ts');
-      const parser = new PromptParser([filePath]);
-      const prompts = parser.parseFile(filePath);
+    it('should handle nested object structures in parameters', async () => {
+      const { paths, parser } = await loadFixtures('complex.prompt.ts');
+      const prompts = parser.parseFile(paths[0]);
 
       const messages = prompts[0].properties.messages;
       expect(Array.isArray(messages.value)).toBe(true);
@@ -316,12 +302,8 @@ describe('PromptParser', () => {
   });
 
   describe('parseAll', () => {
-    it('should parse all files in the program', () => {
-      const files = [
-        path.join(fixturesDir, 'basic.prompt.ts'),
-        path.join(fixturesDir, 'function-model.prompt.ts'),
-      ];
-      const parser = new PromptParser(files);
+    it('should parse all files in the program', async () => {
+      const { parser } = await loadFixtures('basic.prompt.ts', 'function-model.prompt.ts');
       const allPrompts = parser.parseAll();
 
       expect(allPrompts.length).toBeGreaterThanOrEqual(2);

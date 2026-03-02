@@ -1,18 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { FileSystemPromptProvider } from './filesystem-provider.ts';
-import { PromptEditor } from '../parser/prompt-editor.ts';
+import { FilePromptProvider } from './file-prompt-provider.ts';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 
-describe('FileSystemPromptProvider', () => {
+describe('FilePromptProvider', () => {
   let tempDir: string;
-  let provider: FileSystemPromptProvider;
+  let provider: FilePromptProvider;
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'evalution-provider-test-'));
-    const editor = new PromptEditor();
-    provider = new FileSystemPromptProvider({ rootDir: tempDir, editor });
+    provider = new FilePromptProvider({ rootDir: tempDir });
   });
 
   afterEach(async () => {
@@ -315,10 +313,8 @@ export function valid() { return { model: 'openai/gpt-4o', system: 'Valid' }; }
     });
 
     it('should use custom includePatterns and ignorePatterns', async () => {
-      const editor = new PromptEditor();
-      const customProvider = new FileSystemPromptProvider({
+      const customProvider = new FilePromptProvider({
         rootDir: tempDir,
-        editor,
         includePatterns: ['**/*.custom.ts'],
         ignorePatterns: [],
       });

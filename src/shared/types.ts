@@ -35,6 +35,13 @@ export interface ModelValue {
   hasParameterTokens?: boolean;
 }
 
+export interface ModelParameterInfo {
+  name: string;
+  type: string;
+  defaultValue: any;
+  description: string;
+}
+
 export interface ExecuteRequest {
   stream?: boolean;
   functionParams?: any[];

@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { pathToFileURL } from 'url';
 import type { EvalutionConfig } from '../config.ts';
-import { FileSystemPromptProvider } from '../providers/filesystem-provider.ts';
+import { FilePromptProvider } from '../providers/file/file-prompt-provider.ts';
 import { startServer } from '../server/index.ts';
 
 async function loadConfig(rootDir: string): Promise<EvalutionConfig> {
@@ -36,7 +36,7 @@ async function main() {
 
   const config = await loadConfig(rootDir);
   const providers = config.promptProviders ?? [
-    new FileSystemPromptProvider({ rootDir }),
+    new FilePromptProvider({ rootDir }),
   ];
 
   // Check if there are any prompt files

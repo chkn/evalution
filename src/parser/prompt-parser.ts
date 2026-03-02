@@ -1,36 +1,32 @@
 import ts from 'typescript';
-import type { ParsedPrompt, FunctionParameter, PromptProperty, ModelValue } from './types.ts';
-import fs from 'fs';
+import type { ParsedPrompt, FunctionParameter, PromptProperty, ModelValue } from '../shared/types.ts';
 import path from 'path';
 
 export class PromptParser {
-  private program: ts.Program;
   private filePathsMap: Map<string, ts.SourceFile>;
   private rootDir: string;
 
-  constructor(filePaths: string[], rootDir: string = '') {
+  static async create(fileContents: readonly (readonly [string, string | Promise<string>])[], rootDir: string = ''): Promise<PromptParser> {
+    const filePathsMap = new Map();
+    await Promise.all(fileContents.map(async ([filePath, content]) => {
+      const sourceFile = ts.createSourceFile(
+        filePath,
+        await content,
+        ts.ScriptTarget.ESNext,
+        true,
+      );
+      filePathsMap.set(filePath, sourceFile);
+    }));
+    return new PromptParser(filePathsMap, rootDir);
+  }
+
+  constructor(filePathsMap: Map<string, ts.SourceFile>, rootDir: string = '') {
+    this.filePathsMap = filePathsMap;
     this.rootDir = rootDir;
-    const compilerOptions: ts.CompilerOptions = {
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      allowJs: false,
-      strict: false,
-    };
-
-    this.program = ts.createProgram(filePaths, compilerOptions);
-    this.filePathsMap = new Map();
-
-    for (const filePath of filePaths) {
-      const sourceFile = this.program.getSourceFile(filePath);
-      if (sourceFile) {
-        this.filePathsMap.set(filePath, sourceFile);
-      }
-    }
   }
 
   parseFile(filePath: string): ParsedPrompt[] {
-    const sourceFile = this.filePathsMap.get(filePath) || this.program.getSourceFile(filePath);
+    const sourceFile = this.filePathsMap.get(filePath);
     if (!sourceFile) {
       return [];
     }
@@ -61,7 +57,7 @@ export class PromptParser {
   parseAll(): ParsedPrompt[] {
     const allPrompts: ParsedPrompt[] = [];
 
-    for (const [filePath, sourceFile] of this.filePathsMap) {
+    for (const filePath of this.filePathsMap.keys()) {
       const prompts = this.parseFile(filePath);
       allPrompts.push(...prompts);
     }

@@ -1,12 +1,5 @@
-import type { ParsedPrompt } from '../shared/types';
+import type { ParsedPrompt, ModelParameterInfo } from '../shared/types';
 import { encodePromptId } from './utils';
-
-export interface CallSettingInfo {
-  name: string;
-  type: string;
-  defaultValue: any;
-  description: string;
-}
 
 export interface ExecuteResult {
   text: string;
@@ -31,8 +24,8 @@ export async function getPrompts(): Promise<ParsedPrompt[]> {
   return res.json();
 }
 
-export async function getCallSettings(): Promise<CallSettingInfo[]> {
-  const res = await fetch('/api/call-settings');
+export async function getModelParameters(providerId: string): Promise<ModelParameterInfo[]> {
+  const res = await fetch(`/api/providers/${providerId}/model-parameters`);
   await throwIfError(res);
   return res.json();
 }

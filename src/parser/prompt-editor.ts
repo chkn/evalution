@@ -1,9 +1,15 @@
-import fs from 'fs/promises';
 import ts from 'typescript';
-import type { PromptProperty, ModelValue } from './types.ts';
+import type { PromptProperty, ModelValue } from '../shared/types.ts';
 import { KNOWN_PROVIDERS } from '../shared/constants.ts';
+import type { FileProvider } from '../providers/file/file-provider.ts';
 
 export class PromptEditor {
+  private fileProvider: FileProvider;
+
+  constructor(fileProvider: FileProvider) {
+    this.fileProvider = fileProvider;
+  }
+
   async updateProperty(filePath: string, property: PromptProperty, newValue: any): Promise<void> {
     if (!property.isEditable) {
       throw new Error(`Property '${property.name}' is not editable`);
@@ -14,7 +20,7 @@ export class PromptEditor {
     }
 
     // Read source file
-    let sourceCode = await fs.readFile(filePath, 'utf-8');
+    let sourceCode = await this.fileProvider.readFile(filePath);
 
     // For model property with function format, ensure import first
     if (property.name === 'model' && typeof newValue === 'object' && newValue.type === 'function') {
@@ -30,7 +36,7 @@ export class PromptEditor {
     const newSourceCode = before + newSourceText + after;
 
     // Write back to file
-    await fs.writeFile(filePath, newSourceCode, 'utf-8');
+    await this.fileProvider.writeFile(filePath, newSourceCode);
   }
 
   async addProperty(
@@ -39,7 +45,7 @@ export class PromptEditor {
     propertyName: string,
     value: any
   ): Promise<void> {
-    let sourceCode = await fs.readFile(filePath, 'utf-8');
+    let sourceCode = await this.fileProvider.readFile(filePath);
     const sourceFile = ts.createSourceFile(filePath, sourceCode, ts.ScriptTarget.Latest, true);
 
     const obj = this.findReturnObject(sourceFile, functionName);
@@ -73,18 +79,18 @@ export class PromptEditor {
     }
 
     sourceCode = sourceCode.slice(0, insertPos) + insertText + sourceCode.slice(insertPos);
-    await fs.writeFile(filePath, sourceCode, 'utf-8');
+    await this.fileProvider.writeFile(filePath, sourceCode);
   }
 
   async removeProperty(filePath: string, property: PromptProperty): Promise<void> {
     if (!property.fullSpan) {
       throw new Error(`Property '${property.name}' is missing fullSpan metadata`);
     }
-    const sourceCode = await fs.readFile(filePath, 'utf-8');
+    const sourceCode = await this.fileProvider.readFile(filePath);
     const newSourceCode =
       sourceCode.slice(0, property.fullSpan.start) +
       sourceCode.slice(property.fullSpan.end);
-    await fs.writeFile(filePath, newSourceCode, 'utf-8');
+    await this.fileProvider.writeFile(filePath, newSourceCode);
   }
 
   private findReturnObject(

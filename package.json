@@ -21,7 +21,7 @@
   },
   "scripts": {
     "build": "npm run build:cli && npm run build:client",
-    "build:cli": "tsup src/cli/index.ts src/index.ts --format esm --outDir dist --dts --external typescript --external ai --external fastify --external chokidar --external glob --external pino-pretty",
+    "build:cli": "tsup src/cli/index.ts src/index.ts --format esm --outDir dist --dts --external typescript --external ai --external fastify --external chokidar --external minimatch --external pino-pretty",
     "build:client": "vite build",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "node src/cli/index.ts",
@@ -35,15 +35,15 @@
     "@fastify/static": "^6.12.0",
     "@fastify/websocket": "^8.3.0",
     "ai": "^3.4.0",
-    "chokidar": "^3.5.3",
+    "chokidar": "^5.0.0",
     "fastify": "^4.25.0",
-    "glob": "^10.3.0",
+    "minimatch": "^10.2.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "typescript": "^5.3.3"
   },
   "devDependencies": {
-    "@types/node": "^20.10.0",
+    "@types/node": "^22.18.0",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "@vitejs/plugin-react": "^4.2.1",
