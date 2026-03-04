@@ -4,10 +4,31 @@ import path from 'path';
 import { generateText, streamText } from 'ai';
 import type { ModelParameterInfo } from '../shared/types.ts';
 
+/**
+ * Adapter that bridges a prompt config object produced by a
+ * {@link PromptFileType} with the execution layer of an AI SDK.
+ *
+ * Implement this interface to add support for SDKs other than the Vercel AI
+ * SDK, then pass your implementation to {@link FilePromptProvider} via the
+ * `sdk` option.
+ */
 export interface SDKAdapter {
+  /**
+   * Returns the list of model parameters that can be edited in the playground
+   * UI for projects rooted at `rootDir`. Typically extracted from the SDK's
+   * published TypeScript type definitions.
+   *
+   * @param rootDir - Absolute path to the project root.
+   */
   getModelParameters(rootDir: string): ModelParameterInfo[];
 
-  // Execute a prompt config object; returns a result object or a text stream
+  /**
+   * Executes a prompt config object and returns either a result object (when
+   * `stream` is `false`) or an async text iterable (when `stream` is `true`).
+   *
+   * @param config - The config object returned by the prompt function.
+   * @param stream - When `true`, returns a streaming text iterator.
+   */
   executeConfig(config: any, stream: boolean): Promise<any>;
 }
 
@@ -100,6 +121,14 @@ export function extractTypeMembers(dtsPath: string, typeName: string): ModelPara
 
 // ─── Vercel AI SDK implementation ─────────────────────────────────────────────
 
+/**
+ * {@link SDKAdapter} implementation for the
+ * [Vercel AI SDK](https://sdk.vercel.ai/).
+ *
+ * - `getModelParameters` reads `CallSettings` from the SDK's `.d.ts` bundle
+ *   and surfaces parameters with simple types that can be edited in the UI.
+ * - `executeConfig` delegates to `generateText` or `streamText`.
+ */
 export class VercelAISDK implements SDKAdapter {
   getModelParameters(rootDir: string): ModelParameterInfo[] {
     const dtsPath = findPackageDts('ai', 'dist/index.d.ts', rootDir);

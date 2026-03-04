@@ -47,6 +47,20 @@ export interface FilePromptProviderOptions {
 
 let defaultIDCounter = 0;
 
+/**
+ * A {@link PromptProvider} that discovers and serves prompts from
+ * files on the local file system (or any {@link FileProvider}).
+ *
+ * Out of the box it scans for `**\/*.prompt.ts` files, parses them with
+ * {@link TSPromptFileType}, and executes them via {@link VercelAISDK}. All
+ * three defaults are replaceable through {@link FilePromptProviderOptions}.
+ *
+ * @example
+ * ```ts
+ * const provider = new FilePromptProvider({ rootDir: '/my/project' });
+ * const prompts = await provider.getAllPrompts();
+ * ```
+ */
 export class FilePromptProvider implements PromptProvider {
   readonly id: string;
   private parser: PromptFileParser | null = null;

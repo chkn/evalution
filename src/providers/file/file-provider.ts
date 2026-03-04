@@ -6,25 +6,79 @@ import { makeRe, minimatch } from 'minimatch';
 import chokidar from 'chokidar';
 import type { ChangeEventType } from '../prompt-provider.ts';
 
+/** Options accepted by {@link FileProvider.glob}. */
 export interface GlobOptions {
+  /** The directory to search from. Defaults to `process.cwd()`. */
   cwd?: string;
+  /** Glob patterns whose matches are excluded from results. */
   ignore?: readonly string[];
+  /** When `true`, yielded paths are absolute; otherwise they are relative to `cwd`. */
   absolute?: boolean;
 }
 
+/** Options accepted by {@link FileProvider.watch}. */
 export interface FileWatchOptions {
+  /** The directory from which relative file paths are resolved. Defaults to `process.cwd()`. */
   cwd?: string;
+  /** Glob patterns whose matches are excluded from the watcher. */
   ignored?: readonly string[];
+  /**
+   * When `true`, the watcher does not emit events for files that already exist
+   * at startup. Defaults to `true`.
+   */
   ignoreInitial?: boolean;
 }
 
+/**
+ * Callback invoked by {@link FileProvider.watch} when a watched file changes.
+ * @param eventType - The kind of change: `'add'`, `'change'`, or `'remove'`.
+ * @param filePath - The affected file path, relative to the watcher's `cwd`.
+ */
 export type FileWatchCallback = (eventType: ChangeEventType, filePath: string) => void;
 
+/**
+ * Abstraction over file system I/O used throughout evalution.
+ *
+ * Swap in a different implementation to adapt evalution to non-local
+ * environments or to make tests fully in-memory (see {@link MemoryFileProvider}).
+ * {@link LocalFileProvider} is the default implementation for production use.
+ */
 export interface FileProvider {
+  /**
+   * Reads the file at `filePath` and returns its content as a UTF-8 string.
+   * Rejects if the file does not exist.
+   */
   readFile(filePath: string): Promise<string>;
+
+  /**
+   * Writes `content` to `filePath`, creating or overwriting the file.
+   * When the path falls inside an active {@link watch} scope, the watcher
+   * callback is invoked automatically.
+   */
   writeFile(filePath: string, content: string): Promise<void>;
+
+  /**
+   * Dynamically imports the module at `filePath` and returns its namespace
+   * object. Rejects if the file does not exist.
+   */
   import(filePath: string): Promise<any>;
+
+  /**
+   * Returns an async iterator that yields paths matching `pattern`.
+   * @param pattern - A glob pattern (e.g. `'**\/*.prompt.ts'`).
+   * @param options - See {@link GlobOptions}.
+   */
   glob(pattern: string, options?: GlobOptions): AsyncIterableIterator<string>;
+
+  /**
+   * Starts watching for changes to files that match `patterns` and calls
+   * `callback` on each relevant event.
+   *
+   * @param patterns - Glob patterns that select which files to watch.
+   * @param options - See {@link FileWatchOptions}.
+   * @param callback - Called for each matching file event.
+   * @returns A cleanup function; call it to stop watching.
+   */
   watch(
     patterns: readonly string[],
     options: FileWatchOptions,
@@ -39,10 +93,28 @@ interface MemoryWatcher {
   callback: FileWatchCallback;
 }
 
+/**
+ * An in-memory {@link FileProvider} backed by a `Map<string, string>`.
+ *
+ * Intended for unit tests — all file I/O stays in-process with no disk access.
+ * Calling {@link writeFile} triggers any active {@link watch} callbacks
+ * synchronously, making it easy to test reactive code paths.
+ *
+ * @example
+ * ```ts
+ * const provider = new MemoryFileProvider({
+ *   '/virtual/prompt.ts': 'export function myPrompt() { ... }',
+ * });
+ * const content = await provider.readFile('/virtual/prompt.ts');
+ * ```
+ */
 export class MemoryFileProvider implements FileProvider {
   private files: Map<string, string>;
   private watchers: Set<MemoryWatcher> = new Set();
 
+  /**
+   * @param files - Initial file contents keyed by absolute path.
+   */
   constructor(files: Record<string, string> = {}) {
     this.files = new Map(Object.entries(files));
   }
@@ -104,6 +176,16 @@ export class MemoryFileProvider implements FileProvider {
   }
 }
 
+/**
+ * A {@link FileProvider} backed by the local file system.
+ *
+ * Uses `fs/promises` for I/O, `fs/promises.glob` (Node.js ≥ 22) for pattern
+ * matching, and [chokidar](https://github.com/paulmillr/chokidar) for file
+ * watching.
+ *
+ * This is the default implementation used by {@link FilePromptProvider} and
+ * {@link TSPromptFileType} when no custom provider is supplied.
+ */
 export class LocalFileProvider implements FileProvider {
   async readFile(filePath: string): Promise<string> {
     return fs.readFile(filePath, 'utf-8');
