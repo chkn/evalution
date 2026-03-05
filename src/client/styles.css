@@ -179,95 +179,95 @@ code, pre {
 
 /* File tree */
 .file-tree {
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
-.tree-dir-label,
-.tree-file-label {
+/* ── Tree rows (Xcode-style) ── */
+
+.tree-row {
   display: flex;
   align-items: center;
   gap: 5px;
-  width: 100%;
-  border: none;
-  background: transparent;
+  height: 24px;
+  padding-right: 8px;
   cursor: pointer;
-  padding: 3px 8px;
-  font-size: 12px;
-  color: #333;
-  text-align: left;
-  border-radius: 0;
-  transition: background 0.1s;
+  user-select: none;
+  border-radius: 5px;
+  margin: 0 4px;
 }
 
-.tree-dir-label:hover,
-.tree-file-label:hover {
-  background: rgba(0, 0, 0, 0.05);
+.tree-row:hover {
+  background: rgba(0, 0, 0, 0.04);
 }
 
-.tree-chevron {
+.tree-row-selected {
+  background: #3478f6;
+  color: #fff;
+}
+
+.tree-row-selected:hover {
+  background: #3478f6;
+}
+
+.tree-row-selected .tree-row-params {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.tree-row-selected .tree-icon-prompt {
+  color: #fff;
+}
+
+/* Disclosure triangle */
+.tree-disclosure {
+  flex-shrink: 0;
   color: #999;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
+  width: 8px;
+  height: 8px;
 }
 
-.tree-folder-icon {
-  color: #e8a838;
+/* Icons */
+.tree-icon {
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
 }
 
-.tree-file-icon {
-  color: #7b8fa6;
-  flex-shrink: 0;
+.tree-icon-folder {
+  color: #4a9eff;
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
-.tree-label-text {
+.tree-icon-file {
+  color: #8e8e93;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.tree-icon-prompt {
+  color: #e8833a;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Labels */
+.tree-row-label {
   white-space: nowrap;
-  font-family: 'Menlo', 'Monaco', monospace;
-  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  line-height: 24px;
 }
 
-.tree-prompt-btn {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  width: 100%;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  padding: 2px 8px;
-  font-size: 12px;
-  color: #444;
-  text-align: left;
-  border-radius: 0;
-  transition: background 0.1s;
-  font-family: inherit;
-}
-
-.tree-prompt-btn:hover {
-  background: rgba(0, 0, 0, 0.06);
-}
-
-.tree-prompt-btn.selected {
-  background: #667eea;
-  color: white;
-}
-
-.tree-prompt-btn.selected .tree-prompt-params {
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.tree-prompt-params {
-  font-size: 10.5px;
+.tree-row-params {
+  font-size: 10px;
   color: #999;
-  font-family: 'Menlo', 'Monaco', monospace;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
+/* Status / empty state */
 .tree-status {
   padding: 12px 10px;
   font-size: 12px;
@@ -279,9 +279,9 @@ code, pre {
 }
 
 .tree-empty-state {
-  padding: 16px 12px;
+  padding: 24px 12px;
   font-size: 12px;
-  color: #888;
+  color: #999;
   text-align: center;
 }
 
@@ -290,42 +290,81 @@ code, pre {
 }
 
 .tree-add-prompt-btn {
-  background: #4c8bf5;
+  background: #3478f6;
   color: #fff;
   border: none;
-  border-radius: 4px;
-  padding: 6px 14px;
+  border-radius: 5px;
+  padding: 5px 14px;
   font-size: 12px;
   cursor: pointer;
 }
 
 .tree-add-prompt-btn:hover {
-  background: #3a7be0;
+  background: #2868e0;
 }
 
-.tree-footer {
+/* ── Bottom toolbar (Xcode-style) ── */
+
+.tree-toolbar {
   flex-shrink: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 4px 6px;
-}
-
-.tree-footer-add-btn {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.45);
-  font-size: 11px;
-  padding: 4px 6px;
-  border-radius: 4px;
-  cursor: pointer;
+  border-top: 1px solid #e0e0e2;
+  padding: 5px 6px;
+  background: #f5f5f7;
 }
 
-.tree-footer-add-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.7);
+.tree-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: none;
+  color: #666;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.tree-toolbar-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #333;
+}
+
+.tree-filter {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  padding: 2px 6px;
+  color: #999;
+  min-width: 0;
+}
+
+.tree-filter input {
+  flex: 1;
+  border: none;
+  background: none;
+  font-size: 11.5px;
+  color: #333;
+  outline: none;
+  min-width: 0;
+  padding: 1px 0;
+}
+
+.tree-filter input::placeholder {
+  color: #aaa;
+}
+
+.tree-filter:focus-within {
+  border-color: #3478f6;
+  background: #fff;
 }
 
 /* ── Add Prompt Dialog ────────────────────────────────────────────────── */

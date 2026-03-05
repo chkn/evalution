@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { ParsedPrompt } from '../../shared/types';
 
 interface PromptListProps {
@@ -28,7 +28,6 @@ function buildRawTree(prompts: ParsedPrompt[]): RawTree {
     const segments = prompt.treePath;
 
     if (!segments || segments.length === 0) {
-      // No treePath — place at root under a synthetic leaf label
       const leafLabel = prompt.name;
       if (!root.files[leafLabel]) root.files[leafLabel] = [];
       root.files[leafLabel].push(prompt);
@@ -58,7 +57,6 @@ function buildRawTree(prompts: ParsedPrompt[]): RawTree {
 function compressTree(tree: RawTree): CompressedNode[] {
   const nodes: CompressedNode[] = [];
 
-  // Directories first (sorted), then files (sorted)
   const sortedDirs = Object.keys(tree.subdirs).sort();
   const sortedFiles = Object.keys(tree.files).sort();
 
@@ -66,7 +64,6 @@ function compressTree(tree: RawTree): CompressedNode[] {
     let label = dirName;
     let current = tree.subdirs[dirName];
 
-    // Compress single-child dir chains (no files at intermediate levels)
     while (
       Object.keys(current.subdirs).length === 1 &&
       Object.keys(current.files).length === 0
@@ -86,36 +83,73 @@ function compressTree(tree: RawTree): CompressedNode[] {
   return nodes;
 }
 
-// --- Icons ---
+function filterNodes(nodes: CompressedNode[], query: string): CompressedNode[] {
+  const q = query.toLowerCase();
+  const result: CompressedNode[] = [];
 
-function ChevronRight() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3.5 2L7 5L3.5 8"/>
-    </svg>
-  );
+  for (const node of nodes) {
+    if (node.type === 'dir') {
+      const filteredChildren = filterNodes(node.children, query);
+      if (filteredChildren.length > 0 || node.label.toLowerCase().includes(q)) {
+        result.push({ ...node, children: filteredChildren.length > 0 ? filteredChildren : node.children });
+      }
+    } else {
+      const matchesFile = node.label.toLowerCase().includes(q);
+      const matchingPrompts = node.prompts.filter(p => p.name.toLowerCase().includes(q));
+      if (matchesFile) {
+        result.push(node);
+      } else if (matchingPrompts.length > 0) {
+        result.push({ ...node, prompts: matchingPrompts });
+      }
+    }
+  }
+
+  return result;
 }
 
-function ChevronDown() {
+// --- Icons ---
+
+function DisclosureTriangle({ expanded }: { expanded: boolean }) {
   return (
-    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2 3.5L5 7L8 3.5"/>
+    <svg className="tree-disclosure" width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
+      {expanded
+        ? <path d="M1 2h6L4 6.5z"/>
+        : <path d="M2 1v6L6.5 4z"/>
+      }
     </svg>
   );
 }
 
 function FolderIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" style={{ flexShrink: 0 }}>
+    <svg className="tree-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
       <path d="M1.5 3A1.5 1.5 0 000 4.5v8A1.5 1.5 0 001.5 14h13a1.5 1.5 0 001.5-1.5v-7A1.5 1.5 0 0014.5 4H8L6.5 2.5h-5z"/>
     </svg>
   );
 }
 
-function FileIcon() {
+function PromptIcon() {
   return (
-    <svg width="11" height="13" viewBox="0 0 11 13" fill="currentColor" style={{ flexShrink: 0 }}>
-      <path d="M1 1.5A1.5 1.5 0 012.5 0h4.586a1.5 1.5 0 011.06.44l2.415 2.414A1.5 1.5 0 0111 3.914V11.5A1.5 1.5 0 019.5 13h-7A1.5 1.5 0 011 11.5v-10z"/>
+    <svg className="tree-icon" width="12" height="14" viewBox="0 0 12 14" fill="currentColor">
+      <path d="M1.5 1A1.5 1.5 0 000 2.5v9A1.5 1.5 0 001.5 13h9a1.5 1.5 0 001.5-1.5v-7l-4-4h-7z"/>
+      <path d="M8 0v3.5A1.5 1.5 0 009.5 5H12" fill="none" stroke="currentColor" strokeWidth="0.5" opacity="0.3"/>
+    </svg>
+  );
+}
+
+function FilterIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1.5 3h9M3 6h6M4.5 9h3"/>
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+      <line x1="5.5" y1="1.5" x2="5.5" y2="9.5"/>
+      <line x1="1.5" y1="5.5" x2="9.5" y2="5.5"/>
     </svg>
   );
 }
@@ -134,34 +168,60 @@ function FileNode({
   depth: number;
 }) {
   const [expanded, setExpanded] = useState(true);
-  const indent = depth * 12;
+  const hasManyPrompts = node.prompts.length > 1;
+  const indent = depth * 18;
+
+  if (!hasManyPrompts) {
+    // Single prompt — render directly as a leaf row
+    const prompt = node.prompts[0];
+    const isSelected = prompt.id === selectedId;
+    return (
+      <div
+        className={`tree-row${isSelected ? ' tree-row-selected' : ''}`}
+        style={{ paddingLeft: 10 + indent + 16 }}
+        onClick={() => onSelect(prompt.id)}
+      >
+        <span className="tree-icon-prompt"><PromptIcon /></span>
+        <span className="tree-row-label">{prompt.name}</span>
+        {prompt.functionParameters.length > 0 && (
+          <span className="tree-row-params">
+            ({prompt.functionParameters.map(p => p.name).join(', ')})
+          </span>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
-      <button
-        className="tree-file-label"
-        style={{ paddingLeft: 8 + indent }}
+      <div
+        className="tree-row"
+        style={{ paddingLeft: 10 + indent }}
         onClick={() => setExpanded(e => !e)}
       >
-        <span className="tree-chevron">{expanded ? <ChevronDown /> : <ChevronRight />}</span>
-        <span className="tree-file-icon"><FileIcon /></span>
-        <span className="tree-label-text">{node.label}</span>
-      </button>
-      {expanded && node.prompts.map(prompt => (
-        <button
-          key={prompt.id}
-          className={`tree-prompt-btn${prompt.id === selectedId ? ' selected' : ''}`}
-          style={{ paddingLeft: 20 + indent }}
-          onClick={() => onSelect(prompt.id)}
-        >
-          {prompt.name}
-          {prompt.functionParameters.length > 0 && (
-            <span className="tree-prompt-params">
-              ({prompt.functionParameters.map(p => p.name).join(', ')})
-            </span>
-          )}
-        </button>
-      ))}
+        <DisclosureTriangle expanded={expanded} />
+        <span className="tree-icon-file"><PromptIcon /></span>
+        <span className="tree-row-label">{node.label}</span>
+      </div>
+      {expanded && node.prompts.map(prompt => {
+        const isSelected = prompt.id === selectedId;
+        return (
+          <div
+            key={prompt.id}
+            className={`tree-row${isSelected ? ' tree-row-selected' : ''}`}
+            style={{ paddingLeft: 10 + indent + 18 + 16 }}
+            onClick={() => onSelect(prompt.id)}
+          >
+            <span className="tree-icon-prompt"><PromptIcon /></span>
+            <span className="tree-row-label">{prompt.name}</span>
+            {prompt.functionParameters.length > 0 && (
+              <span className="tree-row-params">
+                ({prompt.functionParameters.map(p => p.name).join(', ')})
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -178,19 +238,19 @@ function DirNode({
   depth: number;
 }) {
   const [expanded, setExpanded] = useState(true);
-  const indent = depth * 12;
+  const indent = depth * 18;
 
   return (
     <div>
-      <button
-        className="tree-dir-label"
-        style={{ paddingLeft: 8 + indent }}
+      <div
+        className="tree-row"
+        style={{ paddingLeft: 10 + indent }}
         onClick={() => setExpanded(e => !e)}
       >
-        <span className="tree-chevron">{expanded ? <ChevronDown /> : <ChevronRight />}</span>
-        <span className="tree-folder-icon"><FolderIcon /></span>
-        <span className="tree-label-text">{node.label}</span>
-      </button>
+        <DisclosureTriangle expanded={expanded} />
+        <span className="tree-icon-folder"><FolderIcon /></span>
+        <span className="tree-row-label">{node.label}</span>
+      </div>
       {expanded && (
         <div>
           {node.children.map((child, i) =>
@@ -208,18 +268,15 @@ function DirNode({
 
 // --- Main component ---
 
-function AddButton({ onClick }: { onClick: () => void }) {
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
-         stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
-         onClick={onClick} style={{ cursor: 'pointer' }}>
-      <line x1="6" y1="2" x2="6" y2="10"/>
-      <line x1="2" y1="6" x2="10" y2="6"/>
-    </svg>
-  );
-}
-
 function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt }: PromptListProps) {
+  const [filter, setFilter] = useState('');
+
+  const nodes = useMemo(() => {
+    const rawTree = buildRawTree(prompts);
+    const all = compressTree(rawTree);
+    return filter ? filterNodes(all, filter) : all;
+  }, [prompts, filter]);
+
   if (loading) {
     return (
       <div className="section-panel-body">
@@ -238,21 +295,36 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt
 
   if (prompts.length === 0) {
     return (
-      <div className="section-panel-body">
-        <div className="tree-empty-state">
-          <p>No prompts found.</p>
+      <>
+        <div className="section-panel-body">
+          <div className="tree-empty-state">
+            <p>No prompts found.</p>
+            {onAddPrompt && (
+              <button className="tree-add-prompt-btn" onClick={onAddPrompt}>
+                Create a prompt
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="tree-toolbar">
           {onAddPrompt && (
-            <button className="tree-add-prompt-btn" onClick={onAddPrompt}>
-              Create a prompt
+            <button className="tree-toolbar-btn" onClick={onAddPrompt} title="New prompt">
+              <PlusIcon />
             </button>
           )}
+          <div className="tree-filter">
+            <FilterIcon />
+            <input
+              type="text"
+              placeholder="Filter"
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
+            />
+          </div>
         </div>
-      </div>
+      </>
     );
   }
-
-  const rawTree = buildRawTree(prompts);
-  const nodes = compressTree(rawTree);
 
   return (
     <>
@@ -265,14 +337,22 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt
           )
         )}
       </div>
-      {onAddPrompt && (
-        <div className="tree-footer">
-          <button className="tree-footer-add-btn" onClick={onAddPrompt} title="New prompt">
-            <AddButton onClick={() => {}} />
-            <span>New Prompt</span>
+      <div className="tree-toolbar">
+        {onAddPrompt && (
+          <button className="tree-toolbar-btn" onClick={onAddPrompt} title="New prompt">
+            <PlusIcon />
           </button>
+        )}
+        <div className="tree-filter">
+          <FilterIcon />
+          <input
+            type="text"
+            placeholder="Filter"
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+          />
         </div>
-      )}
+      </div>
     </>
   );
 }
