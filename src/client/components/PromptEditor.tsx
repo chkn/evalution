@@ -34,7 +34,7 @@ function PromptEditor({ prompt, onUpdate }: PromptEditorProps) {
       <div className="editor-header">
         <h2>{prompt.name}</h2>
         <div className="file-info">
-          {prompt.metadata?.filePath?.split('/').pop()}
+          {prompt.treePath?.at(-1)}
         </div>
       </div>
 

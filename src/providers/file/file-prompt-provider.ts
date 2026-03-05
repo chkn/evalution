@@ -4,6 +4,7 @@ import { TSPromptFileType, type PromptFileType, type PromptFileParser } from './
 import { LocalFileProvider, type FileProvider } from './file-provider.ts';
 import { VercelAISDK, type SDKAdapter } from '../../server/sdk-adapter.ts';
 import type { ParsedPrompt } from '../../shared/types.ts';
+import type { FilePromptMetadata, ParsedFilePrompt } from '../../parser/prompt-parser.ts';
 
 const DEFAULT_IGNORE_PATTERNS = ['**/node_modules/**', '**/dist/**', '**/.git/**'];
 
@@ -61,7 +62,7 @@ let defaultIDCounter = 0;
  * const prompts = await provider.getAllPrompts();
  * ```
  */
-export class FilePromptProvider implements PromptProvider {
+export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
   readonly id: string;
   private parser: PromptFileParser | null = null;
   private rootDir: string;
@@ -90,12 +91,12 @@ export class FilePromptProvider implements PromptProvider {
     this.sdkAdapter = sdk;
   }
 
-  async getAllPrompts(): Promise<ParsedPrompt[]> {
+  async getAllPrompts(): Promise<ParsedFilePrompt[]> {
     await this.ensureParser();
     return this.parser!.parseAll();
   }
 
-  async getPrompt(id: string): Promise<ParsedPrompt | null> {
+  async getPrompt(id: string): Promise<ParsedFilePrompt | null> {
     const [filePath, name] = this.parsePromptId(id);
     await this.ensureParser();
 
@@ -106,7 +107,7 @@ export class FilePromptProvider implements PromptProvider {
   async updatePromptProperties(
     promptId: string,
     updates: Record<string, any>
-  ): Promise<ParsedPrompt> {
+  ): Promise<ParsedFilePrompt> {
     const prompt = await this.getPrompt(promptId);
     if (!prompt) {
       throw new Error('Prompt not found');

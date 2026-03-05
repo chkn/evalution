@@ -1,5 +1,5 @@
-import type { ParsedPrompt, PromptProperty } from '../../shared/types.ts';
-import { PromptParser } from '../../parser/prompt-parser.ts';
+import type { PromptProperty } from '../../shared/types.ts';
+import { PromptParser, type ParsedFilePrompt } from '../../parser/prompt-parser.ts';
 import { PromptEditor } from '../../parser/prompt-editor.ts';
 import { LocalFileProvider, type FileProvider } from './file-provider.ts';
 
@@ -9,13 +9,13 @@ import { LocalFileProvider, type FileProvider } from './file-provider.ts';
  */
 export interface PromptFileParser {
   /** Parses every file known to this parser and returns all discovered prompts. */
-  parseAll(): ParsedPrompt[];
+  parseAll(): ParsedFilePrompt[];
 
   /**
    * Parses a single file and returns the prompts it defines.
    * @param filePath - Absolute path to the file to parse.
    */
-  parseFile(filePath: string): ParsedPrompt[];
+  parseFile(filePath: string): ParsedFilePrompt[];
 }
 
 /**

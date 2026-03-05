@@ -7,7 +7,6 @@ interface PromptListProps {
   onSelect: (id: string) => void;
   loading: boolean;
   error: string | null;
-  rootPath: string;
 }
 
 // --- Tree building ---
@@ -21,19 +20,22 @@ type CompressedNode =
   | { type: 'dir'; label: string; children: CompressedNode[] }
   | { type: 'file'; label: string; prompts: ParsedPrompt[] };
 
-function buildRawTree(prompts: ParsedPrompt[], rootPath: string): RawTree {
+function buildRawTree(prompts: ParsedPrompt[]): RawTree {
   const root: RawTree = { subdirs: {}, files: {} };
 
   for (const prompt of prompts) {
-    const filePath = (prompt.metadata?.filePath as string) ?? prompt.id;
-    let relPath = filePath;
-    if (rootPath && filePath.startsWith(rootPath)) {
-      relPath = filePath.slice(rootPath.length).replace(/^\//, '');
+    const segments = prompt.treePath;
+
+    if (!segments || segments.length === 0) {
+      // No treePath — place at root under a synthetic leaf label
+      const leafLabel = prompt.name;
+      if (!root.files[leafLabel]) root.files[leafLabel] = [];
+      root.files[leafLabel].push(prompt);
+      continue;
     }
 
-    const parts = relPath.split('/');
-    const fileName = parts[parts.length - 1].split('#')[0]; // Remove function name suffix if present
-    const dirParts = parts.slice(0, -1);
+    const leafLabel = segments[segments.length - 1];
+    const dirParts = segments.slice(0, -1);
 
     let node = root;
     for (const dir of dirParts) {
@@ -43,10 +45,10 @@ function buildRawTree(prompts: ParsedPrompt[], rootPath: string): RawTree {
       node = node.subdirs[dir];
     }
 
-    if (!node.files[fileName]) {
-      node.files[fileName] = [];
+    if (!node.files[leafLabel]) {
+      node.files[leafLabel] = [];
     }
-    node.files[fileName].push(prompt);
+    node.files[leafLabel].push(prompt);
   }
 
   return root;
@@ -205,7 +207,7 @@ function DirNode({
 
 // --- Main component ---
 
-function PromptList({ prompts, selectedId, onSelect, loading, error, rootPath }: PromptListProps) {
+function PromptList({ prompts, selectedId, onSelect, loading, error }: PromptListProps) {
   if (loading) {
     return (
       <div className="section-panel-body">
@@ -225,12 +227,12 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, rootPath }:
   if (prompts.length === 0) {
     return (
       <div className="section-panel-body">
-        <div className="tree-status">No .prompt.ts files found.</div>
+        <div className="tree-status">No prompts found.</div>
       </div>
     );
   }
 
-  const rawTree = buildRawTree(prompts, rootPath);
+  const rawTree = buildRawTree(prompts);
   const nodes = compressTree(rawTree);
 
   return (

@@ -22,3 +22,4 @@ export { type FileProvider, type FileWatchOptions, type FileWatchCallback, type 
 export type { SDKAdapter } from './server/sdk-adapter.ts';
 export { VercelAISDK } from './server/sdk-adapter.ts';
 export { FilePromptProvider, type FilePromptProviderOptions } from './providers/file/file-prompt-provider.ts';
+export type { FilePromptMetadata, ParsedFilePrompt } from './parser/prompt-parser.ts';

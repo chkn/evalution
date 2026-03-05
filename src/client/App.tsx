@@ -275,7 +275,6 @@ function App() {
                       onSelect={handleSelectPrompt}
                       loading={loading}
                       error={error}
-                      rootPath={rootPath}
                     />
                   )}
                 </aside>

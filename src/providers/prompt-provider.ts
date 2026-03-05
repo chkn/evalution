@@ -21,18 +21,18 @@ export interface PromptChangeEvent {
  * non-TypeScript format. The built-in {@link FilePromptProvider} implements
  * this interface for local `.prompt.ts` files.
  */
-export interface PromptProvider {
+export interface PromptProvider<TParsedPrompt extends ParsedPrompt = ParsedPrompt> {
   /** Uniquely identifies this provider when multiple providers are composed together. */
   readonly id: string;
 
   /** Returns all prompts currently available from this provider. */
-  getAllPrompts(): Promise<ParsedPrompt[]>;
+  getAllPrompts(): Promise<TParsedPrompt[]>;
 
   /**
    * Returns the prompt with the given ID, or `null` if not found.
    * @param id - The prompt's unique identifier.
    */
-  getPrompt(id: string): Promise<ParsedPrompt | null>;
+  getPrompt(id: string): Promise<TParsedPrompt | null>;
 
   /**
    * Updates one or more properties of a prompt in its source and returns the
@@ -47,7 +47,7 @@ export interface PromptProvider {
   updatePromptProperties?(
     promptId: string,
     updates: Record<string, any>
-  ): Promise<ParsedPrompt>;
+  ): Promise<TParsedPrompt>;
 
   /**
    * Executes a prompt and returns either a result object (when `stream` is

@@ -2,6 +2,20 @@ import ts from 'typescript';
 import type { ParsedPrompt, FunctionParameter, PromptProperty, ModelValue } from '../shared/types.ts';
 import path from 'path';
 
+/** Metadata attached to prompts that originate from a file on disk. */
+export interface FilePromptMetadata {
+  /** Absolute path to the source file that defines this prompt. */
+  filePath: string
+}
+
+/**
+ * A {@link ParsedPrompt} produced by the file-based parser, with
+ * {@link FilePromptMetadata} guaranteed to be present on `metadata`.
+ */
+export interface ParsedFilePrompt extends ParsedPrompt {
+  metadata: FilePromptMetadata;
+}
+
 export class PromptParser {
   private filePathsMap: Map<string, ts.SourceFile>;
   private rootDir: string;
@@ -25,13 +39,13 @@ export class PromptParser {
     this.rootDir = rootDir;
   }
 
-  parseFile(filePath: string): ParsedPrompt[] {
+  parseFile(filePath: string): ParsedFilePrompt[] {
     const sourceFile = this.filePathsMap.get(filePath);
     if (!sourceFile) {
       return [];
     }
 
-    const prompts: ParsedPrompt[] = [];
+    const prompts: ParsedFilePrompt[] = [];
 
     const visitNode = (node: ts.Node) => {
       if (ts.isFunctionDeclaration(node) && node.name) {
@@ -54,8 +68,8 @@ export class PromptParser {
     return prompts;
   }
 
-  parseAll(): ParsedPrompt[] {
-    const allPrompts: ParsedPrompt[] = [];
+  parseAll(): ParsedFilePrompt[] {
+    const allPrompts: ParsedFilePrompt[] = [];
 
     for (const filePath of this.filePathsMap.keys()) {
       const prompts = this.parseFile(filePath);
@@ -69,7 +83,7 @@ export class PromptParser {
     node: ts.FunctionDeclaration,
     sourceFile: ts.SourceFile,
     filePath: string
-  ): ParsedPrompt | null {
+  ): ParsedFilePrompt | null {
     if (!node.name) return null;
 
     const functionName = node.name.text;
@@ -82,16 +96,15 @@ export class PromptParser {
     const properties = this.parseObjectLiteral(returnObject, sourceFile, functionParameters.map(p => p.name));
 
     const relativeFilePath = this.rootDir ? path.relative(this.rootDir, filePath) : filePath;
+    const treePath = relativeFilePath.split('/').filter(Boolean);
 
     return {
       id: `${relativeFilePath}#${functionName}`,
       name: functionName,
       functionParameters,
       properties,
-      metadata: {
-        filePath,
-        sourceFile: filePath,
-      },
+      metadata: { filePath },
+      treePath,
     };
   }
 
