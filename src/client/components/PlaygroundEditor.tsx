@@ -341,6 +341,9 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
   };
 
   const { model, system, messages } = prompt.properties;
+  const modelValue = model?.value ?? { type: 'function', provider: 'openai', model: 'gpt-4o' };
+  const systemValue = system?.value ?? '';
+  const systemEditable = system ? system.isEditable : true;
   const modelParamKeys = new Set(['model', 'system', 'messages']);
   const modelParams = Object.entries(prompt.properties)
     .filter(([k]) => !modelParamKeys.has(k));
@@ -360,77 +363,69 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
         </div>
       )}
 
-      {model && (
-        <div className="pg-panel">
-          <div className="pg-panel-header">
-            <span className="pg-panel-title">Model</span>
-          </div>
-          <div className="pg-panel-body">
-            <ModelCard value={model.value} onChange={v => handleUpdate('model', v)} />
-            {modelParams.map(([key, prop]) => (
-              <ParamCard
-                key={key}
-                name={key}
-                prop={prop}
-                description={modelParameters.find(cs => cs.name === key)?.description ?? ''}
-                onDelete={() => handleUpdate(key, null)}
-                onChange={v => handleUpdate(key, v)}
-              />
-            ))}
-          </div>
-          {addableParams.length > 0 && (
-            <div className="pg-panel-footer">
-              <div className="pg-pill-btn pg-add-param-btn">
-                ＋ Parameter
-                <select
-                  className="pg-model-overlay-select"
-                  value=""
-                  onChange={e => {
-                    if (!e.target.value) return;
-                    const cs = modelParameters.find(p => p.name === e.target.value);
-                    if (cs) handleUpdate(cs.name, cs.defaultValue);
-                  }}
-                >
-                  <option value="">Add parameter…</option>
-                  {addableParams.map(p => (
-                    <option key={p.name} value={p.name}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
+      <div className="pg-panel">
+        <div className="pg-panel-header">
+          <span className="pg-panel-title">Model</span>
         </div>
-      )}
+        <div className="pg-panel-body">
+          <ModelCard value={modelValue} onChange={v => handleUpdate('model', v)} />
+          {modelParams.map(([key, prop]) => (
+            <ParamCard
+              key={key}
+              name={key}
+              prop={prop}
+              description={modelParameters.find(cs => cs.name === key)?.description ?? ''}
+              onDelete={() => handleUpdate(key, null)}
+              onChange={v => handleUpdate(key, v)}
+            />
+          ))}
+        </div>
+        {addableParams.length > 0 && (
+          <div className="pg-panel-footer">
+            <div className="pg-pill-btn pg-add-param-btn">
+              ＋ Parameter
+              <select
+                className="pg-model-overlay-select"
+                value=""
+                onChange={e => {
+                  if (!e.target.value) return;
+                  const cs = modelParameters.find(p => p.name === e.target.value);
+                  if (cs) handleUpdate(cs.name, cs.defaultValue);
+                }}
+              >
+                <option value="">Add parameter…</option>
+                {addableParams.map(p => (
+                  <option key={p.name} value={p.name}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+      </div>
 
-      {(system || messages) && (
-        <div className="pg-panel">
-          <div className="pg-panel-header">
-            <span className="pg-panel-title">Messages</span>
-          </div>
-          <div className="pg-panel-body">
-            {system && (
-              <SystemCard
-                content={system.value}
-                isEditable={system.isEditable}
-                onChange={v => handleUpdate('system', v)}
-              />
-            )}
-            {messages && localMessages.map((msg, i) => (
-              <MessageCard
-                key={i}
-                msg={msg}
-                onChange={m => handleMessagesChange(localMessages.map((x, j) => j === i ? m : x))}
-                onDelete={() => handleMessagesChange(localMessages.filter((_, j) => j !== i))}
-              />
-            ))}
-          </div>
-          {messages && (
-            <div className="pg-panel-footer">
-              <button className="pg-pill-btn" onClick={handleAddMessage}>＋ Message</button>
-            </div>
-          )}
+      <div className="pg-panel">
+        <div className="pg-panel-header">
+          <span className="pg-panel-title">Messages</span>
         </div>
-      )}
+        <div className="pg-panel-body">
+          <SystemCard
+            content={systemValue}
+            isEditable={systemEditable}
+            onChange={v => handleUpdate('system', v)}
+          />
+          {localMessages.map((msg, i) => (
+            <MessageCard
+              key={i}
+              msg={msg}
+              onChange={m => handleMessagesChange(localMessages.map((x, j) => j === i ? m : x))}
+              onDelete={() => handleMessagesChange(localMessages.filter((_, j) => j !== i))}
+            />
+          ))}
+        </div>
+        <div className="pg-panel-footer">
+          <button className="pg-pill-btn" onClick={handleAddMessage}>＋ Message</button>
+        </div>
+      </div>
 
       <div className="pg-panel">
         <div className="pg-panel-header">

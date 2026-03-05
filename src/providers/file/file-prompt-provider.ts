@@ -3,7 +3,7 @@ import type { PromptProvider, PromptChangeEvent } from '../prompt-provider.ts';
 import { TSPromptFileType, type PromptFileType, type PromptFileParser } from './prompt-file-type.ts';
 import { LocalFileProvider, type FileProvider } from './file-provider.ts';
 import { VercelAISDK, type SDKAdapter } from '../../server/sdk-adapter.ts';
-import type { ParsedPrompt } from '../../shared/types.ts';
+import type { ParsedPrompt, AddPromptContext } from '../../shared/types.ts';
 import type { FilePromptMetadata, ParsedFilePrompt } from '../../parser/prompt-parser.ts';
 
 const DEFAULT_IGNORE_PATTERNS = ['**/node_modules/**', '**/dist/**', '**/.git/**'];
@@ -64,6 +64,10 @@ let defaultIDCounter = 0;
  */
 export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
   readonly id: string;
+  readonly displayName = 'File System';
+  readonly description = 'Create a .prompt.ts file';
+  readonly icon = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3A1.5 1.5 0 000 4.5v8A1.5 1.5 0 001.5 14h13a1.5 1.5 0 001.5-1.5v-7A1.5 1.5 0 0014.5 4H8L6.5 2.5h-5z"/></svg>';
+
   private parser: PromptFileParser | null = null;
   private rootDir: string;
   private fileType: PromptFileType;
@@ -152,6 +156,68 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
     return this.sdkAdapter.executeConfig(config, stream);
   }
 
+  async addPrompt(partial: Partial<ParsedFilePrompt>): Promise<ParsedFilePrompt | AddPromptContext> {
+    const relFilePath = (partial.metadata as FilePromptMetadata | undefined)?.relativeFilePath;
+    const name = partial.name;
+
+    if (relFilePath && name) {
+      // Enough info — create the file
+      const absPath = path.join(this.rootDir, relFilePath);
+      const content = `export function ${name}() {\n  return {};\n}\n`;
+
+      await this.fileProvider.writeFile(absPath, content);
+      await this.refresh();
+
+      const prompt = await this.getPrompt(`${relFilePath}#${name}`);
+      if (!prompt) throw new Error('Failed to create prompt');
+      return prompt;
+    }
+
+    // Need more info — return form fields
+    const directories = await this.listDirectories();
+    const prompts = await this.getAllPrompts();
+    const dirCounts = new Map<string, number>();
+    for (const p of prompts) {
+      const dir = path.dirname(p.metadata.relativeFilePath);
+      dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
+    }
+    let defaultDir = '.';
+    let maxCount = 0;
+    for (const [dir, count] of dirCounts) {
+      if (count > maxCount && directories.includes(dir)) {
+        defaultDir = dir;
+        maxCount = count;
+      }
+    }
+
+    return {
+      fields: [
+        {
+          name: 'directory',
+          label: 'Directory',
+          type: 'select' as const,
+          required: true,
+          defaultValue: defaultDir,
+          options: directories.map(d => ({ label: d === '.' ? '(root)' : d, value: d })),
+        },
+        {
+          name: 'fileName',
+          label: 'File name',
+          type: 'text' as const,
+          required: true,
+          placeholder: 'my-prompt.prompt.ts',
+        },
+        {
+          name: 'name',
+          label: 'Function name',
+          type: 'text' as const,
+          required: true,
+          placeholder: 'myPrompt',
+        },
+      ],
+    };
+  }
+
   watch(callback: (event: PromptChangeEvent) => void): () => void {
     return this.fileProvider.watch(
       this.includePatterns,
@@ -212,6 +278,20 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
       ? relativePath
       : path.join(this.rootDir, relativePath);
     return [absolutePath, functionName];
+  }
+
+  private async listDirectories(): Promise<string[]> {
+    const dirs = new Set<string>(['.']);
+    const iter = this.fileProvider.glob('**/', {
+      cwd: this.rootDir,
+      ignore: this.ignorePatterns,
+    });
+    for await (const dir of iter) {
+      // glob yields trailing-slash paths like "src/prompts/"
+      const clean = dir.replace(/\/$/, '');
+      if (clean) dirs.add(clean);
+    }
+    return Array.from(dirs).sort();
   }
 
   private resolveFilePath(relativePath: string): string {

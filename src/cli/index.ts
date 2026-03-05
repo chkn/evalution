@@ -45,24 +45,10 @@ async function main() {
   ).flat();
 
   if (allPrompts.length === 0) {
-    console.log(`\n❌ No prompt files found in ${rootDir}.`);
-    console.log('Create a .prompt.ts file to get started.\n');
-    console.log('Example:');
-    console.log('```typescript');
-    console.log("import { openai } from '@ai-sdk/openai';");
-    console.log('');
-    console.log('export function myPrompt() {');
-    console.log('  return {');
-    console.log("    model: openai('gpt-4o'),");
-    console.log("    system: 'You are a helpful assistant',");
-    console.log("    messages: [{ role: 'user', content: 'Hello!' }]");
-    console.log('  };');
-    console.log('}');
-    console.log('```\n');
-    process.exit(1);
+    console.log(`No prompt files found in ${rootDir}. You can create one from the UI.\n`);
+  } else {
+    console.log(`Found ${allPrompts.length} prompt(s)\n`);
   }
-
-  console.log(`✅ Found ${allPrompts.length} prompt(s)\n`);
 
   await startServer({ providers, port, rootPath: rootDir });
 }

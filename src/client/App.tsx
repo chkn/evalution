@@ -3,6 +3,7 @@ import { usePrompts } from './hooks/usePrompts';
 import { useSSE } from './hooks/useSSE';
 import { useResizable } from './hooks/useResizable';
 import PromptList from './components/PromptList';
+import AddPromptDialog from './components/AddPromptDialog';
 import PlaygroundEditor from './components/PlaygroundEditor';
 import PlaygroundExecution from './components/PlaygroundExecution';
 
@@ -72,6 +73,7 @@ function App() {
   const [focusedPaneId, setFocusedPaneId] = useState(INIT_PANE);
   const [rootPath, setRootPath] = useState('');
   const [activeSection, setActiveSection] = useState<'prompts'>('prompts');
+  const [showAddPrompt, setShowAddPrompt] = useState(false);
   const [sectionVisible, setSectionVisible] = useState(true);
   const [dropPaneId, setDropPaneId] = useState<string | null>(null);
 
@@ -275,6 +277,7 @@ function App() {
                       onSelect={handleSelectPrompt}
                       loading={loading}
                       error={error}
+                      onAddPrompt={() => setShowAddPrompt(true)}
                     />
                   )}
                 </aside>
@@ -328,6 +331,16 @@ function App() {
           </div>
         </div>
       </div>
+      {showAddPrompt && (
+        <AddPromptDialog
+          onClose={() => setShowAddPrompt(false)}
+          onCreated={(prompt) => {
+            setShowAddPrompt(false);
+            refetch();
+            handleSelectPrompt(prompt.id);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -278,6 +278,229 @@ code, pre {
   color: #e53935;
 }
 
+.tree-empty-state {
+  padding: 16px 12px;
+  font-size: 12px;
+  color: #888;
+  text-align: center;
+}
+
+.tree-empty-state p {
+  margin: 0 0 12px;
+}
+
+.tree-add-prompt-btn {
+  background: #4c8bf5;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tree-add-prompt-btn:hover {
+  background: #3a7be0;
+}
+
+.tree-footer {
+  flex-shrink: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 4px 6px;
+}
+
+.tree-footer-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.tree-footer-add-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* ── Add Prompt Dialog ────────────────────────────────────────────────── */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog {
+  background: #2a2a3e;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  width: 380px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dialog-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.dialog-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.dialog-close:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.dialog-body {
+  padding: 14px 16px 16px;
+}
+
+.dialog-status {
+  font-size: 12px;
+  color: #888;
+  padding: 8px 0;
+}
+
+.dialog-error {
+  font-size: 12px;
+  color: #e53935;
+  margin-bottom: 10px;
+}
+
+.dialog-field {
+  margin-bottom: 12px;
+}
+
+.dialog-field label {
+  display: block;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 4px;
+}
+
+.dialog-field input,
+.dialog-field select {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 13px;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.dialog-field input:focus,
+.dialog-field select:focus {
+  border-color: #4c8bf5;
+}
+
+.dialog-field input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.dialog-btn-cancel {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.dialog-btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dialog-btn-create {
+  background: #4c8bf5;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.dialog-btn-create:hover {
+  background: #3a7be0;
+}
+
+.dialog-providers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dialog-provider-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dialog-provider-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dialog-provider-icon {
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.dialog-provider-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.dialog-provider-desc {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 2px;
+}
+
 .main-content {
   display: flex;
   flex-direction: column;

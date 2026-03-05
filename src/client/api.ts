@@ -1,4 +1,4 @@
-import type { ParsedPrompt, ModelParameterInfo } from '../shared/types';
+import type { ParsedPrompt, ModelParameterInfo, ProviderInfo, AddPromptContext } from '../shared/types';
 import { encodePromptId } from './utils';
 
 export interface ExecuteResult {
@@ -16,6 +16,25 @@ async function throwIfError(res: Response): Promise<void> {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? `Request failed: ${res.status}`);
   }
+}
+
+export async function getProviders(): Promise<ProviderInfo[]> {
+  const res = await fetch('/api/providers');
+  await throwIfError(res);
+  return res.json();
+}
+
+export async function addPrompt(
+  providerId: string,
+  partial: Record<string, any>
+): Promise<ParsedPrompt | AddPromptContext> {
+  const res = await fetch(`/api/providers/${providerId}/add-prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(partial),
+  });
+  await throwIfError(res);
+  return res.json();
 }
 
 export async function getPrompts(): Promise<ParsedPrompt[]> {

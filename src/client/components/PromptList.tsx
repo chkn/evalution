@@ -7,6 +7,7 @@ interface PromptListProps {
   onSelect: (id: string) => void;
   loading: boolean;
   error: string | null;
+  onAddPrompt?: () => void;
 }
 
 // --- Tree building ---
@@ -207,7 +208,18 @@ function DirNode({
 
 // --- Main component ---
 
-function PromptList({ prompts, selectedId, onSelect, loading, error }: PromptListProps) {
+function AddButton({ onClick }: { onClick: () => void }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
+         stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
+         onClick={onClick} style={{ cursor: 'pointer' }}>
+      <line x1="6" y1="2" x2="6" y2="10"/>
+      <line x1="2" y1="6" x2="10" y2="6"/>
+    </svg>
+  );
+}
+
+function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt }: PromptListProps) {
   if (loading) {
     return (
       <div className="section-panel-body">
@@ -227,7 +239,14 @@ function PromptList({ prompts, selectedId, onSelect, loading, error }: PromptLis
   if (prompts.length === 0) {
     return (
       <div className="section-panel-body">
-        <div className="tree-status">No prompts found.</div>
+        <div className="tree-empty-state">
+          <p>No prompts found.</p>
+          {onAddPrompt && (
+            <button className="tree-add-prompt-btn" onClick={onAddPrompt}>
+              Create a prompt
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -246,6 +265,14 @@ function PromptList({ prompts, selectedId, onSelect, loading, error }: PromptLis
           )
         )}
       </div>
+      {onAddPrompt && (
+        <div className="tree-footer">
+          <button className="tree-footer-add-btn" onClick={onAddPrompt} title="New prompt">
+            <AddButton onClick={() => {}} />
+            <span>New Prompt</span>
+          </button>
+        </div>
+      )}
     </>
   );
 }

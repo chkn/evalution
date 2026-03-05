@@ -13,6 +13,42 @@ export function setupRoutes(
     return { rootPath };
   });
 
+  // GET /api/providers - List providers with display info
+  fastify.get('/api/providers', async () => {
+    return Array.from(providers.entries()).map(([id, provider]) => ({
+      id,
+      displayName: provider.displayName,
+      description: provider.description,
+      icon: provider.icon,
+      hasAddPrompt: !!provider.addPrompt,
+    }));
+  });
+
+  // POST /api/providers/:providerId/add-prompt - Create a new prompt
+  fastify.post<{ Params: { providerId: string }; Body: Record<string, any> }>(
+    '/api/providers/:providerId/add-prompt',
+    async (request, reply) => {
+      try {
+        const { providerId } = request.params;
+        const provider = providers.get(providerId);
+        if (!provider) {
+          return reply.code(404).send({ error: 'Provider not found' });
+        }
+        if (!provider.addPrompt) {
+          return reply.code(405).send({ error: 'This provider does not support adding prompts' });
+        }
+        const result = await provider.addPrompt(request.body);
+        // Distinguish created prompt (has `id`) from context (has `fields`)
+        if ('fields' in result) {
+          return result;
+        }
+        return { ...result, providerId };
+      } catch (error: any) {
+        reply.code(400).send({ error: error.message });
+      }
+    }
+  );
+
   // GET /api/providers/:providerId/model-parameters
   fastify.get<{ Params: { providerId: string } }>(
     '/api/providers/:providerId/model-parameters',

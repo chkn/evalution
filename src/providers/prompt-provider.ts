@@ -1,4 +1,4 @@
-import type { ParsedPrompt, ModelParameterInfo } from '../shared/types.ts';
+import type { ParsedPrompt, ModelParameterInfo, AddPromptContext } from '../shared/types.ts';
 
 /** The kind of change that occurred to a prompt. */
 export type ChangeEventType = 'change' | 'add' | 'remove';
@@ -24,6 +24,15 @@ export interface PromptChangeEvent {
 export interface PromptProvider<TParsedPrompt extends ParsedPrompt = ParsedPrompt> {
   /** Uniquely identifies this provider when multiple providers are composed together. */
   readonly id: string;
+
+  /** Human-readable name shown when choosing between providers. */
+  readonly displayName?: string;
+
+  /** Short description of what this provider offers. */
+  readonly description?: string;
+
+  /** SVG icon markup for this provider. */
+  readonly icon?: string;
 
   /** Returns all prompts currently available from this provider. */
   getAllPrompts(): Promise<TParsedPrompt[]>;
@@ -77,4 +86,19 @@ export interface PromptProvider<TParsedPrompt extends ParsedPrompt = ParsedPromp
    * @returns A no-argument function that unregisters the watcher.
    */
   watch?(callback: (event: PromptChangeEvent) => void): () => void;
+
+  /**
+   * Creates a new prompt from the given partial, or returns an
+   * {@link AddPromptContext} describing what additional inputs are needed.
+   *
+   * When `partial` contains enough information the provider creates the
+   * prompt and returns the full {@link ParsedPrompt}. Otherwise it returns
+   * an {@link AddPromptContext} whose `fields` describe the form the UI
+   * should present to the user.
+   *
+   * Optional — providers that do not support creating prompts may omit it.
+   *
+   * @param partial - Partially filled prompt data.
+   */
+  addPrompt?(partial: Partial<TParsedPrompt>): Promise<TParsedPrompt | AddPromptContext>;
 }

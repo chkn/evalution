@@ -60,3 +60,41 @@ export interface ExecuteRequest {
   stream?: boolean;
   functionParams?: any[];
 }
+
+// ── Add Prompt flow ─────────────────────────────────────────────────────────
+
+/** Describes a single form field rendered by the Add Prompt dialog. */
+export interface AddPromptField {
+  /** Key used to identify this field's value (e.g. `'name'`). */
+  name: string;
+  /** Human-readable label shown next to the input. */
+  label: string;
+  /** The kind of input control to render. */
+  type: 'text' | 'select';
+  /** Whether the field must be filled before submission. */
+  required?: boolean;
+  /** Pre-filled value. */
+  defaultValue?: string;
+  /** Placeholder text shown when the field is empty. */
+  placeholder?: string;
+  /** Available choices when `type` is `'select'`. */
+  options?: { label: string; value: string }[];
+}
+
+/**
+ * Returned by {@link PromptProvider.addPrompt} when additional user input is
+ * needed before the prompt can be created.
+ */
+export interface AddPromptContext {
+  /** The form fields the provider needs the user to fill in. */
+  fields: AddPromptField[];
+}
+
+/** Information about a registered provider, returned by `GET /api/providers`. */
+export interface ProviderInfo {
+  id: string;
+  displayName?: string;
+  description?: string;
+  icon?: string;
+  hasAddPrompt: boolean;
+}

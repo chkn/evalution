@@ -1,11 +1,12 @@
 import ts from 'typescript';
+import type { FilePromptProviderOptions } from '../providers/file/file-prompt-provider.ts';
 import type { ParsedPrompt, FunctionParameter, PromptProperty, ModelValue } from '../shared/types.ts';
 import path from 'path';
 
 /** Metadata attached to prompts that originate from a file on disk. */
 export interface FilePromptMetadata {
-  /** Absolute path to the source file that defines this prompt. */
-  filePath: string
+  /** Path to the source file relative to the {@link FilePromptProviderOptions.rootDir}. */
+  relativeFilePath: string
 }
 
 /**
@@ -103,7 +104,7 @@ export class PromptParser {
       name: functionName,
       functionParameters,
       properties,
-      metadata: { filePath },
+      metadata: { relativeFilePath },
       treePath,
     };
   }
