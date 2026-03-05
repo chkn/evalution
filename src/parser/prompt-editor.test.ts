@@ -230,6 +230,34 @@ export function test() {
     expect(await fileProvider.readFile(filePath)).toContain('String with');
   });
 
+  it('should preserve backtick template literals with interpolation when updating messages', async () => {
+    const { filePath, fileProvider, editor, parser } = await setup(
+`export function test(name: string) {
+  return {
+    model: 'openai/gpt-4o',
+    messages: [
+      { role: 'user', content: \`Hello \${name}\` },
+    ]
+  };
+}`
+    );
+    const prompts = parser.parseFile(filePath);
+
+    // Simulate what the UI does: update messages with the parsed value round-tripped
+    // The parsed value for the template literal content is "Hello ${name}" (with token marker)
+    const newMessages = [
+      { role: 'user', content: 'Hello ${name}' },
+      { role: 'assistant', content: 'Hi there!' },
+    ];
+
+    await editor.updateProperty(filePath, prompts[0].properties.messages, newMessages);
+
+    const result = await fileProvider.readFile(filePath);
+    // The interpolated content must use backticks, not double quotes
+    expect(result).toContain('`Hello ${name}`');
+    expect(result).not.toContain('"Hello ${name}"');
+  });
+
   it('should reject edits to read-only parameters', async () => {
     const { filePath, editor, parser } = await setup(`
 function getDynamic() {

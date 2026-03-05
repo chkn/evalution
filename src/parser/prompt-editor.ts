@@ -273,10 +273,18 @@ export class PromptEditor {
     return sourceCode;
   }
 
+  private stringToSourceText(value: string): string {
+    // Strings containing ${...} must use backticks to preserve interpolation
+    if (/\$\{[^}]+\}/.test(value)) {
+      return '`' + value.replace(/\\/g, '\\\\').replace(/`/g, '\\`') + '`';
+    }
+    return JSON.stringify(value);
+  }
+
   private formatMessages(messages: any[]): string {
     const formatted = messages.map(msg => {
       const role = msg.role ? `role: ${JSON.stringify(msg.role)}` : '';
-      const content = msg.content ? `content: ${JSON.stringify(msg.content)}` : '';
+      const content = msg.content !== undefined ? `content: ${this.stringToSourceText(msg.content)}` : '';
       const parts = [role, content].filter(Boolean).join(', ');
       return `      { ${parts} }`;
     }).join(',\n');
