@@ -49,6 +49,16 @@ export async function getModelParameters(providerId: string): Promise<ModelParam
   return res.json();
 }
 
+export async function renamePrompt(prompt: ParsedPrompt, newName: string): Promise<ParsedPrompt> {
+  const res = await fetch(promptUrl(prompt, 'rename'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ newName }),
+  });
+  await throwIfError(res);
+  return res.json();
+}
+
 export async function updatePromptProperties(
   prompt: ParsedPrompt,
   updates: Record<string, any>

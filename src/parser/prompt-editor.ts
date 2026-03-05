@@ -82,6 +82,32 @@ export class PromptEditor {
     await this.fileProvider.writeFile(filePath, sourceCode);
   }
 
+  async renameFunction(filePath: string, oldName: string, newName: string): Promise<void> {
+    const sourceCode = await this.fileProvider.readFile(filePath);
+    const sourceFile = ts.createSourceFile(filePath, sourceCode, ts.ScriptTarget.Latest, true);
+
+    let nameStart = -1;
+    let nameEnd = -1;
+
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isFunctionDeclaration(node) &&
+        node.name?.text === oldName
+      ) {
+        nameStart = node.name.getStart(sourceFile);
+        nameEnd = node.name.getEnd();
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+
+    if (nameStart < 0) throw new Error(`Function '${oldName}' not found in ${filePath}`);
+
+    const newSource = sourceCode.slice(0, nameStart) + newName + sourceCode.slice(nameEnd);
+    await this.fileProvider.writeFile(filePath, newSource);
+  }
+
   async removeProperty(filePath: string, property: PromptProperty): Promise<void> {
     if (!property.fullSpan) {
       throw new Error(`Property '${property.name}' is missing fullSpan metadata`);

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
 import { usePrompts } from './hooks/usePrompts';
 import { useSSE } from './hooks/useSSE';
 import { useResizable } from './hooks/useResizable';
+import { renamePrompt } from './api';
 import PromptList from './components/PromptList';
 import AddPromptDialog from './components/AddPromptDialog';
 import PlaygroundEditor from './components/PlaygroundEditor';
@@ -91,6 +92,22 @@ function App() {
     if (data.type === 'prompt-changed') refetch();
   }, [refetch]);
   useSSE(handleSSEMessage);
+
+  // Remove tabs whose prompt ID no longer exists (handles renames and deletions)
+  useEffect(() => {
+    if (loading) return;
+    const ids = new Set(prompts.map(p => p.id));
+    setPanes(prev => prev.map(pane => {
+      const tabs = pane.tabs.filter(t => ids.has(t.promptId));
+      if (tabs.length === pane.tabs.length) return pane;
+      const activeStillExists = tabs.some(t => tabKey(t) === pane.activeTabKey);
+      return {
+        ...pane,
+        tabs,
+        activeTabKey: activeStillExists ? pane.activeTabKey : (tabs.at(-1) ? tabKey(tabs.at(-1)!) : null),
+      };
+    }));
+  }, [prompts, loading]);
 
   // ── Pane operations ──────────────────────────────────────────────────────────
 
@@ -278,6 +295,15 @@ function App() {
                       loading={loading}
                       error={error}
                       onAddPrompt={() => setShowAddPrompt(true)}
+                      onRenamePrompt={async (promptId, newName) => {
+                        const prompt = prompts.find(p => p.id === promptId);
+                        if (!prompt) return;
+                        const updated = await renamePrompt(prompt, newName).catch(() => null);
+                        if (updated) {
+                          refetch();
+                          handleSelectPrompt(updated.id);
+                        }
+                      }}
                     />
                   )}
                 </aside>

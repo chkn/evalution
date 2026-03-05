@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import type { ParsedPrompt } from '../../shared/types';
 
 interface PromptListProps {
@@ -8,6 +8,7 @@ interface PromptListProps {
   loading: boolean;
   error: string | null;
   onAddPrompt?: () => void;
+  onRenamePrompt?: (promptId: string, newName: string) => void;
 }
 
 // --- Tree building ---
@@ -154,42 +155,89 @@ function PlusIcon() {
   );
 }
 
+// --- Inline rename input ---
+
+function RenameInput({ initialValue, onCommit, onCancel }: {
+  initialValue: string;
+  onCommit: (v: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    ref.current?.select();
+  }, []);
+
+  return (
+    <input
+      ref={ref}
+      className="tree-rename-input"
+      value={value}
+      onChange={e => setValue(e.target.value)}
+      onKeyDown={e => {
+        if (e.key === 'Enter') { e.preventDefault(); if (value.trim()) onCommit(value.trim()); else onCancel(); }
+        if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+      }}
+      onBlur={() => { if (value.trim() && value.trim() !== initialValue) onCommit(value.trim()); else onCancel(); }}
+      onClick={e => e.stopPropagation()}
+    />
+  );
+}
+
 // --- Tree node components ---
 
-function FileNode({
-  node,
-  selectedId,
-  onSelect,
-  depth,
-}: {
-  node: CompressedNode & { type: 'file' };
+interface TreeNodeProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
-  depth: number;
-}) {
+  renamingId: string | null;
+  onStartRename: (id: string) => void;
+  onCommitRename: (id: string, newName: string) => void;
+  onCancelRename: () => void;
+}
+
+function PromptRow({ prompt, indent, selectedId, onSelect, renamingId, onStartRename, onCommitRename, onCancelRename }: {
+  prompt: ParsedPrompt;
+  indent: number;
+} & TreeNodeProps) {
+  const isSelected = prompt.id === selectedId;
+  const isRenaming = prompt.id === renamingId;
+
+  return (
+    <div
+      className={`tree-row${isSelected ? ' tree-row-selected' : ''}`}
+      style={{ paddingLeft: indent }}
+      onClick={() => onSelect(prompt.id)}
+      onDoubleClick={e => { e.stopPropagation(); onStartRename(prompt.id); }}
+    >
+      <span className="tree-icon-prompt"><PromptIcon /></span>
+      {isRenaming ? (
+        <RenameInput
+          initialValue={prompt.name}
+          onCommit={newName => onCommitRename(prompt.id, newName)}
+          onCancel={onCancelRename}
+        />
+      ) : (
+        <>
+          <span className="tree-row-label">{prompt.name}</span>
+          {prompt.functionParameters.length > 0 && (
+            <span className="tree-row-params">
+              ({prompt.functionParameters.map(p => p.name).join(', ')})
+            </span>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function FileNode({ node, depth, ...rest }: { node: CompressedNode & { type: 'file' }; depth: number } & TreeNodeProps) {
   const [expanded, setExpanded] = useState(true);
   const hasManyPrompts = node.prompts.length > 1;
   const indent = depth * 18;
 
   if (!hasManyPrompts) {
-    // Single prompt — render directly as a leaf row
-    const prompt = node.prompts[0];
-    const isSelected = prompt.id === selectedId;
-    return (
-      <div
-        className={`tree-row${isSelected ? ' tree-row-selected' : ''}`}
-        style={{ paddingLeft: 10 + indent + 16 }}
-        onClick={() => onSelect(prompt.id)}
-      >
-        <span className="tree-icon-prompt"><PromptIcon /></span>
-        <span className="tree-row-label">{prompt.name}</span>
-        {prompt.functionParameters.length > 0 && (
-          <span className="tree-row-params">
-            ({prompt.functionParameters.map(p => p.name).join(', ')})
-          </span>
-        )}
-      </div>
-    );
+    return <PromptRow prompt={node.prompts[0]} indent={10 + indent + 16} {...rest} />;
   }
 
   return (
@@ -203,40 +251,14 @@ function FileNode({
         <span className="tree-icon-file"><PromptIcon /></span>
         <span className="tree-row-label">{node.label}</span>
       </div>
-      {expanded && node.prompts.map(prompt => {
-        const isSelected = prompt.id === selectedId;
-        return (
-          <div
-            key={prompt.id}
-            className={`tree-row${isSelected ? ' tree-row-selected' : ''}`}
-            style={{ paddingLeft: 10 + indent + 18 + 16 }}
-            onClick={() => onSelect(prompt.id)}
-          >
-            <span className="tree-icon-prompt"><PromptIcon /></span>
-            <span className="tree-row-label">{prompt.name}</span>
-            {prompt.functionParameters.length > 0 && (
-              <span className="tree-row-params">
-                ({prompt.functionParameters.map(p => p.name).join(', ')})
-              </span>
-            )}
-          </div>
-        );
-      })}
+      {expanded && node.prompts.map(prompt => (
+        <PromptRow key={prompt.id} prompt={prompt} indent={10 + indent + 18 + 16} {...rest} />
+      ))}
     </div>
   );
 }
 
-function DirNode({
-  node,
-  selectedId,
-  onSelect,
-  depth,
-}: {
-  node: CompressedNode & { type: 'dir' };
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  depth: number;
-}) {
+function DirNode({ node, depth, ...rest }: { node: CompressedNode & { type: 'dir' }; depth: number } & TreeNodeProps) {
   const [expanded, setExpanded] = useState(true);
   const indent = depth * 18;
 
@@ -255,9 +277,9 @@ function DirNode({
         <div>
           {node.children.map((child, i) =>
             child.type === 'dir' ? (
-              <DirNode key={i} node={child} selectedId={selectedId} onSelect={onSelect} depth={depth + 1} />
+              <DirNode key={i} node={child} depth={depth + 1} {...rest} />
             ) : (
-              <FileNode key={i} node={child} selectedId={selectedId} onSelect={onSelect} depth={depth + 1} />
+              <FileNode key={i} node={child} depth={depth + 1} {...rest} />
             )
           )}
         </div>
@@ -268,8 +290,14 @@ function DirNode({
 
 // --- Main component ---
 
-function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt }: PromptListProps) {
+function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt, onRenamePrompt }: PromptListProps) {
   const [filter, setFilter] = useState('');
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+
+  const handleCommitRename = (promptId: string, newName: string) => {
+    setRenamingId(null);
+    onRenamePrompt?.(promptId, newName);
+  };
 
   const nodes = useMemo(() => {
     const rawTree = buildRawTree(prompts);
@@ -331,9 +359,17 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt
       <div className="section-panel-body file-tree">
         {nodes.map((node, i) =>
           node.type === 'dir' ? (
-            <DirNode key={i} node={node} selectedId={selectedId} onSelect={onSelect} depth={0} />
+            <DirNode key={i} node={node} depth={0}
+              selectedId={selectedId} onSelect={onSelect}
+              renamingId={renamingId} onStartRename={setRenamingId}
+              onCommitRename={handleCommitRename} onCancelRename={() => setRenamingId(null)}
+            />
           ) : (
-            <FileNode key={i} node={node} selectedId={selectedId} onSelect={onSelect} depth={0} />
+            <FileNode key={i} node={node} depth={0}
+              selectedId={selectedId} onSelect={onSelect}
+              renamingId={renamingId} onStartRename={setRenamingId}
+              onCommitRename={handleCommitRename} onCancelRename={() => setRenamingId(null)}
+            />
           )
         )}
       </div>

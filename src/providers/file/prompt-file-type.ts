@@ -66,6 +66,14 @@ export interface PromptFileType {
   addProperty(filePath: string, promptName: string, propertyName: string, value: any): Promise<void>;
 
   /**
+   * Renames an exported prompt in a source file.
+   * @param filePath - Absolute path to the file to edit.
+   * @param oldName - Current prompt name.
+   * @param newName - New prompt name.
+   */
+  renamePrompt(filePath: string, oldName: string, newName: string): Promise<void>;
+
+  /**
    * Dynamically imports `filePath`, calls the exported function named
    * `promptName` with `params`, and returns the resulting config object.
    *
@@ -126,6 +134,10 @@ export class TSPromptFileType implements PromptFileType {
 
   addProperty(filePath: string, promptName: string, propertyName: string, value: any): Promise<void> {
     return this.editor.addProperty(filePath, promptName, propertyName, value);
+  }
+
+  renamePrompt(filePath: string, oldName: string, newName: string): Promise<void> {
+    return this.editor.renameFunction(filePath, oldName, newName);
   }
 
   async loadConfig(filePath: string, promptName: string, params: any[]): Promise<any> {

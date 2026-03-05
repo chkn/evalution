@@ -101,6 +101,25 @@ export function setupRoutes(
     }
   );
 
+  // POST /api/prompts/:providerId/:id/rename - Rename a prompt
+  fastify.post<{ Params: { providerId: string; id: string }; Body: { newName: string } }>(
+    '/api/prompts/:providerId/:id/rename',
+    async (request, reply) => {
+      try {
+        const { providerId, id } = request.params;
+        const { newName } = request.body;
+        const provider = providers.get(providerId);
+        if (!provider) return reply.code(404).send({ error: 'Provider not found' });
+        if (!provider.renamePrompt) return reply.code(405).send({ error: 'This provider does not support renaming' });
+        const decodedId = Buffer.from(id, 'base64url').toString('utf8');
+        const updatedPrompt = await provider.renamePrompt(decodedId, newName);
+        return { ...updatedPrompt, providerId };
+      } catch (error: any) {
+        reply.code(400).send({ error: error.message });
+      }
+    }
+  );
+
   // POST /api/prompts/:providerId/:id/update - Update prompt properties
   fastify.post<{ Params: { providerId: string; id: string }; Body: Record<string, any> }>(
     '/api/prompts/:providerId/:id/update',

@@ -367,6 +367,21 @@ code, pre {
   background: #fff;
 }
 
+.tree-rename-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #3478f6;
+  border-radius: 3px;
+  background: #fff;
+  color: #000;
+  font-size: 12.5px;
+  font-family: inherit;
+  padding: 0 3px;
+  height: 18px;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(52, 120, 246, 0.25);
+}
+
 /* ── Add Prompt Dialog ────────────────────────────────────────────────── */
 
 .dialog-backdrop {

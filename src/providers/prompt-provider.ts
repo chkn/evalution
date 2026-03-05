@@ -101,4 +101,14 @@ export interface PromptProvider<TParsedPrompt extends ParsedPrompt = ParsedPromp
    * @param partial - Partially filled prompt data.
    */
   addPrompt?(partial: Partial<TParsedPrompt>): Promise<TParsedPrompt | AddPromptContext>;
+
+  /**
+   * Renames a prompt and returns the updated prompt with its new ID.
+   *
+   * Optional — providers that do not support renaming may omit it.
+   *
+   * @param promptId - ID of the prompt to rename.
+   * @param newName - The new name for the prompt.
+   */
+  renamePrompt?(promptId: string, newName: string): Promise<TParsedPrompt>;
 }

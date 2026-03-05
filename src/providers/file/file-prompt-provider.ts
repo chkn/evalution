@@ -156,6 +156,17 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
     return this.sdkAdapter.executeConfig(config, stream);
   }
 
+  async renamePrompt(promptId: string, newName: string): Promise<ParsedFilePrompt> {
+    const [filePath, oldName] = this.parsePromptId(promptId);
+    await this.fileType.renamePrompt(filePath, oldName, newName);
+    await this.refresh();
+
+    const relFilePath = path.relative(this.rootDir, filePath);
+    const prompt = await this.getPrompt(`${relFilePath}#${newName}`);
+    if (!prompt) throw new Error('Failed to find renamed prompt');
+    return prompt;
+  }
+
   async addPrompt(partial: Partial<ParsedFilePrompt>): Promise<ParsedFilePrompt | AddPromptContext> {
     const relFilePath = (partial.metadata as FilePromptMetadata | undefined)?.relativeFilePath;
     const name = partial.name;
