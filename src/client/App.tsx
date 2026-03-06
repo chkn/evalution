@@ -69,7 +69,7 @@ function SplitIcon() {
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
-  const { prompts, loading, error, refetch } = usePrompts();
+  const { prompts, loading, error, refetch, patchPrompt } = usePrompts();
   const [panes, setPanes] = useState<Pane[]>([{ id: INIT_PANE, tabs: [], activeTabKey: null }]);
   const [focusedPaneId, setFocusedPaneId] = useState(INIT_PANE);
   const [rootPath, setRootPath] = useState('');
@@ -344,7 +344,7 @@ function App() {
                       return (
                         <div key={key} style={key === pane.activeTabKey ? { display: 'contents' } : { display: 'none' }}>
                           <div className="pg-content">
-                            <PlaygroundEditor prompt={prompt} onUpdate={refetch} />
+                            <PlaygroundEditor prompt={prompt} onUpdate={patchPrompt} />
                             <PlaygroundExecution prompt={prompt} />
                           </div>
                         </div>

@@ -1,5 +1,5 @@
 import ts from 'typescript';
-import type { PromptProperty, ModelValue } from '../shared/types.ts';
+import type { PromptProperty, ModelValue, SourceSpan } from '../shared/types.ts';
 import { KNOWN_PROVIDERS } from '../shared/constants.ts';
 import type { FileProvider } from '../providers/file/file-provider.ts';
 
@@ -27,16 +27,63 @@ export class PromptEditor {
       sourceCode = await this.ensureImport(filePath, newValue.provider, sourceCode);
     }
 
+    // Re-parse the current file to get the live span — guards against stale spans
+    // caused by concurrent or sequential saves that already changed the file length.
+    const functionName = property.promptId?.slice(property.promptId.lastIndexOf('#') + 1);
+    const valueSpan = (functionName
+      ? this.findFreshValueSpan(sourceCode, filePath, functionName, property.name)
+      : null) ?? property.valueSpan;
+
     // Convert new value to TypeScript source text
     const newSourceText = this.valueToSourceText(newValue, property.name);
 
     // Replace character range
-    const before = sourceCode.substring(0, property.valueSpan.start);
-    const after = sourceCode.substring(property.valueSpan.end);
+    const before = sourceCode.substring(0, valueSpan.start);
+    const after = sourceCode.substring(valueSpan.end);
     const newSourceCode = before + newSourceText + after;
 
     // Write back to file
     await this.fileProvider.writeFile(filePath, newSourceCode);
+  }
+
+  private findFreshValueSpan(
+    sourceCode: string,
+    filePath: string,
+    functionName: string,
+    propertyName: string
+  ): SourceSpan | null {
+    const sourceFile = ts.createSourceFile(filePath, sourceCode, ts.ScriptTarget.Latest, true);
+
+    let result: SourceSpan | null = null;
+
+    const visitReturn = (node: ts.Node) => {
+      if (result) return;
+      if (
+        ts.isReturnStatement(node) &&
+        node.expression &&
+        ts.isObjectLiteralExpression(node.expression)
+      ) {
+        for (const prop of node.expression.properties) {
+          if (ts.isPropertyAssignment(prop) && prop.name.getText(sourceFile) === propertyName) {
+            result = { start: prop.initializer.getStart(sourceFile), end: prop.initializer.getEnd() };
+            return;
+          }
+        }
+      }
+      ts.forEachChild(node, visitReturn);
+    };
+
+    const visitNode = (node: ts.Node) => {
+      if (result) return;
+      if (ts.isFunctionDeclaration(node) && node.name?.text === functionName && node.body) {
+        visitReturn(node.body);
+        return;
+      }
+      ts.forEachChild(node, visitNode);
+    };
+    visitNode(sourceFile);
+
+    return result;
   }
 
   async addProperty(
@@ -155,7 +202,7 @@ export class PromptEditor {
 
     // Handle strings
     if (typeof value === 'string') {
-      return JSON.stringify(value);
+      return this.stringToSourceText(value);
     }
 
     // Handle numbers

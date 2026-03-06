@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { FilePromptProvider } from './file-prompt-provider.ts';
+import { MemoryFileProvider } from './file-provider.ts';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -264,6 +265,36 @@ export function myPrompt() {
     await new Promise(resolve => setTimeout(resolve, 500));
 
     // Callback should not be called after cleanup
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('should suppress watcher events for provider-originated updates', async () => {
+    const fileProvider = new MemoryFileProvider({
+      '/virtual/test.prompt.ts': `
+export function myPrompt() {
+  return {
+    model: 'openai/gpt-4o',
+    system: 'Test'
+  };
+}
+`,
+    });
+    const watchedProvider = new FilePromptProvider({
+      rootDir: '/virtual',
+      fileProvider,
+    });
+
+    await watchedProvider.getAllPrompts();
+
+    const callback = vi.fn();
+    const cleanup = watchedProvider.watch!(callback);
+
+    await watchedProvider.updatePromptProperties('/virtual/test.prompt.ts#myPrompt', {
+      system: 'Updated locally',
+    });
+
+    cleanup();
+
     expect(callback).not.toHaveBeenCalled();
   });
 

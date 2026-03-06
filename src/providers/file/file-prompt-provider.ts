@@ -1,5 +1,5 @@
 import path from 'path';
-import type { PromptProvider, PromptChangeEvent } from '../prompt-provider.ts';
+import type { PromptProvider, PromptChangeEvent, ChangeEventType } from '../prompt-provider.ts';
 import { TSPromptFileType, type PromptFileType, type PromptFileParser } from './prompt-file-type.ts';
 import { LocalFileProvider, type FileProvider } from './file-provider.ts';
 import { VercelAISDK, type SDKAdapter } from '../../server/sdk-adapter.ts';
@@ -75,6 +75,7 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
   private includePatterns: readonly string[];
   private ignorePatterns: readonly string[];
   private sdkAdapter: SDKAdapter;
+  private suppressedWatchEvents = new Map<string, { remaining: number; expiresAt: number }>();
 
   constructor({
     id = 'fs' + (defaultIDCounter++ ? defaultIDCounter : ''),
@@ -120,6 +121,7 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
     const [filePath, promptName] = this.parsePromptId(promptId);
 
     for (const [propertyName, value] of Object.entries(updates)) {
+      this.suppressNextWatchEvent(filePath, 'change');
       const prop = prompt.properties[propertyName];
 
       if (value === null) {
@@ -158,6 +160,7 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
 
   async renamePrompt(promptId: string, newName: string): Promise<ParsedFilePrompt> {
     const [filePath, oldName] = this.parsePromptId(promptId);
+    this.suppressNextWatchEvent(filePath, 'change');
     await this.fileType.renamePrompt(filePath, oldName, newName);
     await this.refresh();
 
@@ -176,6 +179,7 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
       const absPath = path.join(this.rootDir, relFilePath);
       const content = `export function ${name}() {\n  return {};\n}\n`;
 
+      this.suppressNextWatchEvent(absPath, 'add');
       await this.fileProvider.writeFile(absPath, content);
       await this.refresh();
 
@@ -234,8 +238,12 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
       this.includePatterns,
       { cwd: this.rootDir, ignored: this.ignorePatterns },
       async (eventType, filePath) => {
+        const absolutePath = this.resolveFilePath(filePath);
+        if (this.consumeSuppressedWatchEvent(absolutePath, eventType)) {
+          return;
+        }
+
         if (eventType === 'change' || eventType === 'add') {
-          const absolutePath = this.resolveFilePath(filePath);
           await this.refresh();
           const prompts = this.parser!.parseFile(absolutePath);
           prompts.forEach(prompt => {
@@ -258,6 +266,35 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
   private async refresh(): Promise<void> {
     const files = await Array.fromAsync(this.findPromptFiles());
     this.parser = await this.fileType.createParser(files, this.rootDir);
+  }
+
+  private suppressNextWatchEvent(filePath: string, eventType: ChangeEventType): void {
+    if (eventType !== 'change' && eventType !== 'add') return;
+    const key = `${eventType}:${filePath}`;
+    const entry = this.suppressedWatchEvents.get(key);
+    this.suppressedWatchEvents.set(key, {
+      remaining: (entry?.remaining ?? 0) + 1,
+      expiresAt: Date.now() + 2000,
+    });
+  }
+
+  private consumeSuppressedWatchEvent(filePath: string, eventType: ChangeEventType): boolean {
+    const key = `${eventType}:${filePath}`;
+    const entry = this.suppressedWatchEvents.get(key);
+    if (!entry) return false;
+    if (entry.expiresAt < Date.now()) {
+      this.suppressedWatchEvents.delete(key);
+      return false;
+    }
+    if (entry.remaining <= 1) {
+      this.suppressedWatchEvents.delete(key);
+    } else {
+      this.suppressedWatchEvents.set(key, {
+        remaining: entry.remaining - 1,
+        expiresAt: entry.expiresAt,
+      });
+    }
+    return true;
   }
 
   private async* findPromptFiles(): AsyncIterableIterator<string> {

@@ -1,11 +1,12 @@
-import { useState, useRef, useLayoutEffect, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { ParsedPrompt, PromptProperty, ModelParameterInfo } from '../../shared/types';
 import { POPULAR_MODELS } from '../../shared/constants';
 import { getModelParameters, updatePromptProperties  } from '../api';
+import TokenEditor from './TokenEditor';
 
 interface Props {
   prompt: ParsedPrompt;
-  onUpdate: () => void;
+  onUpdate: (updated: ParsedPrompt) => void;
 }
 
 interface ToolCallEntry {
@@ -19,6 +20,36 @@ interface Msg {
   toolCalls?: ToolCallEntry[];
 }
 
+function hasParameterTokens(value: any): boolean {
+  if (typeof value === 'string') return /\$\{[^}]+\}/.test(value);
+  if (Array.isArray(value)) return value.some(hasParameterTokens);
+  if (value && typeof value === 'object') return Object.values(value).some(hasParameterTokens);
+  return false;
+}
+
+function applyPromptUpdate(prompt: ParsedPrompt, key: string, value: any): ParsedPrompt {
+  const nextProperties = { ...prompt.properties };
+
+  if (value === null) {
+    delete nextProperties[key];
+  } else {
+    const existing = nextProperties[key];
+    nextProperties[key] = existing
+      ? { ...existing, value, hasParameterTokens: hasParameterTokens(value) }
+      : {
+          name: key,
+          value,
+          isEditable: true,
+          hasParameterTokens: hasParameterTokens(value),
+        };
+  }
+
+  return {
+    ...prompt,
+    properties: nextProperties,
+  };
+}
+
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
 function ChevronDown({ size = 12 }: { size?: number }) {
@@ -28,33 +59,6 @@ function ChevronDown({ size = 12 }: { size?: number }) {
       style={{ flexShrink: 0, pointerEvents: 'none', color: '#9ca3af' }}>
       <path d="M2.5 4.5L6 8L9.5 4.5" />
     </svg>
-  );
-}
-
-function AutoResizeTextarea({ value, onChange, onBlur, placeholder, className }: {
-  value: string;
-  onChange: (v: string) => void;
-  onBlur?: () => void;
-  placeholder?: string;
-  className?: string;
-}) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useLayoutEffect(() => {
-    if (ref.current) {
-      ref.current.style.height = 'auto';
-      ref.current.style.height = ref.current.scrollHeight + 'px';
-    }
-  }, [value]);
-  return (
-    <textarea
-      ref={ref}
-      className={className}
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      onBlur={onBlur}
-      placeholder={placeholder}
-      rows={1}
-    />
   );
 }
 
@@ -179,13 +183,7 @@ function SystemCard({ content, isEditable, onChange }: {
         <span className="pg-role-label">System message</span>
       </div>
       {isEditable
-        ? <AutoResizeTextarea
-            className="pg-msg-textarea"
-            value={local}
-            onChange={setLocal}
-            onBlur={() => onChange(local)}
-            placeholder="System prompt…"
-          />
+        ? <TokenEditor className="token-editor" value={local} onChange={v => { setLocal(v); onChange(v); }} placeholder="System prompt…" />
         : <div className="pg-msg-content">{content}</div>
       }
     </div>
@@ -217,12 +215,7 @@ function MessageCard({ msg, onChange, onDelete }: {
         </div>
         <button className="pg-delete-msg" onClick={onDelete} title="Delete">×</button>
       </div>
-      <AutoResizeTextarea
-        className="pg-msg-textarea"
-        value={content}
-        onChange={v => { setContent(v); onChange({ ...msg, content: v }); }}
-        placeholder="Message content…"
-      />
+      <TokenEditor className="token-editor" value={content} onChange={v => { setContent(v); onChange({ ...msg, content: v }); }} placeholder="Message content…" />
       {msg.role === 'assistant' && (
         <ToolCallsSection
           toolCalls={msg.toolCalls ?? []}
@@ -316,12 +309,18 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
     }
   }, [prompt.providerId]);
 
+  useEffect(() => {
+    setLocalMessages(
+      Array.isArray(prompt.properties.messages?.value) ? prompt.properties.messages.value : []
+    );
+  }, [prompt.properties.messages?.value]);
+
   const handleUpdate = async (key: string, value: any) => {
     setSaving(true);
     setError(null);
     try {
       await updatePromptProperties(prompt, { [key]: value });
-      onUpdate();
+      onUpdate(applyPromptUpdate(prompt, key, value));
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -329,9 +328,12 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
     }
   };
 
+  const msgSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleMessagesChange = (msgs: Msg[]) => {
     setLocalMessages(msgs);
-    handleUpdate('messages', msgs);
+    if (msgSaveTimer.current) clearTimeout(msgSaveTimer.current);
+    msgSaveTimer.current = setTimeout(() => handleUpdate('messages', msgs), 600);
   };
 
   const handleAddMessage = () => {
@@ -355,7 +357,7 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
 
   return (
     <div className="pg-editor">
-      {saving && <div className="pg-status-bar">Saving…</div>}
+      <div className={`pg-status-bar${saving ? ' visible' : ''}`}>Saving…</div>
       {error && (
         <div className="pg-error-bar">
           {error}

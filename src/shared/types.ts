@@ -17,6 +17,8 @@ export interface PromptProperty {
   sourceText?: string;
   valueSpan?: SourceSpan;
   fullSpan?: SourceSpan; // full "key: value," including leading whitespace and trailing comma
+  /** The prompt this property belongs to (e.g. `"prompts/greet.prompt.ts#greet"`). Used to re-parse for fresh spans. */
+  promptId?: string;
 }
 
 export interface ParsedPrompt {

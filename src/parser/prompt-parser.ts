@@ -94,13 +94,14 @@ export class PromptParser {
     const returnObject = this.findReturnObject(node);
     if (!returnObject) return null;
 
-    const properties = this.parseObjectLiteral(returnObject, sourceFile, functionParameters.map(p => p.name));
-
     const relativeFilePath = this.rootDir ? path.relative(this.rootDir, filePath) : filePath;
+
+    const promptId = `${relativeFilePath}#${functionName}`;
+    const properties = this.parseObjectLiteral(returnObject, sourceFile, functionParameters.map(p => p.name), promptId);
     const treePath = relativeFilePath.split('/').filter(Boolean);
 
     return {
-      id: `${relativeFilePath}#${functionName}`,
+      id: promptId,
       name: functionName,
       functionParameters,
       properties,
@@ -173,7 +174,8 @@ export class PromptParser {
   private parseObjectLiteral(
     obj: ts.ObjectLiteralExpression,
     sourceFile: ts.SourceFile,
-    paramNames: string[]
+    paramNames: string[],
+    promptId?: string
   ): Record<string, PromptProperty> {
     const properties: Record<string, PromptProperty> = {};
 
@@ -202,6 +204,7 @@ export class PromptParser {
             start: prop.getFullStart(),
             end: fullEnd,
           },
+          promptId,
         };
       }
     }

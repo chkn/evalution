@@ -230,6 +230,28 @@ export function test() {
     expect(await fileProvider.readFile(filePath)).toContain('String with');
   });
 
+  it('should preserve backtick template literals in system prompt when updating', async () => {
+    const { filePath, fileProvider, editor, parser } = await setup(
+`export function test(name: string) {
+  return {
+    model: 'openai/gpt-4o',
+    system: \`Hello \${name}\`,
+  };
+}`
+    );
+    const prompts = parser.parseFile(filePath);
+
+    // Simulate what the editor does: round-trip the parsed value through the UI
+    // The parsed system value is 'Hello ${name}' (plain string with token marker)
+    const systemValue = prompts[0].properties.system.value as string;
+    await editor.updateProperty(filePath, prompts[0].properties.system, systemValue);
+
+    const result = await fileProvider.readFile(filePath);
+    // Must use backticks to preserve template interpolation, not double quotes
+    expect(result).toContain('`Hello ${name}`');
+    expect(result).not.toContain('"Hello ${name}"');
+  });
+
   it('should preserve backtick template literals with interpolation when updating messages', async () => {
     const { filePath, fileProvider, editor, parser } = await setup(
 `export function test(name: string) {
@@ -256,6 +278,38 @@ export function test() {
     // The interpolated content must use backticks, not double quotes
     expect(result).toContain('`Hello ${name}`');
     expect(result).not.toContain('"Hello ${name}"');
+  });
+
+  it('should not corrupt file when the same property is updated twice with stale spans', async () => {
+    const { filePath, fileProvider, editor, parser } = await setup(`
+export function test() {
+  return {
+    model: 'openai/gpt-4o',
+    messages: [
+      { role: 'user', content: 'Short' }
+    ]
+  };
+}
+`);
+    const prompts = parser.parseFile(filePath);
+    const messagesProperty = prompts[0].properties.messages;
+
+    // First update makes the file longer, invalidating the original valueSpan
+    await editor.updateProperty(filePath, messagesProperty, [
+      { role: 'user', content: 'A much longer message that extends the file length significantly' },
+    ]);
+
+    // Second update reuses the same (now stale) property — spans no longer match the file.
+    // Without a fix, the stale valueSpan.end reads from inside the first update's array,
+    // so fragments of the first update's content appear after the new closing bracket.
+    await editor.updateProperty(filePath, messagesProperty, [
+      { role: 'user', content: 'Final version' },
+    ]);
+
+    const result = await fileProvider.readFile(filePath);
+    expect(result).toContain('Final version');
+    // Stale span causes the first update's tail to leak into the output
+    expect(result).not.toContain('extends the file length significantly');
   });
 
   it('should reject edits to read-only parameters', async () => {
