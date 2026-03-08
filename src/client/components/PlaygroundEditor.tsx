@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import type { ParsedPrompt, PromptProperty, ModelParameterInfo } from '../../shared/types';
-import { POPULAR_MODELS } from '../../shared/constants';
-import { getModelParameters, updatePromptProperties  } from '../api';
+import type { ModelInfo, ParsedPrompt, PromptProperty, ModelParameterInfo, ModelCatalog } from '../../shared/types';
+import { getModelCatalog, getModelParameters, updatePromptProperties  } from '../api';
 import TokenEditor from './TokenEditor';
 
 interface Props {
@@ -70,7 +69,7 @@ const PROVIDER_COLORS: Record<string, string> = {
   google: '#4285f4',
 };
 
-function ModelCard({ value, onChange }: { value: any; onChange: (v: any) => void }) {
+function ModelCard({ value, onChange, modelCatalog }: { value: any; onChange: (v: any) => void; modelCatalog: ModelCatalog }) {
   let provider = 'openai';
   let model = 'gpt-4o';
   if (typeof value === 'object' && value?.type === 'function') {
@@ -82,17 +81,16 @@ function ModelCard({ value, onChange }: { value: any; onChange: (v: any) => void
     else { model = value; }
   }
   const currentKey = `${provider}/${model}`;
-  const displayLabel = POPULAR_MODELS
-    .find(m => `${m.provider}/${m.model}` === currentKey)
-    ?.label.replace(/ \(.*\)$/, '') ?? model;
+  const displayLabel = modelCatalog.providers[provider]?.models
+    .find(m => m.id === model)?.label ?? model;
 
   const handleChange = (key: string) => {
-    const found = POPULAR_MODELS.find(m => `${m.provider}/${m.model}` === key);
-    if (!found) return;
     if (typeof value === 'string') onChange(key);
-    else onChange({ type: 'function', provider: found.provider, model: found.model });
+    const [provider, model] = key.split('/');
+    onChange({ type: 'function', provider, model });
   };
 
+  const modelCatalogProviders = Object.entries(modelCatalog.providers);
   return (
     <div className="pg-panel-card pg-model-card">
       <span className="pg-provider-dot" style={{ background: PROVIDER_COLORS[provider] ?? '#888' }} />
@@ -103,12 +101,14 @@ function ModelCard({ value, onChange }: { value: any; onChange: (v: any) => void
         value={currentKey}
         onChange={e => handleChange(e.target.value)}
       >
-        {POPULAR_MODELS.map(m => (
-          <option key={`${m.provider}/${m.model}`} value={`${m.provider}/${m.model}`}>
-            {m.label}
-          </option>
+        {modelCatalogProviders.map(([provider, info]) => (
+          info.models.map(modelInfo => (
+            <option key={`${provider}/${modelInfo.id}`} value={`${provider}/${modelInfo.id}`}>
+              {modelInfo.label}
+            </option>
+          ))
         ))}
-        {!POPULAR_MODELS.some(m => `${m.provider}/${m.model}` === currentKey) && (
+        {!modelCatalogProviders.some(([provider, p]) => p.models.some(m => `${provider}/${m.id}` === currentKey)) && (
           <option value={currentKey}>{currentKey}</option>
         )}
       </select>
@@ -295,6 +295,8 @@ function ParamCard({ name, prop, description, onDelete, onChange }: {
 
 // ─── PlaygroundEditor ─────────────────────────────────────────────────────────
 
+const EMPTY_MODEL_CATALOG: ModelCatalog = { providers: {} };
+
 function PlaygroundEditor({ prompt, onUpdate }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -302,10 +304,12 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
     Array.isArray(prompt.properties.messages?.value) ? prompt.properties.messages.value : []
   );
   const [modelParameters, setModelParameters] = useState<ModelParameterInfo[]>([]);
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
 
   useEffect(() => {
     if (prompt.providerId) {
       getModelParameters(prompt.providerId).then(setModelParameters).catch(() => {});
+      getModelCatalog(prompt.providerId).then(setModelCatalog).catch(() => {});
     }
   }, [prompt.providerId]);
 
@@ -370,7 +374,7 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
           <span className="pg-panel-title">Model</span>
         </div>
         <div className="pg-panel-body">
-          <ModelCard value={modelValue} onChange={v => handleUpdate('model', v)} />
+          <ModelCard value={modelValue} onChange={v => handleUpdate('model', v)} modelCatalog={modelCatalog} />
           {modelParams.map(([key, prop]) => (
             <ParamCard
               key={key}

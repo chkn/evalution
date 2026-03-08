@@ -58,6 +58,33 @@ export interface ModelParameterInfo {
   description: string;
 }
 
+/** A pre-defined model option shown in quick-select UIs. */
+export interface ModelInfo {
+  /** Model ID (e.g. `'gpt-4o'`). */
+  id: string;
+  /** Human-readable label shown in the UI (e.g. `'GPT-4o (OpenAI)'`). */
+  label: string;
+}
+
+/** Describes a single AI provider known to the SDK adapter. */
+export interface ModelProviderInfo {
+  /** Human-readable name (e.g. `'OpenAI'`). */
+  name: string;
+  /** Some of the models available for this provider. */
+  models: ModelInfo[];
+  /** npm package path used when auto-inserting import statements (e.g. `'@ai-sdk/openai'`). */
+  importPath: string;
+}
+
+/**
+ * Model catalog returned by {@link SDKAdapter.getModelInfo}.
+ * Contains the set of known providers and a curated list of popular models.
+ */
+export interface ModelCatalog {
+  /** Map of provider key → provider metadata. */
+  providers: Record<string, ModelProviderInfo>;
+}
+
 export interface ExecuteRequest {
   stream?: boolean;
   functionParams?: any[];
@@ -93,7 +120,7 @@ export interface AddPromptContext {
 }
 
 /** Information about a registered provider, returned by `GET /api/providers`. */
-export interface ProviderInfo {
+export interface PromptProviderInfo {
   id: string;
   displayName?: string;
   description?: string;

@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { PromptEditor } from './prompt-editor.ts';
 import { PromptParser } from './prompt-parser.ts';
 import { MemoryFileProvider } from '../providers/file/file-provider.ts';
+import type { ModelProviderInfo } from '../shared/types.ts';
 
 describe('PromptEditor', () => {
-  async function setup(content: string, filename = '/virtual/test.prompt.ts') {
+  async function setup(content: string, filename = '/virtual/test.prompt.ts', knownProviders: Record<string, ModelProviderInfo> = {}) {
     const fileProvider = new MemoryFileProvider({ [filename]: content });
-    const editor = new PromptEditor(fileProvider);
+    const editor = new PromptEditor(fileProvider, () => Promise.resolve(knownProviders));
     const parser = await PromptParser.create([[filename, content]]);
     return { filePath: filename, fileProvider, editor, parser };
   }
@@ -131,7 +132,7 @@ export function test() {
     system: 'Test'
   };
 }
-`);
+`, '/virtual/test.prompt.ts', { openai: { name: 'OpenAI', models: [], importPath: '@ai-sdk/openai' } });
     const prompts = parser.parseFile(filePath);
 
     await editor.updateProperty(filePath, prompts[0].properties.model, {

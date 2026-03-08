@@ -49,6 +49,19 @@ export function setupRoutes(
     }
   );
 
+  // GET /api/providers/:providerId/models
+  fastify.get<{ Params: { providerId: string } }>(
+    '/api/providers/:providerId/models',
+    async (request, reply) => {
+      const { providerId } = request.params;
+      const provider = providers.get(providerId);
+      if (!provider) {
+        return reply.code(404).send({ error: 'Provider not found' });
+      }
+      return (await provider.getModelCatalog?.()) ?? { providers: {}, popularModels: [] };
+    }
+  );
+
   // GET /api/providers/:providerId/model-parameters
   fastify.get<{ Params: { providerId: string } }>(
     '/api/providers/:providerId/model-parameters',

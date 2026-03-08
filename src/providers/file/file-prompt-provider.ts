@@ -86,7 +86,7 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
     ignorePatterns = DEFAULT_IGNORE_PATTERNS,
     sdk = new VercelAISDK(),
   }: FilePromptProviderOptions = {}) {
-    fileType ??= new TSPromptFileType(fileProvider);
+    fileType ??= new TSPromptFileType(fileProvider, () => sdk.getModelCatalog().then(c => c.providers));
     this.id = id;
     this.rootDir = rootDir;
     this.fileProvider = fileProvider;
@@ -146,6 +146,10 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
     // Re-scan and re-parse to get updated prompt
     await this.refresh();
     return (await this.getPrompt(promptId))!;
+  }
+
+  getModelCatalog() {
+    return this.sdkAdapter.getModelCatalog();
   }
 
   getModelParameters() {

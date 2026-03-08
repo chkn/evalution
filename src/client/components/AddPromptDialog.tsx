@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import type { ProviderInfo, AddPromptContext, ParsedPrompt } from '../../shared/types';
-import { getProviders, addPrompt } from '../api';
+import type { PromptProviderInfo, AddPromptContext, ParsedPrompt } from '../../shared/types';
+import { getPromptProviders, addPrompt } from '../api';
 
 interface AddPromptDialogProps {
   onClose: () => void;
@@ -9,7 +9,7 @@ interface AddPromptDialogProps {
 
 type Step =
   | { type: 'loading' }
-  | { type: 'pick-provider'; providers: ProviderInfo[] }
+  | { type: 'pick-provider'; providers: PromptProviderInfo[] }
   | { type: 'form'; providerId: string; context: AddPromptContext }
   | { type: 'submitting' };
 
@@ -19,7 +19,7 @@ function AddPromptDialog({ onClose, onCreated }: AddPromptDialogProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getProviders().then(providers => {
+    getPromptProviders().then(providers => {
       const addable = providers.filter(p => p.hasAddPrompt);
       if (addable.length === 0) {
         setError('No providers support adding prompts');

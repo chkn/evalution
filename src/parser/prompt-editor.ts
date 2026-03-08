@@ -1,13 +1,14 @@
 import ts from 'typescript';
-import type { PromptProperty, ModelValue, SourceSpan } from '../shared/types.ts';
-import { KNOWN_PROVIDERS } from '../shared/constants.ts';
+import type { ModelProviderInfo, PromptProperty, ModelValue, SourceSpan } from '../shared/types.ts';
 import type { FileProvider } from '../providers/file/file-provider.ts';
 
 export class PromptEditor {
   private fileProvider: FileProvider;
+  private getKnownProviders: () => Promise<Record<string, ModelProviderInfo>>;
 
-  constructor(fileProvider: FileProvider) {
+  constructor(fileProvider: FileProvider, getKnownProviders: () => Promise<Record<string, ModelProviderInfo>> = () => Promise.resolve({})) {
     this.fileProvider = fileProvider;
+    this.getKnownProviders = getKnownProviders;
   }
 
   async updateProperty(filePath: string, property: PromptProperty, newValue: any): Promise<void> {
@@ -258,7 +259,8 @@ export class PromptEditor {
   }
 
   private async ensureImport(filePath: string, provider: string, sourceCode: string): Promise<string> {
-    const providerInfo = KNOWN_PROVIDERS[provider as keyof typeof KNOWN_PROVIDERS];
+    const knownProviders = await this.getKnownProviders();
+    const providerInfo = knownProviders[provider];
     if (!providerInfo) {
       return sourceCode; // Unknown provider, skip import management
     }

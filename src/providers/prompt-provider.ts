@@ -1,4 +1,4 @@
-import type { ParsedPrompt, ModelParameterInfo, AddPromptContext } from '../shared/types.ts';
+import type { ParsedPrompt, ModelInfo, ModelParameterInfo, AddPromptContext, ModelCatalog } from '../shared/types.ts';
 
 /** The kind of change that occurred to a prompt. */
 export type ChangeEventType = 'change' | 'add' | 'remove';
@@ -67,6 +67,14 @@ export interface PromptProvider<TParsedPrompt extends ParsedPrompt = ParsedPromp
    * @param stream - When `true`, the return value is an async text iterator.
    */
   execute(promptId: string, params: any[], stream: boolean): Promise<any>;
+
+  /**
+   * Returns the model catalog (known providers and popular models) for this
+   * provider's underlying SDK.
+   *
+   * Optional — providers that do not expose model info may omit it.
+   */
+  getModelCatalog?(): Promise<ModelCatalog>;
 
   /**
    * Returns the list of editable model parameters exposed by this provider's

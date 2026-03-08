@@ -1,4 +1,4 @@
-import type { ParsedPrompt, ModelParameterInfo, ProviderInfo, AddPromptContext } from '../shared/types';
+import type { ParsedPrompt, ModelInfo, ModelParameterInfo, AddPromptContext, PromptProviderInfo, ModelCatalog } from '../shared/types';
 import { encodePromptId } from './utils';
 
 export interface ExecuteResult {
@@ -18,7 +18,7 @@ async function throwIfError(res: Response): Promise<void> {
   }
 }
 
-export async function getProviders(): Promise<ProviderInfo[]> {
+export async function getPromptProviders(): Promise<PromptProviderInfo[]> {
   const res = await fetch('/api/providers');
   await throwIfError(res);
   return res.json();
@@ -39,6 +39,12 @@ export async function addPrompt(
 
 export async function getPrompts(): Promise<ParsedPrompt[]> {
   const res = await fetch('/api/prompts');
+  await throwIfError(res);
+  return res.json();
+}
+
+export async function getModelCatalog(providerId: string): Promise<ModelCatalog> {
+  const res = await fetch(`/api/providers/${providerId}/models`);
   await throwIfError(res);
   return res.json();
 }

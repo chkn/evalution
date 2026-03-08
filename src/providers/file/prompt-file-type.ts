@@ -1,4 +1,4 @@
-import type { PromptProperty } from '../../shared/types.ts';
+import type { ModelProviderInfo, PromptProperty } from '../../shared/types.ts';
 import { PromptParser, type ParsedFilePrompt } from '../../parser/prompt-parser.ts';
 import { PromptEditor } from '../../parser/prompt-editor.ts';
 import { LocalFileProvider, type FileProvider } from './file-provider.ts';
@@ -115,9 +115,9 @@ export class TSPromptFileType implements PromptFileType {
   private editor: PromptEditor;
   private fileProvider: FileProvider;
 
-  constructor(fileProvider: FileProvider = new LocalFileProvider()) {
+  constructor(fileProvider: FileProvider = new LocalFileProvider(), getKnownProviders: () => Promise<Record<string, ModelProviderInfo>> = () => Promise.resolve({})) {
     this.fileProvider = fileProvider;
-    this.editor = new PromptEditor(fileProvider);
+    this.editor = new PromptEditor(fileProvider, getKnownProviders);
   }
 
   createParser(files: string[], rootDir: string): Promise<PromptFileParser> {

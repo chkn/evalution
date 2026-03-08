@@ -2,7 +2,7 @@ import ts from 'typescript';
 import fs from 'fs';
 import path from 'path';
 import { generateText, streamText } from 'ai';
-import type { ModelParameterInfo } from '../shared/types.ts';
+import type { ModelCatalog, ModelInfo, ModelParameterInfo } from '../shared/types.ts';
 
 /**
  * Adapter that bridges a prompt config object produced by a
@@ -13,6 +13,12 @@ import type { ModelParameterInfo } from '../shared/types.ts';
  * `sdk` option.
  */
 export interface SDKAdapter {
+  /**
+   * Returns model catalog information: the set of known providers and a
+   * curated list of popular models for this SDK.
+   */
+  getModelCatalog(): Promise<ModelCatalog>;
+
   /**
    * Returns the list of model parameters that can be edited in the playground
    * UI for projects rooted at `rootDir`. Typically extracted from the SDK's
@@ -130,6 +136,39 @@ export function extractTypeMembers(dtsPath: string, typeName: string): ModelPara
  * - `executeConfig` delegates to `generateText` or `streamText`.
  */
 export class VercelAISDK implements SDKAdapter {
+  getModelCatalog(): Promise<ModelCatalog> {
+    return Promise.resolve({
+      providers: {
+        openai: {
+          name: 'OpenAI',
+          models: [
+            { id: 'gpt-4o', label: 'GPT-4o' },
+            { id: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+          ],
+          importPath: '@ai-sdk/openai',
+        },
+        anthropic: {
+          name: 'Anthropic',
+          models: [
+            { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
+            { id: 'claude-opus-4', label: 'Claude Opus 4' },
+            { id: 'claude-haiku-4', label: 'Claude Haiku 4' }
+          ],
+          importPath: '@ai-sdk/anthropic',
+        },
+        google: {
+          name: 'Google',
+          models: [
+            { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+            { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+            { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' }
+          ],
+          importPath: '@ai-sdk/google',
+        },
+      },
+    });
+  }
+
   getModelParameters(rootDir: string): ModelParameterInfo[] {
     const dtsPath = findPackageDts('ai', 'dist/index.d.ts', rootDir);
     if (!dtsPath) return [];
