@@ -77,6 +77,8 @@ function App() {
   const [showAddPrompt, setShowAddPrompt] = useState(false);
   const [sectionVisible, setSectionVisible] = useState(true);
   const [dropPaneId, setDropPaneId] = useState<string | null>(null);
+  const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
+  const dirtyTabsRef = useRef<Set<string>>(new Set());
 
   const sidebar   = useResizable({ initial: { w: 224 }, min: 120, max: 600, storageKey: 'sidebar-width' });
   const paneResize = useResizable({ initial: {}, min: 150, storageKey: 'pane-widths' });
@@ -109,6 +111,26 @@ function App() {
     }));
   }, [prompts, loading]);
 
+  const handleDirtyChange = useCallback((key: string, dirty: boolean) => {
+    setDirtyTabs(prev => {
+      const next = new Set(prev);
+      dirty ? next.add(key) : next.delete(key);
+      dirtyTabsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (dirtyTabsRef.current.size > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
+
   // ── Pane operations ──────────────────────────────────────────────────────────
 
   const handleSelectPrompt = (id: string) => {
@@ -123,6 +145,7 @@ function App() {
 
   const handleCloseTab = (paneId: string, key: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    handleDirtyChange(key, false);
     setPanes(prev => {
       const pane = prev.find(p => p.id === paneId)!;
       const next = pane.tabs.filter(t => tabKey(t) !== key);
@@ -268,7 +291,9 @@ function App() {
                           >
                             <span className="tab-icon"><PromptTabIcon /></span>
                             <span className="tab-label">{name}</span>
-                            <span className="tab-close" onClick={e => handleCloseTab(pane.id, key, e)}>×</span>
+                            {dirtyTabs.has(key)
+                              ? <span className="tab-dirty">●</span>
+                              : <span className="tab-close" onClick={e => handleCloseTab(pane.id, key, e)}>×</span>}
                           </button>
                         );
                       })}
@@ -344,7 +369,7 @@ function App() {
                       return (
                         <div key={key} style={key === pane.activeTabKey ? { display: 'contents' } : { display: 'none' }}>
                           <div className="pg-content">
-                            <PlaygroundEditor prompt={prompt} onUpdate={patchPrompt} />
+                            <PlaygroundEditor prompt={prompt} onUpdate={patchPrompt} onDirtyChange={dirty => handleDirtyChange(key, dirty)} />
                             <PlaygroundExecution prompt={prompt} />
                           </div>
                         </div>

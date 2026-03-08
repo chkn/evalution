@@ -6,6 +6,7 @@ import TokenEditor from './TokenEditor';
 interface Props {
   prompt: ParsedPrompt;
   onUpdate: (updated: ParsedPrompt) => void;
+  onDirtyChange: (dirty: boolean) => void;
 }
 
 interface ToolCallEntry {
@@ -297,9 +298,11 @@ function ParamCard({ name, prop, description, onDelete, onChange }: {
 
 const EMPTY_MODEL_CATALOG: ModelCatalog = { providers: {} };
 
-function PlaygroundEditor({ prompt, onUpdate }: Props) {
+function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => { onDirtyChange(saving); }, [saving]);
   const [localMessages, setLocalMessages] = useState<Msg[]>(
     Array.isArray(prompt.properties.messages?.value) ? prompt.properties.messages.value : []
   );
@@ -361,7 +364,6 @@ function PlaygroundEditor({ prompt, onUpdate }: Props) {
 
   return (
     <div className="pg-editor">
-      <div className={`pg-status-bar${saving ? ' visible' : ''}`}>Saving…</div>
       {error && (
         <div className="pg-error-bar">
           {error}
