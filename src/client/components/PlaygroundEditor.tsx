@@ -336,11 +336,17 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   };
 
   const msgSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const systemSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleMessagesChange = (msgs: Msg[]) => {
     setLocalMessages(msgs);
     if (msgSaveTimer.current) clearTimeout(msgSaveTimer.current);
     msgSaveTimer.current = setTimeout(() => handleUpdate('messages', msgs), 600);
+  };
+
+  const handleSystemChange = (v: string) => {
+    if (systemSaveTimer.current) clearTimeout(systemSaveTimer.current);
+    systemSaveTimer.current = setTimeout(() => handleUpdate('system', v), 600);
   };
 
   const handleAddMessage = () => {
@@ -419,7 +425,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
           <SystemCard
             content={systemValue}
             isEditable={systemEditable}
-            onChange={v => handleUpdate('system', v)}
+            onChange={handleSystemChange}
           />
           {localMessages.map((msg, i) => (
             <MessageCard

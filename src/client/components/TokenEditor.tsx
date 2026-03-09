@@ -172,7 +172,7 @@ export function TokenEditor({ value, onChange, onBlur, placeholder, className, r
   useEffect(() => {
     if (value !== lastExternal.current && editorRef.current) {
       lastExternal.current = value;
-      renderValue(value, false);
+      renderValue(value, true);
     }
   }, [value]);
 

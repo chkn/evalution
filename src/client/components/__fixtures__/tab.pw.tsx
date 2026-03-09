@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/experimental-ct-react';
-import { Tab } from './Tab';
+import { Tab } from '../Tab';
 
 const noop = () => {};
 
