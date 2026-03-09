@@ -7,6 +7,7 @@ import PromptList from './components/PromptList';
 import AddPromptDialog from './components/AddPromptDialog';
 import PlaygroundEditor from './components/PlaygroundEditor';
 import PlaygroundExecution from './components/PlaygroundExecution';
+import { Tab } from './components/Tab';
 
 // ─── Tab / Pane model ─────────────────────────────────────────────────────────
 
@@ -46,15 +47,6 @@ function PromptsIcon() {
   );
 }
 
-function PromptTabIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-         stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-      <polyline points="14 2 14 8 20 8"/>
-    </svg>
-  );
-}
 
 function SplitIcon() {
   return (
@@ -281,20 +273,16 @@ function App() {
                         const key = tabKey(tab);
                         const name = tab.type === 'prompt' ? (prompts.find(p => p.id === tab.promptId)?.name ?? tab.promptId) : key;
                         return (
-                          <button
+                          <Tab
                             key={key}
-                            className={`tab ${key === pane.activeTabKey ? 'tab-active' : ''}`}
-                            draggable
+                            name={name}
+                            active={key === pane.activeTabKey}
+                            dirty={dirtyTabs.has(key)}
+                            onClick={() => { setFocusedPaneId(pane.id); setPanes(prev => prev.map(p => p.id === pane.id ? { ...p, activeTabKey: key } : p)); }}
+                            onClose={e => handleCloseTab(pane.id, key, e)}
                             onDragStart={() => { dragTabRef.current = { paneId: pane.id, key }; }}
                             onDragEnd={() => { dragTabRef.current = null; }}
-                            onClick={e => { e.stopPropagation(); setFocusedPaneId(pane.id); setPanes(prev => prev.map(p => p.id === pane.id ? { ...p, activeTabKey: key } : p)); }}
-                          >
-                            <span className="tab-icon"><PromptTabIcon /></span>
-                            <span className="tab-label">{name}</span>
-                            {dirtyTabs.has(key)
-                              ? <span className="tab-dirty">●</span>
-                              : <span className="tab-close" onClick={e => handleCloseTab(pane.id, key, e)}>×</span>}
-                          </button>
+                          />
                         );
                       })}
                     </div>
