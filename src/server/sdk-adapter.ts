@@ -138,6 +138,10 @@ export function extractTypeMembers(dtsPath: string, typeName: string): ModelPara
 export class VercelAISDK implements SDKAdapter {
   getModelCatalog(): Promise<ModelCatalog> {
     return Promise.resolve({
+      modes: [
+        { key: 'function' as const, label: 'Provider', description: 'Import and call provider SDK (e.g. openai("gpt-4o"))' },
+        { key: 'string' as const, label: 'Gateway', description: 'Use a gateway model string (e.g. "openai/gpt-4o")' },
+      ],
       providers: {
         openai: {
           name: 'OpenAI',

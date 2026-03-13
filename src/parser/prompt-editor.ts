@@ -266,6 +266,9 @@ export class PromptEditor {
     }
 
     const importPath = providerInfo.importPath;
+    if (!importPath) {
+      return sourceCode; // No import path specified, skip import management
+    }
     const importStatement = `import { ${provider} } from '${importPath}';`;
 
     // Check if import already exists

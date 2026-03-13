@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import type { ModelInfo, ParsedPrompt, PromptProperty, ModelParameterInfo, ModelCatalog } from '../../shared/types';
+import type { ParsedPrompt, PromptProperty, ModelParameterInfo, ModelCatalog } from '../../shared/types';
 import { getModelCatalog, getModelParameters, updatePromptProperties  } from '../api';
 import TokenEditor from './TokenEditor';
+import ModelPicker from './ModelPicker';
 
 interface Props {
   prompt: ParsedPrompt;
@@ -59,61 +60,6 @@ function ChevronDown({ size = 12 }: { size?: number }) {
       style={{ flexShrink: 0, pointerEvents: 'none', color: '#9ca3af' }}>
       <path d="M2.5 4.5L6 8L9.5 4.5" />
     </svg>
-  );
-}
-
-// ─── ModelCard ────────────────────────────────────────────────────────────────
-
-const PROVIDER_COLORS: Record<string, string> = {
-  openai: '#10a37f',
-  anthropic: '#d97706',
-  google: '#4285f4',
-};
-
-function ModelCard({ value, onChange, modelCatalog }: { value: any; onChange: (v: any) => void; modelCatalog: ModelCatalog }) {
-  let provider = 'openai';
-  let model = 'gpt-4o';
-  if (typeof value === 'object' && value?.type === 'function') {
-    provider = value.provider ?? 'openai';
-    model = value.model ?? 'gpt-4o';
-  } else if (typeof value === 'string') {
-    const idx = value.indexOf('/');
-    if (idx >= 0) { provider = value.slice(0, idx); model = value.slice(idx + 1); }
-    else { model = value; }
-  }
-  const currentKey = `${provider}/${model}`;
-  const displayLabel = modelCatalog.providers[provider]?.models
-    .find(m => m.id === model)?.label ?? model;
-
-  const handleChange = (key: string) => {
-    if (typeof value === 'string') onChange(key);
-    const [provider, model] = key.split('/');
-    onChange({ type: 'function', provider, model });
-  };
-
-  const modelCatalogProviders = Object.entries(modelCatalog.providers);
-  return (
-    <div className="pg-panel-card pg-model-card">
-      <span className="pg-provider-dot" style={{ background: PROVIDER_COLORS[provider] ?? '#888' }} />
-      <span className="pg-model-name">{displayLabel}</span>
-      <ChevronDown size={14} />
-      <select
-        className="pg-model-overlay-select"
-        value={currentKey}
-        onChange={e => handleChange(e.target.value)}
-      >
-        {modelCatalogProviders.map(([provider, info]) => (
-          info.models.map(modelInfo => (
-            <option key={`${provider}/${modelInfo.id}`} value={`${provider}/${modelInfo.id}`}>
-              {modelInfo.label}
-            </option>
-          ))
-        ))}
-        {!modelCatalogProviders.some(([provider, p]) => p.models.some(m => `${provider}/${m.id}` === currentKey)) && (
-          <option value={currentKey}>{currentKey}</option>
-        )}
-      </select>
-    </div>
   );
 }
 
@@ -382,7 +328,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
           <span className="pg-panel-title">Model</span>
         </div>
         <div className="pg-panel-body">
-          <ModelCard value={modelValue} onChange={v => handleUpdate('model', v)} modelCatalog={modelCatalog} />
+          <ModelPicker value={modelValue} onChange={v => handleUpdate('model', v)} modelCatalog={modelCatalog} />
           {modelParams.map(([key, prop]) => (
             <ParamCard
               key={key}

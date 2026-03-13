@@ -44,8 +44,11 @@ export interface ParsedPrompt {
   treePath?: string[];
 }
 
+/** How a model reference is represented in source code. */
+export type ModelValueType = 'string' | 'function';
+
 export interface ModelValue {
-  type: 'string' | 'function';
+  type: ModelValueType;
   provider?: string;
   model: string;
   hasParameterTokens?: boolean;
@@ -73,16 +76,32 @@ export interface ModelProviderInfo {
   /** Some of the models available for this provider. */
   models: ModelInfo[];
   /** npm package path used when auto-inserting import statements (e.g. `'@ai-sdk/openai'`). */
-  importPath: string;
+  importPath?: string;
+}
+
+/** Describes a model selection mode exposed by the SDK adapter (e.g. "Provider" or "Gateway"). */
+export interface ModelMode {
+  /** The value type this mode produces (matches `ModelValue.type`). */
+  key: ModelValueType;
+  /** Label shown in the UI toggle (e.g. "Provider", "Gateway"). */
+  label: string;
+  /** Optional tooltip / helper text. */
+  description?: string;
 }
 
 /**
- * Model catalog returned by {@link SDKAdapter.getModelInfo}.
+ * Model catalog returned by {@link SDKAdapter.getModelCatalog}.
  * Contains the set of known providers and a curated list of popular models.
  */
 export interface ModelCatalog {
   /** Map of provider key → provider metadata. */
   providers: Record<string, ModelProviderInfo>;
+  /**
+   * Available model selection modes. When the array has more than one entry
+   * the UI renders a toggle so the user can switch between them.
+   * If omitted the UI defaults to a single "string" mode.
+   */
+  modes?: ModelMode[];
 }
 
 export interface ExecuteRequest {
