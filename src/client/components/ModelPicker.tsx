@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import type { ModelCatalog, ModelValueType } from '../../shared/types';
+import type { ModelCatalog, ModelMode, ModelValue } from '../../shared/types';
 import ProviderIcon from './ProviderIcon';
 
-interface Props {
-  value: any;
-  onChange: (v: any) => void;
-  modelCatalog: ModelCatalog;
+interface Props<Modes extends ModelMode<string>[]> {
+  value: ModelValue<Modes[number]['key']>;
+  onChange: (v: ModelValue<Modes[number]['key']>) => void;
+  modelCatalog: ModelCatalog<Modes>;
 }
 
 function ChevronDown({ size = 12 }: { size?: number }) {
@@ -29,34 +29,7 @@ function CheckIcon({ size = 14 }: { size?: number }) {
   );
 }
 
-/** Parse the incoming model value (string or ModelValue object) into provider + model + mode. */
-function parseValue(value: any): { provider: string; model: string; mode: ModelValueType } {
-  if (typeof value === 'object' && value?.type === 'function') {
-    return { provider: value.provider ?? 'openai', model: value.model ?? '', mode: 'function' };
-  }
-  if (typeof value === 'object' && value?.type === 'string') {
-    const m = value.model ?? '';
-    const idx = m.indexOf('/');
-    if (idx >= 0) return { provider: m.slice(0, idx), model: m.slice(idx + 1), mode: 'string' };
-    return { provider: '', model: m, mode: 'string' };
-  }
-  if (typeof value === 'string') {
-    const idx = value.indexOf('/');
-    if (idx >= 0) return { provider: value.slice(0, idx), model: value.slice(idx + 1), mode: 'string' };
-    return { provider: '', model: value, mode: 'string' };
-  }
-  return { provider: 'openai', model: 'gpt-4o', mode: 'function' };
-}
-
-/** Build a source-code representation string for display. */
-function sourceRepr(provider: string, model: string, mode: ModelValueType): string {
-  if (mode === 'function') {
-    return `${provider}('${model}')`;
-  }
-  return provider ? `${provider}/${model}` : model;
-}
-
-export default function ModelPicker({ value, onChange, modelCatalog }: Props) {
+export default function ModelPicker<Modes extends ModelMode<string>[]>({ value, onChange, modelCatalog }: Props<Modes>) {
   const [open, setOpen] = useState(false);
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
   const [gatewayInput, setGatewayInput] = useState('');
@@ -64,13 +37,12 @@ export default function ModelPicker({ value, onChange, modelCatalog }: Props) {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
 
-  const { provider, model, mode } = parseValue(value);
+  const { provider, model, type: activeMode } = value;
   const modes = modelCatalog.modes ?? [{ key: 'string' as const, label: '' }];
-  const activeMode = mode;
 
   // Look up pretty label
-  const displayLabel = modelCatalog.providers[provider]?.models
-    .find(m => m.id === model)?.label ?? model;
+  const displayLabel = provider ? modelCatalog.providers[provider]?.models
+    .find(m => m.id === model)?.label ?? model : model;
 
   // Position the dropdown portal beneath the trigger
   const updatePosition = useCallback(() => {
@@ -110,33 +82,28 @@ export default function ModelPicker({ value, onChange, modelCatalog }: Props) {
     };
   }, [open, updatePosition]);
 
-  const emitValue = (p: string, m: string, modeKey: ModelValueType, close: boolean = true) => {
-    if (modeKey === 'function') {
-      onChange({ type: 'function', provider: p, model: m });
-    } else {
-      onChange({ type: 'string', model: p ? `${p}/${m}` : m });
-    }
+  const emitValue = (value: ModelValue, close: boolean = true) => {
+    onChange(value);
     if (close) setOpen(false);
   };
 
-  const switchMode = (newMode: ModelValueType) => {
+  const switchMode = (newMode: string) => {
     if (newMode === activeMode) return;
-    emitValue(provider, model, newMode, false);
+    emitValue({ ...value, type: newMode }, false);
   };
 
   const handleCustomSubmit = (providerKey: string) => {
     const val = (customInputs[providerKey] ?? '').trim();
     if (!val) return;
-    emitValue(providerKey, val, activeMode);
+    emitValue({ type: activeMode, provider: providerKey, model: val });
     setCustomInputs(prev => ({ ...prev, [providerKey]: '' }));
   };
 
   const handleGatewaySubmit = () => {
     const val = gatewayInput.trim();
     if (!val) return;
-    onChange({ type: 'string', model: val });
+    emitValue({ type: 'string', model: val });
     setGatewayInput('');
-    setOpen(false);
   };
 
   const providerEntries = Object.entries(modelCatalog.providers);
@@ -171,20 +138,23 @@ export default function ModelPicker({ value, onChange, modelCatalog }: Props) {
             </div>
             {info.models.map(mi => {
               const isSelected = isCurrentProvider && mi.id === model;
+              const modelValue: ModelValue = { type: activeMode, provider: providerKey, model: mi.id };
               return (
                 <button
                   key={mi.id}
                   type="button"
                   className={'pg-model-option' + (isSelected ? ' selected' : '')}
-                  onClick={() => emitValue(providerKey, mi.id, activeMode)}
+                  onClick={() => emitValue(modelValue)}
                 >
                   <span className="pg-model-option-check">
                     {isSelected && <CheckIcon size={13} />}
                   </span>
                   <span className="pg-model-option-label">{mi.label}</span>
-                  <span className="pg-model-option-source">
-                    {sourceRepr(providerKey, mi.id, activeMode)}
-                  </span>
+                  {modelCatalog.modelSourceText && (
+                    <span className="pg-model-option-source">
+                      {modelCatalog.modelSourceText(modelValue)}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -242,7 +212,9 @@ export default function ModelPicker({ value, onChange, modelCatalog }: Props) {
       >
         <ProviderIcon provider={provider} size={20} />
         <span className="pg-model-picker-label">{displayLabel}</span>
-        <span className="pg-model-picker-source">{sourceRepr(provider, model, activeMode)}</span>
+        {modelCatalog.modelSourceText && (
+          <span className="pg-model-picker-source">{modelCatalog.modelSourceText(value)}</span>
+        )}
         <ChevronDown size={14} />
       </button>
       {dropdown}

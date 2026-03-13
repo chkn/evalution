@@ -387,7 +387,7 @@ export class PromptParser {
         if (ts.isIdentifier(firstArg) && paramNames.includes(firstArg.text)) {
           const model = `\${${firstArg.text}}`;
           return {
-            value: { type: 'function', provider, model, hasParameterTokens: true },
+            value: { type: 'function', provider, model },
             isEditable: true,
             hasParameterTokens: true,
           };

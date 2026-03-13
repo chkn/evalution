@@ -2,7 +2,7 @@ import ts from 'typescript';
 import fs from 'fs';
 import path from 'path';
 import { generateText, streamText } from 'ai';
-import type { ModelCatalog, ModelInfo, ModelParameterInfo } from '../shared/types.ts';
+import type { ModelCatalog, ModelMode, ModelParameterInfo, ModelValue } from '../shared/types.ts';
 
 /**
  * Adapter that bridges a prompt config object produced by a
@@ -136,12 +136,26 @@ export function extractTypeMembers(dtsPath: string, typeName: string): ModelPara
  * - `executeConfig` delegates to `generateText` or `streamText`.
  */
 export class VercelAISDK implements SDKAdapter {
-  getModelCatalog(): Promise<ModelCatalog> {
+  getModelCatalog(): Promise<ModelCatalog<[
+    ModelMode<"function">,
+    ModelMode<"string">
+  ]>> {
     return Promise.resolve({
       modes: [
         { key: 'function' as const, label: 'Provider', description: 'Import and call provider SDK (e.g. openai("gpt-4o"))' },
         { key: 'string' as const, label: 'Gateway', description: 'Use a gateway model string (e.g. "openai/gpt-4o")' },
       ],
+      modelSourceText(value): string {
+        switch (value.type) {
+          case 'function':
+            return `${value.provider}(${JSON.stringify(value.model)})`;
+          case 'string':
+            return JSON.stringify(value.provider ? `${value.provider}/${value.model}` : value.model);
+          default:
+            const ty: never = value.type;
+            throw new Error(`Unknown model value type: ${ty}`);
+        }
+      },
       providers: {
         openai: {
           name: 'OpenAI',

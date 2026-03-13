@@ -242,7 +242,7 @@ function ParamCard({ name, prop, description, onDelete, onChange }: {
 
 // ─── PlaygroundEditor ─────────────────────────────────────────────────────────
 
-const EMPTY_MODEL_CATALOG: ModelCatalog = { providers: {} };
+const EMPTY_MODEL_CATALOG: ModelCatalog = { modes: [], providers: {} };
 
 function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   const [saving, setSaving] = useState(false);

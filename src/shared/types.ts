@@ -44,14 +44,10 @@ export interface ParsedPrompt {
   treePath?: string[];
 }
 
-/** How a model reference is represented in source code. */
-export type ModelValueType = 'string' | 'function';
-
-export interface ModelValue {
-  type: ModelValueType;
+export interface ModelValue<Type extends string = string> {
+  type: Type;
   provider?: string;
   model: string;
-  hasParameterTokens?: boolean;
 }
 
 export interface ModelParameterInfo {
@@ -80,9 +76,9 @@ export interface ModelProviderInfo {
 }
 
 /** Describes a model selection mode exposed by the SDK adapter (e.g. "Provider" or "Gateway"). */
-export interface ModelMode {
-  /** The value type this mode produces (matches `ModelValue.type`). */
-  key: ModelValueType;
+export interface ModelMode<Type extends string> {
+  /** The value type this mode produces (matches {@link ModelValue.type}). */
+  key: Type;
   /** Label shown in the UI toggle (e.g. "Provider", "Gateway"). */
   label: string;
   /** Optional tooltip / helper text. */
@@ -91,17 +87,23 @@ export interface ModelMode {
 
 /**
  * Model catalog returned by {@link SDKAdapter.getModelCatalog}.
- * Contains the set of known providers and a curated list of popular models.
+ * Contains the set of known providers and a curated list of models.
  */
-export interface ModelCatalog {
-  /** Map of provider key → provider metadata. */
+export interface ModelCatalog<Modes extends ModelMode<string>[] = ModelMode<string>[]> {
+  /** Map of provider key → provider metadata for list of known models. */
   providers: Record<string, ModelProviderInfo>;
+
   /**
    * Available model selection modes. When the array has more than one entry
    * the UI renders a toggle so the user can switch between them.
-   * If omitted the UI defaults to a single "string" mode.
    */
-  modes?: ModelMode[];
+  modes: Modes;
+
+  /**
+   * Returns the source representation of a model value.
+   * If not provided, the source text will not be shown in the UI.
+   */
+  modelSourceText?(value: ModelValue<Modes[number]['key']>): string;
 }
 
 export interface ExecuteRequest {

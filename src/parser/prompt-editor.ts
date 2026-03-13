@@ -1,14 +1,14 @@
 import ts from 'typescript';
-import type { ModelProviderInfo, PromptProperty, ModelValue, SourceSpan } from '../shared/types.ts';
+import type { ModelCatalog, PromptProperty, ModelValue, SourceSpan } from '../shared/types.ts';
 import type { FileProvider } from '../providers/file/file-provider.ts';
 
 export class PromptEditor {
   private fileProvider: FileProvider;
-  private getKnownProviders: () => Promise<Record<string, ModelProviderInfo>>;
+  private getModelCatalog: () => Promise<ModelCatalog>;
 
-  constructor(fileProvider: FileProvider, getKnownProviders: () => Promise<Record<string, ModelProviderInfo>> = () => Promise.resolve({})) {
+  constructor(fileProvider: FileProvider, getModelCatalog: () => Promise<ModelCatalog>) {
     this.fileProvider = fileProvider;
-    this.getKnownProviders = getKnownProviders;
+    this.getModelCatalog = getModelCatalog;
   }
 
   async updateProperty(filePath: string, property: PromptProperty, newValue: any): Promise<void> {
@@ -23,9 +23,13 @@ export class PromptEditor {
     // Read source file
     let sourceCode = await this.fileProvider.readFile(filePath);
 
-    // For model property with function format, ensure import first
-    if (property.name === 'model' && typeof newValue === 'object' && newValue.type === 'function') {
-      sourceCode = await this.ensureImport(filePath, newValue.provider, sourceCode);
+    // For model property, fetch catalog once (needed for import management and serialization)
+    let catalog: ModelCatalog | undefined;
+    if (property.name === 'model') {
+      catalog = await this.getModelCatalog();
+      if (typeof newValue === 'object' && newValue.type === 'function') {
+        sourceCode = await this.ensureImport(filePath, newValue.provider, sourceCode, catalog);
+      }
     }
 
     // Re-parse the current file to get the live span — guards against stale spans
@@ -36,7 +40,7 @@ export class PromptEditor {
       : null) ?? property.valueSpan;
 
     // Convert new value to TypeScript source text
-    const newSourceText = this.valueToSourceText(newValue, property.name);
+    const newSourceText = this.valueToSourceText(newValue, property.name, catalog);
 
     // Replace character range
     const before = sourceCode.substring(0, valueSpan.start);
@@ -99,7 +103,8 @@ export class PromptEditor {
     const obj = this.findReturnObject(sourceFile, functionName);
     if (!obj) throw new Error(`Return object not found in function '${functionName}'`);
 
-    const valueText = this.valueToSourceText(value, propertyName);
+    const catalog = propertyName === 'model' ? await this.getModelCatalog() : undefined;
+    const valueText = this.valueToSourceText(value, propertyName, catalog);
 
     // Derive indentation from the first existing property, defaulting to 4 spaces
     let indent = '    ';
@@ -195,10 +200,11 @@ export class PromptEditor {
     return returnObj;
   }
 
-  private valueToSourceText(value: any, propertyName: string): string {
+  private valueToSourceText(value: any, propertyName: string, catalog?: ModelCatalog): string {
     // Handle model property specially
     if (propertyName === 'model') {
-      return this.modelToSourceText(value);
+      if (typeof value === 'string' || !(catalog?.modelSourceText)) return JSON.stringify(value);
+      return catalog.modelSourceText(value);
     }
 
     // Handle strings
@@ -232,35 +238,8 @@ export class PromptEditor {
     throw new Error(`Unsupported value type for property '${propertyName}'`);
   }
 
-  private modelToSourceText(value: any): string {
-    // String format: 'openai/gpt-4o'
-    if (typeof value === 'string') {
-      return JSON.stringify(value);
-    }
-
-    // ModelValue object
-    if (typeof value === 'object' && value !== null) {
-      const modelValue = value as ModelValue;
-
-      if (modelValue.type === 'string') {
-        return JSON.stringify(modelValue.model);
-      }
-
-      if (modelValue.type === 'function') {
-        const provider = modelValue.provider!;
-        const model = modelValue.model;
-
-        // Return function call format (import is handled separately)
-        return `${provider}(${JSON.stringify(model)})`;
-      }
-    }
-
-    throw new Error('Invalid model value format');
-  }
-
-  private async ensureImport(filePath: string, provider: string, sourceCode: string): Promise<string> {
-    const knownProviders = await this.getKnownProviders();
-    const providerInfo = knownProviders[provider];
+  private async ensureImport(filePath: string, provider: string, sourceCode: string, catalog: ModelCatalog): Promise<string> {
+    const providerInfo = catalog.providers[provider];
     if (!providerInfo) {
       return sourceCode; // Unknown provider, skip import management
     }

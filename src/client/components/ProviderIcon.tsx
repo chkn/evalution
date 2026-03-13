@@ -33,8 +33,8 @@ function GoogleIcon({ size }: { size: number }) {
   );
 }
 
-function FallbackIcon({ provider, size }: { provider: string; size: number }) {
-  const letter = provider.charAt(0).toUpperCase();
+function FallbackIcon({ provider, size }: { provider?: string; size: number }) {
+  const letter = provider?.charAt(0).toUpperCase() ?? '';
   return (
     <svg width={size} height={size} viewBox="0 0 24 24">
       <circle cx="12" cy="12" r="11" fill="#888" />
@@ -49,8 +49,8 @@ const ICON_COMPONENTS: Record<string, (props: { size: number }) => JSX.Element> 
   google: GoogleIcon,
 };
 
-export default function ProviderIcon({ provider, size = 24 }: { provider: string; size?: number }) {
-  const Icon = ICON_COMPONENTS[provider];
+export default function ProviderIcon({ provider, size = 24 }: { provider?: string; size?: number }) {
+  const Icon = provider ? ICON_COMPONENTS[provider] : undefined;
   if (Icon) return <Icon size={size} />;
   return <FallbackIcon provider={provider} size={size} />;
 }
