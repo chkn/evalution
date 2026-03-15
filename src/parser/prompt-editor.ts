@@ -1,14 +1,15 @@
 import ts from 'typescript';
 import type { ModelCatalog, PromptProperty, ModelValue, SourceSpan } from '../shared/types.ts';
 import type { FileProvider } from '../providers/file/file-provider.ts';
+import type { SDKAdapter } from '../server/sdk-adapter.ts';
 
 export class PromptEditor {
   private fileProvider: FileProvider;
-  private getModelCatalog: () => Promise<ModelCatalog>;
+  private sdk: SDKAdapter;
 
-  constructor(fileProvider: FileProvider, getModelCatalog: () => Promise<ModelCatalog>) {
+  constructor(fileProvider: FileProvider, sdk: SDKAdapter) {
     this.fileProvider = fileProvider;
-    this.getModelCatalog = getModelCatalog;
+    this.sdk = sdk;
   }
 
   async updateProperty(filePath: string, property: PromptProperty, newValue: any): Promise<void> {
@@ -23,13 +24,10 @@ export class PromptEditor {
     // Read source file
     let sourceCode = await this.fileProvider.readFile(filePath);
 
-    // For model property, fetch catalog once (needed for import management and serialization)
-    let catalog: ModelCatalog | undefined;
-    if (property.name === 'model') {
-      catalog = await this.getModelCatalog();
-      if (typeof newValue === 'object' && newValue.type === 'function') {
-        sourceCode = await this.ensureImport(filePath, newValue.provider, sourceCode, catalog);
-      }
+    // For model property with function format, ensure the provider import exists
+    if (property.name === 'model' && typeof newValue === 'object' && newValue.type === 'function') {
+      const catalog = await this.sdk.getModelCatalog();
+      sourceCode = await this.ensureImport(filePath, newValue.provider, sourceCode, catalog);
     }
 
     // Re-parse the current file to get the live span — guards against stale spans
@@ -40,7 +38,7 @@ export class PromptEditor {
       : null) ?? property.valueSpan;
 
     // Convert new value to TypeScript source text
-    const newSourceText = this.valueToSourceText(newValue, property.name, catalog);
+    const newSourceText = await this.valueToSourceText(newValue, property.name);
 
     // Replace character range
     const before = sourceCode.substring(0, valueSpan.start);
@@ -103,8 +101,7 @@ export class PromptEditor {
     const obj = this.findReturnObject(sourceFile, functionName);
     if (!obj) throw new Error(`Return object not found in function '${functionName}'`);
 
-    const catalog = propertyName === 'model' ? await this.getModelCatalog() : undefined;
-    const valueText = this.valueToSourceText(value, propertyName, catalog);
+    const valueText = await this.valueToSourceText(value, propertyName);
 
     // Derive indentation from the first existing property, defaulting to 4 spaces
     let indent = '    ';
@@ -200,11 +197,11 @@ export class PromptEditor {
     return returnObj;
   }
 
-  private valueToSourceText(value: any, propertyName: string, catalog?: ModelCatalog): string {
+  private async valueToSourceText(value: any, propertyName: string): Promise<string> {
     // Handle model property specially
     if (propertyName === 'model') {
-      if (typeof value === 'string' || !(catalog?.modelSourceText)) return JSON.stringify(value);
-      return catalog.modelSourceText(value);
+      if (typeof value === 'string') return JSON.stringify(value);
+      return this.sdk.getModelSourceText(value as ModelValue);
     }
 
     // Handle strings

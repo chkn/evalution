@@ -58,7 +58,7 @@ export function setupRoutes(
       if (!provider) {
         return reply.code(404).send({ error: 'Provider not found' });
       }
-      return (await provider.getModelCatalog?.()) ?? { providers: {}, popularModels: [] };
+      return (await provider.getModelCatalog?.()) ?? { providers: {} };
     }
   );
 

@@ -91,6 +91,27 @@ export function myPrompt() {
     expect(fileContent).toContain('"New value"');
   });
 
+  it('should return updated sourceText on model property after mode switch', async () => {
+    const filePath = path.join(tempDir, 'test.prompt.ts');
+    await fs.writeFile(filePath, `
+import { openai } from '@ai-sdk/openai';
+
+export function myPrompt() {
+  return {
+    model: openai('gpt-4o'),
+    system: 'Test'
+  };
+}
+`);
+
+    const promptId = `${filePath}#myPrompt`;
+    const updatedPrompt = await provider.updatePromptProperties(promptId, {
+      model: { type: 'string', provider: 'openai', model: 'gpt-4o' },
+    });
+
+    expect(updatedPrompt.properties.model.sourceText).toBe('"openai/gpt-4o"');
+  });
+
   it('should throw error for read-only property', async () => {
     const filePath = path.join(tempDir, 'test.prompt.ts');
     await fs.writeFile(filePath, `

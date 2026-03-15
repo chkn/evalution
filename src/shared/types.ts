@@ -9,9 +9,9 @@ export interface FunctionParameter {
   defaultValue?: any;
 }
 
-export interface PromptProperty {
+export interface PromptProperty<Value = any> {
   name: string;
-  value: any;
+  value: Value;
   isEditable: boolean;
   hasParameterTokens: boolean;
   sourceText?: string;
@@ -99,11 +99,6 @@ export interface ModelCatalog<Modes extends ModelMode<string>[] = ModelMode<stri
    */
   modes: Modes;
 
-  /**
-   * Returns the source representation of a model value.
-   * If not provided, the source text will not be shown in the UI.
-   */
-  modelSourceText?(value: ModelValue<Modes[number]['key']>): string;
 }
 
 export interface ExecuteRequest {

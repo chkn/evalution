@@ -2,33 +2,26 @@ import { describe, it, expect } from 'vitest';
 import { PromptEditor } from './prompt-editor.ts';
 import { PromptParser } from './prompt-parser.ts';
 import { MemoryFileProvider } from '../providers/file/file-provider.ts';
-import type { ModelCatalog, ModelMode, ModelProviderInfo, ModelValue } from '../shared/types.ts';
+import type { ModelProviderInfo, ModelValue } from '../shared/types.ts';
+import type { SDKAdapter } from '../server/sdk-adapter.ts';
 
-function makeCatalog(providers: Record<string, ModelProviderInfo> = {}): ModelCatalog<[ModelMode<'function'>, ModelMode<'string'>]> {
+function makeSdk(providers: Record<string, ModelProviderInfo> = {}): SDKAdapter {
   return {
-    modes: [
-      { key: 'function' as const, label: 'Function', description: '' },
-      { key: 'string' as const, label: 'String', description: '' },
-    ],
-    providers,
-    modelSourceText(value): string {
-      switch (value.type) {
-        case 'function':
-          return `${value.provider}(${JSON.stringify(value.model)})`;
-        case 'string':
-          return JSON.stringify(`${value.provider}/${value.model}`);
-        default:
-          const ty: never = value.type;
-          throw new Error(`Unknown model value type: ${ty}`);
-      }
-    }
+    getModelCatalog: () => Promise.resolve({ providers, modes: [] }),
+    getModelSourceText: (value: ModelValue) => {
+      if (value.type === 'function') return Promise.resolve(`${value.provider}(${JSON.stringify(value.model)})`);
+      const m = value.provider ? `${value.provider}/${value.model}` : value.model;
+      return Promise.resolve(JSON.stringify(m));
+    },
+    getModelParameters: () => [],
+    executeConfig: async () => {},
   };
 }
 
 describe('PromptEditor', () => {
   async function setup(content: string, filename = '/virtual/test.prompt.ts', providers: Record<string, ModelProviderInfo> = {}) {
     const fileProvider = new MemoryFileProvider({ [filename]: content });
-    const editor = new PromptEditor(fileProvider, () => Promise.resolve(makeCatalog(providers)));
+    const editor = new PromptEditor(fileProvider, makeSdk(providers));
     const parser = await PromptParser.create([[filename, content]]);
     return { filePath: filename, fileProvider, editor, parser };
   }

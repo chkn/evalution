@@ -1,22 +1,8 @@
-import type { ModelCatalog, PromptProperty } from '../../shared/types.ts';
-import { PromptParser, type ParsedFilePrompt } from '../../parser/prompt-parser.ts';
+import type { PromptProperty } from '../../shared/types.ts';
+import type { SDKAdapter } from '../../server/sdk-adapter.ts';
+import { PromptParser, type PromptFileParser } from '../../parser/prompt-parser.ts';
 import { PromptEditor } from '../../parser/prompt-editor.ts';
 import { LocalFileProvider, type FileProvider } from './file-provider.ts';
-
-/**
- * Read-only view of a parsed prompt tree, obtained via
- * {@link PromptFileType.createParser}.
- */
-export interface PromptFileParser {
-  /** Parses every file known to this parser and returns all discovered prompts. */
-  parseAll(): ParsedFilePrompt[];
-
-  /**
-   * Parses a single file and returns the prompts it defines.
-   * @param filePath - Absolute path to the file to parse.
-   */
-  parseFile(filePath: string): ParsedFilePrompt[];
-}
 
 /**
  * Strategy object that knows how to parse, edit, and execute a specific
@@ -115,9 +101,9 @@ export class TSPromptFileType implements PromptFileType {
   private editor: PromptEditor;
   private fileProvider: FileProvider;
 
-  constructor(fileProvider: FileProvider = new LocalFileProvider(), getModelCatalog: () => Promise<ModelCatalog>) {
+  constructor(fileProvider: FileProvider = new LocalFileProvider(), sdk: SDKAdapter) {
     this.fileProvider = fileProvider;
-    this.editor = new PromptEditor(fileProvider, getModelCatalog);
+    this.editor = new PromptEditor(fileProvider, sdk);
   }
 
   createParser(files: string[], rootDir: string): Promise<PromptFileParser> {

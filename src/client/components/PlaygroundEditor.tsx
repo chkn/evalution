@@ -21,36 +21,6 @@ interface Msg {
   toolCalls?: ToolCallEntry[];
 }
 
-function hasParameterTokens(value: any): boolean {
-  if (typeof value === 'string') return /\$\{[^}]+\}/.test(value);
-  if (Array.isArray(value)) return value.some(hasParameterTokens);
-  if (value && typeof value === 'object') return Object.values(value).some(hasParameterTokens);
-  return false;
-}
-
-function applyPromptUpdate(prompt: ParsedPrompt, key: string, value: any): ParsedPrompt {
-  const nextProperties = { ...prompt.properties };
-
-  if (value === null) {
-    delete nextProperties[key];
-  } else {
-    const existing = nextProperties[key];
-    nextProperties[key] = existing
-      ? { ...existing, value, hasParameterTokens: hasParameterTokens(value) }
-      : {
-          name: key,
-          value,
-          isEditable: true,
-          hasParameterTokens: hasParameterTokens(value),
-        };
-  }
-
-  return {
-    ...prompt,
-    properties: nextProperties,
-  };
-}
-
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
 function ChevronDown({ size = 12 }: { size?: number }) {
@@ -272,8 +242,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
     setSaving(true);
     setError(null);
     try {
-      await updatePromptProperties(prompt, { [key]: value });
-      onUpdate(applyPromptUpdate(prompt, key, value));
+      onUpdate(await updatePromptProperties(prompt, { [key]: value }));
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -302,7 +271,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   };
 
   const { model, system, messages } = prompt.properties;
-  const modelValue = model?.value ?? { type: 'function', provider: 'openai', model: 'gpt-4o' };
+  const modelProperty = model ?? { value: { type: 'function', provider: 'openai', model: 'gpt-4o' }, name: 'model', isEditable: true, hasParameterTokens: false };
   const systemValue = system?.value ?? '';
   const systemEditable = system ? system.isEditable : true;
   const modelParamKeys = new Set(['model', 'system', 'messages']);
@@ -328,7 +297,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
           <span className="pg-panel-title">Model</span>
         </div>
         <div className="pg-panel-body">
-          <ModelPicker value={modelValue} onChange={v => handleUpdate('model', v)} modelCatalog={modelCatalog} />
+          <ModelPicker property={modelProperty} onChange={v => handleUpdate('model', v)} modelCatalog={modelCatalog} />
           {modelParams.map(([key, prop]) => (
             <ParamCard
               key={key}

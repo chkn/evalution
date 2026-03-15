@@ -29,6 +29,12 @@ export interface SDKAdapter {
   getModelParameters(rootDir: string): ModelParameterInfo[];
 
   /**
+   * Returns the TypeScript source representation of a model value, e.g.
+   * `openai("gpt-4o")` for function mode or `"openai/gpt-4o"` for string mode.
+   */
+  getModelSourceText(value: ModelValue): Promise<string>;
+
+  /**
    * Executes a prompt config object and returns either a result object (when
    * `stream` is `false`) or an async text iterable (when `stream` is `true`).
    *
@@ -145,17 +151,6 @@ export class VercelAISDK implements SDKAdapter {
         { key: 'function' as const, label: 'Provider', description: 'Import and call provider SDK (e.g. openai("gpt-4o"))' },
         { key: 'string' as const, label: 'Gateway', description: 'Use a gateway model string (e.g. "openai/gpt-4o")' },
       ],
-      modelSourceText(value): string {
-        switch (value.type) {
-          case 'function':
-            return `${value.provider}(${JSON.stringify(value.model)})`;
-          case 'string':
-            return JSON.stringify(value.provider ? `${value.provider}/${value.model}` : value.model);
-          default:
-            const ty: never = value.type;
-            throw new Error(`Unknown model value type: ${ty}`);
-        }
-      },
       providers: {
         openai: {
           name: 'OpenAI',
@@ -185,6 +180,17 @@ export class VercelAISDK implements SDKAdapter {
         },
       },
     });
+  }
+
+  getModelSourceText(value: ModelValue): Promise<string> {
+    switch (value.type) {
+      case 'function':
+        return Promise.resolve(`${value.provider}(${JSON.stringify(value.model)})`);
+      case 'string':
+        return Promise.resolve(JSON.stringify(value.provider ? `${value.provider}/${value.model}` : value.model));
+      default:
+        return Promise.reject(new Error(`Unknown model value type: ${value.type}`));
+    }
   }
 
   getModelParameters(rootDir: string): ModelParameterInfo[] {

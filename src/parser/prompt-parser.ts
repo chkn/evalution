@@ -17,7 +17,22 @@ export interface ParsedFilePrompt extends ParsedPrompt {
   metadata: FilePromptMetadata;
 }
 
-export class PromptParser {
+/**
+ * Read-only view of a parsed prompt tree, obtained via
+ * {@link PromptFileType.createParser}.
+ */
+export interface PromptFileParser {
+  /** Parses every file known to this parser and returns all discovered prompts. */
+  parseAll(): ParsedFilePrompt[];
+
+  /**
+   * Parses a single file and returns the prompts it defines.
+   * @param filePath - Absolute path to the file to parse.
+   */
+  parseFile(filePath: string): ParsedFilePrompt[];
+}
+
+export class PromptParser implements PromptFileParser {
   private filePathsMap: Map<string, ts.SourceFile>;
   private rootDir: string;
 

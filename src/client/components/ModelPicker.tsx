@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import type { ModelCatalog, ModelMode, ModelValue } from '../../shared/types';
+import type { ModelCatalog, ModelMode, ModelValue, PromptProperty } from '../../shared/types';
 import ProviderIcon from './ProviderIcon';
 
-interface Props<Modes extends ModelMode<string>[]> {
-  value: ModelValue<Modes[number]['key']>;
-  onChange: (v: ModelValue<Modes[number]['key']>) => void;
-  modelCatalog: ModelCatalog<Modes>;
+interface Props {
+  property: PromptProperty<ModelValue>;
+  onChange: (v: ModelValue) => void;
+  modelCatalog: ModelCatalog;
 }
 
 function ChevronDown({ size = 12 }: { size?: number }) {
@@ -29,7 +29,7 @@ function CheckIcon({ size = 14 }: { size?: number }) {
   );
 }
 
-export default function ModelPicker<Modes extends ModelMode<string>[]>({ value, onChange, modelCatalog }: Props<Modes>) {
+export default function ModelPicker({ property, onChange, modelCatalog }: Props) {
   const [open, setOpen] = useState(false);
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
   const [gatewayInput, setGatewayInput] = useState('');
@@ -37,7 +37,7 @@ export default function ModelPicker<Modes extends ModelMode<string>[]>({ value, 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
 
-  const { provider, model, type: activeMode } = value;
+  const { provider, model, type: activeMode } = property.value;
   const modes = modelCatalog.modes ?? [{ key: 'string' as const, label: '' }];
 
   // Look up pretty label
@@ -89,7 +89,7 @@ export default function ModelPicker<Modes extends ModelMode<string>[]>({ value, 
 
   const switchMode = (newMode: string) => {
     if (newMode === activeMode) return;
-    emitValue({ ...value, type: newMode }, false);
+    emitValue({ ...property.value, type: newMode }, false);
   };
 
   const handleCustomSubmit = (providerKey: string) => {
@@ -150,11 +150,7 @@ export default function ModelPicker<Modes extends ModelMode<string>[]>({ value, 
                     {isSelected && <CheckIcon size={13} />}
                   </span>
                   <span className="pg-model-option-label">{mi.label}</span>
-                  {modelCatalog.modelSourceText && (
-                    <span className="pg-model-option-source">
-                      {modelCatalog.modelSourceText(modelValue)}
-                    </span>
-                  )}
+                  <span className="pg-model-option-source">{mi.id}</span>
                 </button>
               );
             })}
@@ -212,8 +208,8 @@ export default function ModelPicker<Modes extends ModelMode<string>[]>({ value, 
       >
         <ProviderIcon provider={provider} size={20} />
         <span className="pg-model-picker-label">{displayLabel}</span>
-        {modelCatalog.modelSourceText && (
-          <span className="pg-model-picker-source">{modelCatalog.modelSourceText(value)}</span>
+        {property.sourceText && (
+          <span className="pg-model-picker-source">{property.sourceText}</span>
         )}
         <ChevronDown size={14} />
       </button>
