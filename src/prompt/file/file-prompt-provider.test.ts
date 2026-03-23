@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { FilePromptProvider } from './file-prompt-provider.ts';
-import { MemoryFileProvider } from './file-provider.ts';
+import { MemoryFileProvider } from '../../server/file-provider.ts';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -82,10 +82,10 @@ export function myPrompt() {
 
     const promptId = `${filePath}#myPrompt`;
     const updatedPrompt = await provider.updatePromptProperties(promptId, {
-      system: 'New value',
+      system: { kind: 'primitive', value: 'New value' },
     });
 
-    expect(updatedPrompt.properties.system.value).toBe('New value');
+    expect(updatedPrompt.properties.system.value).toEqual({ kind: 'primitive', value: 'New value' });
 
     const fileContent = await fs.readFile(filePath, 'utf-8');
     expect(fileContent).toContain('"New value"');
@@ -106,7 +106,7 @@ export function myPrompt() {
 
     const promptId = `${filePath}#myPrompt`;
     const updatedPrompt = await provider.updatePromptProperties(promptId, {
-      model: { type: 'string', provider: 'openai', model: 'gpt-4o' },
+      model: { kind: 'primitive', value: 'openai/gpt-4o' },
     });
 
     expect(updatedPrompt.properties.model.sourceText).toBe('"openai/gpt-4o"');
@@ -130,7 +130,7 @@ export function myPrompt() {
     const promptId = `${filePath}#myPrompt`;
 
     await expect(
-      provider.updatePromptProperties(promptId, { system: 'New' })
+      provider.updatePromptProperties(promptId, { system: { kind: 'primitive', value: 'New' } })
     ).rejects.toThrow('not editable');
   });
 
@@ -153,9 +153,9 @@ export function myPrompt() {
 
     const promptId = `${filePath}#myPrompt`;
 
-    const updated = await provider.updatePromptProperties(promptId, { temperature: 0.7 });
+    const updated = await provider.updatePromptProperties(promptId, { temperature: { kind: 'primitive', value: 0.7 } });
     expect(updated.properties['temperature']).toBeDefined();
-    expect(updated.properties['temperature'].value).toBe(0.7);
+    expect(updated.properties['temperature'].value).toEqual({ kind: 'primitive', value: 0.7 });
   });
 
   it('should support watching', () => {
@@ -205,11 +205,11 @@ export function myPrompt() {
     const promptId = `${filePath}#myPrompt`;
 
     // First update
-    await provider.updatePromptProperties(promptId, { system: 'Updated' });
+    await provider.updatePromptProperties(promptId, { system: { kind: 'primitive', value: 'Updated' } });
 
     // Verify fresh data
     const prompt = await provider.getPrompt(promptId);
-    expect(prompt!.properties.system.value).toBe('Updated');
+    expect(prompt!.properties.system.value).toEqual({ kind: 'primitive', value: 'Updated' });
   });
 
   it('should call callback on file changes', async () => {
@@ -311,7 +311,7 @@ export function myPrompt() {
     const cleanup = watchedProvider.watch!(callback);
 
     await watchedProvider.updatePromptProperties('/virtual/test.prompt.ts#myPrompt', {
-      system: 'Updated locally',
+      system: { kind: 'primitive', value: 'Updated locally' },
     });
 
     cleanup();

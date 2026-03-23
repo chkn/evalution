@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { pathToFileURL } from 'url';
 import type { EvalutionConfig } from '../config.ts';
-import { FilePromptProvider } from '../providers/file/file-prompt-provider.ts';
+import { FilePromptProvider } from '../prompt/file/file-prompt-provider.ts';
 import { startServer } from '../server/index.ts';
 
 async function loadConfig(rootDir: string): Promise<EvalutionConfig> {

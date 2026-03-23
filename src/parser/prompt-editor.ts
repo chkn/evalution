@@ -1,18 +1,17 @@
 import ts from 'typescript';
-import type { ModelCatalog, PromptProperty, ModelValue, SourceSpan } from '../shared/types.ts';
-import type { FileProvider } from '../providers/file/file-provider.ts';
-import type { SDKAdapter } from '../server/sdk-adapter.ts';
+import type { PropValue } from 'ts-proppy';
+import { valueToSourceText, collectImports, ensureImport } from 'ts-proppy';
+import type { PromptProperty, SourceSpan } from '../shared/types.ts';
+import type { FileProvider } from '../server/file-provider.ts';
 
 export class PromptEditor {
   private fileProvider: FileProvider;
-  private sdk: SDKAdapter;
 
-  constructor(fileProvider: FileProvider, sdk: SDKAdapter) {
+  constructor(fileProvider: FileProvider) {
     this.fileProvider = fileProvider;
-    this.sdk = sdk;
   }
 
-  async updateProperty(filePath: string, property: PromptProperty, newValue: any): Promise<void> {
+  async updateProperty(filePath: string, property: PromptProperty, newValue: PropValue): Promise<void> {
     if (!property.isEditable) {
       throw new Error(`Property '${property.name}' is not editable`);
     }
@@ -24,10 +23,9 @@ export class PromptEditor {
     // Read source file
     let sourceCode = await this.fileProvider.readFile(filePath);
 
-    // For model property with function format, ensure the provider import exists
-    if (property.name === 'model' && typeof newValue === 'object' && newValue.type === 'function') {
-      const catalog = await this.sdk.getModelCatalog();
-      sourceCode = await this.ensureImport(filePath, newValue.provider, sourceCode, catalog);
+    // Ensure any imports needed by the value
+    for (const imp of collectImports(newValue)) {
+      sourceCode = ensureImport(sourceCode, imp, filePath);
     }
 
     // Re-parse the current file to get the live span — guards against stale spans
@@ -38,7 +36,7 @@ export class PromptEditor {
       : null) ?? property.valueSpan;
 
     // Convert new value to TypeScript source text
-    const newSourceText = await this.valueToSourceText(newValue, property.name);
+    const newSourceText = valueToSourceText(newValue);
 
     // Replace character range
     const before = sourceCode.substring(0, valueSpan.start);
@@ -93,15 +91,21 @@ export class PromptEditor {
     filePath: string,
     functionName: string,
     propertyName: string,
-    value: any
+    value: PropValue
   ): Promise<void> {
     let sourceCode = await this.fileProvider.readFile(filePath);
+
+    // Ensure any imports needed by the value
+    for (const imp of collectImports(value)) {
+      sourceCode = ensureImport(sourceCode, imp, filePath);
+    }
+
     const sourceFile = ts.createSourceFile(filePath, sourceCode, ts.ScriptTarget.Latest, true);
 
     const obj = this.findReturnObject(sourceFile, functionName);
     if (!obj) throw new Error(`Return object not found in function '${functionName}'`);
 
-    const valueText = await this.valueToSourceText(value, propertyName);
+    const valueText = valueToSourceText(value);
 
     // Derive indentation from the first existing property, defaulting to 4 spaces
     let indent = '    ';
@@ -195,128 +199,5 @@ export class PromptEditor {
     visitFunc(sourceFile);
 
     return returnObj;
-  }
-
-  private async valueToSourceText(value: any, propertyName: string): Promise<string> {
-    // Handle model property specially
-    if (propertyName === 'model') {
-      if (typeof value === 'string') return JSON.stringify(value);
-      return this.sdk.getModelSourceText(value as ModelValue);
-    }
-
-    // Handle strings
-    if (typeof value === 'string') {
-      return this.stringToSourceText(value);
-    }
-
-    // Handle numbers
-    if (typeof value === 'number') {
-      return value.toString();
-    }
-
-    // Handle booleans
-    if (typeof value === 'boolean') {
-      return value.toString();
-    }
-
-    // Handle arrays
-    if (Array.isArray(value)) {
-      if (propertyName === 'messages') {
-        return this.formatMessages(value);
-      }
-      return JSON.stringify(value, null, 2);
-    }
-
-    // Handle objects
-    if (typeof value === 'object' && value !== null) {
-      return JSON.stringify(value, null, 2);
-    }
-
-    throw new Error(`Unsupported value type for property '${propertyName}'`);
-  }
-
-  private async ensureImport(filePath: string, provider: string, sourceCode: string, catalog: ModelCatalog): Promise<string> {
-    const providerInfo = catalog.providers[provider];
-    if (!providerInfo) {
-      return sourceCode; // Unknown provider, skip import management
-    }
-
-    const importPath = providerInfo.importPath;
-    if (!importPath) {
-      return sourceCode; // No import path specified, skip import management
-    }
-    const importStatement = `import { ${provider} } from '${importPath}';`;
-
-    // Check if import already exists
-    const sourceFile = ts.createSourceFile(
-      filePath,
-      sourceCode,
-      ts.ScriptTarget.Latest,
-      true
-    );
-
-    let hasImport = false;
-    const visitNode = (node: ts.Node) => {
-      if (ts.isImportDeclaration(node)) {
-        const moduleSpecifier = node.moduleSpecifier;
-        if (ts.isStringLiteral(moduleSpecifier) && moduleSpecifier.text === importPath) {
-          // Check if the provider is imported
-          const importClause = node.importClause;
-          if (importClause?.namedBindings && ts.isNamedImports(importClause.namedBindings)) {
-            for (const element of importClause.namedBindings.elements) {
-              if (element.name.text === provider) {
-                hasImport = true;
-                break;
-              }
-            }
-          }
-        }
-      }
-      ts.forEachChild(node, visitNode);
-    };
-    visitNode(sourceFile);
-
-    // Add import if missing
-    if (!hasImport) {
-      const lines = sourceCode.split('\n');
-
-      // Find last import statement
-      let lastImportIndex = -1;
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim().startsWith('import ')) {
-          lastImportIndex = i;
-        }
-      }
-
-      // Insert after last import, or at the beginning
-      if (lastImportIndex >= 0) {
-        lines.splice(lastImportIndex + 1, 0, importStatement);
-      } else {
-        lines.unshift(importStatement);
-      }
-
-      return lines.join('\n');
-    }
-
-    return sourceCode;
-  }
-
-  private stringToSourceText(value: string): string {
-    // Strings containing ${...} must use backticks to preserve interpolation
-    if (/\$\{[^}]+\}/.test(value)) {
-      return '`' + value.replace(/\\/g, '\\\\').replace(/`/g, '\\`') + '`';
-    }
-    return JSON.stringify(value);
-  }
-
-  private formatMessages(messages: any[]): string {
-    const formatted = messages.map(msg => {
-      const role = msg.role ? `role: ${JSON.stringify(msg.role)}` : '';
-      const content = msg.content !== undefined ? `content: ${this.stringToSourceText(msg.content)}` : '';
-      const parts = [role, content].filter(Boolean).join(', ');
-      return `      { ${parts} }`;
-    }).join(',\n');
-
-    return `[\n${formatted}\n    ]`;
   }
 }

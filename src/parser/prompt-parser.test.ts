@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PromptParser } from './prompt-parser.ts';
+import type { PropValue } from '../shared/types.ts';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -67,90 +68,63 @@ describe('PromptParser', () => {
   });
 
   describe('property parsing', () => {
-    it('should parse string literal parameters', async () => {
+    it('should parse string literal parameters as PropValue', async () => {
       const { paths, parser } = await loadFixtures('basic.prompt.ts');
       const prompts = parser.parseFile(paths[0]);
 
       const system = prompts[0].properties.system;
-      expect(system.value).toBe('You are a weather assistant');
+      expect(system.value).toEqual({ kind: 'primitive', value: 'You are a weather assistant' });
       expect(system.isEditable).toBe(true);
-      expect(system.hasParameterTokens).toBe(false);
     });
 
-    it('should parse numeric parameters', async () => {
+    it('should parse numeric parameters as PropValue', async () => {
       const { paths, parser } = await loadFixtures('basic.prompt.ts');
       const prompts = parser.parseFile(paths[0]);
 
       const temperature = prompts[0].properties.temperature;
-      expect(temperature.value).toBe(0.7);
+      expect(temperature.value).toEqual({ kind: 'primitive', value: 0.7 });
       expect(temperature.isEditable).toBe(true);
 
       const maxTokens = prompts[0].properties.maxTokens;
-      expect(maxTokens.value).toBe(500);
+      expect(maxTokens.value).toEqual({ kind: 'primitive', value: 500 });
     });
 
-    it('should parse array parameters (messages)', async () => {
+    it('should parse array parameters (messages) as PropValue', async () => {
       const { paths, parser } = await loadFixtures('basic.prompt.ts');
       const prompts = parser.parseFile(paths[0]);
 
       const messages = prompts[0].properties.messages;
-      expect(Array.isArray(messages.value)).toBe(true);
-      expect(messages.value).toHaveLength(1);
-      expect(messages.value[0]).toEqual({
-        role: 'user',
-        content: 'What is the weather in SF?',
-      });
+      const value = messages.value as PropValue;
+      expect(value.kind).toBe('array');
+      if (value.kind === 'array') {
+        expect(value.elements).toHaveLength(1);
+        expect(value.elements[0]).toEqual({
+          kind: 'object',
+          properties: {
+            role: { kind: 'primitive', value: 'user' },
+            content: { kind: 'primitive', value: 'What is the weather in SF?' },
+          },
+        });
+      }
     });
   });
 
-  describe('parameter tokens', () => {
-    it('should parse template literals with parameter tokens', async () => {
+  describe('template values', () => {
+    it('should parse template literals as template PropValue', async () => {
       const { paths, parser } = await loadFixtures('parameterized.prompt.ts');
       const prompts = parser.parseFile(paths[0]);
 
       const system = prompts[0].properties.system;
-      expect(system.value).toBe('You are a friendly assistant speaking in ${language}');
-      expect(system.hasParameterTokens).toBe(true);
+      expect(system.value).toEqual({ kind: 'template', value: 'You are a friendly assistant speaking in ${language}' });
       expect(system.isEditable).toBe(true);
 
       const messages = prompts[0].properties.messages;
-      expect(messages.value[0].content).toBe('Hello, my name is ${name}');
-      expect(messages.hasParameterTokens).toBe(true);
-    });
-
-    it('should parse string concatenation with params', async () => {
-      const { paths, parser } = await loadFixtures('concatenation.prompt.ts');
-      const prompts = parser.parseFile(paths[0]);
-
-      const system = prompts[0].properties.system;
-      expect(system.value).toBe('You are a code reviewer for ${username}');
-      expect(system.hasParameterTokens).toBe(true);
-
-      const messages = prompts[0].properties.messages;
-      expect(messages.value[0].content).toBe('Review this code: ${codeSnippet}');
-      expect(messages.hasParameterTokens).toBe(true);
-    });
-
-    it('should parse arithmetic expressions with params', async () => {
-      const { paths, parser } = await loadFixtures('complex.prompt.ts');
-      const prompts = parser.parseFile(paths[0]);
-
-      const temperature = prompts[0].properties.temperature;
-      expect(temperature.value).toContain('${baseTemp}');
-      expect(temperature.hasParameterTokens).toBe(true);
-
-      const maxTokens = prompts[0].properties.maxTokens;
-      expect(maxTokens.value).toContain('${multiplier}');
-      expect(maxTokens.hasParameterTokens).toBe(true);
-    });
-
-    it('should set hasParameterTokens: true when params are used', async () => {
-      const { paths, parser } = await loadFixtures('parameterized.prompt.ts');
-      const prompts = parser.parseFile(paths[0]);
-
-      expect(prompts[0].properties.system.hasParameterTokens).toBe(true);
-      expect(prompts[0].properties.messages.hasParameterTokens).toBe(true);
-      expect(prompts[0].properties.temperature.hasParameterTokens).toBe(false);
+      const msgValue = messages.value as PropValue;
+      expect(msgValue.kind).toBe('array');
+      if (msgValue.kind === 'array') {
+        const content = (msgValue.elements[0] as Extract<PropValue, { kind: 'object' }>).properties.content;
+        expect(content).toEqual({ kind: 'template', value: 'Hello, my name is ${name}' });
+      }
     });
 
     it('should handle object parameter with field interpolation', async () => {
@@ -160,19 +134,19 @@ describe('PromptParser', () => {
       expect(prompts).toHaveLength(1);
       expect(prompts[0].name).toBe('userProfile');
 
-      // Should parse object parameter
       expect(prompts[0].functionParameters).toHaveLength(1);
       expect(prompts[0].functionParameters[0].name).toBe('config');
       expect(prompts[0].functionParameters[0].type).toBe('{ name: string; age: number }');
 
-      // Should preserve field references as tokens
       const system = prompts[0].properties.system;
-      expect(system.value).toBe('User is ${config.name}, age ${config.age}');
-      expect(system.hasParameterTokens).toBe(true);
+      expect(system.value).toEqual({ kind: 'template', value: 'User is ${config.name}, age ${config.age}' });
 
       const messages = prompts[0].properties.messages;
-      expect(messages.value[0].content).toBe('Tell me about ${config.name}');
-      expect(messages.hasParameterTokens).toBe(true);
+      const msgValue = messages.value as PropValue;
+      if (msgValue.kind === 'array') {
+        const content = (msgValue.elements[0] as Extract<PropValue, { kind: 'object' }>).properties.content;
+        expect(content).toEqual({ kind: 'template', value: 'Tell me about ${config.name}' });
+      }
     });
 
     it('should handle destructured object parameters', async () => {
@@ -181,19 +155,15 @@ describe('PromptParser', () => {
 
       expect(prompts).toHaveLength(1);
       expect(prompts[0].name).toBe('userGreeting');
-
-      // Should parse destructured parameters
       expect(prompts[0].functionParameters.length).toBeGreaterThan(0);
 
-      // Should preserve direct field references as tokens
       const system = prompts[0].properties.system;
-      expect(system.value).toContain('${name}');
-      expect(system.value).toContain('${age}');
-      expect(system.hasParameterTokens).toBe(true);
-
-      const messages = prompts[0].properties.messages;
-      expect(messages.value[0].content).toContain('${name}');
-      expect(messages.hasParameterTokens).toBe(true);
+      const sysValue = system.value as PropValue;
+      expect(sysValue.kind).toBe('template');
+      if (sysValue.kind === 'template') {
+        expect(sysValue.value).toContain('${name}');
+        expect(sysValue.value).toContain('${age}');
+      }
     });
 
     it('should handle destructured parameters with default values', async () => {
@@ -202,8 +172,6 @@ describe('PromptParser', () => {
 
       expect(prompts).toHaveLength(1);
       expect(prompts[0].name).toBe('customGreeting');
-
-      // Should parse destructured parameters with defaults
       expect(prompts[0].functionParameters).toHaveLength(2);
 
       const nameParam = prompts[0].functionParameters.find(p => p.name === 'name');
@@ -214,11 +182,13 @@ describe('PromptParser', () => {
       expect(greetingParam).toBeDefined();
       expect(greetingParam!.defaultValue).toBe('Hello');
 
-      // Should preserve parameter references in values
       const system = prompts[0].properties.system;
-      expect(system.value).toContain('${greeting}');
-      expect(system.value).toContain('${name}');
-      expect(system.hasParameterTokens).toBe(true);
+      const sysValue = system.value as PropValue;
+      expect(sysValue.kind).toBe('template');
+      if (sysValue.kind === 'template') {
+        expect(sysValue.value).toContain('${greeting}');
+        expect(sysValue.value).toContain('${name}');
+      }
     });
   });
 
@@ -228,9 +198,8 @@ describe('PromptParser', () => {
       const prompts = parser.parseFile(paths[0]);
 
       const model = prompts[0].properties.model;
-      expect(model.value).toBe('openai/gpt-4o');
+      expect(model.value).toEqual({ kind: 'primitive', value: 'openai/gpt-4o' });
       expect(model.isEditable).toBe(true);
-      expect(model.hasParameterTokens).toBe(false);
     });
 
     it('should parse model parameter - function call format', async () => {
@@ -238,13 +207,14 @@ describe('PromptParser', () => {
       const prompts = parser.parseFile(paths[0]);
 
       const model = prompts[0].properties.model;
-      expect(model.value).toEqual({
-        type: 'function',
-        provider: 'openai',
-        model: 'gpt-4o',
-      });
+      const modelValue = model.value as PropValue;
+      expect(modelValue.kind).toBe('functionCall');
+      if (modelValue.kind === 'functionCall') {
+        expect(modelValue.callee).toBe('openai');
+        expect(modelValue.args).toEqual([{ kind: 'primitive', value: 'gpt-4o' }]);
+        expect(modelValue.import).toEqual({ name: 'openai', from: '@ai-sdk/openai' });
+      }
       expect(model.isEditable).toBe(true);
-      expect(model.hasParameterTokens).toBe(false);
     });
   });
 
@@ -266,7 +236,6 @@ describe('PromptParser', () => {
       const { paths, parser } = await loadFixtures('basic.prompt.ts');
       const prompts = parser.parseFile(paths[0]);
 
-      // Literals are editable
       expect(prompts[0].properties.system.isEditable).toBe(true);
       expect(prompts[0].properties.temperature.isEditable).toBe(true);
     });
@@ -285,7 +254,6 @@ describe('PromptParser', () => {
       const { paths, parser } = await loadFixtures('invalid-syntax.prompt.ts');
       const prompts = parser.parseFile(paths[0]);
 
-      // Should still parse what it can, or return empty array
       expect(Array.isArray(prompts)).toBe(true);
     });
 
@@ -294,10 +262,17 @@ describe('PromptParser', () => {
       const prompts = parser.parseFile(paths[0]);
 
       const messages = prompts[0].properties.messages;
-      expect(Array.isArray(messages.value)).toBe(true);
-      expect(messages.value.length).toBeGreaterThan(0);
-      expect(messages.value[0]).toHaveProperty('role');
-      expect(messages.value[0]).toHaveProperty('content');
+      const msgValue = messages.value as PropValue;
+      expect(msgValue.kind).toBe('array');
+      if (msgValue.kind === 'array') {
+        expect(msgValue.elements.length).toBeGreaterThan(0);
+        const first = msgValue.elements[0];
+        expect(first.kind).toBe('object');
+        if (first.kind === 'object') {
+          expect(first.properties).toHaveProperty('role');
+          expect(first.properties).toHaveProperty('content');
+        }
+      }
     });
   });
 

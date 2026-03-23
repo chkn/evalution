@@ -20,9 +20,9 @@
     "src/cli/**/*",
     "src/server/**/*",
     "src/parser/**/*",
-    "src/providers/**/*",
+    "src/prompt/**/*",
     "src/shared/**/*"
-  ],
+, "src/sdk/sdk-adapter.ts"  ],
   "exclude": [
     "node_modules",
     "dist",

@@ -1,4 +1,4 @@
-import type { PromptProvider } from './providers/prompt-provider.ts';
+import type { PromptProvider } from './prompt/prompt-provider.ts';
 
 /**
  * Top-level configuration for an evalution instance.

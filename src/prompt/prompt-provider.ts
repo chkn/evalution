@@ -1,28 +1,14 @@
-import type { ParsedPrompt, ModelInfo, ModelParameterInfo, AddPromptContext, ModelCatalog } from '../shared/types.ts';
-
-/** The kind of change that occurred to a prompt. */
-export type ChangeEventType = 'change' | 'add' | 'remove';
-
-/**
- * Describes a single change emitted by {@link PromptProvider.watch}.
- */
-export interface PromptChangeEvent {
-  /** Whether the prompt was added, modified, or removed. */
-  type: ChangeEventType;
-  /** The ID of the affected prompt. */
-  promptId: string;
-}
+import type { ParsedPrompt, PromptChangeEvent, PropDefinition, AddPromptContext, ModelCatalog } from '../shared/types.ts';
 
 /**
  * A source of prompts that the playground can display and execute.
  *
  * Implement this interface to add a custom prompt source — for example,
  * prompts stored in a database, fetched from a remote API, or written in a
- * non-TypeScript format. The built-in {@link FilePromptProvider} implements
- * this interface for local `.prompt.ts` files.
+ * non-TypeScript format.
  */
 export interface PromptProvider<TParsedPrompt extends ParsedPrompt = ParsedPrompt> {
-  /** Uniquely identifies this provider when multiple providers are composed together. */
+  /** Uniquely identifies this provider when multiple providers are used. */
   readonly id: string;
 
   /** Human-readable name shown when choosing between providers. */
@@ -82,7 +68,7 @@ export interface PromptProvider<TParsedPrompt extends ParsedPrompt = ParsedPromp
    *
    * Optional — providers that do not expose model parameters may omit it.
    */
-  getModelParameters?(): ModelParameterInfo[];
+  getModelParameters?(): PropDefinition[];
 
   /**
    * Registers a callback that is invoked whenever a prompt changes.

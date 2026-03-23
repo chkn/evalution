@@ -1,3 +1,5 @@
+// #region Prompt
+
 export interface SourceSpan {
   start: number;
   end: number;
@@ -9,11 +11,10 @@ export interface FunctionParameter {
   defaultValue?: any;
 }
 
-export interface PromptProperty<Value = any> {
+export interface PromptProperty<Value = unknown> {
   name: string;
   value: Value;
   isEditable: boolean;
-  hasParameterTokens: boolean;
   sourceText?: string;
   valueSpan?: SourceSpan;
   fullSpan?: SourceSpan; // full "key: value," including leading whitespace and trailing comma
@@ -44,69 +45,18 @@ export interface ParsedPrompt {
   treePath?: string[];
 }
 
-export interface ModelValue<Type extends string = string> {
-  type: Type;
-  provider?: string;
-  model: string;
-}
-
-export interface ModelParameterInfo {
-  name: string;
-  type: string;
-  defaultValue: any;
-  description: string;
-}
-
-/** A pre-defined model option shown in quick-select UIs. */
-export interface ModelInfo {
-  /** Model ID (e.g. `'gpt-4o'`). */
-  id: string;
-  /** Human-readable label shown in the UI (e.g. `'GPT-4o (OpenAI)'`). */
-  label: string;
-}
-
-/** Describes a single AI provider known to the SDK adapter. */
-export interface ModelProviderInfo {
-  /** Human-readable name (e.g. `'OpenAI'`). */
-  name: string;
-  /** Some of the models available for this provider. */
-  models: ModelInfo[];
-  /** npm package path used when auto-inserting import statements (e.g. `'@ai-sdk/openai'`). */
-  importPath?: string;
-}
-
-/** Describes a model selection mode exposed by the SDK adapter (e.g. "Provider" or "Gateway"). */
-export interface ModelMode<Type extends string> {
-  /** The value type this mode produces (matches {@link ModelValue.type}). */
-  key: Type;
-  /** Label shown in the UI toggle (e.g. "Provider", "Gateway"). */
-  label: string;
-  /** Optional tooltip / helper text. */
-  description?: string;
-}
+/** The kind of change that occurred to a prompt. */
+export type ChangeEventType = 'change' | 'add' | 'remove';
 
 /**
- * Model catalog returned by {@link SDKAdapter.getModelCatalog}.
- * Contains the set of known providers and a curated list of models.
+ * Describes a single change emitted by {@link PromptProvider.watch}.
  */
-export interface ModelCatalog<Modes extends ModelMode<string>[] = ModelMode<string>[]> {
-  /** Map of provider key → provider metadata for list of known models. */
-  providers: Record<string, ModelProviderInfo>;
-
-  /**
-   * Available model selection modes. When the array has more than one entry
-   * the UI renders a toggle so the user can switch between them.
-   */
-  modes: Modes;
-
+export interface PromptChangeEvent {
+  /** Whether the prompt was added, modified, or removed. */
+  type: ChangeEventType;
+  /** The ID of the affected prompt ({@link ParsedPrompt.id}) */
+  promptId: string;
 }
-
-export interface ExecuteRequest {
-  stream?: boolean;
-  functionParams?: any[];
-}
-
-// ── Add Prompt flow ─────────────────────────────────────────────────────────
 
 /** Describes a single form field rendered by the Add Prompt dialog. */
 export interface AddPromptField {
@@ -143,3 +93,80 @@ export interface PromptProviderInfo {
   icon?: string;
   hasAddPrompt: boolean;
 }
+
+export interface ExecuteRequest {
+  stream?: boolean;
+  functionParams?: any[];
+}
+
+// #endregion
+
+export interface PromptChangedSSEData {
+  type: 'prompt-changed';
+  providerId: string;
+  event: PromptChangeEvent;
+}
+
+export type SSEData = PromptChangedSSEData;
+
+// #region Model
+
+import type { PropValue, PropDefinition, ImportSpecifier } from 'ts-proppy';
+export type { PropDefinition, PropValue, ImportSpecifier };
+
+/** A pre-defined model option shown in quick-select UIs. */
+export interface ModelInfo {
+  /** Model ID (e.g. `'gpt-4o'`). */
+  id: string;
+  /** Human-readable label shown in the UI (e.g. `'GPT-4o (OpenAI)'`). */
+  label: string;
+  /** Optional category for grouping related models together in the UI (usually provider name). */
+  group?: string;
+  /** Values to use when selecting this model in different modes (as defined by {@link ModelCatalog.modelValueTypes}) */
+  values: Record<string, PropValue>;
+}
+
+/** Describes a model selection mode exposed by the SDK adapter (e.g. "Provider" or "Gateway"). */
+export interface ModelValueType {
+  /** Label shown in the UI toggle (e.g. "Provider", "Gateway"). */
+  readonly label: string;
+  /** Optional tooltip / helper text. */
+  readonly description?: string;
+}
+
+/**
+ * Per-group metadata for constructing custom model values in the UI.
+ *
+ * `customValueTemplates` is a `PropValue` template per mode. Any primitive
+ * string value containing `$input` is replaced with the user's custom model
+ * ID at runtime.
+ */
+export interface ModelGroupInfo {
+  customValueTemplates?: Record<string, PropValue>;
+}
+
+/**
+ * Model catalog returned by {@link SDKAdapter.getModelCatalog}.
+ * Contains the set of known providers and a curated list of models.
+ */
+export interface ModelCatalog {
+  /** List of known models. */
+  models: readonly ModelInfo[];
+
+  /**
+   * Available model selection modes.
+   *
+   * When this is an object, the UI renders a toggle so the user can switch between them.
+   * The keys of this object are used in {@link ModelInfo.values}, and the values provide
+   * metadata for how to render each mode in the UI.
+   */
+  modelValueTypes?: Record<string, ModelValueType>;
+
+  /** Per-group metadata for constructing custom model PropValues. Keyed by group name. */
+  groups?: Record<string, ModelGroupInfo>;
+};
+
+// #endregion
+
+
+

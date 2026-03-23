@@ -13,7 +13,6 @@ export function makePrompt(content: string): ParsedPrompt {
         name: 'messages',
         value: [{ role: 'user', content }],
         isEditable: true,
-        hasParameterTokens: false,
       },
     },
   };

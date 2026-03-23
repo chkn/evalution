@@ -1,9 +1,10 @@
 import Fastify, { type FastifyReply } from 'fastify';
 import fastifyStatic from '@fastify/static';
-import type { PromptProvider } from '../providers/prompt-provider.ts';
+import type { PromptProvider } from '../prompt/prompt-provider.ts';
 import { setupRoutes } from './api-routes.ts';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import type { SSEData } from '../shared/types.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,7 +44,8 @@ export async function startServer(options: ServerOptions) {
   for (const [providerId, provider] of providerMap) {
     if (provider.watch) {
       provider.watch((event) => {
-        const message = `data: ${JSON.stringify({ type: 'prompt-changed', providerId, event })}\n\n`;
+        const data: SSEData = { type: 'prompt-changed', providerId, event };
+        const message = `data: ${JSON.stringify(data)}\n\n`;
         sseClients.forEach((reply) => {
           if (!reply.raw.destroyed) {
             reply.raw.write(message);

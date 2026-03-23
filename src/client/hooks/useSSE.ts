@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
+import type { SSEData } from '../../shared/types.ts';
 
-export function useSSE(onMessage: (data: any) => void) {
+export function useSSE(onMessage: (data: SSEData) => void) {
   useEffect(() => {
     const eventSource = new EventSource('/api/events');
 

@@ -8,6 +8,7 @@ import AddPromptDialog from './components/AddPromptDialog';
 import PlaygroundEditor from './components/PlaygroundEditor';
 import PlaygroundExecution from './components/PlaygroundExecution';
 import { Tab } from './components/Tab';
+import type { SSEData } from '../shared/types';
 
 // ─── Tab / Pane model ─────────────────────────────────────────────────────────
 
@@ -82,8 +83,11 @@ function App() {
     fetch('/api/config').then(r => r.json()).then(d => setRootPath(d.rootPath)).catch(() => {});
   }, []);
 
-  const handleSSEMessage = useCallback((data: any) => {
-    if (data.type === 'prompt-changed') refetch();
+  const handleSSEMessage = useCallback((data: SSEData) => {
+    if (data.type === 'prompt-changed') {
+      // FIXME: Delay this for a hot second to debounce multiple rapid changes
+      refetch();
+    }
   }, [refetch]);
   useSSE(handleSSEMessage);
 

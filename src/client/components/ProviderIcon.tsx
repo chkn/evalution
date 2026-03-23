@@ -44,9 +44,9 @@ function FallbackIcon({ provider, size }: { provider?: string; size: number }) {
 }
 
 const ICON_COMPONENTS: Record<string, (props: { size: number }) => JSX.Element> = {
-  openai: OpenAIIcon,
-  anthropic: AnthropicIcon,
-  google: GoogleIcon,
+  OpenAI: OpenAIIcon,
+  Anthropic: AnthropicIcon,
+  Google: GoogleIcon,
 };
 
 export default function ProviderIcon({ provider, size = 24 }: { provider?: string; size?: number }) {

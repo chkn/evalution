@@ -1,10 +1,13 @@
 import path from 'path';
-import type { PromptProvider, PromptChangeEvent, ChangeEventType } from '../prompt-provider.ts';
-import { TSPromptFileType, type PromptFileType } from './prompt-file-type.ts';
-import { LocalFileProvider, type FileProvider } from './file-provider.ts';
-import { VercelAISDK, type SDKAdapter } from '../../server/sdk-adapter.ts';
-import type { AddPromptContext } from '../../shared/types.ts';
+import type { PromptProvider } from '../prompt-provider.ts';
+import type { PromptFileType } from './prompt-file-type.ts';
+import type { SDKAdapter } from '../../sdk/sdk-adapter.ts';
+import type { AddPromptContext, ChangeEventType, PromptChangeEvent } from '../../shared/types.ts';
 import type { FilePromptMetadata, ParsedFilePrompt, PromptFileParser } from '../../parser/prompt-parser.ts';
+
+import { TSPromptFileType } from './ts/TSPromptFileType.ts';
+import { LocalFileProvider, type FileProvider } from '../../server/file-provider.ts';
+import { VercelAISDK } from '../../sdk/vercel-ai-sdk.ts';
 
 const DEFAULT_IGNORE_PATTERNS = ['**/node_modules/**', '**/dist/**', '**/.git/**'];
 
@@ -86,7 +89,7 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
     ignorePatterns = DEFAULT_IGNORE_PATTERNS,
     sdk = new VercelAISDK(),
   }: FilePromptProviderOptions = {}) {
-    fileType ??= new TSPromptFileType(fileProvider, sdk);
+    fileType ??= new TSPromptFileType(fileProvider);
     this.id = id;
     this.rootDir = rootDir;
     this.fileProvider = fileProvider;

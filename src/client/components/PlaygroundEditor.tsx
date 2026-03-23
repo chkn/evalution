@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import type { ParsedPrompt, PromptProperty, ModelParameterInfo, ModelCatalog } from '../../shared/types';
+import type { ParsedPrompt, PromptProperty, PropDefinition, PropValue, ModelCatalog } from '../../shared/types';
 import { getModelCatalog, getModelParameters, updatePromptProperties  } from '../api';
+import { ItemEditor } from 'ts-proppy/react';
 import TokenEditor from './TokenEditor';
 import ModelPicker from './ModelPicker';
 
@@ -145,38 +146,24 @@ function MessageCard({ msg, onChange, onDelete }: {
 
 // ─── ParamCard ────────────────────────────────────────────────────────────────
 
-function ParamCard({ name, prop, description, onDelete, onChange }: {
-  name: string;
-  prop: PromptProperty;
-  description: string;
+function ParamCard({ propDef, value, onDelete, onChange }: {
+  propDef: PropDefinition;
+  value: PropValue | undefined;
   onDelete: () => void;
-  onChange: (v: any) => void;
+  onChange: (v: PropValue) => void;
 }) {
-  const isNumber = typeof prop.value === 'number';
-  const [local, setLocal] = useState(String(prop.value ?? ''));
   const [descExpanded, setDescExpanded] = useState(false);
-  useEffect(() => setLocal(String(prop.value ?? '')), [prop.value]);
-
-  const commit = () => {
-    if (isNumber) {
-      const n = parseFloat(local);
-      if (!isNaN(n)) onChange(n);
-    } else {
-      onChange(local);
-    }
-  };
-
-  const paragraphs = description ? description.split('\n') : [];
+  const paragraphs = propDef.description ? propDef.description.split('\n') : [];
   const hasMore = paragraphs.length > 1;
 
   return (
     <div className="pg-panel-card">
       <div className="pg-msg-header" style={{ alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <span className="pg-role-label">{name}</span>
+          <span className="pg-role-label">{propDef.name}</span>
           {paragraphs.length > 0 && (
             <div className="pg-param-description">
-              {descExpanded ? description : paragraphs[0]}
+              {descExpanded ? propDef.description : paragraphs[0]}
               {hasMore && (
                 <button
                   className="pg-desc-toggle"
@@ -188,31 +175,16 @@ function ParamCard({ name, prop, description, onDelete, onChange }: {
             </div>
           )}
         </div>
-        {prop.isEditable && (
-          <button className="pg-delete-msg" onClick={onDelete} title="Remove parameter">×</button>
-        )}
+        <button className="pg-delete-msg" onClick={onDelete} title="Remove parameter">×</button>
       </div>
-      {prop.isEditable ? (
-        <input
-          className="pg-param-input pg-param-input-inline"
-          type={isNumber ? 'number' : 'text'}
-          step="any"
-          value={local}
-          onChange={e => setLocal(e.target.value)}
-          onBlur={commit}
-        />
-      ) : (
-        <div className="pg-msg-content" style={{ fontSize: 13, color: '#9ca3af' }}>
-          {prop.sourceText}
-        </div>
-      )}
+      <ItemEditor propDef={propDef} value={value} onChange={onChange} />
     </div>
   );
 }
 
 // ─── PlaygroundEditor ─────────────────────────────────────────────────────────
 
-const EMPTY_MODEL_CATALOG: ModelCatalog = { modes: [], providers: {} };
+const EMPTY_MODEL_CATALOG: ModelCatalog = { models: [] };
 
 function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   const [saving, setSaving] = useState(false);
@@ -222,7 +194,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   const [localMessages, setLocalMessages] = useState<Msg[]>(
     Array.isArray(prompt.properties.messages?.value) ? prompt.properties.messages.value : []
   );
-  const [modelParameters, setModelParameters] = useState<ModelParameterInfo[]>([]);
+  const [modelParameters, setModelParameters] = useState<PropDefinition[]>([]);
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
 
   useEffect(() => {
@@ -271,8 +243,8 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   };
 
   const { model, system, messages } = prompt.properties;
-  const modelProperty = model ?? { value: { type: 'function', provider: 'openai', model: 'gpt-4o' }, name: 'model', isEditable: true, hasParameterTokens: false };
-  const systemValue = system?.value ?? '';
+  const modelProperty = model ?? { value: { type: 'function', provider: 'openai', model: 'gpt-4o' }, name: 'model', isEditable: true };
+  const systemValue = typeof system?.value === 'string' ? system.value : ''; // FIXME: Don't hardcode that the property is called 'system' or that it's a string
   const systemEditable = system ? system.isEditable : true;
   const modelParamKeys = new Set(['model', 'system', 'messages']);
   const modelParams = Object.entries(prompt.properties)
@@ -298,16 +270,34 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
         </div>
         <div className="pg-panel-body">
           <ModelPicker property={modelProperty} onChange={v => handleUpdate('model', v)} modelCatalog={modelCatalog} />
-          {modelParams.map(([key, prop]) => (
-            <ParamCard
-              key={key}
-              name={key}
-              prop={prop}
-              description={modelParameters.find(cs => cs.name === key)?.description ?? ''}
-              onDelete={() => handleUpdate(key, null)}
-              onChange={v => handleUpdate(key, v)}
-            />
-          ))}
+          {modelParams.map(([key, prop]) => {
+            const propDef = modelParameters.find(cs => cs.name === key);
+            if (!propDef) {
+              // No PropDefinition available — show source text as read-only
+              return (
+                <div key={key} className="pg-panel-card">
+                  <div className="pg-msg-header">
+                    <span className="pg-role-label">{key}</span>
+                    {prop.isEditable && (
+                      <button className="pg-delete-msg" onClick={() => handleUpdate(key, null)} title="Remove parameter">×</button>
+                    )}
+                  </div>
+                  <div className="pg-msg-content" style={{ fontSize: 13, color: '#9ca3af' }}>
+                    {prop.sourceText ?? String(prop.value)}
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <ParamCard
+                key={key}
+                propDef={propDef}
+                value={prop.value as PropValue | undefined}
+                onDelete={() => handleUpdate(key, null)}
+                onChange={v => handleUpdate(key, v)}
+              />
+            );
+          })}
         </div>
         {addableParams.length > 0 && (
           <div className="pg-panel-footer">
@@ -319,7 +309,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
                 onChange={e => {
                   if (!e.target.value) return;
                   const cs = modelParameters.find(p => p.name === e.target.value);
-                  if (cs) handleUpdate(cs.name, cs.defaultValue);
+                  if (cs?.defaultValue) handleUpdate(cs.name, cs.defaultValue);
                 }}
               >
                 <option value="">Add parameter…</option>

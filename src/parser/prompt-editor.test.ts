@@ -1,27 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { PromptEditor } from './prompt-editor.ts';
 import { PromptParser } from './prompt-parser.ts';
-import { MemoryFileProvider } from '../providers/file/file-provider.ts';
-import type { ModelProviderInfo, ModelValue } from '../shared/types.ts';
-import type { SDKAdapter } from '../server/sdk-adapter.ts';
-
-function makeSdk(providers: Record<string, ModelProviderInfo> = {}): SDKAdapter {
-  return {
-    getModelCatalog: () => Promise.resolve({ providers, modes: [] }),
-    getModelSourceText: (value: ModelValue) => {
-      if (value.type === 'function') return Promise.resolve(`${value.provider}(${JSON.stringify(value.model)})`);
-      const m = value.provider ? `${value.provider}/${value.model}` : value.model;
-      return Promise.resolve(JSON.stringify(m));
-    },
-    getModelParameters: () => [],
-    executeConfig: async () => {},
-  };
-}
+import { MemoryFileProvider } from '../server/file-provider.ts';
+import type { PropValue } from 'ts-proppy';
 
 describe('PromptEditor', () => {
-  async function setup(content: string, filename = '/virtual/test.prompt.ts', providers: Record<string, ModelProviderInfo> = {}) {
+  async function setup(content: string, filename = '/virtual/test.prompt.ts') {
     const fileProvider = new MemoryFileProvider({ [filename]: content });
-    const editor = new PromptEditor(fileProvider, makeSdk(providers));
+    const editor = new PromptEditor(fileProvider);
     const parser = await PromptParser.create([[filename, content]]);
     return { filePath: filename, fileProvider, editor, parser };
   }
@@ -38,7 +24,7 @@ export function test() {
 `);
     const prompts = parser.parseFile(filePath);
 
-    await editor.updateProperty(filePath, prompts[0].properties.system, 'New prompt');
+    await editor.updateProperty(filePath, prompts[0].properties.system, { kind: 'primitive', value: 'New prompt' });
 
     expect(await fileProvider.readFile(filePath)).toContain('"New prompt"');
     expect(await fileProvider.readFile(filePath)).not.toContain('Old prompt');
@@ -56,7 +42,7 @@ export function test() {
 `);
     const prompts = parser.parseFile(filePath);
 
-    await editor.updateProperty(filePath, prompts[0].properties.temperature, 0.9);
+    await editor.updateProperty(filePath, prompts[0].properties.temperature, { kind: 'primitive', value: 0.9 });
 
     expect(await fileProvider.readFile(filePath)).toContain('temperature: 0.9');
   });
@@ -73,7 +59,7 @@ export function test() {
 `);
     const prompts = parser.parseFile(filePath);
 
-    await editor.updateProperty(filePath, prompts[0].properties.stream, true);
+    await editor.updateProperty(filePath, prompts[0].properties.stream, { kind: 'primitive', value: true });
 
     expect(await fileProvider.readFile(filePath)).toContain('stream: true');
   });
@@ -89,10 +75,13 @@ export function test() {
 `);
     const prompts = parser.parseFile(filePath);
 
-    const newMessages = [
-      { role: 'system', content: 'You are helpful' },
-      { role: 'user', content: 'New message' },
-    ];
+    const newMessages: PropValue = {
+      kind: 'array',
+      elements: [
+        { kind: 'object', properties: { role: { kind: 'primitive', value: 'system' }, content: { kind: 'primitive', value: 'You are helpful' } } },
+        { kind: 'object', properties: { role: { kind: 'primitive', value: 'user' }, content: { kind: 'primitive', value: 'New message' } } },
+      ],
+    };
 
     await editor.updateProperty(filePath, prompts[0].properties.messages, newMessages);
 
@@ -111,7 +100,7 @@ export function test() {
 `);
     const prompts = parser.parseFile(filePath);
 
-    await editor.updateProperty(filePath, prompts[0].properties.model, 'anthropic/claude-sonnet-4-20250514');
+    await editor.updateProperty(filePath, prompts[0].properties.model, { kind: 'primitive', value: 'anthropic/claude-sonnet-4-20250514' });
 
     expect(await fileProvider.readFile(filePath)).toContain('"anthropic/claude-sonnet-4-20250514"');
   });
@@ -130,9 +119,10 @@ export function test() {
     const prompts = parser.parseFile(filePath);
 
     await editor.updateProperty(filePath, prompts[0].properties.model, {
-      type: 'function',
-      provider: 'openai',
-      model: 'gpt-4o-mini',
+      kind: 'functionCall',
+      callee: 'openai',
+      args: [{ kind: 'primitive', value: 'gpt-4o-mini' }],
+      import: { name: 'openai', from: '@ai-sdk/openai' },
     });
 
     expect(await fileProvider.readFile(filePath)).toContain('openai("gpt-4o-mini")');
@@ -146,13 +136,14 @@ export function test() {
     system: 'Test'
   };
 }
-`, '/virtual/test.prompt.ts', { openai: { name: 'OpenAI', models: [], importPath: '@ai-sdk/openai' } });
+`);
     const prompts = parser.parseFile(filePath);
 
     await editor.updateProperty(filePath, prompts[0].properties.model, {
-      type: 'function',
-      provider: 'openai',
-      model: 'gpt-4o',
+      kind: 'functionCall',
+      callee: 'openai',
+      args: [{ kind: 'primitive', value: 'gpt-4o' }],
+      import: { name: 'openai', from: '@ai-sdk/openai' },
     });
 
     expect(await fileProvider.readFile(filePath)).toContain("import { openai } from '@ai-sdk/openai'");
@@ -172,7 +163,7 @@ export function test() {
 `);
     const prompts = parser.parseFile(filePath);
 
-    await editor.updateProperty(filePath, prompts[0].properties.system, 'New');
+    await editor.updateProperty(filePath, prompts[0].properties.system, { kind: 'primitive', value: 'New' });
 
     expect(await fileProvider.readFile(filePath)).toContain("import { openai } from '@ai-sdk/openai'");
     expect(await fileProvider.readFile(filePath)).toContain('"New"');
@@ -189,7 +180,7 @@ export function test() {
 `);
     const prompts = parser.parseFile(filePath);
 
-    await editor.updateProperty(filePath, prompts[0].properties.system, 'Valid string');
+    await editor.updateProperty(filePath, prompts[0].properties.system, { kind: 'primitive', value: 'Valid string' });
 
     expect(await fileProvider.readFile(filePath)).toContain('"Valid string"');
   });
@@ -207,7 +198,7 @@ export function test() {
 `);
     const prompts = parser.parseFile(filePath);
 
-    await editor.updateProperty(filePath, prompts[0].properties.system, 'New');
+    await editor.updateProperty(filePath, prompts[0].properties.system, { kind: 'primitive', value: 'New' });
 
     expect(await fileProvider.readFile(filePath)).toContain('// This is a comment');
     expect(await fileProvider.readFile(filePath)).toContain('// Another comment');
@@ -224,7 +215,7 @@ export function test() {
 `);
     const prompts = parser.parseFile(filePath);
 
-    await editor.updateProperty(filePath, prompts[0].properties.system, 'Line 1\nLine 2\nLine 3');
+    await editor.updateProperty(filePath, prompts[0].properties.system, { kind: 'primitive', value: 'Line 1\nLine 2\nLine 3' });
 
     expect(await fileProvider.readFile(filePath)).toContain('Line 1\\nLine 2\\nLine 3');
   });
@@ -240,7 +231,7 @@ export function test() {
 `);
     const prompts = parser.parseFile(filePath);
 
-    await editor.updateProperty(filePath, prompts[0].properties.system, 'String with "quotes" and \\backslashes\\');
+    await editor.updateProperty(filePath, prompts[0].properties.system, { kind: 'primitive', value: 'String with "quotes" and \\backslashes\\' });
 
     expect(await fileProvider.readFile(filePath)).toContain('String with');
   });
@@ -256,9 +247,8 @@ export function test() {
     );
     const prompts = parser.parseFile(filePath);
 
-    // Simulate what the editor does: round-trip the parsed value through the UI
-    // The parsed system value is 'Hello ${name}' (plain string with token marker)
-    const systemValue = prompts[0].properties.system.value as string;
+    // Simulate what the editor does: round-trip the parsed template value
+    const systemValue = prompts[0].properties.system.value as PropValue;
     await editor.updateProperty(filePath, prompts[0].properties.system, systemValue);
 
     const result = await fileProvider.readFile(filePath);
@@ -281,11 +271,13 @@ export function test() {
     const prompts = parser.parseFile(filePath);
 
     // Simulate what the UI does: update messages with the parsed value round-tripped
-    // The parsed value for the template literal content is "Hello ${name}" (with token marker)
-    const newMessages = [
-      { role: 'user', content: 'Hello ${name}' },
-      { role: 'assistant', content: 'Hi there!' },
-    ];
+    const newMessages: PropValue = {
+      kind: 'array',
+      elements: [
+        { kind: 'object', properties: { role: { kind: 'primitive', value: 'user' }, content: { kind: 'template', value: 'Hello ${name}' } } },
+        { kind: 'object', properties: { role: { kind: 'primitive', value: 'assistant' }, content: { kind: 'primitive', value: 'Hi there!' } } },
+      ],
+    };
 
     await editor.updateProperty(filePath, prompts[0].properties.messages, newMessages);
 
@@ -310,20 +302,23 @@ export function test() {
     const messagesProperty = prompts[0].properties.messages;
 
     // First update makes the file longer, invalidating the original valueSpan
-    await editor.updateProperty(filePath, messagesProperty, [
-      { role: 'user', content: 'A much longer message that extends the file length significantly' },
-    ]);
+    await editor.updateProperty(filePath, messagesProperty, {
+      kind: 'array',
+      elements: [
+        { kind: 'object', properties: { role: { kind: 'primitive', value: 'user' }, content: { kind: 'primitive', value: 'A much longer message that extends the file length significantly' } } },
+      ],
+    });
 
     // Second update reuses the same (now stale) property — spans no longer match the file.
-    // Without a fix, the stale valueSpan.end reads from inside the first update's array,
-    // so fragments of the first update's content appear after the new closing bracket.
-    await editor.updateProperty(filePath, messagesProperty, [
-      { role: 'user', content: 'Final version' },
-    ]);
+    await editor.updateProperty(filePath, messagesProperty, {
+      kind: 'array',
+      elements: [
+        { kind: 'object', properties: { role: { kind: 'primitive', value: 'user' }, content: { kind: 'primitive', value: 'Final version' } } },
+      ],
+    });
 
     const result = await fileProvider.readFile(filePath);
     expect(result).toContain('Final version');
-    // Stale span causes the first update's tail to leak into the output
     expect(result).not.toContain('extends the file length significantly');
   });
 
@@ -343,7 +338,7 @@ export function test() {
     const prompts = parser.parseFile(filePath);
 
     await expect(
-      editor.updateProperty(filePath, prompts[0].properties.system, 'New value')
+      editor.updateProperty(filePath, prompts[0].properties.system, { kind: 'primitive', value: 'New value' })
     ).rejects.toThrow('not editable');
   });
 });

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import type { PromptProvider } from '../providers/prompt-provider.ts';
+import type { PromptProvider } from '../prompt/prompt-provider.ts';
 import type { ExecuteRequest } from '../shared/types.ts';
 
 export function setupRoutes(
