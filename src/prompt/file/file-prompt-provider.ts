@@ -3,10 +3,11 @@ import type { PromptProvider } from '../prompt-provider.ts';
 import type { PromptFileType } from './prompt-file-type.ts';
 import type { SDKAdapter } from '../../sdk/sdk-adapter.ts';
 import type { AddPromptContext, ChangeEventType, PromptChangeEvent } from '../../shared/types.ts';
-import type { FilePromptMetadata, ParsedFilePrompt, PromptFileParser } from '../../parser/prompt-parser.ts';
+import type { FilePromptMetadata, ParsedFilePrompt } from './prompt-file-type.ts';
+import { isEditable } from '../../shared/is-editable.ts';
 
-import { TSPromptFileType } from './ts/TSPromptFileType.ts';
-import { LocalFileProvider, type FileProvider } from '../../server/file-provider.ts';
+import { TSPromptFileType } from './ts/ts-prompt-file-type.ts';
+import { LocalFileProvider, type FileProvider } from '../../file-provider.ts';
 import { VercelAISDK } from '../../sdk/vercel-ai-sdk.ts';
 
 const DEFAULT_IGNORE_PATTERNS = ['**/node_modules/**', '**/dist/**', '**/.git/**'];
@@ -71,7 +72,7 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
   readonly description = 'Create a .prompt.ts file';
   readonly icon = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3A1.5 1.5 0 000 4.5v8A1.5 1.5 0 001.5 14h13a1.5 1.5 0 001.5-1.5v-7A1.5 1.5 0 0014.5 4H8L6.5 2.5h-5z"/></svg>';
 
-  private parser: PromptFileParser | null = null;
+  private files: string[] | null = null;
   private rootDir: string;
   private fileType: PromptFileType;
   private fileProvider: FileProvider;
@@ -100,15 +101,18 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
   }
 
   async getAllPrompts(): Promise<ParsedFilePrompt[]> {
-    await this.ensureParser();
-    return this.parser!.parseAll();
+    await this.ensureFiles();
+    return this.fileType.parsePrompts(this.files!, this.rootDir);
   }
 
   async getPrompt(id: string): Promise<ParsedFilePrompt | null> {
     const [filePath, name] = this.parsePromptId(id);
-    await this.ensureParser();
-
-    const prompts = this.parser!.parseFile(filePath);
+    let prompts: ParsedFilePrompt[];
+    try {
+      prompts = await this.fileType.parsePrompts([filePath], this.rootDir);
+    } catch {
+      return null;
+    }
     return prompts.find(p => p.name === name) || null;
   }
 
@@ -123,31 +127,33 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
 
     const [filePath, promptName] = this.parsePromptId(promptId);
 
+    const { definitions, values } = prompt.extractedProps;
+
     for (const [propertyName, value] of Object.entries(updates)) {
       this.suppressNextWatchEvent(filePath, 'change');
-      const prop = prompt.properties[propertyName];
+      const propDef = definitions.find(d => d.name === propertyName);
+      const currentValue = values?.[propertyName];
 
       if (value === null) {
         // null → remove the property
-        if (!prop) throw new Error(`Property '${propertyName}' not found`);
-        await this.fileType.removeProperty(filePath, prop);
-      } else if (!prop) {
+        if (!propDef) throw new Error(`Property '${propertyName}' not found`);
+        await this.fileType.removeProperty(filePath, propDef);
+      } else if (!propDef) {
         // unknown key → add as a new property
         await this.fileType.addProperty(filePath, promptName, propertyName, value);
       } else {
         // existing key → update in place
-        if (!prop.isEditable) {
+        if (currentValue && !isEditable(currentValue)) {
           throw new Error(`Property '${propertyName}' is not editable`);
         }
-        if (!prop.valueSpan) {
+        if (!propDef.valueSpan) {
           throw new Error(`Property '${propertyName}' is missing source metadata`);
         }
-        await this.fileType.updateProperty(filePath, prop, value);
+        await this.fileType.updateProperty(filePath, propDef, value, promptId);
       }
     }
 
     // Re-scan and re-parse to get updated prompt
-    await this.refresh();
     return (await this.getPrompt(promptId))!;
   }
 
@@ -169,7 +175,6 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
     const [filePath, oldName] = this.parsePromptId(promptId);
     this.suppressNextWatchEvent(filePath, 'change');
     await this.fileType.renamePrompt(filePath, oldName, newName);
-    await this.refresh();
 
     const relFilePath = path.relative(this.rootDir, filePath);
     const prompt = await this.getPrompt(`${relFilePath}#${newName}`);
@@ -188,7 +193,6 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
 
       this.suppressNextWatchEvent(absPath, 'add');
       await this.fileProvider.writeFile(absPath, content);
-      await this.refresh();
 
       const prompt = await this.getPrompt(`${relFilePath}#${name}`);
       if (!prompt) throw new Error('Failed to create prompt');
@@ -251,8 +255,10 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
         }
 
         if (eventType === 'change' || eventType === 'add') {
-          await this.refresh();
-          const prompts = this.parser!.parseFile(absolutePath);
+          if (this.files && !this.files.includes(absolutePath)) {
+            this.files.push(absolutePath);
+          }
+          const prompts = await this.fileType.parsePrompts([absolutePath], this.rootDir);
           prompts.forEach(prompt => {
             callback({ type: eventType === 'change' ? 'change' : 'add', promptId: prompt.id });
           });
@@ -264,15 +270,10 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
     );
   }
 
-  private async ensureParser(): Promise<void> {
-    if (!this.parser) {
-      await this.refresh();
+  private async ensureFiles(): Promise<void> {
+    if (!this.files) {
+      this.files = await Array.fromAsync(this.findPromptFiles());
     }
-  }
-
-  private async refresh(): Promise<void> {
-    const files = await Array.fromAsync(this.findPromptFiles());
-    this.parser = await this.fileType.createParser(files, this.rootDir);
   }
 
   private suppressNextWatchEvent(filePath: string, eventType: ChangeEventType): void {

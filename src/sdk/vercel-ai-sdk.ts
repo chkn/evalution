@@ -19,14 +19,14 @@ export class VercelAISDK implements SDKAdapter {
     // FIXME: Can we read this from the SDK instead of hardcoding it?
     return Promise.resolve({
       modelValueTypes: {
-        "function": { label: 'Provider', description: 'Import and call provider SDK (e.g. openai("gpt-4o"))' },
+        "function": { label: 'Provider', description: 'Call provider function (e.g. openai("gpt-4o"))' },
         "string": { label: 'Gateway', description: 'Use a gateway model string (e.g. "openai/gpt-4o")' },
       },
       groups: {
         'OpenAI': {
           customValueTemplates: {
             function: { kind: 'functionCall' as const, callee: 'openai', args: [{ kind: 'primitive' as const, value: '$input' }], import: { name: 'openai', from: '@ai-sdk/openai' } },
-            string: { kind: 'primitive' as const, value: 'openai/$input' },
+            //string: { kind: 'primitive' as const, value: 'openai/$input' },
           },
         },
       },

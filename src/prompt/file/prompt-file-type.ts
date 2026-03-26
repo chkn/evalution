@@ -1,6 +1,20 @@
-import type { PromptProperty } from '../../shared/types.ts';
-import type { PromptFileParser } from '../../parser/prompt-parser.ts';
-import type { TSPromptFileType } from './ts/TSPromptFileType.ts';
+import type { PropDefinition, PropValue } from 'ts-proppy';
+import type { ParsedPrompt } from '../../shared/types.ts';
+import type { TSPromptFileType } from './ts/ts-prompt-file-type.ts';
+
+/** Metadata attached to prompts that originate from a file on disk. */
+export interface FilePromptMetadata {
+  /** Path to the source file relative to the {@link FilePromptProviderOptions.rootDir}. */
+  relativeFilePath: string
+}
+
+/**
+ * A {@link ParsedPrompt} produced by the file-based parser, with
+ * {@link FilePromptMetadata} guaranteed to be present on `metadata`.
+ */
+export interface ParsedFilePrompt extends ParsedPrompt {
+  metadata: FilePromptMetadata;
+}
 
 /**
  * Strategy object that knows how to parse, edit, and execute a specific
@@ -19,26 +33,28 @@ export interface PromptFileType {
   defaultIncludePatterns: readonly string[];
 
   /**
-   * Creates a {@link PromptFileParser} for the given set of files.
-   * @param files - Absolute paths of the files to include.
+   * Parses the given files and returns all discovered prompts.
+   * Reads fresh file content at the time of the call.
+   * @param files - Absolute paths of the files to parse.
    * @param rootDir - The project root; used to compute relative prompt IDs.
    */
-  createParser(files: string[], rootDir: string): Promise<PromptFileParser>;
+  parsePrompts(files: string[], rootDir: string): Promise<ParsedFilePrompt[]>;
 
   /**
    * Updates the value of an existing property in a prompt source file.
    * @param filePath - Absolute path to the file to edit.
-   * @param prop - The property to update (must carry source-position metadata).
+   * @param propDef - The property definition to update (must carry source-position metadata).
    * @param value - The new value to write.
+   * @param promptId - The prompt ID, used to re-parse for fresh spans.
    */
-  updateProperty(filePath: string, prop: PromptProperty, value: any): Promise<void>;
+  updateProperty(filePath: string, propDef: PropDefinition, value: PropValue, promptId?: string): Promise<void>;
 
   /**
    * Removes a property from a prompt source file entirely.
    * @param filePath - Absolute path to the file to edit.
-   * @param prop - The property to remove.
+   * @param propDef - The property definition to remove.
    */
-  removeProperty(filePath: string, prop: PromptProperty): Promise<void>;
+  removeProperty(filePath: string, propDef: PropDefinition): Promise<void>;
 
   /**
    * Adds a new property to a prompt in a source file.
@@ -47,7 +63,7 @@ export interface PromptFileType {
    * @param propertyName - The key to add.
    * @param value - The value to assign.
    */
-  addProperty(filePath: string, promptName: string, propertyName: string, value: any): Promise<void>;
+  addProperty(filePath: string, promptName: string, propertyName: string, value: PropValue): Promise<void>;
 
   /**
    * Renames an exported prompt in a source file.
@@ -67,5 +83,3 @@ export interface PromptFileType {
    */
   loadConfig(filePath: string, promptName: string, params: any[]): Promise<any>;
 }
-
-

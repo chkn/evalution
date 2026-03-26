@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import type { ParsedPrompt, PromptProperty, PropDefinition, PropValue, ModelCatalog } from '../../shared/types';
+import type { ParsedPrompt, PropDefinition, PropValue, ModelCatalog } from '../../shared/types';
 import { getModelCatalog, getModelParameters, updatePromptProperties  } from '../api';
-import { ItemEditor } from 'ts-proppy/react';
-import TokenEditor from './TokenEditor';
+import { ItemEditor, TemplateEditor } from 'ts-proppy/react';
+import { valueToSourceText } from 'ts-proppy';
+import { isEditable } from '../../shared/is-editable';
 import ModelPicker from './ModelPicker';
 
 interface Props {
@@ -87,21 +88,40 @@ const ROLE_LABELS: Record<string, string> = {
   tool: 'Tool Result',
 };
 
-function SystemCard({ content, isEditable, onChange }: {
+/** Minimal PropDefinition for template editing */
+const TEMPLATE_PROP_DEF: PropDefinition = {
+  name: '_template',
+  type: { kind: 'primitive', syntax: 'string' },
+  optional: false,
+};
+
+function SystemCard({ content, editable, onChange }: {
   content: string;
-  isEditable: boolean;
+  editable: boolean;
   onChange: (v: string) => void;
 }) {
   const [local, setLocal] = useState(content);
   useEffect(() => setLocal(content), [content]);
+
+  const handleChange = (v: PropValue) => {
+    const str = v.kind === 'template' ? v.value : v.kind === 'primitive' && typeof v.value === 'string' ? v.value : '';
+    setLocal(str);
+    onChange(str);
+  };
 
   return (
     <div className="pg-panel-card">
       <div className="pg-msg-header">
         <span className="pg-role-label">System message</span>
       </div>
-      {isEditable
-        ? <TokenEditor className="token-editor" value={local} onChange={v => { setLocal(v); onChange(v); }} placeholder="System prompt…" />
+      {editable
+        ? <TemplateEditor
+            propDef={TEMPLATE_PROP_DEF}
+            value={{ kind: 'template', value: local }}
+            onChange={handleChange}
+            className="token-editor"
+            placeholder="System prompt…"
+          />
         : <div className="pg-msg-content">{content}</div>
       }
     </div>
@@ -115,6 +135,12 @@ function MessageCard({ msg, onChange, onDelete }: {
 }) {
   const [content, setContent] = useState(msg.content);
   useEffect(() => setContent(msg.content), [msg.content]);
+
+  const handleChange = (v: PropValue) => {
+    const str = v.kind === 'template' ? v.value : v.kind === 'primitive' && typeof v.value === 'string' ? v.value : '';
+    setContent(str);
+    onChange({ ...msg, content: str });
+  };
 
   return (
     <div className="pg-panel-card">
@@ -133,7 +159,13 @@ function MessageCard({ msg, onChange, onDelete }: {
         </div>
         <button className="pg-delete-msg" onClick={onDelete} title="Delete">×</button>
       </div>
-      <TokenEditor className="token-editor" value={content} onChange={v => { setContent(v); onChange({ ...msg, content: v }); }} placeholder="Message content…" />
+      <TemplateEditor
+        propDef={TEMPLATE_PROP_DEF}
+        value={{ kind: 'template', value: content }}
+        onChange={handleChange}
+        className="token-editor"
+        placeholder="Message content…"
+      />
       {msg.role === 'assistant' && (
         <ToolCallsSection
           toolCalls={msg.toolCalls ?? []}
@@ -192,7 +224,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
 
   useEffect(() => { onDirtyChange(saving); }, [saving]);
   const [localMessages, setLocalMessages] = useState<Msg[]>(
-    Array.isArray(prompt.properties.messages?.value) ? prompt.properties.messages.value : []
+    extractMessages(prompt)
   );
   const [modelParameters, setModelParameters] = useState<PropDefinition[]>([]);
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
@@ -205,10 +237,8 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   }, [prompt.providerId]);
 
   useEffect(() => {
-    setLocalMessages(
-      Array.isArray(prompt.properties.messages?.value) ? prompt.properties.messages.value : []
-    );
-  }, [prompt.properties.messages?.value]);
+    setLocalMessages(extractMessages(prompt));
+  }, [prompt.extractedProps.values?.messages]);
 
   const handleUpdate = async (key: string, value: any) => {
     setSaving(true);
@@ -228,31 +258,42 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   const handleMessagesChange = (msgs: Msg[]) => {
     setLocalMessages(msgs);
     if (msgSaveTimer.current) clearTimeout(msgSaveTimer.current);
-    msgSaveTimer.current = setTimeout(() => handleUpdate('messages', msgs), 600);
+    msgSaveTimer.current = setTimeout(() => handleUpdate('messages', msgsToValue(msgs)), 600);
   };
 
   const handleSystemChange = (v: string) => {
     if (systemSaveTimer.current) clearTimeout(systemSaveTimer.current);
-    systemSaveTimer.current = setTimeout(() => handleUpdate('system', v), 600);
+    systemSaveTimer.current = setTimeout(() => {
+      const hasInterpolation = v.includes('${');
+      const value: PropValue = hasInterpolation
+        ? { kind: 'template', value: v }
+        : { kind: 'primitive', value: v };
+      handleUpdate('system', value);
+    }, 600);
   };
 
   const handleAddMessage = () => {
     const newMsgs = [...localMessages, { role: 'user', content: '' }];
     setLocalMessages(newMsgs);
-    handleUpdate('messages', newMsgs);
+    handleUpdate('messages', msgsToValue(newMsgs));
   };
 
-  const { model, system, messages } = prompt.properties;
-  const modelProperty = model ?? { value: { type: 'function', provider: 'openai', model: 'gpt-4o' }, name: 'model', isEditable: true };
-  const systemValue = typeof system?.value === 'string' ? system.value : ''; // FIXME: Don't hardcode that the property is called 'system' or that it's a string
-  const systemEditable = system ? system.isEditable : true;
+  const { definitions, values } = prompt.extractedProps;
+  const modelValue = values?.model;
+  const systemValue = values?.system;
+  const systemStr = systemValue?.kind === 'primitive' && typeof systemValue.value === 'string'
+    ? systemValue.value
+    : systemValue?.kind === 'template' ? systemValue.value : '';
+  const systemEditable = systemValue ? isEditable(systemValue) : true;
   const modelParamKeys = new Set(['model', 'system', 'messages']);
-  const modelParams = Object.entries(prompt.properties)
-    .filter(([k]) => !modelParamKeys.has(k));
+  const modelParams = definitions
+    .filter(d => !modelParamKeys.has(d.name))
+    .map(d => ({ def: d, value: values?.[d.name] }));
 
   // CallSettings params not yet present in the prompt
+  const existingNames = new Set(definitions.map(d => d.name));
   const addableParams = modelParameters.filter(
-    cs => prompt.properties[cs.name] === undefined
+    cs => !existingNames.has(cs.name)
   );
 
   return (
@@ -269,32 +310,32 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
           <span className="pg-panel-title">Model</span>
         </div>
         <div className="pg-panel-body">
-          <ModelPicker property={modelProperty} onChange={v => handleUpdate('model', v)} modelCatalog={modelCatalog} />
-          {modelParams.map(([key, prop]) => {
-            const propDef = modelParameters.find(cs => cs.name === key);
+          <ModelPicker value={modelValue} onChange={v => handleUpdate('model', v)} modelCatalog={modelCatalog} />
+          {modelParams.map(({ def, value: propValue }) => {
+            const propDef = modelParameters.find(cs => cs.name === def.name);
             if (!propDef) {
               // No PropDefinition available — show source text as read-only
               return (
-                <div key={key} className="pg-panel-card">
+                <div key={def.name} className="pg-panel-card">
                   <div className="pg-msg-header">
-                    <span className="pg-role-label">{key}</span>
-                    {prop.isEditable && (
-                      <button className="pg-delete-msg" onClick={() => handleUpdate(key, null)} title="Remove parameter">×</button>
+                    <span className="pg-role-label">{def.name}</span>
+                    {propValue && isEditable(propValue) && (
+                      <button className="pg-delete-msg" onClick={() => handleUpdate(def.name, null)} title="Remove parameter">×</button>
                     )}
                   </div>
                   <div className="pg-msg-content" style={{ fontSize: 13, color: '#9ca3af' }}>
-                    {prop.sourceText ?? String(prop.value)}
+                    {propValue ? valueToSourceText(propValue) : ''}
                   </div>
                 </div>
               );
             }
             return (
               <ParamCard
-                key={key}
+                key={def.name}
                 propDef={propDef}
-                value={prop.value as PropValue | undefined}
-                onDelete={() => handleUpdate(key, null)}
-                onChange={v => handleUpdate(key, v)}
+                value={propValue}
+                onDelete={() => handleUpdate(def.name, null)}
+                onChange={v => handleUpdate(def.name, v)}
               />
             );
           })}
@@ -328,8 +369,8 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
         </div>
         <div className="pg-panel-body">
           <SystemCard
-            content={systemValue}
-            isEditable={systemEditable}
+            content={systemStr}
+            editable={systemEditable}
             onChange={handleSystemChange}
           />
           {localMessages.map((msg, i) => (
@@ -357,6 +398,39 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
       </div>
     </div>
   );
+}
+
+/** Convert a Msg[] back to a PropValue array for saving. */
+function msgsToValue(msgs: Msg[]): PropValue {
+  return {
+    kind: 'array',
+    elements: msgs.map(msg => {
+      const contentHasInterpolation = msg.content.includes('${');
+      const content: PropValue = contentHasInterpolation
+        ? { kind: 'template', value: msg.content }
+        : { kind: 'primitive', value: msg.content };
+      return {
+        kind: 'object',
+        properties: {
+          role: { kind: 'primitive', value: msg.role },
+          content,
+        },
+      };
+    }),
+  };
+}
+
+/** Extract a plain Msg[] from the prompt's messages PropValue. */
+function extractMessages(prompt: ParsedPrompt): Msg[] {
+  const msgValue = prompt.extractedProps.values?.messages;
+  if (!msgValue || msgValue.kind !== 'array') return [];
+  return msgValue.elements.map(el => {
+    if (el.kind !== 'object') return { role: 'user', content: '' };
+    const role = el.properties.role?.kind === 'primitive' ? String(el.properties.role.value) : 'user';
+    const content = el.properties.content?.kind === 'primitive' ? String(el.properties.content.value)
+      : el.properties.content?.kind === 'template' ? el.properties.content.value : '';
+    return { role, content };
+  });
 }
 
 export default PlaygroundEditor;

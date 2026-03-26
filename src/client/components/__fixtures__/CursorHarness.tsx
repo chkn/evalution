@@ -8,11 +8,17 @@ export function makePrompt(content: string): ParsedPrompt {
     providerId: 'test',
     name: 'test',
     functionParameters: [],
-    properties: {
-      messages: {
-        name: 'messages',
-        value: [{ role: 'user', content }],
-        isEditable: true,
+    extractedProps: {
+      definitions: [
+        { name: 'messages', type: { kind: 'array', syntax: 'any[]', elementType: { kind: 'primitive', syntax: 'any' } }, optional: false },
+      ],
+      values: {
+        messages: {
+          kind: 'array',
+          elements: [
+            { kind: 'object', properties: { role: { kind: 'primitive', value: 'user' }, content: { kind: 'primitive', value: content } } },
+          ],
+        },
       },
     },
   };

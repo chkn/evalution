@@ -15,11 +15,11 @@
  * ```
  */
 export type { EvalutionConfig } from './config.ts';
-export type { ChangeEventType, PromptProvider, PromptChangeEvent } from './providers/prompt-provider.ts';
-export type { ParsedPrompt, PromptProperty, SourceSpan, ModelValueType, ModelInfo, ModelProviderInfo, ModelCatalog, ModelMode, ModelParameterInfo, FunctionParameter, AddPromptField, AddPromptContext, PromptProviderInfo } from './shared/types.ts';
-export { type PromptFileType, type PromptFileParser, TSPromptFileType } from './providers/file/prompt-file-type.ts';
-export { type FileProvider, type FileWatchOptions, type FileWatchCallback, type GlobOptions, LocalFileProvider, MemoryFileProvider } from './providers/file/file-provider.ts';
-export type { SDKAdapter } from './server/sdk-adapter.ts';
-export { VercelAISDK } from './server/sdk-adapter.ts';
-export { FilePromptProvider, type FilePromptProviderOptions } from './providers/file/file-prompt-provider.ts';
-export type { FilePromptMetadata, ParsedFilePrompt } from './parser/prompt-parser.ts';
+export type { PromptProvider } from './prompt/prompt-provider.ts';
+export type { ChangeEventType, PromptChangeEvent, ParsedPrompt, SourceSpan, ModelValueType, ModelInfo, ModelCatalog, FunctionParameter, AddPromptField, AddPromptContext, PromptProviderInfo, ExtractedProps, PropValue, PropDefinition } from './shared/types.ts';
+export { type PromptFileType, type ParsedFilePrompt, type FilePromptMetadata } from './prompt/file/prompt-file-type.ts';
+export { TSPromptFileType } from './prompt/file/ts/ts-prompt-file-type.ts';
+export { type FileProvider, type FileWatchOptions, type FileWatchCallback, type GlobOptions, LocalFileProvider, MemoryFileProvider } from './file-provider.ts';
+export type { SDKAdapter } from './sdk/sdk-adapter.ts';
+export { VercelAISDK } from './sdk/vercel-ai-sdk.ts';
+export { FilePromptProvider, type FilePromptProviderOptions } from './prompt/file/file-prompt-provider.ts';

@@ -926,11 +926,10 @@ code, pre {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 12px 5px 34px;
+  padding: 5px 12px 5px 12px;
 }
 
 .pg-custom-gateway-row {
-  padding-left: 12px;
   border-top: 1px solid #f3f4f6;
   padding-top: 8px;
   padding-bottom: 8px;

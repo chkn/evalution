@@ -27,6 +27,6 @@
     "node_modules",
     "dist",
     "src/client",
-    "src/parser/__fixtures__"
+    "src/prompt/file/ts/__fixtures__"
   ]
 }

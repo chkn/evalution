@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MemoryFileProvider } from '../../server/file-provider.ts';
+import { MemoryFileProvider } from './file-provider.ts';
 
 const cwd = '/virtual';
 

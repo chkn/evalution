@@ -1,9 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { FilePromptProvider } from './file-prompt-provider.ts';
-import { MemoryFileProvider } from '../../server/file-provider.ts';
+import { MemoryFileProvider } from '../../file-provider.ts';
+import { valueToSourceText } from 'ts-proppy';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+
+/** Helper to look up a value by name from extractedProps */
+function getValue(prompt: { extractedProps: { values?: Record<string, any> } }, name: string) {
+  return prompt.extractedProps.values![name];
+}
 
 describe('FilePromptProvider', () => {
   let tempDir: string;
@@ -85,7 +91,7 @@ export function myPrompt() {
       system: { kind: 'primitive', value: 'New value' },
     });
 
-    expect(updatedPrompt.properties.system.value).toEqual({ kind: 'primitive', value: 'New value' });
+    expect(getValue(updatedPrompt, 'system')).toEqual({ kind: 'primitive', value: 'New value' });
 
     const fileContent = await fs.readFile(filePath, 'utf-8');
     expect(fileContent).toContain('"New value"');
@@ -109,7 +115,7 @@ export function myPrompt() {
       model: { kind: 'primitive', value: 'openai/gpt-4o' },
     });
 
-    expect(updatedPrompt.properties.model.sourceText).toBe('"openai/gpt-4o"');
+    expect(valueToSourceText(getValue(updatedPrompt, 'model'))).toBe('"openai/gpt-4o"');
   });
 
   it('should throw error for read-only property', async () => {
@@ -154,8 +160,9 @@ export function myPrompt() {
     const promptId = `${filePath}#myPrompt`;
 
     const updated = await provider.updatePromptProperties(promptId, { temperature: { kind: 'primitive', value: 0.7 } });
-    expect(updated.properties['temperature']).toBeDefined();
-    expect(updated.properties['temperature'].value).toEqual({ kind: 'primitive', value: 0.7 });
+    const tempValue = getValue(updated, 'temperature');
+    expect(tempValue).toBeDefined();
+    expect(tempValue).toEqual({ kind: 'primitive', value: 0.7 });
   });
 
   it('should support watching', () => {
@@ -209,7 +216,7 @@ export function myPrompt() {
 
     // Verify fresh data
     const prompt = await provider.getPrompt(promptId);
-    expect(prompt!.properties.system.value).toEqual({ kind: 'primitive', value: 'Updated' });
+    expect(getValue(prompt!, 'system')).toEqual({ kind: 'primitive', value: 'Updated' });
   });
 
   it('should call callback on file changes', async () => {

@@ -1,25 +1,9 @@
 // #region Prompt
 
-export interface SourceSpan {
-  start: number;
-  end: number;
-}
-
 export interface FunctionParameter {
   name: string;
   type?: string;
   defaultValue?: any;
-}
-
-export interface PromptProperty<Value = unknown> {
-  name: string;
-  value: Value;
-  isEditable: boolean;
-  sourceText?: string;
-  valueSpan?: SourceSpan;
-  fullSpan?: SourceSpan; // full "key: value," including leading whitespace and trailing comma
-  /** The prompt this property belongs to (e.g. `"prompts/greet.prompt.ts#greet"`). Used to re-parse for fresh spans. */
-  promptId?: string;
 }
 
 export interface ParsedPrompt {
@@ -27,7 +11,7 @@ export interface ParsedPrompt {
   providerId?: string;
   name: string;
   functionParameters: FunctionParameter[];
-  properties: Record<string, PromptProperty>;
+  extractedProps: ExtractedProps;
   metadata?: unknown;
 
   /**
@@ -111,8 +95,8 @@ export type SSEData = PromptChangedSSEData;
 
 // #region Model
 
-import type { PropValue, PropDefinition, ImportSpecifier } from 'ts-proppy';
-export type { PropDefinition, PropValue, ImportSpecifier };
+import type { PropValue, PropDefinition, ImportSpecifier, ExtractedProps, SourceSpan } from 'ts-proppy';
+export type { PropDefinition, PropValue, ImportSpecifier, ExtractedProps, SourceSpan };
 
 /** A pre-defined model option shown in quick-select UIs. */
 export interface ModelInfo {

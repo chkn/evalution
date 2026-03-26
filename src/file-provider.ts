@@ -4,7 +4,7 @@ import { pathToFileURL } from 'url';
 import { glob as globLib } from 'fs/promises';
 import { makeRe, minimatch } from 'minimatch';
 import chokidar from 'chokidar';
-import type { ChangeEventType } from '../shared/types.ts';
+import type { ChangeEventType } from './shared/types.ts';
 
 /** Options accepted by {@link FileProvider.glob}. */
 export interface GlobOptions {
