@@ -3,6 +3,7 @@ import type { ParsedPrompt, PropDefinition, PropValue, ModelCatalog } from '../.
 import { getModelCatalog, getModelParameters, updatePromptProperties  } from '../api';
 import { ItemEditor, TemplateEditor, valueToSourceText } from 'ts-proppy/react';
 import { isEditable } from '../../shared/is-editable';
+import { defaultValueForType } from '../utils';
 import ModelPicker from './ModelPicker';
 
 interface Props {
@@ -145,6 +146,8 @@ function MessageCard({ msg, onChange, onDelete }: {
     <div className="pg-panel-card">
       <div className="pg-msg-header">
         <div className="pg-role-wrapper">
+          <span className="pg-role-label">{ROLE_LABELS[msg.role] ?? msg.role}</span>
+          <ChevronDown size={10} />
           <select
             className="pg-role-select"
             value={msg.role}
@@ -154,7 +157,6 @@ function MessageCard({ msg, onChange, onDelete }: {
               <option key={val} value={val}>{label}</option>
             ))}
           </select>
-          <ChevronDown size={10} />
         </div>
         <button className="pg-delete-msg" onClick={onDelete} title="Delete">×</button>
       </div>
@@ -208,7 +210,9 @@ function ParamCard({ propDef, value, onDelete, onChange }: {
         </div>
         <button className="pg-delete-msg" onClick={onDelete} title="Remove parameter">×</button>
       </div>
-      <ItemEditor propDef={propDef} value={value} onChange={onChange} />
+      <div className="pg-param-input-inline">
+        <ItemEditor propDef={propDef} value={value} onChange={onChange} className="pg-param-input" />
+      </div>
     </div>
   );
 }
@@ -349,7 +353,8 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
                 onChange={e => {
                   if (!e.target.value) return;
                   const cs = modelParameters.find(p => p.name === e.target.value);
-                  if (cs?.defaultValue) handleUpdate(cs.name, cs.defaultValue);
+                  if (!cs) return;
+                  handleUpdate(cs.name, cs.defaultValue ?? defaultValueForType(cs.type));
                 }}
               >
                 <option value="">Add parameter…</option>
