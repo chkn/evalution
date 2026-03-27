@@ -41,9 +41,20 @@ async function getCursorOffset(locator: Locator): Promise<number | null> {
 }
 
 async function mockApiRoutes(page: Page) {
-  await page.route('**/models', route => route.fulfill({ json: { providers: {} } }));
+  await page.route('**/models', route => route.fulfill({ json: { models: [] } }));
   await page.route('**/model-parameters', route => route.fulfill({ json: [] }));
-  await page.route('**/update', route => route.fulfill({ json: {} }));
+  await page.route('**/update', async route => {
+    // Echo back a valid ParsedPrompt so onUpdate doesn't blow away state
+    const body = JSON.parse(route.request().postData() ?? '{}');
+    const messages = body.messages ?? { kind: 'array', elements: [] };
+    const system = body.system ?? { kind: 'primitive', value: '' };
+    await route.fulfill({
+      json: {
+        id: 'test', name: 'test', functionParameters: [],
+        extractedProps: { definitions: [], values: { messages, system } },
+      },
+    });
+  });
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

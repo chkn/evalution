@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { ParsedPrompt, PropDefinition, PropValue, ModelCatalog } from '../../shared/types';
 import { getModelCatalog, getModelParameters, updatePromptProperties  } from '../api';
-import { ItemEditor, TemplateEditor } from 'ts-proppy/react';
-import { valueToSourceText } from 'ts-proppy';
+import { ItemEditor, TemplateEditor, valueToSourceText } from 'ts-proppy/react';
 import { isEditable } from '../../shared/is-editable';
 import ModelPicker from './ModelPicker';
 

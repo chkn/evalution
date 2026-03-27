@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { ModelCatalog, ModelInfo, PropValue } from '../../shared/types';
-import { valueToSourceText } from 'ts-proppy';
+import { valueToSourceText } from 'ts-proppy/react';
 import ProviderIcon from './ProviderIcon';
 
 interface Props {
