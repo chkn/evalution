@@ -24,7 +24,7 @@ function CheckIcon({ size = 14 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 14 14" fill="none" stroke="currentColor"
       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-      style={{ flexShrink: 0, color: '#111827' }}>
+      style={{ flexShrink: 0, color: 'currentColor' }}>
       <path d="M2.5 7.5L5.5 10.5L11.5 4" />
     </svg>
   );
