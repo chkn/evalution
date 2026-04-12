@@ -1,26 +1,18 @@
 import { useState } from 'react';
 import PlaygroundEditor from '../PlaygroundEditor';
-import type { ParsedPrompt } from '../../../shared/types';
+import type { NormalizedPrompt } from '../../../shared/types';
 
-export function makePrompt(content: string): ParsedPrompt {
+export function makePrompt(content: string): NormalizedPrompt {
   return {
     id: 'test',
     providerId: 'test',
     name: 'test',
     functionParameters: [],
-    extractedProps: {
-      definitions: [
-        { name: 'messages', type: { kind: 'array', syntax: 'any[]', elementType: { kind: 'primitive', syntax: 'any' } }, optional: false },
-      ],
-      values: {
-        messages: {
-          kind: 'array',
-          elements: [
-            { kind: 'object', properties: { role: { kind: 'primitive', value: 'user' }, content: { kind: 'primitive', value: content } } },
-          ],
-        },
-      },
-    },
+    modelEditable: true,
+    systemEditable: true,
+    messages: [{ role: 'user', content }],
+    messagesEditable: true,
+    parameters: [],
   };
 }
 
@@ -33,7 +25,7 @@ export function CursorHarness({ initialContent = '', reloadContent }: {
   initialContent?: string;
   reloadContent?: string;
 }) {
-  const [prompt, setPrompt] = useState<ParsedPrompt>(makePrompt(initialContent));
+  const [prompt, setPrompt] = useState<NormalizedPrompt>(makePrompt(initialContent));
 
   return (
     <div>

@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import type { ParsedPrompt } from '../../shared/types';
+import type { NormalizedPrompt } from '../../shared/types';
 import { executePrompt, streamPrompt } from '../api';
 
 interface Props {
-  prompt: ParsedPrompt;
+  prompt: NormalizedPrompt;
 }
 
 function PlaygroundExecution({ prompt }: Props) {

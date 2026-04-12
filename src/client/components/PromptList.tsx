@@ -1,8 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
-import type { ParsedPrompt } from '../../shared/types';
+import type { NormalizedPrompt } from '../../shared/types';
 
 interface PromptListProps {
-  prompts: ParsedPrompt[];
+  prompts: NormalizedPrompt[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   loading: boolean;
@@ -15,14 +15,14 @@ interface PromptListProps {
 
 interface RawTree {
   subdirs: Record<string, RawTree>;
-  files: Record<string, ParsedPrompt[]>;
+  files: Record<string, NormalizedPrompt[]>;
 }
 
 type CompressedNode =
   | { type: 'dir'; label: string; children: CompressedNode[] }
-  | { type: 'file'; label: string; prompts: ParsedPrompt[] };
+  | { type: 'file'; label: string; prompts: NormalizedPrompt[] };
 
-function buildRawTree(prompts: ParsedPrompt[]): RawTree {
+function buildRawTree(prompts: NormalizedPrompt[]): RawTree {
   const root: RawTree = { subdirs: {}, files: {} };
 
   for (const prompt of prompts) {
@@ -199,7 +199,7 @@ interface TreeNodeProps {
 }
 
 function PromptRow({ prompt, indent, selectedId, onSelect, renamingId, onStartRename, onCommitRename, onCancelRename }: {
-  prompt: ParsedPrompt;
+  prompt: NormalizedPrompt;
   indent: number;
 } & TreeNodeProps) {
   const isSelected = prompt.id === selectedId;

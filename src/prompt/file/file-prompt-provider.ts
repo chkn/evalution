@@ -2,8 +2,17 @@ import path from 'path';
 import type { PromptProvider } from '../prompt-provider.ts';
 import type { PromptFileType } from './prompt-file-type.ts';
 import type { SDKAdapter } from '../../sdk/sdk-adapter.ts';
-import type { AddPromptContext, ChangeEventType, PromptChangeEvent } from '../../shared/types.ts';
-import type { FilePromptMetadata, ParsedFilePrompt } from './prompt-file-type.ts';
+import type {
+  AddPromptContext,
+  ChangeEventType,
+  NormalizedPromptUpdates,
+  PromptChangeEvent,
+} from '../../shared/types.ts';
+import type {
+  FilePromptMetadata,
+  NormalizedFilePrompt,
+  ParsedFilePrompt,
+} from './prompt-file-type.ts';
 import { isEditable } from '../../shared/is-editable.ts';
 
 import { TSPromptFileType } from './ts/ts-prompt-file-type.ts';
@@ -66,7 +75,7 @@ let defaultIDCounter = 0;
  * const prompts = await provider.getAllPrompts();
  * ```
  */
-export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
+export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> {
   readonly id: string;
   readonly displayName = 'File System';
   readonly description = 'Create a .prompt.ts file';
@@ -100,36 +109,31 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
     this.sdkAdapter = sdk;
   }
 
-  async getAllPrompts(): Promise<ParsedFilePrompt[]> {
+  async getAllPrompts(): Promise<NormalizedFilePrompt[]> {
     await this.ensureFiles();
-    return this.fileType.parsePrompts(this.files!, this.rootDir);
+    const parsed = await this.fileType.parsePrompts(this.files!, this.rootDir);
+    return parsed.map(p => this.normalizeFilePrompt(p));
   }
 
-  async getPrompt(id: string): Promise<ParsedFilePrompt | null> {
-    const [filePath, name] = this.parsePromptId(id);
-    let prompts: ParsedFilePrompt[];
-    try {
-      prompts = await this.fileType.parsePrompts([filePath], this.rootDir);
-    } catch {
-      return null;
-    }
-    return prompts.find(p => p.name === name) || null;
+  async getPrompt(id: string): Promise<NormalizedFilePrompt | null> {
+    const parsed = await this.getParsedPrompt(id);
+    return parsed ? this.normalizeFilePrompt(parsed) : null;
   }
 
   async updatePromptProperties(
     promptId: string,
-    updates: Record<string, any>
-  ): Promise<ParsedFilePrompt> {
-    const prompt = await this.getPrompt(promptId);
-    if (!prompt) {
+    updates: NormalizedPromptUpdates
+  ): Promise<NormalizedFilePrompt> {
+    const parsed = await this.getParsedPrompt(promptId);
+    if (!parsed) {
       throw new Error('Prompt not found');
     }
 
     const [filePath, promptName] = this.parsePromptId(promptId);
+    const { definitions, values } = parsed.extractedProps;
+    const rawUpdates = this.sdkAdapter.denormalizeUpdates(updates);
 
-    const { definitions, values } = prompt.extractedProps;
-
-    for (const [propertyName, value] of Object.entries(updates)) {
+    for (const [propertyName, value] of Object.entries(rawUpdates)) {
       this.suppressNextWatchEvent(filePath, 'change');
       const propDef = definitions.find(d => d.name === propertyName);
       const currentValue = values?.[propertyName];
@@ -157,6 +161,22 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
     return (await this.getPrompt(promptId))!;
   }
 
+  private async getParsedPrompt(id: string): Promise<ParsedFilePrompt | null> {
+    const [filePath, name] = this.parsePromptId(id);
+    let prompts: ParsedFilePrompt[];
+    try {
+      prompts = await this.fileType.parsePrompts([filePath], this.rootDir);
+    } catch {
+      return null;
+    }
+    return prompts.find(p => p.name === name) || null;
+  }
+
+  private normalizeFilePrompt(parsed: ParsedFilePrompt): NormalizedFilePrompt {
+    const normalized = this.sdkAdapter.normalizePrompt(parsed);
+    return { ...normalized, metadata: parsed.metadata };
+  }
+
   getModelCatalog() {
     return this.sdkAdapter.getModelCatalog();
   }
@@ -171,7 +191,7 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
     return this.sdkAdapter.executeConfig(config, stream);
   }
 
-  async renamePrompt(promptId: string, newName: string): Promise<ParsedFilePrompt> {
+  async renamePrompt(promptId: string, newName: string): Promise<NormalizedFilePrompt> {
     const [filePath, oldName] = this.parsePromptId(promptId);
     this.suppressNextWatchEvent(filePath, 'change');
     await this.fileType.renamePrompt(filePath, oldName, newName);
@@ -182,7 +202,7 @@ export class FilePromptProvider implements PromptProvider<ParsedFilePrompt> {
     return prompt;
   }
 
-  async addPrompt(partial: Partial<ParsedFilePrompt>): Promise<ParsedFilePrompt | AddPromptContext> {
+  async addPrompt(partial: Partial<NormalizedFilePrompt>): Promise<NormalizedFilePrompt | AddPromptContext> {
     const relFilePath = (partial.metadata as FilePromptMetadata | undefined)?.relativeFilePath;
     const name = partial.name;
 

@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
-import type { ParsedPrompt } from '../../shared/types';
+import type { NormalizedPrompt } from '../../shared/types';
 import { getPrompts } from '../api';
 
-function samePrompt(a: ParsedPrompt, b: ParsedPrompt): boolean {
+function samePrompt(a: NormalizedPrompt, b: NormalizedPrompt): boolean {
   return a.id === b.id && a.providerId === b.providerId;
 }
 
 export function usePrompts() {
-  const [prompts, setPrompts] = useState<ParsedPrompt[]>([]);
+  const [prompts, setPrompts] = useState<NormalizedPrompt[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +27,7 @@ export function usePrompts() {
     fetchPrompts();
   }, []);
 
-  const patchPrompt = (updated: ParsedPrompt) => {
+  const patchPrompt = (updated: NormalizedPrompt) => {
     setPrompts(prev => {
       let found = false;
       const next = prev.map(prompt => {

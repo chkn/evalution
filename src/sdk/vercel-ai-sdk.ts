@@ -2,9 +2,23 @@ import fs from 'fs';
 import ts from 'typescript';
 import { generateText, streamText } from 'ai';
 
-import type { PropDefinition } from 'ts-proppy';
+import type { PropDefinition, PropValue } from 'ts-proppy';
 import { findTypeDeclaration, extractPropertiesFromDeclaration } from 'ts-proppy';
 import { findPackageDts, type SDKAdapter } from './sdk-adapter.ts';
+import { isEditable } from '../shared/is-editable.ts';
+import type {
+  ParsedPrompt,
+  NormalizedPrompt,
+  NormalizedMessage,
+  NormalizedParameter,
+  NormalizedPromptUpdates,
+  NormalizedToolCall,
+} from '../shared/types.ts';
+
+const MODEL_KEY = 'model';
+const SYSTEM_KEY = 'system';
+const MESSAGES_KEY = 'messages';
+const RESERVED_KEYS = new Set([MODEL_KEY, SYSTEM_KEY, MESSAGES_KEY]);
 
 /**
  * {@link SDKAdapter} implementation for the
@@ -65,4 +79,108 @@ export class VercelAISDK implements SDKAdapter {
       return { text: result.text, usage: result.usage, finishReason: result.finishReason };
     }
   }
+
+  normalizePrompt(prompt: ParsedPrompt): NormalizedPrompt {
+    const { definitions, values } = prompt.extractedProps;
+    const modelValue = values?.[MODEL_KEY];
+    const systemValue = values?.[SYSTEM_KEY];
+    const messagesValue = values?.[MESSAGES_KEY];
+
+    const parameters: NormalizedParameter[] = definitions
+      .filter(d => !RESERVED_KEYS.has(d.name))
+      .map(def => {
+        const value = values?.[def.name];
+        return {
+          def,
+          value,
+          editable: value ? isEditable(value) : true,
+        };
+      });
+
+    return {
+      id: prompt.id,
+      providerId: prompt.providerId,
+      name: prompt.name,
+      functionParameters: prompt.functionParameters,
+      metadata: prompt.metadata,
+      treePath: prompt.treePath,
+      model: modelValue,
+      modelEditable: modelValue ? isEditable(modelValue) : true,
+      system: systemValue,
+      systemEditable: systemValue ? isEditable(systemValue) : true,
+      messages: extractMessages(messagesValue),
+      messagesEditable: messagesValue ? isEditable(messagesValue) : true,
+      parameters,
+    };
+  }
+
+  denormalizeUpdates(updates: NormalizedPromptUpdates): Record<string, PropValue | null> {
+    const out: Record<string, PropValue | null> = {};
+    if (MODEL_KEY in updates) out[MODEL_KEY] = updates.model ?? null;
+    if (SYSTEM_KEY in updates) out[SYSTEM_KEY] = updates.system ?? null;
+    if (MESSAGES_KEY in updates) {
+      out[MESSAGES_KEY] = updates.messages === null || updates.messages === undefined
+        ? null
+        : messagesToValue(updates.messages);
+    }
+    if (updates.parameters) {
+      for (const [name, value] of Object.entries(updates.parameters)) {
+        out[name] = value;
+      }
+    }
+    return out;
+  }
+}
+
+/**
+ * Returns a {@link PropValue} that is either a primitive string or a template
+ * string, depending on whether `content` contains any `${…}` interpolations.
+ */
+function stringToPropValue(content: string): PropValue {
+  return content.includes('${')
+    ? { kind: 'template', value: content }
+    : { kind: 'primitive', value: content };
+}
+
+function messagesToValue(msgs: NormalizedMessage[]): PropValue {
+  return {
+    kind: 'array',
+    elements: msgs.map(msg => ({
+      kind: 'object',
+      properties: {
+        role: { kind: 'primitive', value: msg.role },
+        content: stringToPropValue(msg.content),
+      },
+    })),
+  };
+}
+
+function extractMessages(value: PropValue | undefined): NormalizedMessage[] {
+  if (!value || value.kind !== 'array') return [];
+  return value.elements.map(el => {
+    if (el.kind !== 'object') return { role: 'user', content: '' };
+    const roleValue = el.properties.role;
+    const role = roleValue?.kind === 'primitive' ? String(roleValue.value) : 'user';
+    const contentValue = el.properties.content;
+    const content = contentValue?.kind === 'primitive'
+      ? String(contentValue.value)
+      : contentValue?.kind === 'template' ? contentValue.value : '';
+    const toolCalls = extractToolCalls(el.properties.toolCalls);
+    return toolCalls ? { role, content, toolCalls } : { role, content };
+  });
+}
+
+function extractToolCalls(value: PropValue | undefined): NormalizedToolCall[] | undefined {
+  if (!value || value.kind !== 'array') return undefined;
+  const out: NormalizedToolCall[] = [];
+  for (const el of value.elements) {
+    if (el.kind !== 'object') continue;
+    const name = el.properties.toolName;
+    const args = el.properties.args;
+    out.push({
+      toolName: name?.kind === 'primitive' ? String(name.value) : '',
+      args: args?.kind === 'primitive' ? String(args.value) : '',
+    });
+  }
+  return out.length > 0 ? out : undefined;
 }

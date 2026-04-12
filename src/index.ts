@@ -16,8 +16,33 @@
  */
 export type { EvalutionConfig } from './config.ts';
 export type { PromptProvider } from './prompt/prompt-provider.ts';
-export type { ChangeEventType, PromptChangeEvent, ParsedPrompt, SourceSpan, ModelValueType, ModelInfo, ModelCatalog, FunctionParameter, AddPromptField, AddPromptContext, PromptProviderInfo, ExtractedProps, PropValue, PropDefinition } from './shared/types.ts';
-export { type PromptFileType, type ParsedFilePrompt, type FilePromptMetadata } from './prompt/file/prompt-file-type.ts';
+export type {
+  ChangeEventType,
+  PromptChangeEvent,
+  ParsedPrompt,
+  NormalizedPrompt,
+  NormalizedMessage,
+  NormalizedToolCall,
+  NormalizedParameter,
+  NormalizedPromptUpdates,
+  SourceSpan,
+  ModelValueType,
+  ModelInfo,
+  ModelCatalog,
+  FunctionParameter,
+  AddPromptField,
+  AddPromptContext,
+  PromptProviderInfo,
+  ExtractedProps,
+  PropValue,
+  PropDefinition,
+} from './shared/types.ts';
+export {
+  type PromptFileType,
+  type ParsedFilePrompt,
+  type NormalizedFilePrompt,
+  type FilePromptMetadata,
+} from './prompt/file/prompt-file-type.ts';
 export { TSPromptFileType } from './prompt/file/ts/ts-prompt-file-type.ts';
 export { type FileProvider, type FileWatchOptions, type FileWatchCallback, type GlobOptions, LocalFileProvider, MemoryFileProvider } from './file-provider.ts';
 export type { SDKAdapter } from './sdk/sdk-adapter.ts';

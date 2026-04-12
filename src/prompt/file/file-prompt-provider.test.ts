@@ -5,10 +5,11 @@ import { valueToSourceText } from 'ts-proppy';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import type { NormalizedPrompt, PropValue } from '../../shared/types.ts';
 
-/** Helper to look up a value by name from extractedProps */
-function getValue(prompt: { extractedProps: { values?: Record<string, any> } }, name: string) {
-  return prompt.extractedProps.values![name];
+/** Look up a parameter value by name on a normalized prompt. */
+function getParameter(prompt: NormalizedPrompt, name: string): PropValue | undefined {
+  return prompt.parameters.find(p => p.def.name === name)?.value;
 }
 
 describe('FilePromptProvider', () => {
@@ -91,7 +92,7 @@ export function myPrompt() {
       system: { kind: 'primitive', value: 'New value' },
     });
 
-    expect(getValue(updatedPrompt, 'system')).toEqual({ kind: 'primitive', value: 'New value' });
+    expect(updatedPrompt.system).toEqual({ kind: 'primitive', value: 'New value' });
 
     const fileContent = await fs.readFile(filePath, 'utf-8');
     expect(fileContent).toContain('"New value"');
@@ -115,7 +116,7 @@ export function myPrompt() {
       model: { kind: 'primitive', value: 'openai/gpt-4o' },
     });
 
-    expect(valueToSourceText(getValue(updatedPrompt, 'model'))).toBe('"openai/gpt-4o"');
+    expect(valueToSourceText(updatedPrompt.model!)).toBe('"openai/gpt-4o"');
   });
 
   it('should throw error for read-only property', async () => {
@@ -142,7 +143,9 @@ export function myPrompt() {
 
   it('should throw error for non-existent prompt', async () => {
     await expect(
-      provider.updatePromptProperties('/fake/path.ts#fake', { system: 'New' })
+      provider.updatePromptProperties('/fake/path.ts#fake', {
+        system: { kind: 'primitive', value: 'New' },
+      })
     ).rejects.toThrow('Prompt not found');
   });
 
@@ -159,8 +162,10 @@ export function myPrompt() {
 
     const promptId = `${filePath}#myPrompt`;
 
-    const updated = await provider.updatePromptProperties(promptId, { temperature: { kind: 'primitive', value: 0.7 } });
-    const tempValue = getValue(updated, 'temperature');
+    const updated = await provider.updatePromptProperties(promptId, {
+      parameters: { temperature: { kind: 'primitive', value: 0.7 } },
+    });
+    const tempValue = getParameter(updated, 'temperature');
     expect(tempValue).toBeDefined();
     expect(tempValue).toEqual({ kind: 'primitive', value: 0.7 });
   });
@@ -216,7 +221,7 @@ export function myPrompt() {
 
     // Verify fresh data
     const prompt = await provider.getPrompt(promptId);
-    expect(getValue(prompt!, 'system')).toEqual({ kind: 'primitive', value: 'Updated' });
+    expect(prompt!.system).toEqual({ kind: 'primitive', value: 'Updated' });
   });
 
   it('should call callback on file changes', async () => {

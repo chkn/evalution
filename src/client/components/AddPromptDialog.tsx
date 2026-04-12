@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import type { PromptProviderInfo, AddPromptContext, ParsedPrompt } from '../../shared/types';
+import type { PromptProviderInfo, AddPromptContext, NormalizedPrompt } from '../../shared/types';
 import { getPromptProviders, addPrompt } from '../api';
 
 interface AddPromptDialogProps {
   onClose: () => void;
-  onCreated: (prompt: ParsedPrompt) => void;
+  onCreated: (prompt: NormalizedPrompt) => void;
 }
 
 type Step =
@@ -46,7 +46,7 @@ function AddPromptDialog({ onClose, onCreated }: AddPromptDialogProps) {
         setStep({ type: 'form', providerId, context: result });
       } else {
         // Provider created the prompt immediately
-        onCreated(result as ParsedPrompt);
+        onCreated(result as NormalizedPrompt);
       }
     } catch (e: any) {
       setError(e.message);
@@ -86,7 +86,7 @@ function AddPromptDialog({ onClose, onCreated }: AddPromptDialogProps) {
         setFieldValues({ ...defaults, ...fieldValues });
         setStep({ type: 'form', providerId: step.providerId, context: result });
       } else {
-        onCreated(result as ParsedPrompt);
+        onCreated(result as NormalizedPrompt);
       }
     } catch (e: any) {
       setError(e.message);

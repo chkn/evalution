@@ -1,5 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import type { ParsedPrompt, PropDefinition, PropValue, ModelCatalog } from '../../shared/types';
+import type {
+  NormalizedPrompt,
+  NormalizedMessage,
+  NormalizedPromptUpdates,
+  NormalizedParameter,
+  PropDefinition,
+  PropValue,
+  ModelCatalog,
+} from '../../shared/types';
 import { getModelCatalog, getModelParameters, updatePromptProperties  } from '../api';
 import { ItemEditor, TemplateEditor, valueToSourceText } from 'ts-proppy/react';
 import { isEditable } from '../../shared/is-editable';
@@ -7,20 +15,9 @@ import { defaultValueForType } from '../utils';
 import ModelPicker from './ModelPicker';
 
 interface Props {
-  prompt: ParsedPrompt;
-  onUpdate: (updated: ParsedPrompt) => void;
+  prompt: NormalizedPrompt;
+  onUpdate: (updated: NormalizedPrompt) => void;
   onDirtyChange: (dirty: boolean) => void;
-}
-
-interface ToolCallEntry {
-  toolName: string;
-  args: string;
-}
-
-interface Msg {
-  role: string;
-  content: string;
-  toolCalls?: ToolCallEntry[];
 }
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
@@ -38,8 +35,8 @@ function ChevronDown({ size = 12 }: { size?: number }) {
 // ─── ToolCallsSection ─────────────────────────────────────────────────────────
 
 function ToolCallsSection({ toolCalls, onChange }: {
-  toolCalls: ToolCallEntry[];
-  onChange: (tc: ToolCallEntry[]) => void;
+  toolCalls: NonNullable<NormalizedMessage['toolCalls']>;
+  onChange: (tc: NonNullable<NormalizedMessage['toolCalls']>) => void;
 }) {
   return (
     <div className="pg-tool-calls">
@@ -129,8 +126,8 @@ function SystemCard({ content, editable, onChange }: {
 }
 
 function MessageCard({ msg, onChange, onDelete }: {
-  msg: Msg;
-  onChange: (m: Msg) => void;
+  msg: NormalizedMessage;
+  onChange: (m: NormalizedMessage) => void;
   onDelete: () => void;
 }) {
   const [content, setContent] = useState(msg.content);
@@ -221,14 +218,25 @@ function ParamCard({ propDef, value, onDelete, onChange }: {
 
 const EMPTY_MODEL_CATALOG: ModelCatalog = { models: [] };
 
+function systemPropValueToString(value: PropValue | undefined): string {
+  if (!value) return '';
+  if (value.kind === 'primitive' && typeof value.value === 'string') return value.value;
+  if (value.kind === 'template') return value.value;
+  return '';
+}
+
+function stringToSystemPropValue(v: string): PropValue {
+  return v.includes('${')
+    ? { kind: 'template', value: v }
+    : { kind: 'primitive', value: v };
+}
+
 function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { onDirtyChange(saving); }, [saving]);
-  const [localMessages, setLocalMessages] = useState<Msg[]>(
-    extractMessages(prompt)
-  );
+  const [localMessages, setLocalMessages] = useState<NormalizedMessage[]>(prompt.messages);
   const [modelParameters, setModelParameters] = useState<PropDefinition[]>([]);
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
 
@@ -240,14 +248,14 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   }, [prompt.providerId]);
 
   useEffect(() => {
-    setLocalMessages(extractMessages(prompt));
-  }, [prompt.extractedProps.values?.messages]);
+    setLocalMessages(prompt.messages);
+  }, [prompt.messages]);
 
-  const handleUpdate = async (key: string, value: any) => {
+  const handleUpdate = async (updates: NormalizedPromptUpdates) => {
     setSaving(true);
     setError(null);
     try {
-      onUpdate(await updatePromptProperties(prompt, { [key]: value }));
+      onUpdate(await updatePromptProperties(prompt, updates));
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -258,46 +266,28 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   const msgSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const systemSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleMessagesChange = (msgs: Msg[]) => {
+  const handleMessagesChange = (msgs: NormalizedMessage[]) => {
     setLocalMessages(msgs);
     if (msgSaveTimer.current) clearTimeout(msgSaveTimer.current);
-    msgSaveTimer.current = setTimeout(() => handleUpdate('messages', msgsToValue(msgs)), 600);
+    msgSaveTimer.current = setTimeout(() => handleUpdate({ messages: msgs }), 600);
   };
 
   const handleSystemChange = (v: string) => {
     if (systemSaveTimer.current) clearTimeout(systemSaveTimer.current);
     systemSaveTimer.current = setTimeout(() => {
-      const hasInterpolation = v.includes('${');
-      const value: PropValue = hasInterpolation
-        ? { kind: 'template', value: v }
-        : { kind: 'primitive', value: v };
-      handleUpdate('system', value);
+      handleUpdate({ system: stringToSystemPropValue(v) });
     }, 600);
   };
 
   const handleAddMessage = () => {
-    const newMsgs = [...localMessages, { role: 'user', content: '' }];
+    const newMsgs: NormalizedMessage[] = [...localMessages, { role: 'user', content: '' }];
     setLocalMessages(newMsgs);
-    handleUpdate('messages', msgsToValue(newMsgs));
+    handleUpdate({ messages: newMsgs });
   };
 
-  const { definitions, values } = prompt.extractedProps;
-  const modelValue = values?.model;
-  const systemValue = values?.system;
-  const systemStr = systemValue?.kind === 'primitive' && typeof systemValue.value === 'string'
-    ? systemValue.value
-    : systemValue?.kind === 'template' ? systemValue.value : '';
-  const systemEditable = systemValue ? isEditable(systemValue) : true;
-  const modelParamKeys = new Set(['model', 'system', 'messages']);
-  const modelParams = definitions
-    .filter(d => !modelParamKeys.has(d.name))
-    .map(d => ({ def: d, value: values?.[d.name] }));
-
-  // CallSettings params not yet present in the prompt
-  const existingNames = new Set(definitions.map(d => d.name));
-  const addableParams = modelParameters.filter(
-    cs => !existingNames.has(cs.name)
-  );
+  const systemStr = systemPropValueToString(prompt.system);
+  const existingParams = new Set(prompt.parameters.map(p => p.def.name));
+  const addableParams = modelParameters.filter(cs => !existingParams.has(cs.name));
 
   return (
     <div className="pg-editor">
@@ -313,32 +303,36 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
           <span className="pg-panel-title">Model</span>
         </div>
         <div className="pg-panel-body">
-          <ModelPicker value={modelValue} onChange={v => handleUpdate('model', v)} modelCatalog={modelCatalog} />
-          {modelParams.map(({ def, value: propValue }) => {
-            const propDef = modelParameters.find(cs => cs.name === def.name);
+          <ModelPicker value={prompt.model} onChange={v => handleUpdate({ model: v })} modelCatalog={modelCatalog} />
+          {prompt.parameters.map((param: NormalizedParameter) => {
+            const propDef = modelParameters.find(cs => cs.name === param.def.name);
             if (!propDef) {
               // No PropDefinition available — show source text as read-only
               return (
-                <div key={def.name} className="pg-panel-card">
+                <div key={param.def.name} className="pg-panel-card">
                   <div className="pg-msg-header">
-                    <span className="pg-role-label">{def.name}</span>
-                    {propValue && isEditable(propValue) && (
-                      <button className="pg-delete-msg" onClick={() => handleUpdate(def.name, null)} title="Remove parameter">×</button>
+                    <span className="pg-role-label">{param.def.name}</span>
+                    {param.value && isEditable(param.value) && (
+                      <button
+                        className="pg-delete-msg"
+                        onClick={() => handleUpdate({ parameters: { [param.def.name]: null } })}
+                        title="Remove parameter"
+                      >×</button>
                     )}
                   </div>
                   <div className="pg-msg-content" style={{ fontSize: 13, color: '#9ca3af' }}>
-                    {propValue ? valueToSourceText(propValue) : ''}
+                    {param.value ? valueToSourceText(param.value) : ''}
                   </div>
                 </div>
               );
             }
             return (
               <ParamCard
-                key={def.name}
+                key={param.def.name}
                 propDef={propDef}
-                value={propValue}
-                onDelete={() => handleUpdate(def.name, null)}
-                onChange={v => handleUpdate(def.name, v)}
+                value={param.value}
+                onDelete={() => handleUpdate({ parameters: { [param.def.name]: null } })}
+                onChange={v => handleUpdate({ parameters: { [param.def.name]: v } })}
               />
             );
           })}
@@ -354,7 +348,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
                   if (!e.target.value) return;
                   const cs = modelParameters.find(p => p.name === e.target.value);
                   if (!cs) return;
-                  handleUpdate(cs.name, cs.defaultValue ?? defaultValueForType(cs.type));
+                  handleUpdate({ parameters: { [cs.name]: cs.defaultValue ?? defaultValueForType(cs.type) } });
                 }}
               >
                 <option value="">Add parameter…</option>
@@ -374,7 +368,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
         <div className="pg-panel-body">
           <SystemCard
             content={systemStr}
-            editable={systemEditable}
+            editable={prompt.systemEditable}
             onChange={handleSystemChange}
           />
           {localMessages.map((msg, i) => (
@@ -402,39 +396,6 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
       </div>
     </div>
   );
-}
-
-/** Convert a Msg[] back to a PropValue array for saving. */
-function msgsToValue(msgs: Msg[]): PropValue {
-  return {
-    kind: 'array',
-    elements: msgs.map(msg => {
-      const contentHasInterpolation = msg.content.includes('${');
-      const content: PropValue = contentHasInterpolation
-        ? { kind: 'template', value: msg.content }
-        : { kind: 'primitive', value: msg.content };
-      return {
-        kind: 'object',
-        properties: {
-          role: { kind: 'primitive', value: msg.role },
-          content,
-        },
-      };
-    }),
-  };
-}
-
-/** Extract a plain Msg[] from the prompt's messages PropValue. */
-function extractMessages(prompt: ParsedPrompt): Msg[] {
-  const msgValue = prompt.extractedProps.values?.messages;
-  if (!msgValue || msgValue.kind !== 'array') return [];
-  return msgValue.elements.map(el => {
-    if (el.kind !== 'object') return { role: 'user', content: '' };
-    const role = el.properties.role?.kind === 'primitive' ? String(el.properties.role.value) : 'user';
-    const content = el.properties.content?.kind === 'primitive' ? String(el.properties.content.value)
-      : el.properties.content?.kind === 'template' ? el.properties.content.value : '';
-    return { role, content };
-  });
 }
 
 export default PlaygroundEditor;

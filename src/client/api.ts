@@ -1,4 +1,11 @@
-import type { ParsedPrompt, PropDefinition, AddPromptContext, PromptProviderInfo, ModelCatalog } from '../shared/types';
+import type {
+  NormalizedPrompt,
+  NormalizedPromptUpdates,
+  PropDefinition,
+  AddPromptContext,
+  PromptProviderInfo,
+  ModelCatalog,
+} from '../shared/types';
 import { encodePromptId } from './utils';
 
 export interface ExecuteResult {
@@ -7,7 +14,7 @@ export interface ExecuteResult {
   finishReason: string;
 }
 
-function promptUrl(prompt: ParsedPrompt, suffix: string): string {
+function promptUrl(prompt: NormalizedPrompt, suffix: string): string {
   return `/api/prompts/${prompt.providerId}/${encodePromptId(prompt.id)}/${suffix}`;
 }
 
@@ -27,7 +34,7 @@ export async function getPromptProviders(): Promise<PromptProviderInfo[]> {
 export async function addPrompt(
   providerId: string,
   partial: Record<string, any>
-): Promise<ParsedPrompt | AddPromptContext> {
+): Promise<NormalizedPrompt | AddPromptContext> {
   const res = await fetch(`/api/providers/${providerId}/add-prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -37,7 +44,7 @@ export async function addPrompt(
   return res.json();
 }
 
-export async function getPrompts(): Promise<ParsedPrompt[]> {
+export async function getPrompts(): Promise<NormalizedPrompt[]> {
   const res = await fetch('/api/prompts');
   await throwIfError(res);
   return res.json();
@@ -55,7 +62,7 @@ export async function getModelParameters(providerId: string): Promise<PropDefini
   return res.json();
 }
 
-export async function renamePrompt(prompt: ParsedPrompt, newName: string): Promise<ParsedPrompt> {
+export async function renamePrompt(prompt: NormalizedPrompt, newName: string): Promise<NormalizedPrompt> {
   const res = await fetch(promptUrl(prompt, 'rename'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -66,9 +73,9 @@ export async function renamePrompt(prompt: ParsedPrompt, newName: string): Promi
 }
 
 export async function updatePromptProperties(
-  prompt: ParsedPrompt,
-  updates: Record<string, any>
-): Promise<ParsedPrompt> {
+  prompt: NormalizedPrompt,
+  updates: NormalizedPromptUpdates
+): Promise<NormalizedPrompt> {
   const res = await fetch(promptUrl(prompt, 'update'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -79,7 +86,7 @@ export async function updatePromptProperties(
 }
 
 export async function executePrompt(
-  prompt: ParsedPrompt,
+  prompt: NormalizedPrompt,
   paramValues: Record<string, any>
 ): Promise<ExecuteResult> {
   const res = await fetch(promptUrl(prompt, 'execute'), {
@@ -95,7 +102,7 @@ export async function executePrompt(
 }
 
 export async function* streamPrompt(
-  prompt: ParsedPrompt,
+  prompt: NormalizedPrompt,
   paramValues: Record<string, any>
 ): AsyncGenerator<string> {
   const res = await fetch(promptUrl(prompt, 'execute'), {

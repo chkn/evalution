@@ -1,8 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 
-import type { PropDefinition } from 'ts-proppy';
-import type { ModelCatalog } from '../shared/types.ts';
+import type { PropDefinition, PropValue } from 'ts-proppy';
+import type {
+  ModelCatalog,
+  ParsedPrompt,
+  NormalizedPrompt,
+  NormalizedPromptUpdates,
+} from '../shared/types.ts';
 
 /**
  * Adapter that provides values and execution for a particular AI SDK.
@@ -35,6 +40,26 @@ export interface SDKAdapter {
    * @param stream - When `true`, returns a streaming text iterator.
    */
   executeConfig(config: any, stream: boolean): Promise<any>;
+
+  /**
+   * Convert a low-level {@link ParsedPrompt} produced by a
+   * {@link PromptFileType} into a {@link NormalizedPrompt} that the UI can
+   * consume without knowing the SDK's specific property names or message shape.
+   *
+   * @param prompt - The raw parsed prompt.
+   */
+  normalizePrompt(prompt: ParsedPrompt): NormalizedPrompt;
+
+  /**
+   * Convert {@link NormalizedPromptUpdates} (what the UI sends back) into the
+   * raw property-name-keyed updates that {@link PromptFileType.updateProperty}
+   * and friends operate on.
+   *
+   * @param updates - Updates expressed in the normalized vocabulary.
+   * @returns A `Record` keyed by the SDK's actual property names. Values may
+   *   be `null` (to remove) or a `PropValue`.
+   */
+  denormalizeUpdates(updates: NormalizedPromptUpdates): Record<string, PropValue | null>;
 }
 
 // ─── Generic helpers ──────────────────────────────────────────────────────────

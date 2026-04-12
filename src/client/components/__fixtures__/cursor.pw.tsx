@@ -44,14 +44,21 @@ async function mockApiRoutes(page: Page) {
   await page.route('**/models', route => route.fulfill({ json: { models: [] } }));
   await page.route('**/model-parameters', route => route.fulfill({ json: [] }));
   await page.route('**/update', async route => {
-    // Echo back a valid ParsedPrompt so onUpdate doesn't blow away state
+    // Echo back a valid NormalizedPrompt so onUpdate doesn't blow away state
     const body = JSON.parse(route.request().postData() ?? '{}');
-    const messages = body.messages ?? { kind: 'array', elements: [] };
-    const system = body.system ?? { kind: 'primitive', value: '' };
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    const system = body.system ?? undefined;
     await route.fulfill({
       json: {
-        id: 'test', name: 'test', functionParameters: [],
-        extractedProps: { definitions: [], values: { messages, system } },
+        id: 'test',
+        name: 'test',
+        functionParameters: [],
+        modelEditable: true,
+        system,
+        systemEditable: true,
+        messages,
+        messagesEditable: true,
+        parameters: [],
       },
     });
   });

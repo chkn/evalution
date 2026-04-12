@@ -6,12 +6,73 @@ export interface FunctionParameter {
   defaultValue?: any;
 }
 
+/**
+ * Low-level prompt representation produced by a
+ * {@link PromptFileType}. It exposes the raw `extractedProps` from the parser
+ * and uses SDK-specific property names (e.g. `model`, `system`, `messages`).
+ *
+ * Not intended for public consumption — {@link PromptProvider} implementations
+ * convert this into a {@link NormalizedPrompt} via an {@link SDKAdapter} before
+ * returning it to callers.
+ */
 export interface ParsedPrompt {
   id: string;
   providerId?: string;
   name: string;
   functionParameters: FunctionParameter[];
   extractedProps: ExtractedProps;
+  metadata?: unknown;
+  treePath?: string[];
+}
+
+/**
+ * A single message in a conversation, in a form that is independent of any
+ * particular SDK's message shape.
+ */
+export interface NormalizedMessage {
+  /** Role identifier (`'system'`, `'user'`, `'assistant'`, `'tool'`, …). */
+  role: string;
+  /** Message content, as a plain string. Template syntax (`${…}`) is allowed. */
+  content: string;
+  /** Optional tool calls attached to an assistant message. */
+  toolCalls?: NormalizedToolCall[];
+}
+
+/** A tool invocation emitted by an assistant message. */
+export interface NormalizedToolCall {
+  /** The name of the tool / function to invoke. */
+  toolName: string;
+  /** Arguments to the tool, as a JSON string. */
+  args: string;
+}
+
+/**
+ * A model parameter (`temperature`, `maxTokens`, …) attached to a prompt.
+ * Mirrors the `PropDefinition` + current value pair that the playground UI
+ * needs for rendering a parameter editor.
+ */
+export interface NormalizedParameter {
+  /** Describes the parameter's name, type, and documentation. */
+  def: PropDefinition;
+  /** The parameter's current value, or `undefined` if not set on the prompt. */
+  value?: PropValue;
+  /** Whether the current value can be edited from the UI. */
+  editable: boolean;
+}
+
+/**
+ * Prompt representation used by {@link PromptProvider} public methods and by
+ * the playground UI. It hides SDK-specific property names behind a stable
+ * shape — `model`, `system`, `messages`, and the rest as `parameters`.
+ *
+ * {@link SDKAdapter.normalizePrompt} converts a {@link ParsedPrompt} produced
+ * by a {@link PromptFileType} into this form.
+ */
+export interface NormalizedPrompt {
+  id: string;
+  providerId?: string;
+  name: string;
+  functionParameters: FunctionParameter[];
   metadata?: unknown;
 
   /**
@@ -27,6 +88,40 @@ export interface ParsedPrompt {
    * @example ['src', 'prompts', 'greeting.prompt.ts']
    */
   treePath?: string[];
+
+  /** The model reference (e.g. a provider call or gateway string). */
+  model?: PropValue;
+  /** Whether {@link model} can be edited in the UI. */
+  modelEditable: boolean;
+
+  /** Top-level system prompt, if the SDK supports one. */
+  system?: PropValue;
+  /** Whether {@link system} can be edited in the UI. */
+  systemEditable: boolean;
+
+  /** Conversation messages. */
+  messages: NormalizedMessage[];
+  /** Whether {@link messages} can be edited in the UI. */
+  messagesEditable: boolean;
+
+  /**
+   * Model parameters currently set on the prompt (everything other than
+   * `model`, `system`, and `messages`).
+   */
+  parameters: NormalizedParameter[];
+}
+
+/**
+ * Updates that can be applied to a {@link NormalizedPrompt} via
+ * {@link PromptProvider.updatePromptProperties}. A value of `null` removes
+ * that field from the underlying source.
+ */
+export interface NormalizedPromptUpdates {
+  model?: PropValue | null;
+  system?: PropValue | null;
+  messages?: NormalizedMessage[] | null;
+  /** Per-parameter updates, keyed by parameter name. `null` removes. */
+  parameters?: Record<string, PropValue | null>;
 }
 
 /** The kind of change that occurred to a prompt. */

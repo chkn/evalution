@@ -1,4 +1,11 @@
-import type { ParsedPrompt, PromptChangeEvent, PropDefinition, AddPromptContext, ModelCatalog } from '../shared/types.ts';
+import type {
+  NormalizedPrompt,
+  NormalizedPromptUpdates,
+  PromptChangeEvent,
+  PropDefinition,
+  AddPromptContext,
+  ModelCatalog,
+} from '../shared/types.ts';
 
 /**
  * A source of prompts that the playground can display and execute.
@@ -7,7 +14,7 @@ import type { ParsedPrompt, PromptChangeEvent, PropDefinition, AddPromptContext,
  * prompts stored in a database, fetched from a remote API, or written in a
  * non-TypeScript format.
  */
-export interface PromptProvider<TParsedPrompt extends ParsedPrompt = ParsedPrompt> {
+export interface PromptProvider<TPrompt extends NormalizedPrompt = NormalizedPrompt> {
   /** Uniquely identifies this provider when multiple providers are used. */
   readonly id: string;
 
@@ -21,28 +28,29 @@ export interface PromptProvider<TParsedPrompt extends ParsedPrompt = ParsedPromp
   readonly icon?: string;
 
   /** Returns all prompts currently available from this provider. */
-  getAllPrompts(): Promise<TParsedPrompt[]>;
+  getAllPrompts(): Promise<TPrompt[]>;
 
   /**
    * Returns the prompt with the given ID, or `null` if not found.
    * @param id - The prompt's unique identifier.
    */
-  getPrompt(id: string): Promise<TParsedPrompt | null>;
+  getPrompt(id: string): Promise<TPrompt | null>;
 
   /**
-   * Updates one or more properties of a prompt in its source and returns the
-   * updated prompt. Setting a property value to `null` removes it.
+   * Applies normalized updates to a prompt's source and returns the fresh
+   * prompt. Setting any field of `updates` to `null` removes the corresponding
+   * property from the underlying source.
    *
    * This method is optional; providers that do not support in-place editing
    * may omit it.
    *
    * @param promptId - ID of the prompt to update.
-   * @param updates - Map of property names to new values (`null` removes the property).
+   * @param updates - Updates expressed in the normalized vocabulary.
    */
   updatePromptProperties?(
     promptId: string,
-    updates: Record<string, any>
-  ): Promise<TParsedPrompt>;
+    updates: NormalizedPromptUpdates
+  ): Promise<TPrompt>;
 
   /**
    * Executes a prompt and returns either a result object (when `stream` is
@@ -86,7 +94,7 @@ export interface PromptProvider<TParsedPrompt extends ParsedPrompt = ParsedPromp
    * {@link AddPromptContext} describing what additional inputs are needed.
    *
    * When `partial` contains enough information the provider creates the
-   * prompt and returns the full {@link ParsedPrompt}. Otherwise it returns
+   * prompt and returns the full {@link NormalizedPrompt}. Otherwise it returns
    * an {@link AddPromptContext} whose `fields` describe the form the UI
    * should present to the user.
    *
@@ -94,7 +102,7 @@ export interface PromptProvider<TParsedPrompt extends ParsedPrompt = ParsedPromp
    *
    * @param partial - Partially filled prompt data.
    */
-  addPrompt?(partial: Partial<TParsedPrompt>): Promise<TParsedPrompt | AddPromptContext>;
+  addPrompt?(partial: Partial<TPrompt>): Promise<TPrompt | AddPromptContext>;
 
   /**
    * Renames a prompt and returns the updated prompt with its new ID.
@@ -104,5 +112,5 @@ export interface PromptProvider<TParsedPrompt extends ParsedPrompt = ParsedPromp
    * @param promptId - ID of the prompt to rename.
    * @param newName - The new name for the prompt.
    */
-  renamePrompt?(promptId: string, newName: string): Promise<TParsedPrompt>;
+  renamePrompt?(promptId: string, newName: string): Promise<TPrompt>;
 }

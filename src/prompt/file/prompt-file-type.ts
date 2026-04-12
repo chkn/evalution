@@ -1,5 +1,5 @@
 import type { PropDefinition, PropValue } from 'ts-proppy';
-import type { ParsedPrompt } from '../../shared/types.ts';
+import type { ParsedPrompt, NormalizedPrompt } from '../../shared/types.ts';
 import type { TSPromptFileType } from './ts/ts-prompt-file-type.ts';
 
 /** Metadata attached to prompts that originate from a file on disk. */
@@ -11,8 +11,21 @@ export interface FilePromptMetadata {
 /**
  * A {@link ParsedPrompt} produced by the file-based parser, with
  * {@link FilePromptMetadata} guaranteed to be present on `metadata`.
+ *
+ * This is the low-level form emitted by {@link PromptFileType.parsePrompts};
+ * {@link FilePromptProvider} converts it to a {@link NormalizedFilePrompt}
+ * before exposing it publicly.
  */
 export interface ParsedFilePrompt extends ParsedPrompt {
+  metadata: FilePromptMetadata;
+}
+
+/**
+ * A {@link NormalizedPrompt} whose `metadata` field is guaranteed to carry
+ * {@link FilePromptMetadata}. This is the public-facing prompt type returned
+ * by {@link FilePromptProvider}.
+ */
+export interface NormalizedFilePrompt extends NormalizedPrompt {
   metadata: FilePromptMetadata;
 }
 
