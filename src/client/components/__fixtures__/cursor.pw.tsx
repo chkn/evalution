@@ -58,7 +58,7 @@ async function mockApiRoutes(page: Page) {
         systemEditable: true,
         messages,
         messagesEditable: true,
-        parameters: [],
+        modelParameters: [],
       },
     });
   });

@@ -12,7 +12,7 @@ export function makePrompt(content: string): NormalizedPrompt {
     systemEditable: true,
     messages: [{ role: 'user', content }],
     messagesEditable: true,
-    parameters: [],
+    modelParameters: [],
   };
 }
 

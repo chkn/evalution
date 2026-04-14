@@ -108,7 +108,7 @@ export interface NormalizedPrompt {
    * Model parameters currently set on the prompt (everything other than
    * `model`, `system`, and `messages`).
    */
-  parameters: NormalizedParameter[];
+  modelParameters: NormalizedParameter[];
 }
 
 /**
@@ -121,7 +121,7 @@ export interface NormalizedPromptUpdates {
   system?: PropValue | null;
   messages?: NormalizedMessage[] | null;
   /** Per-parameter updates, keyed by parameter name. `null` removes. */
-  parameters?: Record<string, PropValue | null>;
+  modelParameters?: Record<string, PropValue | null>;
 }
 
 /** The kind of change that occurred to a prompt. */

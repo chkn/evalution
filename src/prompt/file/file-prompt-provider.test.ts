@@ -9,7 +9,7 @@ import type { NormalizedPrompt, PropValue } from '../../shared/types.ts';
 
 /** Look up a parameter value by name on a normalized prompt. */
 function getParameter(prompt: NormalizedPrompt, name: string): PropValue | undefined {
-  return prompt.parameters.find(p => p.def.name === name)?.value;
+  return prompt.modelParameters.find(p => p.def.name === name)?.value;
 }
 
 describe('FilePromptProvider', () => {
@@ -163,7 +163,7 @@ export function myPrompt() {
     const promptId = `${filePath}#myPrompt`;
 
     const updated = await provider.updatePromptProperties(promptId, {
-      parameters: { temperature: { kind: 'primitive', value: 0.7 } },
+      modelParameters: { temperature: { kind: 'primitive', value: 0.7 } },
     });
     const tempValue = getParameter(updated, 'temperature');
     expect(tempValue).toBeDefined();

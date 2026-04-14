@@ -4,7 +4,7 @@ import { generateText, streamText } from 'ai';
 
 import type { PropDefinition, PropValue } from 'ts-proppy';
 import { findTypeDeclaration, extractPropertiesFromDeclaration } from 'ts-proppy';
-import { findPackageDts, type SDKAdapter } from './sdk-adapter.ts';
+import { findPackageDts, stringToPropValue, type SDKAdapter } from './sdk-adapter.ts';
 import { isEditable } from '../shared/is-editable.ts';
 import type {
   ParsedPrompt,
@@ -86,7 +86,7 @@ export class VercelAISDK implements SDKAdapter {
     const systemValue = values?.[SYSTEM_KEY];
     const messagesValue = values?.[MESSAGES_KEY];
 
-    const parameters: NormalizedParameter[] = definitions
+    const modelParameters: NormalizedParameter[] = definitions
       .filter(d => !RESERVED_KEYS.has(d.name))
       .map(def => {
         const value = values?.[def.name];
@@ -110,11 +110,11 @@ export class VercelAISDK implements SDKAdapter {
       systemEditable: systemValue ? isEditable(systemValue) : true,
       messages: extractMessages(messagesValue),
       messagesEditable: messagesValue ? isEditable(messagesValue) : true,
-      parameters,
+      modelParameters,
     };
   }
 
-  denormalizeUpdates(updates: NormalizedPromptUpdates): Record<string, PropValue | null> {
+  denormalizeUpdates(updates: NormalizedPromptUpdates, _currentValues?: Record<string, PropValue>): Record<string, PropValue | null> {
     const out: Record<string, PropValue | null> = {};
     if (MODEL_KEY in updates) out[MODEL_KEY] = updates.model ?? null;
     if (SYSTEM_KEY in updates) out[SYSTEM_KEY] = updates.system ?? null;
@@ -123,23 +123,13 @@ export class VercelAISDK implements SDKAdapter {
         ? null
         : messagesToValue(updates.messages);
     }
-    if (updates.parameters) {
-      for (const [name, value] of Object.entries(updates.parameters)) {
+    if (updates.modelParameters) {
+      for (const [name, value] of Object.entries(updates.modelParameters)) {
         out[name] = value;
       }
     }
     return out;
   }
-}
-
-/**
- * Returns a {@link PropValue} that is either a primitive string or a template
- * string, depending on whether `content` contains any `${…}` interpolations.
- */
-function stringToPropValue(content: string): PropValue {
-  return content.includes('${')
-    ? { kind: 'template', value: content }
-    : { kind: 'primitive', value: content };
 }
 
 function messagesToValue(msgs: NormalizedMessage[]): PropValue {

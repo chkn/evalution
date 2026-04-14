@@ -101,7 +101,7 @@ function SystemCard({ content, editable, onChange }: {
   useEffect(() => setLocal(content), [content]);
 
   const handleChange = (v: PropValue) => {
-    const str = v.kind === 'template' ? v.value : v.kind === 'primitive' && typeof v.value === 'string' ? v.value : '';
+    const str = propValueToString(v);
     setLocal(str);
     onChange(str);
   };
@@ -134,7 +134,7 @@ function MessageCard({ msg, onChange, onDelete }: {
   useEffect(() => setContent(msg.content), [msg.content]);
 
   const handleChange = (v: PropValue) => {
-    const str = v.kind === 'template' ? v.value : v.kind === 'primitive' && typeof v.value === 'string' ? v.value : '';
+    const str = propValueToString(v);
     setContent(str);
     onChange({ ...msg, content: str });
   };
@@ -218,10 +218,11 @@ function ParamCard({ propDef, value, onDelete, onChange }: {
 
 const EMPTY_MODEL_CATALOG: ModelCatalog = { models: [] };
 
-function systemPropValueToString(value: PropValue | undefined): string {
+function propValueToString(value: PropValue | undefined): string {
   if (!value) return '';
   if (value.kind === 'primitive' && typeof value.value === 'string') return value.value;
   if (value.kind === 'template') return value.value;
+  if (value.kind === 'raw') return value.sourceText;
   return '';
 }
 
@@ -285,8 +286,8 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
     handleUpdate({ messages: newMsgs });
   };
 
-  const systemStr = systemPropValueToString(prompt.system);
-  const existingParams = new Set(prompt.parameters.map(p => p.def.name));
+  const systemStr = propValueToString(prompt.system);
+  const existingParams = new Set(prompt.modelParameters.map(p => p.def.name));
   const addableParams = modelParameters.filter(cs => !existingParams.has(cs.name));
 
   return (
@@ -304,7 +305,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
         </div>
         <div className="pg-panel-body">
           <ModelPicker value={prompt.model} onChange={v => handleUpdate({ model: v })} modelCatalog={modelCatalog} />
-          {prompt.parameters.map((param: NormalizedParameter) => {
+          {prompt.modelParameters.map((param: NormalizedParameter) => {
             const propDef = modelParameters.find(cs => cs.name === param.def.name);
             if (!propDef) {
               // No PropDefinition available — show source text as read-only
@@ -315,7 +316,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
                     {param.value && isEditable(param.value) && (
                       <button
                         className="pg-delete-msg"
-                        onClick={() => handleUpdate({ parameters: { [param.def.name]: null } })}
+                        onClick={() => handleUpdate({ modelParameters: { [param.def.name]: null } })}
                         title="Remove parameter"
                       >×</button>
                     )}
@@ -331,8 +332,8 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
                 key={param.def.name}
                 propDef={propDef}
                 value={param.value}
-                onDelete={() => handleUpdate({ parameters: { [param.def.name]: null } })}
-                onChange={v => handleUpdate({ parameters: { [param.def.name]: v } })}
+                onDelete={() => handleUpdate({ modelParameters: { [param.def.name]: null } })}
+                onChange={v => handleUpdate({ modelParameters: { [param.def.name]: v } })}
               />
             );
           })}
@@ -348,7 +349,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
                   if (!e.target.value) return;
                   const cs = modelParameters.find(p => p.name === e.target.value);
                   if (!cs) return;
-                  handleUpdate({ parameters: { [cs.name]: cs.defaultValue ?? defaultValueForType(cs.type) } });
+                  handleUpdate({ modelParameters: { [cs.name]: cs.defaultValue ?? defaultValueForType(cs.type) } });
                 }}
               >
                 <option value="">Add parameter…</option>

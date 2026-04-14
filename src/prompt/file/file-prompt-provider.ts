@@ -131,7 +131,7 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
 
     const [filePath, promptName] = this.parsePromptId(promptId);
     const { definitions, values } = parsed.extractedProps;
-    const rawUpdates = this.sdkAdapter.denormalizeUpdates(updates);
+    const rawUpdates = this.sdkAdapter.denormalizeUpdates(updates, values);
 
     for (const [propertyName, value] of Object.entries(rawUpdates)) {
       this.suppressNextWatchEvent(filePath, 'change');

@@ -59,7 +59,7 @@ export interface SDKAdapter {
    * @returns A `Record` keyed by the SDK's actual property names. Values may
    *   be `null` (to remove) or a `PropValue`.
    */
-  denormalizeUpdates(updates: NormalizedPromptUpdates): Record<string, PropValue | null>;
+  denormalizeUpdates(updates: NormalizedPromptUpdates, currentValues?: Record<string, PropValue>): Record<string, PropValue | null>;
 }
 
 // ─── Generic helpers ──────────────────────────────────────────────────────────
@@ -85,4 +85,14 @@ export function findPackageDts(packageName: string, dtsRelPath: string, rootDir:
     }
   }
   return null;
+}
+
+/**
+ * Returns a {@link PropValue} that is either a primitive string or a template
+ * string, depending on whether `content` contains any `${…}` interpolations.
+ */
+export function stringToPropValue(content: string): PropValue {
+  return content.includes('${')
+    ? { kind: 'template', value: content }
+    : { kind: 'primitive', value: content };
 }
