@@ -29,6 +29,7 @@ export type {
   ModelValueType,
   ModelInfo,
   ModelCatalog,
+  ModelGroupInfo,
   FunctionParameter,
   AddPromptField,
   AddPromptContext,

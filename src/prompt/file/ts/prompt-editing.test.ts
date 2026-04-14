@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { TSPromptFileType } from './ts-prompt-file-type.ts';
 import { MemoryFileProvider } from '../../../file-provider.ts';
 import type { PropValue, PropDefinition } from 'ts-proppy';
-import { isEditable } from '../../../shared/is-editable.ts';
+import { isEditable } from '../../../shared/helpers.ts';
 
 /** Helper to look up a PropDefinition by name */
 function getDef(prompt: { extractedProps: { definitions: PropDefinition[] } }, name: string): PropDefinition {

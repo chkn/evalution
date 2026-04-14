@@ -1,3 +1,6 @@
+import type { SDKAdapter } from '../sdk/sdk-adapter.ts';
+import type { PromptProvider } from '../prompt/prompt-provider.ts';
+
 // #region Prompt
 
 export interface FunctionParameter {
@@ -201,8 +204,11 @@ export interface ModelInfo {
   label: string;
   /** Optional category for grouping related models together in the UI (usually provider name). */
   group?: string;
-  /** Values to use when selecting this model in different modes (as defined by {@link ModelCatalog.modelValueTypes}) */
-  values: Record<string, PropValue>;
+  /**
+   * Values to use when selecting this model in different modes (as defined by {@link ModelCatalog.modelValueTypes}).
+   * If a value is undefined for a particular mode, this model is not offered as a quick-select option in that mode.
+   */
+  values: Record<string, PropValue | undefined>;
 }
 
 /** Describes a model selection mode exposed by the SDK adapter (e.g. "Provider" or "Gateway"). */

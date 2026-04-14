@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { ModelCatalog, ModelInfo, PropValue } from '../../shared/types';
 import { valueToSourceText } from 'ts-proppy/react';
 import ProviderIcon from './ProviderIcon';
+import { propValueEquals } from '../../shared/helpers';
 
 interface Props {
   value: PropValue | undefined;
@@ -28,13 +29,6 @@ function CheckIcon({ size = 14 }: { size?: number }) {
       <path d="M2.5 7.5L5.5 10.5L11.5 4" />
     </svg>
   );
-}
-
-/** Compare two PropValues by their serialized source text */
-function propValueEquals(a: unknown, b: PropValue | undefined): boolean {
-  if (b === undefined) return a === undefined;
-  if (!a || typeof a !== 'object' || !('kind' in a)) return false;
-  return valueToSourceText(a as PropValue) === valueToSourceText(b);
 }
 
 /** Deep-clone a PropValue template, replacing `$input` in primitive strings with `input`. */
@@ -98,8 +92,8 @@ export default function ModelPicker({ value: propertyValue, onChange, modelCatal
     }
   }, [modes[0]?.[0]]);
 
-  const displayLabel = selectedModel?.label
-    ?? (propertyValue ? valueToSourceText(propertyValue) : '');
+  const sourceText = propertyValue ? valueToSourceText(propertyValue) : undefined;
+  const displayLabel = selectedModel?.label ?? sourceText ?? '';
 
   const updatePosition = useCallback(() => {
     if (!triggerRef.current) return;
@@ -189,8 +183,9 @@ export default function ModelPicker({ value: propertyValue, onChange, modelCatal
               <span>{providerKey}</span>
             </div>
             {models.map(mi => {
-              const isSelected = mi.id === selectedModel?.id;
+              const isSelected = mi.id === selectedModel?.id && selectedModel.mode === activeMode;
               const modelValue = mi.values[activeMode];
+              if (!modelValue) return null;
               return (
                 <button
                   key={mi.id}
@@ -202,7 +197,7 @@ export default function ModelPicker({ value: propertyValue, onChange, modelCatal
                     {isSelected && <CheckIcon size={13} />}
                   </span>
                   <span className="pg-model-option-label">{mi.label}</span>
-                  <span className="pg-model-option-source">{mi.id}</span>
+                  <span className="pg-model-option-source">{valueToSourceText(modelValue)}</span>
                 </button>
               );
             })}
@@ -263,11 +258,12 @@ export default function ModelPicker({ value: propertyValue, onChange, modelCatal
         className="pg-model-picker-trigger"
         onClick={() => setOpen(!open)}
         type="button"
+        title={sourceText}
       >
         <ProviderIcon provider={selectedModel?.group} size={20} />
         <span className="pg-model-picker-label">{displayLabel}</span>
         {propertyValue && selectedModel && (
-          <span className="pg-model-picker-source">{valueToSourceText(propertyValue)}</span>
+          <span className="pg-model-picker-source">{sourceText}</span>
         )}
         <ChevronDown size={14} />
       </button>

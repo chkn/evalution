@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { TSPromptFileType } from './ts-prompt-file-type.ts';
 import { LocalFileProvider } from '../../../file-provider.ts';
 import type { PropValue } from '../../../shared/types.ts';
-import { isEditable } from '../../../shared/is-editable.ts';
+import { isEditable } from '../../../shared/helpers.ts';
 import path from 'path';
 import { fileURLToPath } from 'url';
 

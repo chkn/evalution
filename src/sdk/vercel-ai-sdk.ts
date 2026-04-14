@@ -5,7 +5,7 @@ import { generateText, streamText } from 'ai';
 import type { PropDefinition, PropValue } from 'ts-proppy';
 import { findTypeDeclaration, extractPropertiesFromDeclaration } from 'ts-proppy';
 import { findPackageDts, stringToPropValue, type SDKAdapter } from './sdk-adapter.ts';
-import { isEditable } from '../shared/is-editable.ts';
+import { isEditable } from '../shared/helpers.ts';
 import type {
   ParsedPrompt,
   NormalizedPrompt,

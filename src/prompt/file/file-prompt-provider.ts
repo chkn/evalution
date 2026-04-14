@@ -13,7 +13,7 @@ import type {
   NormalizedFilePrompt,
   ParsedFilePrompt,
 } from './prompt-file-type.ts';
-import { isEditable } from '../../shared/is-editable.ts';
+import { isEditable } from '../../shared/helpers.ts';
 
 import { TSPromptFileType } from './ts/ts-prompt-file-type.ts';
 import { LocalFileProvider, type FileProvider } from '../../file-provider.ts';

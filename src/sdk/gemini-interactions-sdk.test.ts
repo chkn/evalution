@@ -61,7 +61,14 @@ describe('GeminiInteractionsSDK', () => {
 
       const normalized = sdk.normalizePrompt(prompt);
 
-      expect(normalized.model).toEqual({ kind: 'primitive', value: 'gemini-3-flash-preview' });
+      expect(normalized.model).toEqual({
+        kind: 'object',
+        properties: {
+          key: { kind: 'primitive', value: 'model' },
+          value: { kind: 'primitive', value: 'gemini-3-flash-preview' },
+        },
+        displayValue: '"gemini-3-flash-preview"',
+      });
       expect(normalized.system).toEqual({ kind: 'primitive', value: 'You are helpful.' });
       expect(normalized.messages).toEqual([{ role: 'user', content: 'Hello' }]);
       expect(normalized.modelParameters).toEqual([]);
@@ -177,7 +184,13 @@ describe('GeminiInteractionsSDK', () => {
   describe('denormalizeUpdates', () => {
     it('maps model, system, messages to SDK property names', () => {
       const updates: NormalizedPromptUpdates = {
-        model: { kind: 'primitive', value: 'gemini-2.5-pro' },
+        model: {
+          kind: 'object',
+          properties: {
+            key: { kind: 'primitive', value: 'model' },
+            value: { kind: 'primitive', value: 'gemini-2.5-pro' },
+          },
+        },
         system: { kind: 'primitive', value: 'Be concise.' },
         messages: [
           { role: 'user', content: 'Hello' },
@@ -251,7 +264,9 @@ describe('GeminiInteractionsSDK', () => {
     });
 
     it('only includes keys that are present in updates', () => {
-      const raw = sdk.denormalizeUpdates({ model: { kind: 'primitive', value: 'test' } });
+      const raw = sdk.denormalizeUpdates({
+        model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'test' } } },
+      }, {});
       expect(Object.keys(raw)).toEqual(['model']);
     });
   });
@@ -261,7 +276,7 @@ describe('GeminiInteractionsSDK', () => {
       const catalog = await sdk.getModelCatalog();
       expect(catalog.models.length).toBeGreaterThan(0);
       expect(catalog.models[0].id).toContain('gemini');
-      expect(catalog.models[0].values.string).toBeDefined();
+      expect(catalog.models[0].values.model).toBeDefined();
     });
   });
 

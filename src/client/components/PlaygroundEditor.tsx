@@ -10,7 +10,7 @@ import type {
 } from '../../shared/types';
 import { getModelCatalog, getModelParameters, updatePromptProperties  } from '../api';
 import { ItemEditor, TemplateEditor, valueToSourceText } from 'ts-proppy/react';
-import { isEditable } from '../../shared/is-editable';
+import { isEditable } from '../../shared/helpers';
 import { defaultValueForType } from '../utils';
 import ModelPicker from './ModelPicker';
 

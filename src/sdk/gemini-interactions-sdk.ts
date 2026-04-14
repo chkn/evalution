@@ -3,9 +3,9 @@ import ts from 'typescript';
 import { GoogleGenAI } from '@google/genai';
 
 import type { PropDefinition, PropValue } from 'ts-proppy';
-import { findTypeDeclaration, extractPropertiesFromDeclaration } from 'ts-proppy';
+import { findTypeDeclaration, extractPropertiesFromDeclaration, valueToSourceText } from 'ts-proppy';
 import { findPackageDts, stringToPropValue, type SDKAdapter } from './sdk-adapter.ts';
-import { isEditable } from '../shared/is-editable.ts';
+import { isEditable } from '../shared/helpers.ts';
 import type {
   ParsedPrompt,
   NormalizedPrompt,
@@ -17,6 +17,7 @@ import type {
 type BaseCreateInteractionParams = Parameters<typeof GoogleGenAI.prototype.interactions.create>[0];
 
 const MODEL_KEY = 'model';
+const AGENT_KEY = 'agent';
 const SYSTEM_KEY = 'system_instruction';
 const INPUT_KEY = 'input';
 const GENERATION_CONFIG_KEY = 'generation_config';
@@ -93,45 +94,63 @@ const FALLBACK_GENERATION_CONFIG_PARAMS: PropDefinition[] = [
 export class GeminiInteractionsSDK implements SDKAdapter {
   getModelCatalog() {
     return Promise.resolve({
+      modelValueTypes: {
+        "model": { label: 'Models', description: 'Models' },
+        "agent": { label: 'Agents', description: 'Agents' },
+      },
+      groups: {
+        'Google': {
+          customValueTemplates: {
+            model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: '$input' } } },
+            agent: { kind: 'object', properties: { key: { kind: 'primitive', value: 'agent' }, value: { kind: 'primitive', value: '$input' } } },
+          },
+        },
+      },
       models: [
         {
-          id: 'gemini-3-flash-preview',
-          label: 'Gemini 3 Flash',
-          values: { string: { kind: 'primitive' as const, value: 'gemini-3-flash-preview' } },
-          group: 'Google',
-        },
-        {
           id: 'gemini-3.1-flash-lite-preview',
-          label: 'Gemini 3.1 Flash Lite',
-          values: { string: { kind: 'primitive' as const, value: 'gemini-3.1-flash-lite-preview' } },
+          label: 'Gemini 3.1 Flash-Lite Preview',
+          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-3.1-flash-lite-preview' } } } },
           group: 'Google',
         },
         {
           id: 'gemini-3.1-pro-preview',
-          label: 'Gemini 3.1 Pro',
-          values: { string: { kind: 'primitive' as const, value: 'gemini-3.1-pro-preview' } },
+          label: 'Gemini 3.1 Pro Preview',
+          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-3.1-pro-preview' } } } },
+          group: 'Google',
+        },
+        {
+          id: 'gemini-3-flash-preview',
+          label: 'Gemini 3 Flash Preview',
+          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-3-flash-preview' } } } },
           group: 'Google',
         },
         {
           id: 'gemini-2.5-pro',
           label: 'Gemini 2.5 Pro',
-          values: { string: { kind: 'primitive' as const, value: 'gemini-2.5-pro' } },
+          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-2.5-pro' } } } },
           group: 'Google',
         },
         {
           id: 'gemini-2.5-flash',
           label: 'Gemini 2.5 Flash',
-          values: { string: { kind: 'primitive' as const, value: 'gemini-2.5-flash' } },
+          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-2.5-flash' } } } },
           group: 'Google',
         },
         {
           id: 'gemini-2.5-flash-lite',
-          label: 'Gemini 2.5 Flash Lite',
-          values: { string: { kind: 'primitive' as const, value: 'gemini-2.5-flash-lite' } },
+          label: 'Gemini 2.5 Flash-lite',
+          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-2.5-flash-lite' } } } },
           group: 'Google',
         },
+        {
+          id: 'deep-research-pro-preview-12-2025',
+          label: 'Deep Research Preview',
+          values: { agent: { kind: 'object', properties: { key: { kind: 'primitive', value: 'agent' }, value: { kind: 'primitive', value: 'deep-research-pro-preview-12-2025' } } } },
+          group: 'Google',
+        }
       ],
-    });
+    } as const);
   }
 
   getModelParameters(rootDir: string): PropDefinition[] {
@@ -165,9 +184,28 @@ export class GeminiInteractionsSDK implements SDKAdapter {
 
   normalizePrompt(prompt: ParsedPrompt): NormalizedPrompt {
     const { definitions, values } = prompt.extractedProps;
-    const modelValue = values?.[MODEL_KEY];
     const systemValue = values?.[SYSTEM_KEY];
     const inputValue = values?.[INPUT_KEY];
+    const modelValue = values?.[MODEL_KEY];
+    const agentValue = values?.[AGENT_KEY];
+
+    let model: PropValue | undefined;
+    let modelEditable = false;
+    if (modelValue) {
+      model = {
+        kind: 'object',
+        properties: { key: { kind: 'primitive', value: 'model' }, value: modelValue },
+        displayValue: valueToSourceText(modelValue),
+      };
+      modelEditable = isEditable(modelValue);
+    } else if (agentValue) {
+      model = {
+        kind: 'object',
+        properties: { key: { kind: 'primitive', value: 'agent' }, value: agentValue },
+        displayValue: valueToSourceText(agentValue),
+      };
+      modelEditable = isEditable(agentValue);
+    }
 
     const genConfigDef = definitions.find(d => d.name === GENERATION_CONFIG_KEY);
     const genConfigValue = values?.[GENERATION_CONFIG_KEY];
@@ -188,8 +226,8 @@ export class GeminiInteractionsSDK implements SDKAdapter {
       functionParameters: prompt.functionParameters,
       metadata: prompt.metadata,
       treePath: prompt.treePath,
-      model: modelValue,
-      modelEditable: modelValue ? isEditable(modelValue) : true,
+      model,
+      modelEditable,
       system: systemValue,
       systemEditable: systemValue ? isEditable(systemValue) : true,
       messages: extractMessages(inputValue),
@@ -200,7 +238,19 @@ export class GeminiInteractionsSDK implements SDKAdapter {
 
   denormalizeUpdates(updates: NormalizedPromptUpdates, currentValues?: Record<string, PropValue>): Record<string, PropValue | null> {
     const out: Record<string, PropValue | null> = {};
-    if ('model' in updates) out[MODEL_KEY] = updates.model ?? null;
+    if ('model' in updates) {
+      // Only null-out keys that actually exist in the file to avoid
+      // "Property not found" errors from updatePromptProperties
+      if (currentValues && MODEL_KEY in currentValues) out[MODEL_KEY] = null;
+      if (currentValues && AGENT_KEY in currentValues) out[AGENT_KEY] = null;
+
+      const modelUpdate = updates.model;
+      if (modelUpdate?.kind === 'object' && modelUpdate.properties.key?.kind === 'primitive') {
+        const key = String(modelUpdate.properties.key.value);
+        const value = modelUpdate.properties.value;
+        out[key] = value;
+      }
+    }
     if ('system' in updates) out[SYSTEM_KEY] = updates.system ?? null;
     if ('messages' in updates) {
       out[INPUT_KEY] = updates.messages == null

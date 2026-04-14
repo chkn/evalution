@@ -12,8 +12,7 @@ import type {
 /**
  * Adapter that provides values and execution for a particular AI SDK.
  *
- * Implement this interface to add support for SDKs other than the Vercel AI
- * SDK, then pass your implementation to {@link FilePromptProvider} via the
+ * Pass an instance of this to {@link FilePromptProvider} via the
  * `sdk` option.
  */
 export interface SDKAdapter {
