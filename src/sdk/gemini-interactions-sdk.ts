@@ -108,12 +108,6 @@ export class GeminiInteractionsSDK implements SDKAdapter {
       },
       models: [
         {
-          id: 'gemini-3.1-flash-lite-preview',
-          label: 'Gemini 3.1 Flash-Lite Preview',
-          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-3.1-flash-lite-preview' } } } },
-          group: 'Google',
-        },
-        {
           id: 'gemini-3.1-pro-preview',
           label: 'Gemini 3.1 Pro Preview',
           values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-3.1-pro-preview' } } } },
@@ -123,6 +117,12 @@ export class GeminiInteractionsSDK implements SDKAdapter {
           id: 'gemini-3-flash-preview',
           label: 'Gemini 3 Flash Preview',
           values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-3-flash-preview' } } } },
+          group: 'Google',
+        },
+        {
+          id: 'gemini-3.1-flash-lite-preview',
+          label: 'Gemini 3.1 Flash-Lite Preview',
+          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-3.1-flash-lite-preview' } } } },
           group: 'Google',
         },
         {
@@ -160,7 +160,7 @@ export class GeminiInteractionsSDK implements SDKAdapter {
         const sourceText = fs.readFileSync(dtsPath, 'utf-8');
         const sourceFile = ts.createSourceFile(dtsPath, sourceText, ts.ScriptTarget.Latest, true);
         const decl = findTypeDeclaration(sourceFile, 'GenerationConfig_2');
-        if (decl) return extractPropertiesFromDeclaration(decl, sourceFile);
+        if (decl) return extractPropertiesFromDeclaration(decl, sourceFile).definitions;
       } catch {
         // fall through to hardcoded defaults
       }

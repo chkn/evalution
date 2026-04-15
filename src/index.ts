@@ -30,7 +30,6 @@ export type {
   ModelInfo,
   ModelCatalog,
   ModelGroupInfo,
-  FunctionParameter,
   AddPromptField,
   AddPromptContext,
   PromptProviderInfo,

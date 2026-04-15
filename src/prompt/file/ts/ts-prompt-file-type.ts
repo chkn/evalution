@@ -6,10 +6,10 @@ import {
   addProperty as applyAdd,
   removeProperty as applyRemove,
   extractPropertiesFromObjectLiteral,
+  extractPropertiesFromParameters,
 } from 'ts-proppy';
 import { type FileProvider, LocalFileProvider } from '../../../file-provider.ts';
 import type { PromptFileType, ParsedFilePrompt } from '../prompt-file-type.ts';
-import type { FunctionParameter } from '../../../shared/types.ts';
 
 /**
  * {@link PromptFileType} implementation for TypeScript `.prompt.ts` files.
@@ -169,7 +169,7 @@ export class TSPromptFileType implements PromptFileType {
     if (!node.name) return null;
 
     const functionName = node.name.text;
-    const functionParameters = this.parseFunctionParameters(node, sourceFile);
+    const functionParameters = extractPropertiesFromParameters(node.parameters, sourceFile).definitions;
     const returnObject = this.findReturnObjectInFunction(node);
     if (!returnObject) return null;
 
@@ -186,38 +186,6 @@ export class TSPromptFileType implements PromptFileType {
       metadata: { relativeFilePath },
       treePath,
     };
-  }
-
-  private parseFunctionParameters(node: ts.FunctionDeclaration, sourceFile: ts.SourceFile): FunctionParameter[] {
-    const parameters: FunctionParameter[] = [];
-
-    for (const param of node.parameters) {
-      if (ts.isIdentifier(param.name)) {
-        const name = param.name.text;
-        const type = param.type ? param.type.getText(sourceFile) : undefined;
-        const defaultValue = param.initializer ? this.evaluateLiteral(param.initializer) : undefined;
-        parameters.push({ name, type, defaultValue });
-      } else if (ts.isObjectBindingPattern(param.name)) {
-        const type = param.type ? param.type.getText(sourceFile) : undefined;
-        for (const element of param.name.elements) {
-          if (ts.isBindingElement(element) && ts.isIdentifier(element.name)) {
-            const name = element.name.text;
-            const defaultValue = element.initializer ? this.evaluateLiteral(element.initializer) : undefined;
-            parameters.push({ name, type, defaultValue });
-          }
-        }
-      }
-    }
-
-    return parameters;
-  }
-
-  private evaluateLiteral(node: ts.Expression): any {
-    if (ts.isStringLiteral(node)) return node.text;
-    if (ts.isNumericLiteral(node)) return parseFloat(node.text);
-    if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
-    if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
-    return undefined;
   }
 
   // #endregion

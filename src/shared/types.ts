@@ -3,12 +3,6 @@ import type { PromptProvider } from '../prompt/prompt-provider.ts';
 
 // #region Prompt
 
-export interface FunctionParameter {
-  name: string;
-  type?: string;
-  defaultValue?: any;
-}
-
 /**
  * Low-level prompt representation produced by a
  * {@link PromptFileType}. It exposes the raw `extractedProps` from the parser
@@ -22,7 +16,7 @@ export interface ParsedPrompt {
   id: string;
   providerId?: string;
   name: string;
-  functionParameters: FunctionParameter[];
+  functionParameters: PropDefinition[];
   extractedProps: ExtractedProps;
   metadata?: unknown;
   treePath?: string[];
@@ -75,7 +69,7 @@ export interface NormalizedPrompt {
   id: string;
   providerId?: string;
   name: string;
-  functionParameters: FunctionParameter[];
+  functionParameters: PropDefinition[];
   metadata?: unknown;
 
   /**

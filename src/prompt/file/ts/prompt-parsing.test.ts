@@ -67,13 +67,14 @@ describe('PromptParser', () => {
       expect(prompts[0].functionParameters).toHaveLength(2);
       expect(prompts[0].functionParameters[0]).toEqual({
         name: 'name',
-        type: 'string',
-        defaultValue: undefined,
+        type: { kind: 'primitive', syntax: 'string' },
+        optional: false,
       });
       expect(prompts[0].functionParameters[1]).toEqual({
         name: 'language',
-        type: undefined,
-        defaultValue: 'en',
+        type: { kind: 'primitive', syntax: 'string' },
+        optional: true,
+        defaultValue: { kind: 'primitive', value: 'en' },
       });
     });
   });
@@ -145,7 +146,10 @@ describe('PromptParser', () => {
 
       expect(prompts[0].functionParameters).toHaveLength(1);
       expect(prompts[0].functionParameters[0].name).toBe('config');
-      expect(prompts[0].functionParameters[0].type).toBe('{ name: string; age: number }');
+      expect(prompts[0].functionParameters[0].type).toMatchObject({
+        kind: 'object',
+        syntax: '{ name: string; age: number }',
+      });
 
       const system = getValue(prompts[0], 'system');
       expect(system).toEqual({ kind: 'template', value: 'User is ${config.name}, age ${config.age}' });
@@ -187,7 +191,7 @@ describe('PromptParser', () => {
 
       const greetingParam = prompts[0].functionParameters.find(p => p.name === 'greeting');
       expect(greetingParam).toBeDefined();
-      expect(greetingParam!.defaultValue).toBe('Hello');
+      expect(greetingParam!.defaultValue).toEqual({ kind: 'primitive', value: 'Hello' });
 
       const sysValue = getValue(prompts[0], 'system');
       expect(sysValue.kind).toBe('template');

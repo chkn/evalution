@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import type { NormalizedPrompt } from '../../shared/types';
+import type { NormalizedPrompt, PropValue } from '../../shared/types';
+import { PropsEditor, materializeValue } from 'ts-proppy/react';
 import { executePrompt, streamPrompt } from '../api';
 
 interface Props {
@@ -7,33 +8,41 @@ interface Props {
 }
 
 function PlaygroundExecution({ prompt }: Props) {
-  const [paramValues, setParamValues] = useState<Record<string, any>>({});
+  const [paramValues, setParamValues] = useState<Record<string, PropValue>>({});
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
-  const handleParamChange = (name: string, value: string) => {
+  const handleParamChange = (name: string, value: PropValue) => {
     setParamValues(prev => ({ ...prev, [name]: value }));
   };
 
-  const validate = (): boolean => {
+  const resolveParams = async (): Promise<any[] | null> => {
+    const resolved: any[] = [];
     for (const param of prompt.functionParameters) {
-      if (param.defaultValue === undefined && !paramValues[param.name]) {
-        setError(`Parameter '${param.name}' is required`);
-        return false;
+      const current = paramValues[param.name] ?? param.defaultValue;
+      if (current === undefined) {
+        if (!param.optional) {
+          setError(`Parameter '${param.name}' is required`);
+          return null;
+        }
+        resolved.push(undefined);
+      } else {
+        resolved.push(await materializeValue(current));
       }
     }
-    return true;
+    return resolved;
   };
 
   const handleExecute = async (stream: boolean) => {
-    if (!validate()) return;
-    setExecuting(true);
     setError(null);
     setResult('');
+    const resolved = await resolveParams();
+    if (!resolved) return;
+    setExecuting(true);
     try {
-      if (stream) await executeStream();
-      else await executeGenerate();
+      if (stream) await executeStream(resolved);
+      else await executeGenerate(resolved);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -41,13 +50,13 @@ function PlaygroundExecution({ prompt }: Props) {
     }
   };
 
-  const executeGenerate = async () => {
-    const data = await executePrompt(prompt, paramValues);
+  const executeGenerate = async (params: any[]) => {
+    const data = await executePrompt(prompt, params);
     setResult(data.text);
   };
 
-  const executeStream = async () => {
-    for await (const chunk of streamPrompt(prompt, paramValues)) {
+  const executeStream = async (params: any[]) => {
+    for await (const chunk of streamPrompt(prompt, params)) {
       setResult(prev => prev + chunk);
     }
   };
@@ -60,21 +69,10 @@ function PlaygroundExecution({ prompt }: Props) {
         </div>
         {prompt.functionParameters.length > 0 && (
           <div className="pg-panel-body">
-            {prompt.functionParameters.map(param => (
-              <div key={param.name} className="pg-panel-card pg-param-card">
-                <div className="pg-param-label">
-                  {param.name}
-                  {param.type && <span className="pg-param-type"> : {param.type}</span>}
-                </div>
-                <input
-                  className="pg-param-input"
-                  type="text"
-                  value={paramValues[param.name] ?? ''}
-                  onChange={e => handleParamChange(param.name, e.target.value)}
-                  placeholder={param.defaultValue !== undefined ? `Default: ${param.defaultValue}` : 'Required'}
-                />
-              </div>
-            ))}
+            <PropsEditor
+              props={{ definitions: prompt.functionParameters, values: paramValues }}
+              onChange={handleParamChange}
+            />
           </div>
         )}
         <div className="pg-panel-footer">

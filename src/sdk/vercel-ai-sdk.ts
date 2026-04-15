@@ -67,7 +67,7 @@ export class VercelAISDK implements SDKAdapter {
     const decl = findTypeDeclaration(sourceFile, 'CallSettings');
     if (!decl) return [];
 
-    return extractPropertiesFromDeclaration(decl, sourceFile);
+    return extractPropertiesFromDeclaration(decl, sourceFile).definitions;
   }
 
   async executeConfig(config: any, stream: boolean): Promise<any> {

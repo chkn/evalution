@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { ModelCatalog, ModelInfo, PropValue } from '../../shared/types';
-import { valueToSourceText } from 'ts-proppy/react';
+import { valueToDisplayString } from 'ts-proppy/react';
 import ProviderIcon from './ProviderIcon';
 import { propValueEquals } from '../../shared/helpers';
 
@@ -92,8 +92,8 @@ export default function ModelPicker({ value: propertyValue, onChange, modelCatal
     }
   }, [modes[0]?.[0]]);
 
-  const sourceText = propertyValue ? valueToSourceText(propertyValue) : undefined;
-  const displayLabel = selectedModel?.label ?? sourceText ?? '';
+  const valueString = propertyValue ? valueToDisplayString(propertyValue) : undefined;
+  const displayLabel = selectedModel?.label ?? valueString ?? '';
 
   const updatePosition = useCallback(() => {
     if (!triggerRef.current) return;
@@ -197,7 +197,7 @@ export default function ModelPicker({ value: propertyValue, onChange, modelCatal
                     {isSelected && <CheckIcon size={13} />}
                   </span>
                   <span className="pg-model-option-label">{mi.label}</span>
-                  <span className="pg-model-option-source">{valueToSourceText(modelValue)}</span>
+                  <span className="pg-model-option-source">{valueToDisplayString(modelValue)}</span>
                 </button>
               );
             })}
@@ -258,12 +258,12 @@ export default function ModelPicker({ value: propertyValue, onChange, modelCatal
         className="pg-model-picker-trigger"
         onClick={() => setOpen(!open)}
         type="button"
-        title={sourceText}
+        title={valueString}
       >
         <ProviderIcon provider={selectedModel?.group} size={20} />
         <span className="pg-model-picker-label">{displayLabel}</span>
         {propertyValue && selectedModel && (
-          <span className="pg-model-picker-source">{sourceText}</span>
+          <span className="pg-model-picker-source">{valueString}</span>
         )}
         <ChevronDown size={14} />
       </button>

@@ -87,15 +87,12 @@ export async function updatePromptProperties(
 
 export async function executePrompt(
   prompt: NormalizedPrompt,
-  paramValues: Record<string, any>
+  functionParams: any[]
 ): Promise<ExecuteResult> {
   const res = await fetch(promptUrl(prompt, 'execute'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      stream: false,
-      functionParams: prompt.functionParameters.map(p => paramValues[p.name]),
-    }),
+    body: JSON.stringify({ stream: false, functionParams }),
   });
   await throwIfError(res);
   return res.json();
@@ -103,15 +100,12 @@ export async function executePrompt(
 
 export async function* streamPrompt(
   prompt: NormalizedPrompt,
-  paramValues: Record<string, any>
+  functionParams: any[]
 ): AsyncGenerator<string> {
   const res = await fetch(promptUrl(prompt, 'execute'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      stream: true,
-      functionParams: prompt.functionParameters.map(p => paramValues[p.name]),
-    }),
+    body: JSON.stringify({ stream: true, functionParams }),
   });
   await throwIfError(res);
 
