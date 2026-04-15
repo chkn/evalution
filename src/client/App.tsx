@@ -5,8 +5,7 @@ import { useResizable } from './hooks/useResizable';
 import { renamePrompt } from './api';
 import PromptList from './components/PromptList';
 import AddPromptDialog from './components/AddPromptDialog';
-import PlaygroundEditor from './components/PlaygroundEditor';
-import PlaygroundExecution from './components/PlaygroundExecution';
+import PlaygroundContent from './components/PlaygroundContent';
 import { Tab } from './components/Tab';
 import type { SSEData } from '../shared/types';
 
@@ -360,10 +359,7 @@ function App() {
                       if (!prompt) return null;
                       return (
                         <div key={key} style={key === pane.activeTabKey ? { display: 'contents' } : { display: 'none' }}>
-                          <div className="pg-content">
-                            <PlaygroundEditor prompt={prompt} onUpdate={patchPrompt} onDirtyChange={dirty => handleDirtyChange(key, dirty)} />
-                            <PlaygroundExecution prompt={prompt} />
-                          </div>
+                          <PlaygroundContent prompt={prompt} onUpdate={patchPrompt} onDirtyChange={dirty => handleDirtyChange(key, dirty)} />
                         </div>
                       );
                     })}

@@ -719,8 +719,6 @@ code, pre {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  container-type: inline-size;
-  container-name: main;
 }
 
 /* ─── Pane tab bar ──────────────────────────────────────────────────────────── */
@@ -896,20 +894,19 @@ code, pre {
   background: var(--content-bg);
 }
 
-/* Two-column layout when there's enough horizontal space.
-   column-fill: auto fills column 1 to full height before wrapping to column 2. */
-@container main (min-width: 560px) {
-  .pg-content {
-    column-count: 2;
-    column-fill: auto;
-    column-gap: 12px;
-    overflow-y: hidden;
-  }
+/* Two-column layout, applied by PlaygroundContent when a single column at the
+   pane's full width would overflow vertically. column-fill: auto fills column 1
+   to full height before wrapping to column 2. */
+.pg-content--multicol {
+  column-count: 2;
+  column-fill: auto;
+  column-gap: 12px;
+  overflow-y: hidden;
+}
 
-  .pg-editor,
-  .pg-exec {
-    display: contents;
-  }
+.pg-content--multicol .pg-editor,
+.pg-content--multicol .pg-exec {
+  display: contents;
 }
 
 /* ─── Playground cards ─────────────────────────────────────────────────────── */
