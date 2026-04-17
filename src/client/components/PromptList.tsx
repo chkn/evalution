@@ -211,6 +211,7 @@ function PromptRow({ prompt, indent, selectedId, onSelect, renamingId, onStartRe
       style={{ paddingLeft: indent }}
       onClick={() => onSelect(prompt.id)}
       onDoubleClick={e => { e.stopPropagation(); onStartRename(prompt.id); }}
+      title={prompt.name}
     >
       <span className="tree-icon-prompt"><PromptIcon /></span>
       {isRenaming ? (
@@ -248,6 +249,7 @@ function FileNode({ node, depth, ...rest }: { node: CompressedNode & { type: 'fi
         className="tree-row"
         style={{ paddingLeft: 10 + indent }}
         onClick={() => setExpanded(e => !e)}
+        title={node.label}
       >
         <DisclosureTriangle expanded={expanded} />
         <span className="tree-icon-file"><PromptIcon /></span>
@@ -270,6 +272,7 @@ function DirNode({ node, depth, ...rest }: { node: CompressedNode & { type: 'dir
         className="tree-row"
         style={{ paddingLeft: 10 + indent }}
         onClick={() => setExpanded(e => !e)}
+        title={node.label}
       >
         <DisclosureTriangle expanded={expanded} />
         <span className="tree-icon-folder"><FolderIcon /></span>
@@ -309,23 +312,30 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt
 
   if (loading) {
     return (
-      <div className="section-panel-body">
-        <div className="tree-status">Loading...</div>
-      </div>
+      <>
+        <div className="section-panel-header">Prompts</div>
+        <div className="section-panel-body">
+          <div className="tree-status">Loading...</div>
+        </div>
+      </>
     );
   }
 
   if (error) {
     return (
-      <div className="section-panel-body">
-        <div className="tree-status tree-error">Error: {error}</div>
-      </div>
+      <>
+        <div className="section-panel-header">Prompts</div>
+        <div className="section-panel-body">
+          <div className="tree-status tree-error">Error: {error}</div>
+        </div>
+      </>
     );
   }
 
   if (prompts.length === 0) {
     return (
       <>
+        <div className="section-panel-header">Prompts</div>
         <div className="section-panel-body">
           <div className="tree-empty-state">
             <p>No prompts found.</p>
@@ -358,6 +368,7 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt
 
   return (
     <>
+      <div className="section-panel-header">Prompts</div>
       <div className="section-panel-body file-tree">
         {nodes.map((node, i) =>
           node.type === 'dir' ? (

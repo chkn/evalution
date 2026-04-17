@@ -247,7 +247,7 @@ code, pre {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 42px; /* 36px titlebar overlap + 6px gap */
+  padding-top: 64px; /* 36px titlebar overlap + 6px gap + 12px content-card corner radius + 10px to align top of tab with bottom of section header */
   flex-shrink: 0;
 }
 
@@ -289,7 +289,7 @@ code, pre {
 }
 
 .icon-nav-btn {
-  width: 34px;
+  width: 40px;
   height: 34px;
   border: none;
   background: transparent;
@@ -300,7 +300,9 @@ code, pre {
   border-radius: 6px;
   color: #7a7a9a;
   margin-bottom: 2px;
+  align-self: flex-end;
   transition: color 0.15s, background 0.15s;
+  padding-right: 11px;
 }
 
 .icon-nav-btn:hover {
@@ -309,8 +311,17 @@ code, pre {
 }
 
 .icon-nav-btn.active {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.12);
+  color: #667eea;
+  background: var(--sidebar-bg);
+  border-radius: 4px 0 0 4px;
+  /* inset highlights only — no filter/drop-shadow that would bleed onto the content card */
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 1px 0 0 rgba(255,255,255,0.07), inset 0 -1px 0 rgba(255,255,255,0.07);
+  position: relative;
+  z-index: 5;
+}
+
+.icon-nav-btn.active:hover {
+  background: var(--sidebar-bg);
 }
 
 /* Resize handle */
@@ -344,7 +355,6 @@ code, pre {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--sidebar-heading);
-  border-bottom: 1px solid var(--sidebar-border);
   flex-shrink: 0;
 }
 
