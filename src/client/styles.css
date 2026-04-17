@@ -154,6 +154,20 @@
     /* Delete button */
     --delete-hover-bg: rgba(239, 68, 68, 0.1);
     --delete-hover-text: #f87171;
+
+    /* ts-proppy PropsEditor */
+    --proppy-border: rgba(255, 255, 255, 0.1);
+    --proppy-container-bg: #1f2238;
+    --proppy-button-bg: #2c2c2e;
+    --proppy-button-color: #e5e5e7;
+    --proppy-input-bg: #1c1c1e;
+    --proppy-input-color: #e5e5e7;
+    --proppy-text-primary: #e5e5e7;
+    --proppy-text-muted: #6e7280;
+    --proppy-text-secondary: #9aa3b8;
+    --proppy-danger-bg: rgba(220, 38, 38, 0.12);
+    --proppy-danger-border: rgba(220, 38, 38, 0.3);
+    --proppy-danger-color: #f87171;
   }
 }
 
