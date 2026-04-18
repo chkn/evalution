@@ -1,9 +1,12 @@
 import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
 import { usePrompts } from './hooks/usePrompts';
+import { useTraces } from './hooks/useTraces';
 import { useSSE } from './hooks/useSSE';
 import { useResizable } from './hooks/useResizable';
 import { renamePrompt } from './api';
 import PromptList from './components/PromptList';
+import TraceList from './components/TraceList';
+import TraceView from './components/TraceView';
 import AddPromptDialog from './components/AddPromptDialog';
 import PlaygroundContent from './components/PlaygroundContent';
 import { Tab } from './components/Tab';
@@ -12,9 +15,11 @@ import type { SSEData } from '../shared/types';
 // ─── Tab / Pane model ─────────────────────────────────────────────────────────
 
 interface PromptTab { type: 'prompt'; promptId: string }
-type AppTab = PromptTab;
+interface TraceTab { type: 'trace'; providerId: string; traceId: string; label: string }
+type AppTab = PromptTab | TraceTab;
 
-const tabKey = (t: AppTab) => `${t.type}:${t.promptId}`;
+const tabKey = (t: AppTab) =>
+  t.type === 'prompt' ? `prompt:${t.promptId}` : `trace:${t.providerId}:${t.traceId}`;
 
 interface Pane { id: string; tabs: AppTab[]; activeTabKey: string | null }
 
@@ -30,6 +35,17 @@ function AppIcon() {
          stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="4 17 10 11 4 5"/>
       <line x1="12" y1="19" x2="20" y2="19"/>
+    </svg>
+  );
+}
+
+function TracesIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="4" y1="6" x2="14" y2="6"/>
+      <line x1="8" y1="12" x2="20" y2="12"/>
+      <line x1="6" y1="18" x2="16" y2="18"/>
     </svg>
   );
 }
@@ -62,10 +78,11 @@ function SplitIcon() {
 
 function App() {
   const { prompts, loading, error, refetch, patchPrompt } = usePrompts();
+  const { traces, refetch: refetchTraces } = useTraces();
   const [panes, setPanes] = useState<Pane[]>([{ id: INIT_PANE, tabs: [], activeTabKey: null }]);
   const [focusedPaneId, setFocusedPaneId] = useState(INIT_PANE);
   const [rootPath, setRootPath] = useState('');
-  const [activeSection, setActiveSection] = useState<'prompts'>('prompts');
+  const [activeSection, setActiveSection] = useState<'prompts' | 'traces'>('prompts');
   const [showAddPrompt, setShowAddPrompt] = useState(false);
   const [sectionVisible, setSectionVisible] = useState(true);
   const [dropPaneId, setDropPaneId] = useState<string | null>(null);
@@ -86,8 +103,10 @@ function App() {
     if (data.type === 'prompt-changed') {
       // FIXME: Delay this for a hot second to debounce multiple rapid changes
       refetch();
+    } else if (data.type === 'trace-changed') {
+      refetchTraces();
     }
-  }, [refetch]);
+  }, [refetch, refetchTraces]);
   useSSE(handleSSEMessage);
 
   // Remove tabs whose prompt ID no longer exists (handles renames and deletions)
@@ -95,7 +114,7 @@ function App() {
     if (loading) return;
     const ids = new Set(prompts.map(p => p.id));
     setPanes(prev => prev.map(pane => {
-      const tabs = pane.tabs.filter(t => ids.has(t.promptId));
+      const tabs = pane.tabs.filter(t => t.type !== 'prompt' || ids.has(t.promptId));
       if (tabs.length === pane.tabs.length) return pane;
       const activeStillExists = tabs.some(t => tabKey(t) === pane.activeTabKey);
       return {
@@ -136,6 +155,49 @@ function App() {
       tabs: p.tabs.some(t => tabKey(t) === key) ? p.tabs : [...p.tabs, tab],
       activeTabKey: key,
     }));
+  };
+
+  const handleSelectTrace = (providerId: string, traceId: string, label: string) => {
+    const tab: AppTab = { type: 'trace', providerId, traceId, label };
+    const key = tabKey(tab);
+    setPanes(prev => prev.map(p => p.id !== focusedPaneId ? p : {
+      ...p,
+      tabs: p.tabs.some(t => tabKey(t) === key) ? p.tabs : [...p.tabs, tab],
+      activeTabKey: key,
+    }));
+  };
+
+  /**
+   * Opens a trace tab in a pane to the right of the given prompt pane. If that
+   * right-hand pane doesn't exist yet, splits the current pane first.
+   */
+  const openTraceTabRightOf = (fromPaneId: string, providerId: string, traceId: string, label: string) => {
+    const tab: TraceTab = { type: 'trace', providerId, traceId, label };
+    const key = tabKey(tab);
+    setPanes(prev => {
+      const idx = prev.findIndex(p => p.id === fromPaneId);
+      if (idx < 0) return prev;
+      let targetId = prev[idx + 1]?.id;
+      let next = prev;
+      if (!targetId) {
+        const newId = mkPaneId();
+        targetId = newId;
+        // Split 50/50 using the prompt pane's rendered width, if available.
+        const el = contentCardRef.current?.querySelector<HTMLElement>(`[data-pane="${fromPaneId}"]`);
+        const currentWidth = el?.getBoundingClientRect().width ?? 400;
+        paneResize.setSize(fromPaneId, Math.max(200, Math.floor(currentWidth / 2)));
+        next = [...prev];
+        next.splice(idx + 1, 0, { id: newId, tabs: [], activeTabKey: null });
+      }
+      const targetIdResolved = targetId;
+      const updated = next.map(p => {
+        if (p.id !== targetIdResolved) return p;
+        const alreadyOpen = p.tabs.some(t => tabKey(t) === key);
+        return { ...p, tabs: alreadyOpen ? p.tabs : [...p.tabs, tab], activeTabKey: key };
+      });
+      setFocusedPaneId(targetIdResolved);
+      return updated;
+    });
   };
 
   const handleCloseTab = (paneId: string, key: string, e: React.MouseEvent) => {
@@ -206,6 +268,9 @@ function App() {
   const focusedPane      = panes.find(p => p.id === focusedPaneId) ?? panes[0];
   const focusedActiveTab = focusedPane?.tabs.find(t => tabKey(t) === focusedPane.activeTabKey) ?? null;
   const selectedPromptId = focusedActiveTab?.type === 'prompt' ? focusedActiveTab.promptId : null;
+  const selectedTraceKey = focusedActiveTab?.type === 'trace'
+    ? `${focusedActiveTab.providerId}:${focusedActiveTab.traceId}`
+    : null;
   const sidebarWidth     = sidebar.sizes.w;
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -241,6 +306,16 @@ function App() {
             >
               <PromptsIcon />
             </button>
+            <button
+              className={`icon-nav-btn ${activeSection === 'traces' && sectionVisible ? 'active' : ''}`}
+              onClick={() => {
+                if (activeSection === 'traces' && sectionVisible) setSectionVisible(false);
+                else { setActiveSection('traces'); setSectionVisible(true); }
+              }}
+              title="Traces"
+            >
+              <TracesIcon />
+            </button>
           </nav>
         </div>
 
@@ -274,7 +349,9 @@ function App() {
                     <div className="pane-tabs-scroll">
                       {pane.tabs.map(tab => {
                         const key = tabKey(tab);
-                        const name = tab.type === 'prompt' ? (prompts.find(p => p.id === tab.promptId)?.name ?? tab.promptId) : key;
+                        const name = tab.type === 'prompt'
+                          ? (prompts.find(p => p.id === tab.promptId)?.name ?? tab.promptId)
+                          : `Trace: ${tab.label}`;
                         return (
                           <Tab
                             key={key}
@@ -322,6 +399,15 @@ function App() {
                       }}
                     />
                   )}
+                  {activeSection === 'traces' && (
+                    <TraceList
+                      traces={traces}
+                      loading={false}
+                      error={null}
+                      selectedTraceKey={selectedTraceKey}
+                      onSelect={(t) => handleSelectTrace(t.providerId, t.id, t.name)}
+                    />
+                  )}
                 </aside>
                 <div className="resize-handle" onMouseDown={sidebar.getOnMouseDown('w', sidebarWidth)} />
               </>
@@ -355,11 +441,25 @@ function App() {
                     )}
                     {pane.tabs.map(tab => {
                       const key = tabKey(tab);
-                      const prompt = prompts.find(p => p.id === tab.promptId) ?? null;
-                      if (!prompt) return null;
+                      const visible = key === pane.activeTabKey ? { display: 'contents' } : { display: 'none' };
+                      if (tab.type === 'prompt') {
+                        const prompt = prompts.find(p => p.id === tab.promptId) ?? null;
+                        if (!prompt) return null;
+                        return (
+                          <div key={key} style={visible}>
+                            <PlaygroundContent
+                              prompt={prompt}
+                              onUpdate={patchPrompt}
+                              onDirtyChange={dirty => handleDirtyChange(key, dirty)}
+                              onExecuted={(providerId, traceId, label) =>
+                                openTraceTabRightOf(pane.id, providerId, traceId, label)}
+                            />
+                          </div>
+                        );
+                      }
                       return (
-                        <div key={key} style={key === pane.activeTabKey ? { display: 'contents' } : { display: 'none' }}>
-                          <PlaygroundContent prompt={prompt} onUpdate={patchPrompt} onDirtyChange={dirty => handleDirtyChange(key, dirty)} />
+                        <div key={key} style={visible}>
+                          <TraceView providerId={tab.providerId} traceId={tab.traceId} />
                         </div>
                       );
                     })}

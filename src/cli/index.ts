@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import { pathToFileURL } from 'url';
 import type { EvalutionConfig } from '../config.ts';
 import { FilePromptProvider } from '../prompt/file/file-prompt-provider.ts';
+import { DummyTraceProvider } from '../trace/dummy-trace-provider.ts';
 import { startServer } from '../server/index.ts';
 
 async function loadConfig(rootDir: string): Promise<EvalutionConfig> {
@@ -38,6 +39,7 @@ async function main() {
   const providers = config.promptProviders ?? [
     new FilePromptProvider({ rootDir }),
   ];
+  const traceProviders = config.traceProviders ?? [new DummyTraceProvider()];
 
   // Check if there are any prompt files
   const allPrompts = (
@@ -50,7 +52,7 @@ async function main() {
     console.log(`Found ${allPrompts.length} prompt(s)\n`);
   }
 
-  await startServer({ providers, port, rootPath: rootDir });
+  await startServer({ providers, traceProviders, port, rootPath: rootDir });
 }
 
 main().catch((error) => {

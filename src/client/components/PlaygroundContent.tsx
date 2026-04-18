@@ -7,6 +7,11 @@ interface Props {
   prompt: NormalizedPrompt;
   onUpdate: (updated: NormalizedPrompt) => void;
   onDirtyChange: (dirty: boolean) => void;
+  /**
+   * Invoked after a successful execution with the trace that was registered
+   * for it. Lets the surrounding app open a trace tab in a split pane.
+   */
+  onExecuted?: (traceProviderId: string, traceId: string, label: string) => void;
 }
 
 // Minimum container width at which a 2-column layout is worth considering.
@@ -17,7 +22,7 @@ const MULTICOL_MIN_WIDTH = 660;
  * multi-column layout only when the content would overflow a single column
  * at the container's current width.
  */
-function PlaygroundContent({ prompt, onUpdate, onDirtyChange }: Props) {
+function PlaygroundContent({ prompt, onUpdate, onDirtyChange, onExecuted }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -67,7 +72,7 @@ function PlaygroundContent({ prompt, onUpdate, onDirtyChange }: Props) {
   return (
     <div className="pg-content" ref={ref}>
       <PlaygroundEditor prompt={prompt} onUpdate={onUpdate} onDirtyChange={onDirtyChange} />
-      <PlaygroundExecution prompt={prompt} />
+      <PlaygroundExecution prompt={prompt} onExecuted={onExecuted} />
     </div>
   );
 }

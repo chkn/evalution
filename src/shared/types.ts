@@ -175,6 +175,155 @@ export interface ExecuteRequest {
   functionParams?: any[];
 }
 
+/**
+ * Response body of `POST /api/prompts/:providerId/:id/execute`.
+ *
+ * The endpoint returns immediately after the trace has been registered; the
+ * real output is streamed as span events via
+ * `GET /api/traces/:tracerProviderId/:traceId/events`.
+ */
+export interface ExecuteResponse {
+  /** ID of the trace that tracks this execution. */
+  traceId: string;
+  /** ID of the trace provider that owns the trace. */
+  tracerProviderId: string;
+}
+
+// #endregion
+
+// #region Trace
+
+/**
+ * Classification of a {@link Span}. Mirrors the conventional OpenLLMetry /
+ * OpenTelemetry "workflow → task → agent → tool → chat/completion" hierarchy
+ * used by most LLM tracing tools.
+ */
+export type SpanKind =
+  | 'workflow'
+  | 'task'
+  | 'agent'
+  | 'tool'
+  | 'chat'
+  | 'completion'
+  | 'embedding'
+  | 'other';
+
+/** A single message within an LLM span's input/output. */
+export interface SpanMessage {
+  role: string;
+  content: string;
+}
+
+/** LLM-specific attributes attached to `chat`, `completion`, `embedding` spans. */
+export interface LLMSpanDetails {
+  provider?: string;
+  model?: string;
+  messages?: SpanMessage[];
+  output?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  /** Dollar cost of the call, if known. */
+  cost?: number;
+  /** Model parameters (temperature, max_tokens, …). */
+  parameters?: Record<string, unknown>;
+}
+
+/**
+ * A span in a {@link Trace}. Spans form a tree via {@link parentId}.
+ * Durations are derived from `startTime` and `endTime`; an in-progress span has
+ * no `endTime` yet.
+ */
+export interface Span {
+  id: string;
+  traceId: string;
+  /** `undefined` for the root span of the trace. */
+  parentId?: string;
+  name: string;
+  kind: SpanKind;
+  /** Start timestamp in milliseconds since epoch. */
+  startTime: number;
+  /** End timestamp in milliseconds since epoch, or `undefined` while running. */
+  endTime?: number;
+  status?: 'ok' | 'error';
+  /** Error message if `status` is `'error'`. */
+  errorMessage?: string;
+  /** Free-form attributes to show in the span's details pane. */
+  attributes?: Record<string, unknown>;
+  /** LLM-specific details (present for `chat`/`completion`/`embedding` spans). */
+  llm?: LLMSpanDetails;
+}
+
+/**
+ * Top-level trace for a single invocation (e.g. one prompt execution).
+ */
+export interface Trace {
+  id: string;
+  providerId?: string;
+  name: string;
+  /** Start timestamp (ms). */
+  startTime: number;
+  /** End timestamp (ms), or `undefined` while the trace is still running. */
+  endTime?: number;
+  status: 'running' | 'ok' | 'error';
+  /** Free-form attributes (e.g. prompt ID, function params). */
+  attributes?: Record<string, unknown>;
+}
+
+/** Compact trace entry for listings (sidebar / `GET /api/traces`). */
+export interface TraceSummary {
+  id: string;
+  providerId: string;
+  name: string;
+  startTime: number;
+  endTime?: number;
+  status: 'running' | 'ok' | 'error';
+  /** Number of spans currently associated with the trace. */
+  spanCount: number;
+}
+
+/** A trace together with all of its spans. */
+export interface TraceWithSpans {
+  trace: Trace;
+  spans: Span[];
+}
+
+/** The kind of change that occurred to a trace. */
+export type TraceChangeType = 'add' | 'update' | 'remove';
+
+/** Describes a single change emitted by `TraceProvider.watch`. */
+export interface TraceChangeEvent {
+  type: TraceChangeType;
+  traceId: string;
+}
+
+/** Real-time event pushed over the per-trace SSE subscription. */
+export type TraceStreamEvent =
+  | { type: 'span-start'; span: Span }
+  | { type: 'span-end'; span: Span }
+  | { type: 'span-update'; span: Span }
+  | { type: 'trace-update'; trace: Trace }
+  | { type: 'trace-end'; trace: Trace };
+
+/** Information about a registered trace provider, returned by `GET /api/trace-providers`. */
+export interface TraceProviderInfo {
+  id: string;
+  displayName?: string;
+  description?: string;
+}
+
+/** Argument passed to `TraceProvider.beginPromptTrace`. */
+export interface BeginPromptTraceInfo {
+  /** ID of the prompt provider that owns the prompt. */
+  promptProviderId: string;
+  /** Prompt ID. */
+  promptId: string;
+  /** Human-readable prompt name. */
+  promptName: string;
+  /** Positional function parameters that were passed to execute. */
+  functionParams: unknown[];
+}
+
 // #endregion
 
 export interface PromptChangedSSEData {
@@ -183,7 +332,13 @@ export interface PromptChangedSSEData {
   event: PromptChangeEvent;
 }
 
-export type SSEData = PromptChangedSSEData;
+export interface TraceChangedSSEData {
+  type: 'trace-changed';
+  providerId: string;
+  event: TraceChangeEvent;
+}
+
+export type SSEData = PromptChangedSSEData | TraceChangedSSEData;
 
 // #region Model
 

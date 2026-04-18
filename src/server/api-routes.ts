@@ -1,13 +1,17 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { PromptProvider } from '../prompt/prompt-provider.ts';
-import type { ExecuteRequest } from '../shared/types.ts';
+import type { TraceProvider } from '../trace/trace-provider.ts';
+import type { ExecuteRequest, ExecuteResponse, TraceStreamEvent } from '../shared/types.ts';
 
 export function setupRoutes(
   fastify: FastifyInstance,
   providers: Map<string, PromptProvider>,
+  traceProviders: Map<string, TraceProvider>,
   sseClients: Set<FastifyReply>,
   rootPath: string
 ) {
+  const defaultTraceProvider = (): TraceProvider | undefined =>
+    traceProviders.values().next().value;
   // GET /api/config - Get server configuration
   fastify.get('/api/config', async () => {
     return { rootPath };
@@ -158,6 +162,10 @@ export function setupRoutes(
   );
 
   // POST /api/prompts/:providerId/:id/execute - Execute prompt
+  //
+  // Returns immediately with a trace reference. The actual execution runs in
+  // the background; clients subscribe to
+  // `/api/traces/:providerId/:traceId/events` for span-level updates.
   fastify.post<{ Params: { providerId: string; id: string }; Body: ExecuteRequest }>(
     '/api/prompts/:providerId/:id/execute',
     async (request, reply) => {
@@ -168,30 +176,119 @@ export function setupRoutes(
           return reply.code(404).send({ error: 'Provider not found' });
         }
 
-        const decodedId = Buffer.from(id, 'base64url').toString('utf8');
-        const { stream = false, functionParams = [] } = request.body;
-
-        if (stream) {
-          reply.raw.setHeader('Content-Type', 'text/event-stream');
-          reply.raw.setHeader('Cache-Control', 'no-cache');
-          reply.raw.setHeader('Connection', 'keep-alive');
-
-          const textStream = await provider.execute(decodedId, functionParams, true);
-
-          for await (const chunk of textStream as AsyncIterable<string>) {
-            reply.raw.write(`data: ${JSON.stringify({ chunk })}\n\n`);
-          }
-
-          reply.raw.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-          reply.raw.end();
-        } else {
-          return await provider.execute(decodedId, functionParams, false);
+        const tracer = defaultTraceProvider();
+        if (!tracer) {
+          return reply.code(500).send({ error: 'No trace provider configured' });
         }
+
+        const decodedId = Buffer.from(id, 'base64url').toString('utf8');
+        const { functionParams = [] } = request.body;
+
+        const prompt = await provider.getPrompt(decodedId);
+        if (!prompt) {
+          return reply.code(404).send({ error: 'Prompt not found' });
+        }
+
+        const trace = await tracer.beginPromptTrace({
+          promptProviderId: providerId,
+          promptId: decodedId,
+          promptName: prompt.name,
+          functionParams,
+        });
+
+        // Fire-and-forget the real execution; errors are surfaced on the trace
+        // (the trace provider owns that wiring).
+        provider.execute(decodedId, functionParams, false).catch((err) => {
+          fastify.log.error({ err }, 'prompt execution failed');
+        });
+
+        const response: ExecuteResponse = {
+          traceId: trace.id,
+          tracerProviderId: tracer.id,
+        };
+        return response;
       } catch (error: any) {
         if (!reply.sent) {
           reply.code(500).send({ error: error.message });
         }
       }
+    }
+  );
+
+  // GET /api/trace-providers - List trace providers
+  fastify.get('/api/trace-providers', async () => {
+    return Array.from(traceProviders.entries()).map(([id, provider]) => ({
+      id,
+      displayName: provider.displayName,
+      description: provider.description,
+    }));
+  });
+
+  // GET /api/traces - List all traces across all trace providers
+  fastify.get('/api/traces', async (request, reply) => {
+    try {
+      const results = await Promise.all(
+        Array.from(traceProviders.values()).map((p) => p.getAllTraces())
+      );
+      return results.flat();
+    } catch (error: any) {
+      reply.code(500).send({ error: error.message });
+    }
+  });
+
+  // GET /api/traces/:providerId/:id - Fetch a trace together with its spans
+  fastify.get<{ Params: { providerId: string; id: string } }>(
+    '/api/traces/:providerId/:id',
+    async (request, reply) => {
+      const { providerId, id } = request.params;
+      const tracer = traceProviders.get(providerId);
+      if (!tracer) {
+        return reply.code(404).send({ error: 'Trace provider not found' });
+      }
+      const trace = await tracer.getTrace(id);
+      if (!trace) {
+        return reply.code(404).send({ error: 'Trace not found' });
+      }
+      return trace;
+    }
+  );
+
+  // GET /api/traces/:providerId/:id/events - SSE stream of trace updates
+  fastify.get<{ Params: { providerId: string; id: string } }>(
+    '/api/traces/:providerId/:id/events',
+    async (request, reply) => {
+      const { providerId, id } = request.params;
+      const tracer = traceProviders.get(providerId);
+      if (!tracer) {
+        return reply.code(404).send({ error: 'Trace provider not found' });
+      }
+
+      reply.raw.setHeader('Content-Type', 'text/event-stream');
+      reply.raw.setHeader('Cache-Control', 'no-cache');
+      reply.raw.setHeader('Connection', 'keep-alive');
+      reply.raw.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+
+      // Replay existing state so late subscribers aren't stuck waiting for the
+      // next event before they can render anything.
+      const existing = await tracer.getTrace(id);
+      if (existing) {
+        for (const span of existing.spans) {
+          const initial: TraceStreamEvent =
+            span.endTime === undefined
+              ? { type: 'span-start', span }
+              : { type: 'span-end', span };
+          reply.raw.write(`data: ${JSON.stringify(initial)}\n\n`);
+        }
+      }
+
+      const unsubscribe = tracer.subscribeTrace(id, (event) => {
+        if (reply.raw.destroyed) return;
+        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+      });
+
+      request.raw.on('close', () => {
+        unsubscribe();
+      });
     }
   );
 

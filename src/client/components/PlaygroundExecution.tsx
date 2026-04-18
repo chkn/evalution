@@ -1,16 +1,20 @@
 import { useState } from 'react';
 import type { NormalizedPrompt, PropValue } from '../../shared/types';
 import { PropsEditor, materializeValue } from 'ts-proppy/react';
-import { executePrompt, streamPrompt } from '../api';
+import { executePrompt } from '../api';
 
 interface Props {
   prompt: NormalizedPrompt;
+  /**
+   * Invoked with the trace reference returned by the execute endpoint. Lets
+   * the surrounding app open the corresponding trace tab.
+   */
+  onExecuted?: (traceProviderId: string, traceId: string, label: string) => void;
 }
 
-function PlaygroundExecution({ prompt }: Props) {
+function PlaygroundExecution({ prompt, onExecuted }: Props) {
   const [paramValues, setParamValues] = useState<Record<string, PropValue>>({});
   const [executing, setExecuting] = useState(false);
-  const [result, setResult] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
   const handleParamChange = (name: string, value: PropValue) => {
@@ -34,30 +38,18 @@ function PlaygroundExecution({ prompt }: Props) {
     return resolved;
   };
 
-  const handleExecute = async (stream: boolean) => {
+  const handleRun = async () => {
     setError(null);
-    setResult('');
     const resolved = await resolveParams();
     if (!resolved) return;
     setExecuting(true);
     try {
-      if (stream) await executeStream(resolved);
-      else await executeGenerate(resolved);
+      const { traceId, tracerProviderId } = await executePrompt(prompt, resolved);
+      onExecuted?.(tracerProviderId, traceId, prompt.name);
     } catch (e: any) {
       setError(e.message);
     } finally {
       setExecuting(false);
-    }
-  };
-
-  const executeGenerate = async (params: any[]) => {
-    const data = await executePrompt(prompt, params);
-    setResult(data.text);
-  };
-
-  const executeStream = async (params: any[]) => {
-    for await (const chunk of streamPrompt(prompt, params)) {
-      setResult(prev => prev + chunk);
     }
   };
 
@@ -78,17 +70,10 @@ function PlaygroundExecution({ prompt }: Props) {
         <div className="pg-panel-footer">
           <button
             className="pg-pill-btn pg-pill-primary"
-            onClick={() => handleExecute(false)}
+            onClick={handleRun}
             disabled={executing}
           >
             {executing ? '…' : '▶  Run'}
-          </button>
-          <button
-            className="pg-pill-btn"
-            onClick={() => handleExecute(true)}
-            disabled={executing}
-          >
-            Stream
           </button>
         </div>
       </div>
@@ -100,22 +85,6 @@ function PlaygroundExecution({ prompt }: Props) {
           </div>
           <div className="pg-panel-body">
             <div className="pg-output-body">{error}</div>
-          </div>
-        </div>
-      )}
-
-      {(result || (executing && !result)) && (
-        <div className="pg-panel">
-          <div className="pg-panel-header">
-            <span className="pg-panel-title">Output</span>
-          </div>
-          <div className="pg-panel-body">
-            <div className="pg-output-body">
-              {executing && !result
-                ? <span className="pg-spinner">Running…</span>
-                : <pre>{result}</pre>
-              }
-            </div>
           </div>
         </div>
       )}

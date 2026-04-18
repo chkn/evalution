@@ -5,14 +5,13 @@ import type {
   AddPromptContext,
   PromptProviderInfo,
   ModelCatalog,
+  ExecuteResponse,
+  TraceSummary,
+  TraceWithSpans,
+  TraceStreamEvent,
+  TraceProviderInfo,
 } from '../shared/types';
 import { encodePromptId } from './utils';
-
-export interface ExecuteResult {
-  text: string;
-  usage: any;
-  finishReason: string;
-}
 
 function promptUrl(prompt: NormalizedPrompt, suffix: string): string {
   return `/api/prompts/${prompt.providerId}/${encodePromptId(prompt.id)}/${suffix}`;
@@ -88,44 +87,58 @@ export async function updatePromptProperties(
 export async function executePrompt(
   prompt: NormalizedPrompt,
   functionParams: any[]
-): Promise<ExecuteResult> {
+): Promise<ExecuteResponse> {
   const res = await fetch(promptUrl(prompt, 'execute'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stream: false, functionParams }),
+    body: JSON.stringify({ functionParams }),
   });
   await throwIfError(res);
   return res.json();
 }
 
-export async function* streamPrompt(
-  prompt: NormalizedPrompt,
-  functionParams: any[]
-): AsyncGenerator<string> {
-  const res = await fetch(promptUrl(prompt, 'execute'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stream: true, functionParams }),
-  });
+export async function getTraceProviders(): Promise<TraceProviderInfo[]> {
+  const res = await fetch('/api/trace-providers');
   await throwIfError(res);
+  return res.json();
+}
 
-  const reader = res.body?.getReader();
-  if (!reader) throw new Error('No response body');
+export async function getTraces(): Promise<TraceSummary[]> {
+  const res = await fetch('/api/traces');
+  await throwIfError(res);
+  return res.json();
+}
 
-  const decoder = new TextDecoder();
-  let buf = '';
+export async function getTrace(
+  providerId: string,
+  traceId: string
+): Promise<TraceWithSpans> {
+  const res = await fetch(`/api/traces/${encodeURIComponent(providerId)}/${encodeURIComponent(traceId)}`);
+  await throwIfError(res);
+  return res.json();
+}
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop() ?? '';
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = JSON.parse(line.slice(6));
-        if (data.chunk) yield data.chunk as string;
+/**
+ * Opens an SSE subscription for the given trace. The callback is invoked for
+ * each {@link TraceStreamEvent}. Returns a cleanup function that closes the
+ * underlying connection.
+ */
+export function subscribeTraceEvents(
+  providerId: string,
+  traceId: string,
+  onEvent: (event: TraceStreamEvent) => void
+): () => void {
+  const url = `/api/traces/${encodeURIComponent(providerId)}/${encodeURIComponent(traceId)}/events`;
+  const es = new EventSource(url);
+  es.onmessage = (msg) => {
+    try {
+      const data = JSON.parse(msg.data);
+      if (data && data.type && data.type !== 'connected') {
+        onEvent(data as TraceStreamEvent);
       }
+    } catch {
+      /* ignore malformed payloads */
     }
-  }
+  };
+  return () => es.close();
 }

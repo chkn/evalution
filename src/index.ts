@@ -16,6 +16,8 @@
  */
 export type { EvalutionConfig } from './config.ts';
 export type { PromptProvider } from './prompt/prompt-provider.ts';
+export type { TraceProvider } from './trace/trace-provider.ts';
+export { DummyTraceProvider } from './trace/dummy-trace-provider.ts';
 export type {
   ChangeEventType,
   PromptChangeEvent,
@@ -33,6 +35,20 @@ export type {
   AddPromptField,
   AddPromptContext,
   PromptProviderInfo,
+  SpanKind,
+  SpanMessage,
+  LLMSpanDetails,
+  Span,
+  Trace,
+  TraceSummary,
+  TraceWithSpans,
+  TraceChangeType,
+  TraceChangeEvent,
+  TraceStreamEvent,
+  TraceProviderInfo,
+  BeginPromptTraceInfo,
+  ExecuteRequest,
+  ExecuteResponse,
   ExtractedProps,
   PropValue,
   PropDefinition,

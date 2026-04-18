@@ -1,4 +1,5 @@
 import type { PromptProvider } from './prompt/prompt-provider.ts';
+import type { TraceProvider } from './trace/trace-provider.ts';
 
 /**
  * Top-level configuration for an evalution instance.
@@ -27,4 +28,12 @@ export interface EvalutionConfig {
    * directory is used automatically.
    */
   promptProviders?: PromptProvider[];
+
+  /**
+   * One or more providers that supply execution traces to the playground.
+   *
+   * If omitted, a {@link DummyTraceProvider} is used automatically so the
+   * Traces tab can still be exercised without wiring a real tracing backend.
+   */
+  traceProviders?: TraceProvider[];
 }
