@@ -281,7 +281,11 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   };
 
   const handleAddMessage = () => {
-    const newMsgs: NormalizedMessage[] = [...localMessages, { role: 'user', content: '' }];
+    const last = localMessages[localMessages.length - 1];
+    let role = 'user';
+    if (last?.role === 'user') role = 'assistant';
+    else if (last?.role === 'assistant' && last.toolCalls?.length) role = 'tool';
+    const newMsgs: NormalizedMessage[] = [...localMessages, { role, content: '' }];
     setLocalMessages(newMsgs);
     handleUpdate({ messages: newMsgs });
   };

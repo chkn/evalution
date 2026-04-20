@@ -11,16 +11,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export interface ServerOptions {
-  providers: PromptProvider[];
+  promptProviders: PromptProvider[];
   traceProviders: TraceProvider[];
   port: number;
   rootPath: string;
 }
 
 export async function startServer(options: ServerOptions) {
-  const { providers, traceProviders, port, rootPath } = options;
+  const { promptProviders, traceProviders, port, rootPath } = options;
 
-  const providerMap = new Map(providers.map(p => [p.id, p]));
+  const promptProviderMap = new Map(promptProviders.map(p => [p.id, p]));
   const traceProviderMap = new Map(traceProviders.map(p => [p.id, p]));
 
   const fastify = Fastify({
@@ -34,7 +34,7 @@ export async function startServer(options: ServerOptions) {
   const sseClients = new Set<FastifyReply>();
 
   // Setup API routes
-  setupRoutes(fastify, providerMap, traceProviderMap, sseClients, rootPath);
+  setupRoutes(fastify, promptProviderMap, traceProviderMap, sseClients, rootPath);
 
   // Serve static client files
   const clientPath = path.join(__dirname, '..', 'client');
@@ -53,7 +53,7 @@ export async function startServer(options: ServerOptions) {
   };
 
   // Setup file watching for all providers that support it
-  for (const [providerId, provider] of providerMap) {
+  for (const [providerId, provider] of promptProviderMap) {
     if (provider.watch) {
       provider.watch((event) => {
         broadcast({ type: 'prompt-changed', providerId, event });

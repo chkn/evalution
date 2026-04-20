@@ -110,43 +110,85 @@ export class GeminiInteractionsSDK implements SDKAdapter {
         {
           id: 'gemini-3.1-pro-preview',
           label: 'Gemini 3.1 Pro Preview',
-          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-3.1-pro-preview' } } } },
+          values: {
+            model: {
+              kind: 'object',
+              properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-3.1-pro-preview' } },
+              displayValue: 'gemini-3.1-pro-preview'
+            }
+          },
           group: 'Google',
         },
         {
           id: 'gemini-3-flash-preview',
           label: 'Gemini 3 Flash Preview',
-          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-3-flash-preview' } } } },
+          values: {
+            model: {
+              kind: 'object',
+              properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-3-flash-preview' } },
+              displayValue: 'gemini-3-flash-preview'
+            }
+          },
           group: 'Google',
         },
         {
           id: 'gemini-3.1-flash-lite-preview',
           label: 'Gemini 3.1 Flash-Lite Preview',
-          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-3.1-flash-lite-preview' } } } },
+          values: {
+            model: {
+              kind: 'object',
+              properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-3.1-flash-lite-preview' } },
+              displayValue: 'gemini-3.1-flash-lite-preview'
+            }
+          },
           group: 'Google',
         },
         {
           id: 'gemini-2.5-pro',
           label: 'Gemini 2.5 Pro',
-          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-2.5-pro' } } } },
+          values: {
+            model: {
+              kind: 'object',
+              properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-2.5-pro' } },
+              displayValue: 'gemini-2.5-pro'
+            }
+          },
           group: 'Google',
         },
         {
           id: 'gemini-2.5-flash',
           label: 'Gemini 2.5 Flash',
-          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-2.5-flash' } } } },
+          values: {
+            model: {
+              kind: 'object',
+              properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-2.5-flash' } },
+              displayValue: 'gemini-2.5-flash'
+            }
+          },
           group: 'Google',
         },
         {
           id: 'gemini-2.5-flash-lite',
           label: 'Gemini 2.5 Flash-lite',
-          values: { model: { kind: 'object', properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-2.5-flash-lite' } } } },
+          values: {
+            model: {
+              kind: 'object',
+              properties: { key: { kind: 'primitive', value: 'model' }, value: { kind: 'primitive', value: 'gemini-2.5-flash-lite' } },
+              displayValue: 'gemini-2.5-flash-lite'
+            }
+          },
           group: 'Google',
         },
         {
           id: 'deep-research-pro-preview-12-2025',
           label: 'Deep Research Preview',
-          values: { agent: { kind: 'object', properties: { key: { kind: 'primitive', value: 'agent' }, value: { kind: 'primitive', value: 'deep-research-pro-preview-12-2025' } } } },
+          values: {
+            agent: {
+              kind: 'object',
+              properties: { key: { kind: 'primitive', value: 'agent' }, value: { kind: 'primitive', value: 'deep-research-pro-preview-12-2025' } },
+              displayValue: 'deep-research-pro-preview-12-2025'
+            }
+          },
           group: 'Google',
         }
       ],

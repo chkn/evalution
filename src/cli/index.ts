@@ -33,26 +33,11 @@ async function main() {
   const rootDir = pathArg ? path.resolve(pathArg) : process.cwd();
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-  console.log('🔍 Scanning for .prompt.ts files...');
-
   const config = await loadConfig(rootDir);
-  const providers = config.promptProviders ?? [
-    new FilePromptProvider({ rootDir }),
-  ];
+  const promptProviders = config.promptProviders ?? [new FilePromptProvider({ rootDir })];
   const traceProviders = config.traceProviders ?? [new DummyTraceProvider()];
 
-  // Check if there are any prompt files
-  const allPrompts = (
-    await Promise.all(providers.map(p => p.getAllPrompts()))
-  ).flat();
-
-  if (allPrompts.length === 0) {
-    console.log(`No prompt files found in ${rootDir}. You can create one from the UI.\n`);
-  } else {
-    console.log(`Found ${allPrompts.length} prompt(s)\n`);
-  }
-
-  await startServer({ providers, traceProviders, port, rootPath: rootDir });
+  await startServer({ promptProviders, traceProviders, port, rootPath: rootDir });
 }
 
 main().catch((error) => {

@@ -77,7 +77,7 @@ function SplitIcon() {
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
-  const { prompts, loading, error, refetch, patchPrompt } = usePrompts();
+  const { prompts, loading, error, refetch: refetchPrompts, patchPrompt } = usePrompts();
   const { traces, refetch: refetchTraces } = useTraces();
   const [panes, setPanes] = useState<Pane[]>([{ id: INIT_PANE, tabs: [], activeTabKey: null }]);
   const [focusedPaneId, setFocusedPaneId] = useState(INIT_PANE);
@@ -89,7 +89,7 @@ function App() {
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
   const dirtyTabsRef = useRef<Set<string>>(new Set());
 
-  const sidebar   = useResizable({ initial: { w: 224 }, min: 120, max: 600, storageKey: 'sidebar-width' });
+  const sidebar    = useResizable({ initial: { w: 224 }, min: 120, max: 600, storageKey: 'sidebar-width' });
   const paneResize = useResizable({ initial: {}, min: 150, storageKey: 'pane-widths' });
 
   const contentCardRef = useRef<HTMLDivElement>(null);
@@ -100,13 +100,13 @@ function App() {
   }, []);
 
   const handleSSEMessage = useCallback((data: SSEData) => {
+    // FIXME: Delay these for a hot second to debounce multiple rapid changes
     if (data.type === 'prompt-changed') {
-      // FIXME: Delay this for a hot second to debounce multiple rapid changes
-      refetch();
+      refetchPrompts();
     } else if (data.type === 'trace-changed') {
       refetchTraces();
     }
-  }, [refetch, refetchTraces]);
+  }, [refetchPrompts, refetchTraces]);
   useSSE(handleSSEMessage);
 
   // Remove tabs whose prompt ID no longer exists (handles renames and deletions)
@@ -393,7 +393,7 @@ function App() {
                         if (!prompt) return;
                         const updated = await renamePrompt(prompt, newName).catch(() => null);
                         if (updated) {
-                          refetch();
+                          refetchPrompts();
                           handleSelectPrompt(updated.id);
                         }
                       }}
@@ -475,7 +475,7 @@ function App() {
           onClose={() => setShowAddPrompt(false)}
           onCreated={(prompt) => {
             setShowAddPrompt(false);
-            refetch();
+            refetchPrompts();
             handleSelectPrompt(prompt.id);
           }}
         />

@@ -918,14 +918,17 @@ code, pre {
   background: var(--content-bg);
 }
 
-/* Two-column layout, applied by PlaygroundContent when a single column at the
-   pane's full width would overflow vertically. column-fill: auto fills column 1
-   to full height before wrapping to column 2. */
+/* Two-column layout, applied by PlaygroundContent when the pane is wide enough
+   and the content overflows a single column. JS assigns each .pg-panel to a
+   column and row via inline grid-column / grid-row styles; grid-auto-rows: 1px
+   lets panels span an exact pixel count so columns stack independently without
+   row-height alignment. The container grows to fit both columns and scrolls
+   normally via the inherited overflow-y: auto. */
 .pg-content--multicol {
-  column-count: 2;
-  column-fill: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 1px;
   column-gap: 12px;
-  overflow-y: hidden;
 }
 
 .pg-content--multicol .pg-editor,
