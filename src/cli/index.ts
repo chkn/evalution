@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import { pathToFileURL } from 'url';
 import type { EvalutionConfig } from '../config.ts';
 import { FilePromptProvider } from '../prompt/file/file-prompt-provider.ts';
-import { DummyTraceProvider } from '../trace/dummy-trace-provider.ts';
+import { MemoryTraceProvider } from '../trace/memory-trace-provider.ts';
 import { startServer } from '../server/index.ts';
 
 async function loadConfig(rootDir: string): Promise<EvalutionConfig> {
@@ -35,7 +35,7 @@ async function main() {
 
   const config = await loadConfig(rootDir);
   const promptProviders = config.promptProviders ?? [new FilePromptProvider({ rootDir })];
-  const traceProviders = config.traceProviders ?? [new DummyTraceProvider()];
+  const traceProviders = config.traceProviders ?? [new MemoryTraceProvider()];
 
   await startServer({ promptProviders, traceProviders, port, rootPath: rootDir });
 }

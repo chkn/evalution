@@ -1,4 +1,24 @@
 import type { PropValue } from 'ts-proppy';
+import type { SpanKind } from './types.ts';
+
+export function otelOperationToSpanKind(operationName: any): SpanKind {
+  switch (operationName) {
+    case 'chat':
+    case 'response':
+    case 'text_completion':
+    case 'generate_content':
+      return 'LLM';
+    case 'execute_tool':
+      return 'TOOL';
+    case 'create_agent':
+    case 'invoke_agent':
+      return 'AGENT';
+    case 'embeddings':
+      return 'EMBEDDING';
+    default:
+      return 'DEFAULT';
+  }
+}
 
 /** Whether a property value can be edited in the UI. */
 export function isEditable(value: PropValue): boolean {

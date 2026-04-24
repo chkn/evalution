@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
-import type { NormalizedPrompt } from '../../shared/types';
+import type { ExecuteResponse, NormalizedPrompt } from '../../shared/types';
 import PlaygroundEditor from './PlaygroundEditor';
 import PlaygroundExecution from './PlaygroundExecution';
 
@@ -11,7 +11,7 @@ interface Props {
    * Invoked after a successful execution with the trace that was registered
    * for it. Lets the surrounding app open a trace tab in a split pane.
    */
-  onExecuted?: (traceProviderId: string, traceId: string, label: string) => void;
+  onExecuted?: (result: ExecuteResponse & { label: string }) => void;
 }
 
 // Minimum container width at which a 2-column layout is worth considering.

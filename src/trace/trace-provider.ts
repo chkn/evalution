@@ -1,6 +1,7 @@
+import type { SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import type { PromptProvider } from '../prompt/prompt-provider.ts';
 import type {
-  BeginPromptTraceInfo,
-  Trace,
+  SpanKind,
   TraceChangeEvent,
   TraceStreamEvent,
   TraceSummary,
@@ -8,13 +9,36 @@ import type {
 } from '../shared/types.ts';
 
 /**
- * A source of execution traces that the playground can display and subscribe
- * to in real time. Implement this interface to integrate a tracing backend
- * (in-memory, OpenTelemetry collector, LangSmith, Langfuse, …).
+ * Attribute name a span can set to pick one of our {@link SpanKind} values.
+ * Falls back to `'DEFAULT'` when absent or unrecognised.
+ */
+export const SPAN_KIND_ATTRIBUTE = 'evalution.span.type';
+
+/**
+ * Attribute name a span can set to link itself to a specific {@link PromptProvider}.
+ */
+export const PROMPT_PROVIDER_ID_ATTRIBUTE = 'evalution.prompt.provider.id';
+
+/**
+ * Attribute name a span can set to link itself to a specific prompt.
+ */
+export const PROMPT_ID_ATTRIBUTE = 'evalution.prompt.id';
+
+/**
+ * Attribute name a span can set to give a human-readable name to the prompt.
+ */
+export const PROMPT_NAME_ATTRIBUTE = 'gen_ai.prompt.name';
+
+/**
+ * A read-only store of execution traces that the playground can display and
+ * subscribe to in real time. Implement this interface to integrate a tracing
+ * backend (in-memory, OpenTelemetry collector, LangSmith, Langfuse, …).
  *
- * The playground invokes {@link beginPromptTrace} at the start of every
- * prompt execution, then streams the resulting trace's {@link Span}s to the
- * trace tab via {@link subscribeTrace}.
+ * Traces and spans are created via the OpenTelemetry API
+ * (`@opentelemetry/api`). A `TraceProvider` implementation's job is to expose
+ * the traces a backend knows about; populating the store from OTel spans is
+ * an implementation detail (e.g. by registering a
+ * `@opentelemetry/sdk-trace-base` `SpanProcessor`).
  */
 export interface TraceProvider {
   /** Uniquely identifies this provider when multiple providers are used. */
@@ -34,9 +58,9 @@ export interface TraceProvider {
 
   /**
    * Returns the trace with the given ID together with all of its spans, or
-   * `null` when the trace is unknown.
+   * `undefined` when the trace is unknown.
    */
-  getTrace(traceId: string): Promise<TraceWithSpans | null>;
+  getTrace(traceId: string): Promise<TraceWithSpans | undefined>;
 
   /**
    * Subscribes to real-time updates for a specific trace. The callback is
@@ -51,17 +75,6 @@ export interface TraceProvider {
   ): () => void;
 
   /**
-   * Registers a new trace for the given prompt execution and returns its ID
-   * immediately. The trace is populated asynchronously — subscribers should
-   * attach via {@link subscribeTrace} to follow updates.
-   *
-   * @param info - Metadata describing what is being executed.
-   * @returns The fresh {@link Trace} so the caller can echo its ID back to
-   * the client right away.
-   */
-  beginPromptTrace(info: BeginPromptTraceInfo): Promise<Trace>;
-
-  /**
    * Registers a callback invoked whenever a trace is added, updated, or
    * removed. Used by the sidebar to stay in sync without polling.
    *
@@ -70,4 +83,15 @@ export interface TraceProvider {
    * @returns A no-argument function that unregisters the watcher.
    */
   watch?(callback: (event: TraceChangeEvent) => void): () => void;
+
+  /**
+   * Returns a `SpanProcessor` (from `@opentelemetry/sdk-trace-base`) that
+   * feeds OpenTelemetry spans into this provider's store. The playground
+   * registers it on a shared `BasicTracerProvider` so spans produced by the
+   * server's tracer land here.
+   *
+   * Optional — providers backed by an external backend (LangSmith, a
+   * collector, …) typically receive spans out-of-band and can omit this.
+   */
+  getSpanProcessor?(): SpanProcessor;
 }

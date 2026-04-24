@@ -1,11 +1,14 @@
 import Fastify, { type FastifyReply } from 'fastify';
 import fastifyStatic from '@fastify/static';
+import { trace, type Tracer } from '@opentelemetry/api';
+import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 import type { PromptProvider } from '../prompt/prompt-provider.ts';
 import type { TraceProvider } from '../trace/trace-provider.ts';
 import { setupRoutes } from './api-routes.ts';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { SSEData } from '../shared/types.ts';
+import { MemoryTraceProvider } from '../trace/memory-trace-provider.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +26,22 @@ export async function startServer(options: ServerOptions) {
   const promptProviderMap = new Map(promptProviders.map(p => [p.id, p]));
   const traceProviderMap = new Map(traceProviders.map(p => [p.id, p]));
 
+  // Wire every trace provider that exposes a SpanProcessor into a shared
+  // OpenTelemetry tracer so prompt executions can produce real spans.
+  const spanProcessors = traceProviders
+    .filter((p) => !!p.getSpanProcessor)
+    .map((p) => p.getSpanProcessor!());
+  const tracerProvider = new BasicTracerProvider({ spanProcessors });
+  trace.setGlobalTracerProvider(tracerProvider);
+  const tracer: Tracer = tracerProvider.getTracer('evalution');
+
+  // For the UI to render new traces, prefer pulling them from
+  // a memory provider if we're using one, otherwise just use the first.
+  const defaultTraceProviderId = traceProviders.find(p => p instanceof MemoryTraceProvider)?.id ?? traceProviders[0]?.id;
+  if (!defaultTraceProviderId) {
+    throw new Error('At least one trace provider must be configured');
+  }
+
   const fastify = Fastify({
     logger: {
       level: 'info',
@@ -34,7 +53,15 @@ export async function startServer(options: ServerOptions) {
   const sseClients = new Set<FastifyReply>();
 
   // Setup API routes
-  setupRoutes(fastify, promptProviderMap, traceProviderMap, sseClients, rootPath);
+  setupRoutes({
+    fastify,
+    promptProviders: promptProviderMap,
+    traceProviders: traceProviderMap,
+    sseClients,
+    rootPath,
+    tracer,
+    defaultTraceProviderId,
+  });
 
   // Serve static client files
   const clientPath = path.join(__dirname, '..', 'client');

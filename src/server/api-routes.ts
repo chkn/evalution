@@ -1,17 +1,28 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { SpanStatusCode, type Tracer } from '@opentelemetry/api';
 import type { PromptProvider } from '../prompt/prompt-provider.ts';
-import type { TraceProvider } from '../trace/trace-provider.ts';
+import { type TraceProvider, PROMPT_ID_ATTRIBUTE, PROMPT_NAME_ATTRIBUTE, PROMPT_PROVIDER_ID_ATTRIBUTE, SPAN_KIND_ATTRIBUTE } from '../trace/trace-provider.ts';
 import type { ExecuteRequest, ExecuteResponse, TraceStreamEvent } from '../shared/types.ts';
 
-export function setupRoutes(
-  fastify: FastifyInstance,
-  providers: Map<string, PromptProvider>,
-  traceProviders: Map<string, TraceProvider>,
-  sseClients: Set<FastifyReply>,
-  rootPath: string
-) {
-  const defaultTraceProvider = (): TraceProvider | undefined =>
-    traceProviders.values().next().value;
+export interface SetupRoutesOptions {
+  fastify: FastifyInstance;
+  promptProviders: Map<string, PromptProvider>;
+  traceProviders: Map<string, TraceProvider>;
+  sseClients: Set<FastifyReply>;
+  rootPath: string;
+  tracer: Tracer;
+  defaultTraceProviderId: string;
+}
+
+export function setupRoutes({
+  fastify,
+  promptProviders,
+  traceProviders,
+  sseClients,
+  rootPath,
+  tracer,
+  defaultTraceProviderId
+}: SetupRoutesOptions) {
   // GET /api/config - Get server configuration
   fastify.get('/api/config', async () => {
     return { rootPath };
@@ -19,7 +30,7 @@ export function setupRoutes(
 
   // GET /api/providers - List providers with display info
   fastify.get('/api/providers', async () => {
-    return Array.from(providers.entries()).map(([id, provider]) => ({
+    return Array.from(promptProviders.entries()).map(([id, provider]) => ({
       id,
       displayName: provider.displayName,
       description: provider.description,
@@ -34,7 +45,7 @@ export function setupRoutes(
     async (request, reply) => {
       try {
         const { providerId } = request.params;
-        const provider = providers.get(providerId);
+        const provider = promptProviders.get(providerId);
         if (!provider) {
           return reply.code(404).send({ error: 'Provider not found' });
         }
@@ -58,7 +69,7 @@ export function setupRoutes(
     '/api/providers/:providerId/models',
     async (request, reply) => {
       const { providerId } = request.params;
-      const provider = providers.get(providerId);
+      const provider = promptProviders.get(providerId);
       if (!provider) {
         return reply.code(404).send({ error: 'Provider not found' });
       }
@@ -71,7 +82,7 @@ export function setupRoutes(
     '/api/providers/:providerId/model-parameters',
     async (request, reply) => {
       const { providerId } = request.params;
-      const provider = providers.get(providerId);
+      const provider = promptProviders.get(providerId);
       if (!provider) {
         return reply.code(404).send({ error: 'Provider not found' });
       }
@@ -83,7 +94,7 @@ export function setupRoutes(
   fastify.get('/api/prompts', async (request, reply) => {
     try {
       const results = await Promise.all(
-        Array.from(providers.entries()).map(async ([providerId, provider]) => {
+        Array.from(promptProviders.entries()).map(async ([providerId, provider]) => {
           const prompts = await provider.getAllPrompts();
           return prompts.map(prompt => ({ ...prompt, providerId }));
         })
@@ -100,7 +111,7 @@ export function setupRoutes(
     async (request, reply) => {
       try {
         const { providerId, id } = request.params;
-        const provider = providers.get(providerId);
+        const provider = promptProviders.get(providerId);
         if (!provider) {
           return reply.code(404).send({ error: 'Provider not found' });
         }
@@ -125,7 +136,7 @@ export function setupRoutes(
       try {
         const { providerId, id } = request.params;
         const { newName } = request.body;
-        const provider = providers.get(providerId);
+        const provider = promptProviders.get(providerId);
         if (!provider) return reply.code(404).send({ error: 'Provider not found' });
         if (!provider.renamePrompt) return reply.code(405).send({ error: 'This provider does not support renaming' });
         const decodedId = Buffer.from(id, 'base64url').toString('utf8');
@@ -143,7 +154,7 @@ export function setupRoutes(
     async (request, reply) => {
       try {
         const { providerId, id } = request.params;
-        const provider = providers.get(providerId);
+        const provider = promptProviders.get(providerId);
         if (!provider) {
           return reply.code(404).send({ error: 'Provider not found' });
         }
@@ -171,14 +182,9 @@ export function setupRoutes(
     async (request, reply) => {
       try {
         const { providerId, id } = request.params;
-        const provider = providers.get(providerId);
+        const provider = promptProviders.get(providerId);
         if (!provider) {
           return reply.code(404).send({ error: 'Provider not found' });
-        }
-
-        const tracer = defaultTraceProvider();
-        if (!tracer) {
-          return reply.code(500).send({ error: 'No trace provider configured' });
         }
 
         const decodedId = Buffer.from(id, 'base64url').toString('utf8');
@@ -189,24 +195,48 @@ export function setupRoutes(
           return reply.code(404).send({ error: 'Prompt not found' });
         }
 
-        const trace = await tracer.beginPromptTrace({
-          promptProviderId: providerId,
-          promptId: decodedId,
-          promptName: prompt.name,
-          functionParams,
-        });
+        return tracer.startActiveSpan(
+          prompt.name,
+          {
+            attributes: {
+              [SPAN_KIND_ATTRIBUTE]: 'LLM',
+              [PROMPT_PROVIDER_ID_ATTRIBUTE]: providerId,
+              [PROMPT_ID_ATTRIBUTE]: decodedId,
+              [PROMPT_NAME_ATTRIBUTE]: prompt.name,
+            },
+          },
+          (span) => {
+            const { traceId } = span.spanContext();
 
-        // Fire-and-forget the real execution; errors are surfaced on the trace
-        // (the trace provider owns that wiring).
-        provider.execute(decodedId, functionParams, false).catch((err) => {
-          fastify.log.error({ err }, 'prompt execution failed');
-        });
+            // Fire-and-forget the real execution; the root span is closed
+            // when it settles. Child spans emitted via the active context
+            // will be parented correctly.
+            provider
+              .execute(decodedId, functionParams, false)
+              .then(
+                () => {
+                  span.setStatus({ code: SpanStatusCode.OK });
+                },
+                (err: any) => {
+                  fastify.log.error({ err }, 'prompt execution failed');
+                  span.recordException(err);
+                  span.setStatus({
+                    code: SpanStatusCode.ERROR,
+                    message: err?.error ? JSON.stringify(err.error, null, 2) : err?.message ?? String(err),
+                  });
+                }
+              )
+              .finally(() => {
+                span.end();
+              });
 
-        const response: ExecuteResponse = {
-          traceId: trace.id,
-          tracerProviderId: tracer.id,
-        };
-        return response;
+            return {
+              traceId,
+              tracerProviderId: defaultTraceProviderId,
+              rootSpanId: span.spanContext().spanId,
+            };
+          }
+        );
       } catch (error: any) {
         if (!reply.sent) {
           reply.code(500).send({ error: error.message });

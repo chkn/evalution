@@ -10,12 +10,12 @@ import TraceView from './components/TraceView';
 import AddPromptDialog from './components/AddPromptDialog';
 import PlaygroundContent from './components/PlaygroundContent';
 import { Tab } from './components/Tab';
-import type { SSEData } from '../shared/types';
+import type { ExecuteResponse, SSEData } from '../shared/types';
 
 // ─── Tab / Pane model ─────────────────────────────────────────────────────────
 
 interface PromptTab { type: 'prompt'; promptId: string }
-interface TraceTab { type: 'trace'; providerId: string; traceId: string; label: string }
+interface TraceTab { type: 'trace'; providerId: string; traceId: string; rootSpanId: string; label: string }
 type AppTab = PromptTab | TraceTab;
 
 const tabKey = (t: AppTab) =>
@@ -158,7 +158,7 @@ function App() {
   };
 
   const handleSelectTrace = (providerId: string, traceId: string, label: string) => {
-    const tab: AppTab = { type: 'trace', providerId, traceId, label };
+    const tab: AppTab = { type: 'trace', providerId, traceId, rootSpanId: '', label };
     const key = tabKey(tab);
     setPanes(prev => prev.map(p => p.id !== focusedPaneId ? p : {
       ...p,
@@ -171,8 +171,9 @@ function App() {
    * Opens a trace tab in a pane to the right of the given prompt pane. If that
    * right-hand pane doesn't exist yet, splits the current pane first.
    */
-  const openTraceTabRightOf = (fromPaneId: string, providerId: string, traceId: string, label: string) => {
-    const tab: TraceTab = { type: 'trace', providerId, traceId, label };
+  const openTraceTabRightOf = (fromPaneId: string, result: ExecuteResponse & { label: string }) => {
+    const { tracerProviderId: providerId, traceId, rootSpanId, label } = result;
+    const tab: TraceTab = { type: 'trace', providerId, traceId, rootSpanId, label };
     const key = tabKey(tab);
     setPanes(prev => {
       const idx = prev.findIndex(p => p.id === fromPaneId);
@@ -451,15 +452,15 @@ function App() {
                               prompt={prompt}
                               onUpdate={patchPrompt}
                               onDirtyChange={dirty => handleDirtyChange(key, dirty)}
-                              onExecuted={(providerId, traceId, label) =>
-                                openTraceTabRightOf(pane.id, providerId, traceId, label)}
+                              onExecuted={(result) =>
+                                openTraceTabRightOf(pane.id, result)}
                             />
                           </div>
                         );
                       }
                       return (
                         <div key={key} style={visible}>
-                          <TraceView providerId={tab.providerId} traceId={tab.traceId} />
+                          <TraceView providerId={tab.providerId} traceId={tab.traceId} initialSpanId={tab.rootSpanId || undefined} />
                         </div>
                       );
                     })}

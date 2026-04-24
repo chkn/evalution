@@ -32,7 +32,7 @@ export interface EvalutionConfig {
   /**
    * One or more providers that supply execution traces to the playground.
    *
-   * If omitted, a {@link DummyTraceProvider} is used automatically so the
+   * If omitted, a {@link MemoryTraceProvider} is used automatically so the
    * Traces tab can still be exercised without wiring a real tracing backend.
    */
   traceProviders?: TraceProvider[];

@@ -17,7 +17,7 @@
 export type { EvalutionConfig } from './config.ts';
 export type { PromptProvider } from './prompt/prompt-provider.ts';
 export type { TraceProvider } from './trace/trace-provider.ts';
-export { DummyTraceProvider } from './trace/dummy-trace-provider.ts';
+export { MemoryTraceProvider } from './trace/memory-trace-provider.ts';
 export type {
   ChangeEventType,
   PromptChangeEvent,
@@ -46,7 +46,6 @@ export type {
   TraceChangeEvent,
   TraceStreamEvent,
   TraceProviderInfo,
-  BeginPromptTraceInfo,
   ExecuteRequest,
   ExecuteResponse,
   ExtractedProps,

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { NormalizedPrompt, PropValue } from '../../shared/types';
+import type { ExecuteResponse, NormalizedPrompt, PropValue } from '../../shared/types';
 import { PropsEditor, materializeValue } from 'ts-proppy/react';
 import { executePrompt } from '../api';
 
@@ -9,7 +9,7 @@ interface Props {
    * Invoked with the trace reference returned by the execute endpoint. Lets
    * the surrounding app open the corresponding trace tab.
    */
-  onExecuted?: (traceProviderId: string, traceId: string, label: string) => void;
+  onExecuted?: (result: ExecuteResponse & { label: string }) => void;
 }
 
 function PlaygroundExecution({ prompt, onExecuted }: Props) {
@@ -44,8 +44,8 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
     if (!resolved) return;
     setExecuting(true);
     try {
-      const { traceId, tracerProviderId } = await executePrompt(prompt, resolved);
-      onExecuted?.(tracerProviderId, traceId, prompt.name);
+      const result = await executePrompt(prompt, resolved);
+      onExecuted?.({ ...result, label: prompt.name });
     } catch (e: any) {
       setError(e.message);
     } finally {

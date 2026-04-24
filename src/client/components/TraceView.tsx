@@ -5,6 +5,8 @@ import { getTrace, subscribeTraceEvents } from '../api';
 interface Props {
   providerId: string;
   traceId: string;
+  /** Span to select and scroll to on first render. */
+  initialSpanId?: string;
 }
 
 interface TraceState {
@@ -12,9 +14,9 @@ interface TraceState {
   spans: Span[];
 }
 
-function TraceView({ providerId, traceId }: Props) {
+function TraceView({ providerId, traceId, initialSpanId }: Props) {
   const [state, setState] = useState<TraceState>({ trace: null, spans: [] });
-  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
+  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(initialSpanId ?? null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -77,13 +79,15 @@ function TraceView({ providerId, traceId }: Props) {
           const running = span.endTime === undefined;
           const duration = running ? undefined : spanEnd - span.startTime;
 
+          const hasError = span.status === 'error';
           return (
-            <div key={span.id} className={`trace-row${isSelected ? ' trace-row-expanded' : ''}`}>
+            <div key={span.id} className={`trace-row${isSelected ? ' trace-row-expanded' : ''}${hasError ? ' trace-row-error' : ''}`}>
               <div
                 className="trace-row-main"
                 onClick={() => setSelectedSpanId(isSelected ? null : span.id)}
               >
-                <div className="trace-row-label" style={{ paddingLeft: 8 + row.depth * 16 }}>
+                <div className="trace-row-label" style={{ paddingLeft: row.depth * 16 }}>
+                  <SpanErrorIcon visible={hasError} />
                   <SpanKindPill kind={span.kind} />
                   <span className="trace-row-name">{span.name}</span>
                 </div>
@@ -182,13 +186,39 @@ function SpanKindPill({ kind }: { kind: Span['kind'] }) {
   return <span className={`span-kind-pill span-kind-${kind}`}>{kind}</span>;
 }
 
+function SpanErrorIcon({ visible }: { visible: boolean }) {
+  return (
+    <svg
+      className="span-error-icon"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-label={visible ? 'Error' : undefined}
+      aria-hidden={!visible}
+      style={{ visibility: visible ? 'visible' : 'hidden' }}
+    >
+      <path
+        d="M7.06 2.8 1.8 12.2A1 1 0 0 0 2.7 13.7h10.6a1 1 0 0 0 .9-1.5L9.0 2.8a1.15 1.15 0 0 0-1.94 0Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <path d="M8 6.5v3M8 11v.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function SpanDetails({ span }: { span: Span }) {
   const rows: { label: string; value: React.ReactNode }[] = [];
 
   rows.push({ label: 'ID', value: <code>{span.id}</code> });
   rows.push({ label: 'Kind', value: span.kind });
   if (span.status) rows.push({ label: 'Status', value: span.status });
-  if (span.errorMessage) rows.push({ label: 'Error', value: span.errorMessage });
+  if (span.errorMessage) {
+    rows.push({
+      label: 'Error',
+      value: <pre className="span-details-json">{span.errorMessage}</pre>,
+    });
+  }
 
   if (span.llm) {
     const { llm } = span;

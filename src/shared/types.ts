@@ -1,5 +1,6 @@
 import type { SDKAdapter } from '../sdk/sdk-adapter.ts';
 import type { PromptProvider } from '../prompt/prompt-provider.ts';
+import type { otelOperationToSpanKind } from './helpers.ts';
 
 // #region Prompt
 
@@ -187,6 +188,8 @@ export interface ExecuteResponse {
   traceId: string;
   /** ID of the trace provider that owns the trace. */
   tracerProviderId: string;
+  /** Span ID of the root span for this execution. */
+  rootSpanId: string;
 }
 
 // #endregion
@@ -194,19 +197,18 @@ export interface ExecuteResponse {
 // #region Trace
 
 /**
- * Classification of a {@link Span}. Mirrors the conventional OpenLLMetry /
- * OpenTelemetry "workflow → task → agent → tool → chat/completion" hierarchy
- * used by most LLM tracing tools.
+ * Classification of a {@link Span}. See also:
+ * - `lmnr.span.type` from https://laminar.sh/docs/tracing/otel
+ * - `mlflow.spanType` from https://mlflow.org/docs/latest/genai/tracing/opentelemetry/attribute-mapping/#translated-span-attributes
+ * 
+ * Mapped from `gen_ai.operation.name` via the {@link otelOperationToSpanKind} function.
  */
 export type SpanKind =
-  | 'workflow'
-  | 'task'
-  | 'agent'
-  | 'tool'
-  | 'chat'
-  | 'completion'
-  | 'embedding'
-  | 'other';
+  | 'LLM'
+  | 'TOOL'
+  | 'AGENT'
+  | 'EMBEDDING'
+  | 'DEFAULT';
 
 /** A single message within an LLM span's input/output. */
 export interface SpanMessage {
@@ -214,7 +216,7 @@ export interface SpanMessage {
   content: string;
 }
 
-/** LLM-specific attributes attached to `chat`, `completion`, `embedding` spans. */
+/** LLM-specific attributes attached to `LLM` spans. */
 export interface LLMSpanDetails {
   provider?: string;
   model?: string;
@@ -310,18 +312,6 @@ export interface TraceProviderInfo {
   id: string;
   displayName?: string;
   description?: string;
-}
-
-/** Argument passed to `TraceProvider.beginPromptTrace`. */
-export interface BeginPromptTraceInfo {
-  /** ID of the prompt provider that owns the prompt. */
-  promptProviderId: string;
-  /** Prompt ID. */
-  promptId: string;
-  /** Human-readable prompt name. */
-  promptName: string;
-  /** Positional function parameters that were passed to execute. */
-  functionParams: unknown[];
 }
 
 // #endregion
