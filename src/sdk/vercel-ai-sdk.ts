@@ -43,6 +43,12 @@ export class VercelAISDK implements SDKAdapter {
             //string: { kind: 'primitive' as const, value: 'openai/$input' },
           },
         },
+        'Anthropic': {
+          customValueTemplates: {
+            function: { kind: 'functionCall' as const, callee: 'anthropic', args: [{ kind: 'primitive' as const, value: '$input' }], import: { name: 'anthropic', from: '@ai-sdk/anthropic' } },
+            //string: { kind: 'primitive' as const, value: 'anthropic/$input' },
+          },
+        },
       },
       models: [
         {
@@ -53,6 +59,33 @@ export class VercelAISDK implements SDKAdapter {
             string: { kind: 'primitive' as const, value: 'openai/gpt-4o' },
           },
           group: 'OpenAI',
+        },
+        {
+          id: 'anthropic/claude-opus-4-7',
+          label: 'Claude Opus 4.7 (Anthropic)',
+          values: {
+            function: { kind: 'functionCall' as const, callee: 'anthropic', args: [{ kind: 'primitive' as const, value: 'claude-opus-4-7' }], import: { name: 'anthropic', from: '@ai-sdk/anthropic' } },
+            string: { kind: 'primitive' as const, value: 'anthropic/claude-opus-4-7' },
+          },
+          group: 'Anthropic',
+        },
+        {
+          id: 'anthropic/claude-sonnet-4-6',
+          label: 'Claude Sonnet 4.6 (Anthropic)',
+          values: {
+            function: { kind: 'functionCall' as const, callee: 'anthropic', args: [{ kind: 'primitive' as const, value: 'claude-sonnet-4-6' }], import: { name: 'anthropic', from: '@ai-sdk/anthropic' } },
+            string: { kind: 'primitive' as const, value: 'anthropic/claude-sonnet-4-6' },
+          },
+          group: 'Anthropic',
+        },
+        {
+          id: 'anthropic/claude-haiku-4-5',
+          label: 'Claude Haiku 4.5 (Anthropic)',
+          values: {
+            function: { kind: 'functionCall' as const, callee: 'anthropic', args: [{ kind: 'primitive' as const, value: 'claude-haiku-4-5' }], import: { name: 'anthropic', from: '@ai-sdk/anthropic' } },
+            string: { kind: 'primitive' as const, value: 'anthropic/claude-haiku-4-5' },
+          },
+          group: 'Anthropic',
         },
       ]
     });
