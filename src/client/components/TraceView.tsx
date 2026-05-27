@@ -7,6 +7,8 @@ interface Props {
   traceId: string;
   /** Span to select and scroll to on first render. */
   initialSpanId?: string;
+  /** Called when the user asks to open a linked prompt in a split pane. */
+  onOpenPrompt?: (promptId: string) => void;
 }
 
 interface TraceState {
@@ -14,7 +16,7 @@ interface TraceState {
   spans: Span[];
 }
 
-function TraceView({ providerId, traceId, initialSpanId }: Props) {
+function TraceView({ providerId, traceId, initialSpanId, onOpenPrompt }: Props) {
   const [state, setState] = useState<TraceState>({ trace: null, spans: [] });
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(initialSpanId ?? null);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +62,7 @@ function TraceView({ providerId, traceId, initialSpanId }: Props) {
         <div className="trace-view-title">
           <span className={`trace-status-dot trace-status-${state.trace.status}`} />
           <span>{state.trace.name}</span>
+          <span className="trace-view-timestamp">{formatTimestamp(state.trace.startTime)}</span>
         </div>
         <div className="trace-view-meta">
           <span>{state.spans.length} span{state.spans.length === 1 ? '' : 's'}</span>
@@ -80,16 +83,32 @@ function TraceView({ providerId, traceId, initialSpanId }: Props) {
           const duration = running ? undefined : spanEnd - span.startTime;
 
           const hasError = span.status === 'error';
+          const canOpenPrompt = !!(span.promptId && onOpenPrompt);
+          const handleOpenPrompt = canOpenPrompt ? () => onOpenPrompt!(span.promptId!) : undefined;
           return (
             <div key={span.id} className={`trace-row${isSelected ? ' trace-row-expanded' : ''}${hasError ? ' trace-row-error' : ''}`}>
-              <div
-                className="trace-row-main"
-                onClick={() => setSelectedSpanId(isSelected ? null : span.id)}
-              >
+              <div className="trace-row-main">
                 <div className="trace-row-label" style={{ paddingLeft: row.depth * 16 }}>
+                  <button
+                    className="trace-row-disclosure"
+                    onClick={() => setSelectedSpanId(isSelected ? null : span.id)}
+                    aria-label={isSelected ? 'Collapse' : 'Expand'}
+                  >
+                    <DisclosureChevron expanded={isSelected} />
+                  </button>
                   <SpanErrorIcon visible={hasError} />
                   <SpanKindPill kind={span.kind} />
-                  <span className="trace-row-name">{span.name}</span>
+                  <span
+                    className={`trace-row-name${canOpenPrompt ? ' trace-row-name-linked' : ''}`}
+                    onClick={handleOpenPrompt}
+                  >
+                    {span.name}
+                  </span>
+                  {canOpenPrompt && (
+                    <button className="trace-row-prompt-btn" onClick={handleOpenPrompt} title="Open prompt">
+                      <PromptLinkIcon />
+                    </button>
+                  )}
                 </div>
                 <div className="trace-row-duration">
                   {duration !== undefined ? formatDuration(duration) : running ? '…' : ''}
@@ -176,6 +195,14 @@ function computeWindow(trace: Trace | null, spans: Span[]): { start: number; end
   return { start, end };
 }
 
+function formatTimestamp(ms: number): string {
+  const d = new Date(ms);
+  return d.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+}
+
 function formatDuration(ms: number): string {
   if (ms < 1) return '<1ms';
   if (ms < 1000) return `${Math.round(ms)}ms`;
@@ -207,6 +234,33 @@ function SpanErrorIcon({ visible }: { visible: boolean }) {
   );
 }
 
+function DisclosureChevron({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      className={`trace-disclosure-icon${expanded ? ' trace-disclosure-icon-open' : ''}`}
+      width="10" height="10" viewBox="0 0 10 10"
+      fill="none" aria-hidden
+    >
+      <path d="M2.5 3.5 5 6.5l2.5-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PromptLinkIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+      <line x1="16" y1="13" x2="8" y2="13"/>
+      <line x1="16" y1="17" x2="8" y2="17"/>
+      <line x1="10" y1="9" x2="8" y2="9"/>
+    </svg>
+  );
+}
+
 function SpanDetails({ span }: { span: Span }) {
   const rows: { label: string; value: React.ReactNode }[] = [];
 
@@ -216,7 +270,7 @@ function SpanDetails({ span }: { span: Span }) {
   if (span.errorMessage) {
     rows.push({
       label: 'Error',
-      value: <pre className="span-details-json">{span.errorMessage}</pre>,
+      value: <pre className="span-details-error">{span.errorMessage}</pre>,
     });
   }
 

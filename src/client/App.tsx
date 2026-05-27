@@ -167,6 +167,47 @@ function App() {
     }));
   };
 
+  const openTabRightOf = (fromPaneId: string, tab: AppTab) => {
+    const key = tabKey(tab);
+    setPanes(prev => {
+      // If already open anywhere, just focus it.
+      const existing = prev.find(p => p.tabs.some(t => tabKey(t) === key));
+      if (existing) {
+        setFocusedPaneId(existing.id);
+        return prev.map(p => p.id === existing.id ? { ...p, activeTabKey: key } : p);
+      }
+
+      const idx = prev.findIndex(p => p.id === fromPaneId);
+      if (idx < 0) return prev;
+
+      // If there's already another pane, use the adjacent one (prefer right, else left).
+      let targetId = prev[idx + 1]?.id ?? prev[idx - 1]?.id;
+      let next = prev;
+      if (!targetId) {
+        // Only pane — create a split.
+        const newId = mkPaneId();
+        targetId = newId;
+        const el = contentCardRef.current?.querySelector<HTMLElement>(`[data-pane="${fromPaneId}"]`);
+        const currentWidth = el?.getBoundingClientRect().width ?? 400;
+        paneResize.setSize(fromPaneId, Math.max(200, Math.floor(currentWidth / 2)));
+        next = [...prev];
+        next.splice(idx + 1, 0, { id: newId, tabs: [], activeTabKey: null });
+      }
+
+      const targetIdResolved = targetId;
+      setFocusedPaneId(targetIdResolved);
+      return next.map(p => p.id === targetIdResolved
+        ? { ...p, tabs: [...p.tabs, tab], activeTabKey: key }
+        : p
+      );
+    });
+  };
+
+  const openPromptTabRightOf = (fromPaneId: string, promptId: string) => {
+    const tab: PromptTab = { type: 'prompt', promptId };
+    openTabRightOf(fromPaneId, tab);
+  };
+
   /**
    * Opens a trace tab in a pane to the right of the given prompt pane. If that
    * right-hand pane doesn't exist yet, splits the current pane first.
@@ -174,31 +215,7 @@ function App() {
   const openTraceTabRightOf = (fromPaneId: string, result: ExecuteResponse & { label: string }) => {
     const { tracerProviderId: providerId, traceId, rootSpanId, label } = result;
     const tab: TraceTab = { type: 'trace', providerId, traceId, rootSpanId, label };
-    const key = tabKey(tab);
-    setPanes(prev => {
-      const idx = prev.findIndex(p => p.id === fromPaneId);
-      if (idx < 0) return prev;
-      let targetId = prev[idx + 1]?.id;
-      let next = prev;
-      if (!targetId) {
-        const newId = mkPaneId();
-        targetId = newId;
-        // Split 50/50 using the prompt pane's rendered width, if available.
-        const el = contentCardRef.current?.querySelector<HTMLElement>(`[data-pane="${fromPaneId}"]`);
-        const currentWidth = el?.getBoundingClientRect().width ?? 400;
-        paneResize.setSize(fromPaneId, Math.max(200, Math.floor(currentWidth / 2)));
-        next = [...prev];
-        next.splice(idx + 1, 0, { id: newId, tabs: [], activeTabKey: null });
-      }
-      const targetIdResolved = targetId;
-      const updated = next.map(p => {
-        if (p.id !== targetIdResolved) return p;
-        const alreadyOpen = p.tabs.some(t => tabKey(t) === key);
-        return { ...p, tabs: alreadyOpen ? p.tabs : [...p.tabs, tab], activeTabKey: key };
-      });
-      setFocusedPaneId(targetIdResolved);
-      return updated;
-    });
+    openTabRightOf(fromPaneId, tab);
   };
 
   const handleCloseTab = (paneId: string, key: string, e: React.MouseEvent) => {
@@ -460,7 +477,7 @@ function App() {
                       }
                       return (
                         <div key={key} style={visible}>
-                          <TraceView providerId={tab.providerId} traceId={tab.traceId} initialSpanId={tab.rootSpanId || undefined} />
+                          <TraceView providerId={tab.providerId} traceId={tab.traceId} initialSpanId={tab.rootSpanId || undefined} onOpenPrompt={(promptId) => openPromptTabRightOf(pane.id, promptId)} />
                         </div>
                       );
                     })}

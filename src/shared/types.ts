@@ -254,6 +254,10 @@ export interface Span {
   attributes?: Record<string, unknown>;
   /** LLM-specific details (present for `chat`/`completion`/`embedding` spans). */
   llm?: LLMSpanDetails;
+  /** Evalution prompt provider ID (`evalution.prompt.provider.id`). */
+  promptProviderId?: string;
+  /** Evalution prompt ID (`evalution.prompt.id`). */
+  promptId?: string;
 }
 
 /**
