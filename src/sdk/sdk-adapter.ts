@@ -4,6 +4,7 @@ import path from 'path';
 import type { PropDefinition, PropValue } from 'ts-proppy';
 import type {
   ModelCatalog,
+  ModelPropValue,
   ParsedPrompt,
   NormalizedPrompt,
   NormalizedPromptUpdates,
@@ -58,7 +59,7 @@ export interface SDKAdapter {
    * @returns A `Record` keyed by the SDK's actual property names. Values may
    *   be `null` (to remove) or a `PropValue`.
    */
-  denormalizeUpdates(updates: NormalizedPromptUpdates, currentValues?: Record<string, PropValue>): Record<string, PropValue | null>;
+  denormalizeUpdates(updates: NormalizedPromptUpdates, currentValues?: Record<string, PropValue>): Record<string, ModelPropValue | null>;
 }
 
 // ─── Generic helpers ──────────────────────────────────────────────────────────

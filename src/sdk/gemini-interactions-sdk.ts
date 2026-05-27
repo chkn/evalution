@@ -12,6 +12,7 @@ import type {
   NormalizedMessage,
   NormalizedParameter,
   NormalizedPromptUpdates,
+  ModelPropValue,
 } from '../shared/types.ts';
 
 type BaseCreateInteractionParams = Parameters<typeof GoogleGenAI.prototype.interactions.create>[0];
@@ -278,8 +279,8 @@ export class GeminiInteractionsSDK implements SDKAdapter {
     };
   }
 
-  denormalizeUpdates(updates: NormalizedPromptUpdates, currentValues?: Record<string, PropValue>): Record<string, PropValue | null> {
-    const out: Record<string, PropValue | null> = {};
+  denormalizeUpdates(updates: NormalizedPromptUpdates, currentValues?: Record<string, PropValue>): Record<string, ModelPropValue | null> {
+    const out: Record<string, ModelPropValue | null> = {};
     if ('model' in updates) {
       // Only null-out keys that actually exist in the file to avoid
       // "Property not found" errors from updatePromptProperties

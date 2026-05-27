@@ -57,10 +57,13 @@ npx evalution
 
 ## Prompt File Format
 
-Prompts are defined as **exported functions** that return Vercel AI SDK configuration objects.
+Prompts are defined as **functions** that return Vercel AI SDK configuration objects, either exported individually or grouped via the `prompts()` helper.
 
-### Simple Prompt (No Parameters)
+### Plain Exports
 
+Each exported function is a prompt:
+
+`simple1.prompt.ts`:
 ```typescript
 import { openai } from '@ai-sdk/openai';
 
@@ -73,9 +76,65 @@ export function simplePrompt() {
 }
 ```
 
-### Parameterized Prompt
+Then to use it:
 
-Functions can accept parameters that are used in the prompt configuration:
+```typescript
+import { generateText } from 'ai';
+import { simplePrompt } from './simple1.prompt.ts';
+
+const prompt = simplePrompt();
+const { text } = await generateText(prompt);
+
+console.log(text);
+```
+
+### `prompts()` Helper
+
+Alternatively, install `@evalution/vercel-ai-sdk` and use the `prompts()` helper. Provider instances are destructured from the factory parameter, and each method on the returned object is a prompt:
+
+`simple2.prompt.ts`:
+```typescript
+import { prompts } from '@evalution/vercel-ai-sdk';
+
+export default prompts(({ openai }) => ({
+
+  simplePrompt() {
+    return {
+      model: openai('gpt-4o'),
+      system: 'You are a helpful assistant',
+      messages: [{ role: 'user', content: 'Hello!' }],
+    };
+  },
+
+}));
+```
+
+This form allows you to override the default provider instance (if you don't override it, you get the default instance, just like in the previous section). Here's an example:
+
+```typescript
+import { generateText } from 'ai';
+import { createOpenAI } from '@ai-sdk/openai';
+import prompts from './simple2.prompt.ts';
+
+const { simplePrompt } = prompts({
+  openai: createOpenAI({ apiKey: "XXX" })
+});
+const prompt = simplePrompt();
+const { text } = await generateText(prompt);
+
+console.log(text);
+```
+
+**Use the helper if:**
+- You need to override the default provider instance.
+- You want your prompt functions to be strongly typed against the AI SDK's config shape without writing your own type annotations.
+
+**Don't use the helper if:**
+- You don't want to add a runtime dependency on `@evalution/vercel-ai-sdk`.
+
+### Parameterized Prompts
+
+In either form, prompt functions can accept parameters used in the configuration:
 
 ```typescript
 import { openai } from '@ai-sdk/openai';
@@ -124,7 +183,7 @@ The UI allows you to switch between formats and select from popular models.
 
 ## Environment Variables
 
-Set API keys for the providers you want to use:
+To test your prompts in the UI, set the applicable API keys for the providers you are using:
 
 ```bash
 export OPENAI_API_KEY="sk-..."
@@ -191,7 +250,7 @@ Contributions welcome! Please open an issue or PR.
 
 **No prompts found**
 - Make sure your files end with `.prompt.ts`
-- Files must export functions (not default exports or const objects)
+- Files must either export functions directly, or default-export a `prompts(...)` helper call
 
 **API key errors**
 - Ensure you've set the correct environment variables

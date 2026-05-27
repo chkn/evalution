@@ -115,7 +115,7 @@ export interface NormalizedPrompt {
  * that field from the underlying source.
  */
 export interface NormalizedPromptUpdates {
-  model?: PropValue | null;
+  model?: ModelPropValue | null;
   system?: PropValue | null;
   messages?: NormalizedMessage[] | null;
   /** Per-parameter updates, keyed by parameter name. `null` removes. */
@@ -332,8 +332,25 @@ export type SSEData = PromptChangedSSEData | TraceChangedSSEData;
 
 // #region Model
 
-import type { PropValue, PropDefinition, ImportSpecifier, ExtractedProps, SourceSpan } from 'ts-proppy';
-export type { PropDefinition, PropValue, ImportSpecifier, ExtractedProps, SourceSpan };
+import type { PropValue, PropDefinition, ImportSpecifier, ExtractedProps, SourceSpan, CalleeBinding } from 'ts-proppy';
+export type { PropDefinition, PropValue, ImportSpecifier, ExtractedProps, SourceSpan, CalleeBinding };
+
+/**
+ * Catalog-only variant of {@link PropValue} where `functionCall.binding` may
+ * carry multiple candidate bindings (e.g. a parameter-destructure form *and* a
+ * top-level-import form). The {@link PromptFileType} resolves these candidates
+ * against the target file's structure at edit time.
+ *
+ * Plain {@link PropValue} is assignable to `ModelPropValue` (single binding ⊆ array).
+ */
+export type ModelPropValue =
+  | Exclude<PropValue, { kind: 'functionCall' | 'object' | 'array' | 'tuple' }>
+  | (Omit<Extract<PropValue, { kind: 'functionCall' }>, 'binding' | 'args'> & {
+      binding?: CalleeBinding | CalleeBinding[];
+      args: ModelPropValue[];
+    })
+  | (Omit<Extract<PropValue, { kind: 'object' }>, 'properties'> & { properties: Record<string, ModelPropValue> })
+  | (Omit<Extract<PropValue, { kind: 'array' | 'tuple' }>, 'elements'> & { elements: ModelPropValue[] });
 
 /** A pre-defined model option shown in quick-select UIs. */
 export interface ModelInfo {
@@ -347,7 +364,7 @@ export interface ModelInfo {
    * Values to use when selecting this model in different modes (as defined by {@link ModelCatalog.modelValueTypes}).
    * If a value is undefined for a particular mode, this model is not offered as a quick-select option in that mode.
    */
-  values: Record<string, PropValue | undefined>;
+  values: Record<string, ModelPropValue | undefined>;
 }
 
 /** Describes a model selection mode exposed by the SDK adapter (e.g. "Provider" or "Gateway"). */
@@ -366,7 +383,7 @@ export interface ModelValueType {
  * ID at runtime.
  */
 export interface ModelGroupInfo {
-  customValueTemplates?: Record<string, PropValue>;
+  customValueTemplates?: Record<string, ModelPropValue>;
 }
 
 /**

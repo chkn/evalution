@@ -120,7 +120,7 @@ export function test() {
       kind: 'functionCall',
       callee: 'openai',
       args: [{ kind: 'primitive', value: 'gpt-4o-mini' }],
-      import: { name: 'openai', from: '@ai-sdk/openai' },
+      binding: { kind: 'import', spec: { name: 'openai', from: '@ai-sdk/openai' } },
     });
 
     expect(await fileProvider.readFile(filePath)).toContain('openai("gpt-4o-mini")');
@@ -139,7 +139,7 @@ export function test() {
       kind: 'functionCall',
       callee: 'openai',
       args: [{ kind: 'primitive', value: 'gpt-4o' }],
-      import: { name: 'openai', from: '@ai-sdk/openai' },
+      binding: { kind: 'import', spec: { name: 'openai', from: '@ai-sdk/openai' } },
     });
 
     expect(await fileProvider.readFile(filePath)).toContain("import { openai } from '@ai-sdk/openai'");

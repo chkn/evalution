@@ -1,5 +1,5 @@
 import type { PropValue } from 'ts-proppy';
-import type { SpanKind } from './types.ts';
+import type { ModelPropValue, SpanKind } from './types.ts';
 
 export function otelOperationToSpanKind(operationName: any): SpanKind {
   switch (operationName) {
@@ -22,14 +22,14 @@ export function otelOperationToSpanKind(operationName: any): SpanKind {
 
 /** Whether a property value can be edited in the UI. */
 export function isEditable(value: PropValue): boolean {
-  return value.kind !== 'raw' && !(value.kind === 'functionCall' && !value.import);
+  return value.kind !== 'raw' && !(value.kind === 'functionCall' && !value.binding);
 }
 
 export function isPropValue(a: unknown): a is PropValue {
   return !!a && typeof a === 'object' && 'kind' in a;
 }
 
-export function propValueEquals(a: unknown, b: PropValue | undefined): boolean {
+export function propValueEquals(a: unknown, b: PropValue | ModelPropValue | undefined): boolean {
   if (b === undefined) return a === undefined;
   if (!isPropValue(a)) return false;
   switch (b.kind) {

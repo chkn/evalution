@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import type { ModelCatalog, ModelInfo, PropValue } from '../../shared/types';
+import type { ModelCatalog, ModelInfo, ModelPropValue, PropValue } from '../../shared/types';
 import { valueToDisplayString } from 'ts-proppy/react';
 import ProviderIcon from './ProviderIcon';
 import { propValueEquals } from '../../shared/helpers';
 
 interface Props {
   value: PropValue | undefined;
-  onChange: (v: PropValue) => void;
+  onChange: (v: ModelPropValue) => void;
   modelCatalog: ModelCatalog;
 }
 
@@ -31,8 +31,8 @@ function CheckIcon({ size = 14 }: { size?: number }) {
   );
 }
 
-/** Deep-clone a PropValue template, replacing `$input` in primitive strings with `input`. */
-function applyTemplate(template: PropValue, input: string): PropValue {
+/** Deep-clone a ModelPropValue template, replacing `$input` in primitive strings with `input`. */
+function applyTemplate(template: ModelPropValue, input: string): ModelPropValue {
   switch (template.kind) {
     case 'primitive':
       if (typeof template.value === 'string') {
@@ -131,12 +131,12 @@ export default function ModelPicker({ value: propertyValue, onChange, modelCatal
     };
   }, [open, updatePosition]);
 
-  const emitValue = (value: PropValue, close: boolean = true) => {
+  const emitValue = (value: ModelPropValue, close: boolean = true) => {
     onChange(value);
     if (close) setOpen(false);
   };
 
-  const getCustomInputValue = (providerKey: string): PropValue | undefined => {
+  const getCustomInputValue = (providerKey: string): ModelPropValue | undefined => {
     const val = (customInputs[providerKey] ?? '').trim();
     if (!val) return;
     const template = modelCatalog.groups?.[providerKey]?.customValueTemplates?.[activeMode];
@@ -197,7 +197,7 @@ export default function ModelPicker({ value: propertyValue, onChange, modelCatal
                     {isSelected && <CheckIcon size={13} />}
                   </span>
                   <span className="pg-model-option-label">{mi.label}</span>
-                  <span className="pg-model-option-source">{valueToDisplayString(modelValue)}</span>
+                  <span className="pg-model-option-source">{valueToDisplayString(modelValue as PropValue)}</span>
                 </button>
               );
             })}

@@ -13,12 +13,58 @@ import type {
   NormalizedParameter,
   NormalizedPromptUpdates,
   NormalizedToolCall,
+  ModelInfo,
+  ModelPropValue,
+  CalleeBinding,
 } from '../shared/types.ts';
 
 const MODEL_KEY = 'model';
 const SYSTEM_KEY = 'system';
 const MESSAGES_KEY = 'messages';
 const RESERVED_KEYS = new Set([MODEL_KEY, SYSTEM_KEY, MESSAGES_KEY]);
+
+/** The `prompts()` factory from `@evalution/vercel-ai-sdk`. */
+const PROMPTS_HELPER_CALL = {
+  callee: 'prompts',
+  import: { name: 'prompts', from: '@evalution/vercel-ai-sdk' },
+} as const;
+
+/** Build the binding-candidate array for a provider function call. */
+function providerBinding(provider: string): CalleeBinding[] {
+  return [
+    { kind: 'parameter', enclosingCall: PROMPTS_HELPER_CALL },
+    { kind: 'import', spec: { name: provider, from: `@ai-sdk/${provider}` } },
+  ];
+}
+
+/** Build a {@link ModelInfo} entry from group, label, provider, and model ID. */
+function model(group: string, label: string, provider: string, modelId: string): ModelInfo {
+  const id = `${provider}/${modelId}`;
+  return {
+    id,
+    label,
+    group,
+    values: {
+      function: {
+        kind: 'functionCall',
+        callee: provider,
+        args: [{ kind: 'primitive', value: modelId }],
+        binding: providerBinding(provider),
+      },
+      string: { kind: 'primitive', value: id },
+    },
+  };
+}
+
+/** Build a custom-value template entry for a provider (used in `groups.{provider}.customValueTemplates.function`). */
+function customValueTemplate(provider: string): ModelPropValue {
+  return {
+    kind: 'functionCall',
+    callee: provider,
+    args: [{ kind: 'primitive', value: '$input' }],
+    binding: providerBinding(provider),
+  };
+}
 
 /**
  * {@link SDKAdapter} implementation for the
@@ -33,61 +79,19 @@ export class VercelAISDK implements SDKAdapter {
     // FIXME: Can we read this from the SDK instead of hardcoding it?
     return Promise.resolve({
       modelValueTypes: {
-        "function": { label: 'Provider', description: 'Call provider function (e.g. openai("gpt-4o"))' },
-        "string": { label: 'Gateway', description: 'Use a gateway model string (e.g. "openai/gpt-4o")' },
+        function: { label: 'Provider', description: 'Call provider function (e.g. openai("gpt-4o"))' },
+        string: { label: 'Gateway', description: 'Use a gateway model string (e.g. "openai/gpt-4o")' },
       },
       groups: {
-        'OpenAI': {
-          customValueTemplates: {
-            function: { kind: 'functionCall' as const, callee: 'openai', args: [{ kind: 'primitive' as const, value: '$input' }], import: { name: 'openai', from: '@ai-sdk/openai' } },
-            //string: { kind: 'primitive' as const, value: 'openai/$input' },
-          },
-        },
-        'Anthropic': {
-          customValueTemplates: {
-            function: { kind: 'functionCall' as const, callee: 'anthropic', args: [{ kind: 'primitive' as const, value: '$input' }], import: { name: 'anthropic', from: '@ai-sdk/anthropic' } },
-            //string: { kind: 'primitive' as const, value: 'anthropic/$input' },
-          },
-        },
+        OpenAI: { customValueTemplates: { function: customValueTemplate('openai') } },
+        Anthropic: { customValueTemplates: { function: customValueTemplate('anthropic') } },
       },
       models: [
-        {
-          id: 'openai/gpt-4o',
-          label: 'GPT-4o (OpenAI)',
-          values: {
-            function: { kind: 'functionCall' as const, callee: 'openai', args: [{ kind: 'primitive' as const, value: 'gpt-4o' }], import: { name: 'openai', from: '@ai-sdk/openai' } },
-            string: { kind: 'primitive' as const, value: 'openai/gpt-4o' },
-          },
-          group: 'OpenAI',
-        },
-        {
-          id: 'anthropic/claude-opus-4-7',
-          label: 'Claude Opus 4.7 (Anthropic)',
-          values: {
-            function: { kind: 'functionCall' as const, callee: 'anthropic', args: [{ kind: 'primitive' as const, value: 'claude-opus-4-7' }], import: { name: 'anthropic', from: '@ai-sdk/anthropic' } },
-            string: { kind: 'primitive' as const, value: 'anthropic/claude-opus-4-7' },
-          },
-          group: 'Anthropic',
-        },
-        {
-          id: 'anthropic/claude-sonnet-4-6',
-          label: 'Claude Sonnet 4.6 (Anthropic)',
-          values: {
-            function: { kind: 'functionCall' as const, callee: 'anthropic', args: [{ kind: 'primitive' as const, value: 'claude-sonnet-4-6' }], import: { name: 'anthropic', from: '@ai-sdk/anthropic' } },
-            string: { kind: 'primitive' as const, value: 'anthropic/claude-sonnet-4-6' },
-          },
-          group: 'Anthropic',
-        },
-        {
-          id: 'anthropic/claude-haiku-4-5',
-          label: 'Claude Haiku 4.5 (Anthropic)',
-          values: {
-            function: { kind: 'functionCall' as const, callee: 'anthropic', args: [{ kind: 'primitive' as const, value: 'claude-haiku-4-5' }], import: { name: 'anthropic', from: '@ai-sdk/anthropic' } },
-            string: { kind: 'primitive' as const, value: 'anthropic/claude-haiku-4-5' },
-          },
-          group: 'Anthropic',
-        },
-      ]
+        model('OpenAI',    'GPT-4o',           'openai',    'gpt-4o'),
+        model('Anthropic', 'Claude Opus 4.7',  'anthropic', 'claude-opus-4-7'),
+        model('Anthropic', 'Claude Sonnet 4.6','anthropic', 'claude-sonnet-4-6'),
+        model('Anthropic', 'Claude Haiku 4.5', 'anthropic', 'claude-haiku-4-5'),
+      ],
     });
   }
 
@@ -147,8 +151,8 @@ export class VercelAISDK implements SDKAdapter {
     };
   }
 
-  denormalizeUpdates(updates: NormalizedPromptUpdates, _currentValues?: Record<string, PropValue>): Record<string, PropValue | null> {
-    const out: Record<string, PropValue | null> = {};
+  denormalizeUpdates(updates: NormalizedPromptUpdates, _currentValues?: Record<string, PropValue>): Record<string, ModelPropValue | null> {
+    const out: Record<string, ModelPropValue | null> = {};
     if (MODEL_KEY in updates) out[MODEL_KEY] = updates.model ?? null;
     if (SYSTEM_KEY in updates) out[SYSTEM_KEY] = updates.system ?? null;
     if (MESSAGES_KEY in updates) {

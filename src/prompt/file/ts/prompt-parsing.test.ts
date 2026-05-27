@@ -221,7 +221,7 @@ describe('PromptParser', () => {
       if (model.kind === 'functionCall') {
         expect(model.callee).toBe('openai');
         expect(model.args).toEqual([{ kind: 'primitive', value: 'gpt-4o' }]);
-        expect(model.import).toEqual({ name: 'openai', from: '@ai-sdk/openai' });
+        expect(model.binding).toEqual({ kind: 'import', spec: { name: 'openai', from: '@ai-sdk/openai' } });
       }
       expect(isEditable(model)).toBe(true);
     });

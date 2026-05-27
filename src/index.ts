@@ -32,6 +32,8 @@ export type {
   ModelInfo,
   ModelCatalog,
   ModelGroupInfo,
+  ModelPropValue,
+  CalleeBinding,
   AddPromptField,
   AddPromptContext,
   PromptProviderInfo,

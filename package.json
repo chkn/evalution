@@ -16,6 +16,9 @@
     "bin",
     "dist"
   ],
+  "workspaces": [
+    "packages/vercel-ai-sdk"
+  ],
   "engines": {
     "node": ">=22.18.0"
   },
@@ -25,9 +28,9 @@
     "build:client": "vite build",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "node src/cli/index.ts",
-    "dev:server:debug": "node --inspect-brk src/cli/index.ts",
+    "dev:server:debug": "node --inspect src/cli/index.ts",
     "dev:client": "vite --mode development",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.client.json",
+    "typecheck": "(tsc --noEmit & tsc --noEmit -p tsconfig.client.json & tsc --noEmit -p packages/vercel-ai-sdk ) && wait",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -40,21 +43,21 @@
     "@google/genai": "^1.50.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/sdk-trace-base": "^2.7.0",
-    "ai": "^3.4.0",
+    "ai": ">=3.4.0",
     "chokidar": "^5.0.0",
     "fastify": "^4.25.0",
     "minimatch": "^10.2.4",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
+    "react": ">=18.2.0",
+    "react-dom": ">=18.2.0",
     "ts-proppy": "^0.1.0",
-    "typescript": "^5.3.3"
+    "typescript": ">=5.3.3"
   },
   "devDependencies": {
     "@playwright/experimental-ct-react": "^1.58.2",
     "@playwright/test": "^1.58.2",
-    "@types/node": "^22.18.0",
-    "@types/react": "^18.2.45",
-    "@types/react-dom": "^18.2.18",
+    "@types/node": ">=22.18.0",
+    "@types/react": ">=18.2.45",
+    "@types/react-dom": ">=18.2.18",
     "@vitejs/plugin-react": "^4.2.1",
     "@vitest/coverage-v8": "^1.1.0",
     "concurrently": "^9.2.1",

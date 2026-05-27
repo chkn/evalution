@@ -1,5 +1,5 @@
 import type { PropDefinition, PropValue } from 'ts-proppy';
-import type { ParsedPrompt, NormalizedPrompt } from '../../shared/types.ts';
+import type { ParsedPrompt, NormalizedPrompt, ModelPropValue } from '../../shared/types.ts';
 import type { TSPromptFileType } from './ts/ts-prompt-file-type.ts';
 
 /** Metadata attached to prompts that originate from a file on disk. */
@@ -60,7 +60,7 @@ export interface PromptFileType {
    * @param value - The new value to write.
    * @param promptId - The prompt ID, used to re-parse for fresh spans.
    */
-  updateProperty(filePath: string, propDef: PropDefinition, value: PropValue, promptId?: string): Promise<void>;
+  updateProperty(filePath: string, propDef: PropDefinition, value: ModelPropValue, promptId?: string): Promise<void>;
 
   /**
    * Removes a property from a prompt source file entirely.
@@ -76,7 +76,7 @@ export interface PromptFileType {
    * @param propertyName - The key to add.
    * @param value - The value to assign.
    */
-  addProperty(filePath: string, promptName: string, propertyName: string, value: PropValue): Promise<void>;
+  addProperty(filePath: string, promptName: string, propertyName: string, value: ModelPropValue): Promise<void>;
 
   /**
    * Renames an exported prompt in a source file.

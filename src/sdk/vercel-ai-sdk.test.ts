@@ -25,7 +25,10 @@ describe('VercelAISDK', () => {
         expect(fn?.kind).toBe('functionCall');
         if (fn?.kind === 'functionCall') {
           expect(fn.callee).toBe('anthropic');
-          expect(fn.import).toEqual({ name: 'anthropic', from: '@ai-sdk/anthropic' });
+          expect(fn.binding).toEqual([
+            { kind: 'parameter', enclosingCall: { callee: 'prompts', import: { name: 'prompts', from: '@evalution/vercel-ai-sdk' } } },
+            { kind: 'import', spec: { name: 'anthropic', from: '@ai-sdk/anthropic' } },
+          ]);
         }
 
         const str = model.values.string;
