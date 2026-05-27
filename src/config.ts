@@ -36,4 +36,12 @@ export interface EvalutionConfig {
    * Traces tab can still be exercised without wiring a real tracing backend.
    */
   traceProviders?: TraceProvider[];
+
+  /**
+   * Whether to load a `.env` file from the directory evalution is launched
+   * from before starting the server.
+   *
+   * @default true
+   */
+  useDotenv?: boolean;
 }

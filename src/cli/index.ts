@@ -19,6 +19,19 @@ async function loadConfig(rootDir: string): Promise<EvalutionConfig> {
   return mod.default ?? {};
 }
 
+function applyDotenv(rootDir: string): void {
+  const envPath = path.join(rootDir, '.env');
+  try {
+    process.loadEnvFile(envPath);
+    console.log(`📄 Loaded environment variables from ${envPath}`);
+  } catch (err: any) {
+    // Missing .env is fine; any other error is worth surfacing.
+    if (err?.code !== 'ENOENT') {
+      console.warn(`Warning: failed to load .env from ${envPath}:`, err.message);
+    }
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2);
 
@@ -34,6 +47,10 @@ async function main() {
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   const config = await loadConfig(rootDir);
+
+  if (config.useDotenv !== false) {
+    applyDotenv(rootDir);
+  }
   const promptProviders = config.promptProviders ?? [new FilePromptProvider({ rootDir })];
   const traceProviders = config.traceProviders ?? [new MemoryTraceProvider()];
 
