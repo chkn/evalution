@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import type {
   NormalizedPrompt,
   NormalizedMessage,
@@ -9,7 +9,7 @@ import type {
   ModelCatalog,
 } from '../../shared/types';
 import { getModelCatalog, getModelParameters, updatePromptProperties  } from '../api';
-import { ItemEditor, TemplateEditor, valueToSourceText } from 'ts-proppy/react';
+import { ItemEditor, TemplateEditor, valueToDisplayString, interpolatablesFromDefinitions } from 'ts-proppy/react';
 import { isEditable } from '../../shared/helpers';
 import { defaultValueForType } from '../utils';
 import ModelPicker from './ModelPicker';
@@ -18,6 +18,29 @@ interface Props {
   prompt: NormalizedPrompt;
   onUpdate: (updated: NormalizedPrompt) => void;
   onDirtyChange: (dirty: boolean) => void;
+}
+
+/**
+ * Mirrors an external value into local state so it can be edited freely,
+ * resyncing only when the external value structurally changes (not on every
+ * parent re-render). Without the structural compare, an in-flight edit can be
+ * stomped when the parent re-renders with a fresh-but-equal object reference
+ * after a debounced save round-trips.
+ */
+function useSyncedExternal<T>(external: T): [T, (v: T) => void] {
+  const [local, setLocal] = useState(external);
+  const lastExternalKey = useRef<string | null>(null);
+  if (lastExternalKey.current === null) {
+    lastExternalKey.current = JSON.stringify(external);
+  }
+  useEffect(() => {
+    const key = JSON.stringify(external);
+    if (key !== lastExternalKey.current) {
+      lastExternalKey.current = key;
+      setLocal(external);
+    }
+  }, [external]);
+  return [local, setLocal];
 }
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
@@ -92,18 +115,17 @@ const TEMPLATE_PROP_DEF: PropDefinition = {
   optional: false,
 };
 
-function SystemCard({ content, editable, onChange }: {
-  content: string;
+function SystemCard({ content, editable, propDef, onChange }: {
+  content: PropValue | undefined;
   editable: boolean;
-  onChange: (v: string) => void;
+  propDef: PropDefinition;
+  onChange: (v: PropValue) => void;
 }) {
-  const [local, setLocal] = useState(content);
-  useEffect(() => setLocal(content), [content]);
+  const [local, setLocal] = useSyncedExternal(content);
 
   const handleChange = (v: PropValue) => {
-    const str = propValueToString(v);
-    setLocal(str);
-    onChange(str);
+    setLocal(v);
+    onChange(v);
   };
 
   return (
@@ -113,30 +135,28 @@ function SystemCard({ content, editable, onChange }: {
       </div>
       {editable
         ? <TemplateEditor
-            propDef={TEMPLATE_PROP_DEF}
-            value={{ kind: 'template', value: local }}
+            propDef={propDef}
+            value={local}
             onChange={handleChange}
             className="token-editor"
-            placeholder="System prompt…"
           />
-        : <div className="pg-msg-content">{content}</div>
+        : <div className="pg-msg-content">{content !== undefined ? valueToDisplayString(content) : ''}</div>
       }
     </div>
   );
 }
 
-function MessageCard({ msg, onChange, onDelete }: {
+function MessageCard({ msg, propDef, onChange, onDelete }: {
   msg: NormalizedMessage;
+  propDef: PropDefinition;
   onChange: (m: NormalizedMessage) => void;
   onDelete: () => void;
 }) {
-  const [content, setContent] = useState(msg.content);
-  useEffect(() => setContent(msg.content), [msg.content]);
+  const [content, setContent] = useSyncedExternal(msg.content);
 
   const handleChange = (v: PropValue) => {
-    const str = propValueToString(v);
-    setContent(str);
-    onChange({ ...msg, content: str });
+    setContent(v);
+    onChange({ ...msg, content: v });
   };
 
   return (
@@ -158,11 +178,10 @@ function MessageCard({ msg, onChange, onDelete }: {
         <button className="pg-delete-msg" onClick={onDelete} title="Delete">×</button>
       </div>
       <TemplateEditor
-        propDef={TEMPLATE_PROP_DEF}
-        value={{ kind: 'template', value: content }}
+        propDef={propDef}
+        value={content}
         onChange={handleChange}
         className="token-editor"
-        placeholder="Message content…"
       />
       {msg.role === 'assistant' && (
         <ToolCallsSection
@@ -218,26 +237,12 @@ function ParamCard({ propDef, value, onDelete, onChange }: {
 
 const EMPTY_MODEL_CATALOG: ModelCatalog = { models: [] };
 
-function propValueToString(value: PropValue | undefined): string {
-  if (!value) return '';
-  if (value.kind === 'primitive' && typeof value.value === 'string') return value.value;
-  if (value.kind === 'template') return value.value;
-  if (value.kind === 'raw') return value.sourceText;
-  return '';
-}
-
-function stringToSystemPropValue(v: string): PropValue {
-  return v.includes('${')
-    ? { kind: 'template', value: v }
-    : { kind: 'primitive', value: v };
-}
-
 function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { onDirtyChange(saving); }, [saving]);
-  const [localMessages, setLocalMessages] = useState<NormalizedMessage[]>(prompt.messages);
+  const [localMessages, setLocalMessages] = useSyncedExternal(prompt.messages);
   const [modelParameters, setModelParameters] = useState<PropDefinition[]>([]);
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
 
@@ -247,10 +252,6 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
       getModelCatalog(prompt.providerId).then(setModelCatalog).catch(() => {});
     }
   }, [prompt.providerId]);
-
-  useEffect(() => {
-    setLocalMessages(prompt.messages);
-  }, [prompt.messages]);
 
   const handleUpdate = async (updates: NormalizedPromptUpdates) => {
     setSaving(true);
@@ -273,11 +274,9 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
     msgSaveTimer.current = setTimeout(() => handleUpdate({ messages: msgs }), 600);
   };
 
-  const handleSystemChange = (v: string) => {
+  const handleSystemChange = (system: PropValue) => {
     if (systemSaveTimer.current) clearTimeout(systemSaveTimer.current);
-    systemSaveTimer.current = setTimeout(() => {
-      handleUpdate({ system: stringToSystemPropValue(v) });
-    }, 600);
+    systemSaveTimer.current = setTimeout(() => handleUpdate({ system }), 600);
   };
 
   const handleAddMessage = () => {
@@ -285,14 +284,19 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
     let role = 'user';
     if (last?.role === 'user') role = 'assistant';
     else if (last?.role === 'assistant' && last.toolCalls?.length) role = 'tool';
-    const newMsgs: NormalizedMessage[] = [...localMessages, { role, content: '' }];
+    const newMsgs: NormalizedMessage[] = [...localMessages, { role, content: { kind: 'primitive', value: '' } }];
     setLocalMessages(newMsgs);
     handleUpdate({ messages: newMsgs });
   };
 
-  const systemStr = propValueToString(prompt.system);
   const existingParams = new Set(prompt.modelParameters.map(p => p.def.name));
   const addableParams = modelParameters.filter(cs => !existingParams.has(cs.name));
+
+  // Identifiers available for `${…}` interpolation in the system/message editors.
+  const contentPropDef = useMemo<PropDefinition>(() => ({
+    ...TEMPLATE_PROP_DEF,
+    interpolatables: interpolatablesFromDefinitions(prompt.functionParameters),
+  }), [prompt.functionParameters]);
 
   return (
     <div className="pg-editor">
@@ -326,7 +330,7 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
                     )}
                   </div>
                   <div className="pg-msg-content" style={{ fontSize: 13, color: '#9ca3af' }}>
-                    {param.value ? valueToSourceText(param.value) : ''}
+                    {param.value !== undefined ? valueToDisplayString(param.value) : ''}
                   </div>
                 </div>
               );
@@ -372,14 +376,16 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
         </div>
         <div className="pg-panel-body">
           <SystemCard
-            content={systemStr}
+            content={prompt.system}
             editable={prompt.systemEditable}
+            propDef={contentPropDef}
             onChange={handleSystemChange}
           />
           {localMessages.map((msg, i) => (
             <MessageCard
               key={i}
               msg={msg}
+              propDef={contentPropDef}
               onChange={m => handleMessagesChange(localMessages.map((x, j) => j === i ? m : x))}
               onDelete={() => handleMessagesChange(localMessages.filter((_, j) => j !== i))}
             />

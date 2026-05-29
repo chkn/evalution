@@ -126,14 +126,14 @@ describe('PromptParser', () => {
       const prompts = await fileType.parsePrompts([paths[0]], '');
 
       const system = getValue(prompts[0], 'system');
-      expect(system).toEqual({ kind: 'template', value: 'You are a friendly assistant speaking in ${language}' });
+      expect(system).toEqual({ kind: 'template', value: ['You are a friendly assistant speaking in ', { expr: 'language' }, ''] });
       expect(isEditable(system)).toBe(true);
 
       const msgValue = getValue(prompts[0], 'messages');
       expect(msgValue.kind).toBe('array');
       if (msgValue.kind === 'array') {
         const content = (msgValue.elements[0] as Extract<PropValue, { kind: 'object' }>).properties.content;
-        expect(content).toEqual({ kind: 'template', value: 'Hello, my name is ${name}' });
+        expect(content).toEqual({ kind: 'template', value: ['Hello, my name is ', { expr: 'name' }, ''] });
       }
     });
 
@@ -152,12 +152,12 @@ describe('PromptParser', () => {
       });
 
       const system = getValue(prompts[0], 'system');
-      expect(system).toEqual({ kind: 'template', value: 'User is ${config.name}, age ${config.age}' });
+      expect(system).toEqual({ kind: 'template', value: ['User is ', { expr: 'config.name' }, ', age ', { expr: 'config.age' }, ''] });
 
       const msgValue = getValue(prompts[0], 'messages');
       if (msgValue.kind === 'array') {
         const content = (msgValue.elements[0] as Extract<PropValue, { kind: 'object' }>).properties.content;
-        expect(content).toEqual({ kind: 'template', value: 'Tell me about ${config.name}' });
+        expect(content).toEqual({ kind: 'template', value: ['Tell me about ', { expr: 'config.name' }, ''] });
       }
     });
 
@@ -172,8 +172,8 @@ describe('PromptParser', () => {
       const sysValue = getValue(prompts[0], 'system');
       expect(sysValue.kind).toBe('template');
       if (sysValue.kind === 'template') {
-        expect(sysValue.value).toContain('${name}');
-        expect(sysValue.value).toContain('${age}');
+        expect(sysValue.value.some(s => typeof s !== 'string' && s.expr === 'name')).toBe(true);
+        expect(sysValue.value.some(s => typeof s !== 'string' && s.expr === 'age')).toBe(true);
       }
     });
 
@@ -196,8 +196,8 @@ describe('PromptParser', () => {
       const sysValue = getValue(prompts[0], 'system');
       expect(sysValue.kind).toBe('template');
       if (sysValue.kind === 'template') {
-        expect(sysValue.value).toContain('${greeting}');
-        expect(sysValue.value).toContain('${name}');
+        expect(sysValue.value.some(s => typeof s !== 'string' && s.expr === 'greeting')).toBe(true);
+        expect(sysValue.value.some(s => typeof s !== 'string' && s.expr === 'name')).toBe(true);
       }
     });
   });

@@ -4,7 +4,7 @@ import { generateText, streamText } from 'ai';
 
 import type { PropDefinition, PropValue } from 'ts-proppy';
 import { findTypeDeclaration, extractPropertiesFromDeclaration } from 'ts-proppy';
-import { findPackageDts, stringToPropValue, type SDKAdapter } from './sdk-adapter.ts';
+import { findPackageDts, type SDKAdapter } from './sdk-adapter.ts';
 import { isEditable } from '../shared/helpers.ts';
 import type {
   ParsedPrompt,
@@ -176,22 +176,22 @@ function messagesToValue(msgs: NormalizedMessage[]): PropValue {
       kind: 'object',
       properties: {
         role: { kind: 'primitive', value: msg.role },
-        content: stringToPropValue(msg.content),
+        content: msg.content,
       },
     })),
   };
 }
 
+const EMPTY_CONTENT: PropValue = { kind: 'primitive', value: '' };
+
 function extractMessages(value: PropValue | undefined): NormalizedMessage[] {
-  if (!value || value.kind !== 'array') return [];
+  if (!value) return [];
+  if (value.kind !== 'array') return [{ role: 'user', content: value }];
   return value.elements.map(el => {
-    if (el.kind !== 'object') return { role: 'user', content: '' };
+    if (el.kind !== 'object') return { role: 'user', content: el };
     const roleValue = el.properties.role;
     const role = roleValue?.kind === 'primitive' ? String(roleValue.value) : 'user';
-    const contentValue = el.properties.content;
-    const content = contentValue?.kind === 'primitive'
-      ? String(contentValue.value)
-      : contentValue?.kind === 'template' ? contentValue.value : '';
+    const content = el.properties.content ?? EMPTY_CONTENT;
     const toolCalls = extractToolCalls(el.properties.toolCalls);
     return toolCalls ? { role, content, toolCalls } : { role, content };
   });

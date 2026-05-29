@@ -86,13 +86,3 @@ export function findPackageDts(packageName: string, dtsRelPath: string, rootDir:
   }
   return null;
 }
-
-/**
- * Returns a {@link PropValue} that is either a primitive string or a template
- * string, depending on whether `content` contains any `${…}` interpolations.
- */
-export function stringToPropValue(content: string): PropValue {
-  return content.includes('${')
-    ? { kind: 'template', value: content }
-    : { kind: 'primitive', value: content };
-}

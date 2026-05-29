@@ -51,8 +51,19 @@ describe('GeminiInteractionsSDK', () => {
             {
               kind: 'object',
               properties: {
-                role: { kind: 'primitive', value: 'user' },
-                content: { kind: 'primitive', value: 'Hello' },
+                type: { kind: 'primitive', value: 'user_input' },
+                content: {
+                  kind: 'array',
+                  elements: [
+                    {
+                      kind: 'object',
+                      properties: {
+                        type: { kind: 'primitive', value: 'text' },
+                        text: { kind: 'primitive', value: 'Hello' },
+                      },
+                    },
+                  ],
+                },
               },
             },
           ],
@@ -70,11 +81,23 @@ describe('GeminiInteractionsSDK', () => {
         displayValue: '"gemini-3-flash-preview"',
       });
       expect(normalized.system).toEqual({ kind: 'primitive', value: 'You are helpful.' });
-      expect(normalized.messages).toEqual([{ role: 'user', content: 'Hello' }]);
+      expect(normalized.messages).toEqual([{ role: 'user', content: { kind: 'primitive', value: 'Hello' } }]);
       expect(normalized.modelParameters).toEqual([]);
     });
 
-    it('translates "model" role to "assistant"', () => {
+    it('translates model_output step to assistant role', () => {
+      const textContent = (text: string): PropValue => ({
+        kind: 'array',
+        elements: [
+          {
+            kind: 'object',
+            properties: {
+              type: { kind: 'primitive', value: 'text' },
+              text: { kind: 'primitive', value: text },
+            },
+          },
+        ],
+      });
       const prompt = makeParsedPrompt({
         model: { kind: 'primitive', value: 'gemini-3-flash-preview' },
         input: {
@@ -83,15 +106,15 @@ describe('GeminiInteractionsSDK', () => {
             {
               kind: 'object',
               properties: {
-                role: { kind: 'primitive', value: 'user' },
-                content: { kind: 'primitive', value: 'Hi' },
+                type: { kind: 'primitive', value: 'user_input' },
+                content: textContent('Hi'),
               },
             },
             {
               kind: 'object',
               properties: {
-                role: { kind: 'primitive', value: 'model' },
-                content: { kind: 'primitive', value: 'Hello!' },
+                type: { kind: 'primitive', value: 'model_output' },
+                content: textContent('Hello!'),
               },
             },
           ],
@@ -111,17 +134,17 @@ describe('GeminiInteractionsSDK', () => {
       });
 
       const normalized = sdk.normalizePrompt(prompt);
-      expect(normalized.messages).toEqual([{ role: 'user', content: 'Tell me a joke.' }]);
+      expect(normalized.messages).toEqual([{ role: 'user', content: { kind: 'primitive', value: 'Tell me a joke.' } }]);
     });
 
     it('handles template string input', () => {
       const prompt = makeParsedPrompt({
         model: { kind: 'primitive', value: 'gemini-3-flash-preview' },
-        input: { kind: 'template', value: 'Tell me about ${topic}' },
+        input: { kind: 'template', value: ['Tell me about ', { expr: 'topic' }, ''] },
       });
 
       const normalized = sdk.normalizePrompt(prompt);
-      expect(normalized.messages).toEqual([{ role: 'user', content: 'Tell me about ${topic}' }]);
+      expect(normalized.messages).toEqual([{ role: 'user', content: { kind: 'template', value: ['Tell me about ', { expr: 'topic' }, ''] } }]);
     });
 
     it('exposes generation_config sub-properties as modelParameters', () => {
@@ -177,7 +200,7 @@ describe('GeminiInteractionsSDK', () => {
       });
 
       const normalized = sdk.normalizePrompt(prompt);
-      expect(normalized.messages).toEqual([{ role: 'user', content: 'Describe the image.' }]);
+      expect(normalized.messages).toEqual([{ role: 'user', content: { kind: 'primitive', value: 'Describe the image.' } }]);
     });
   });
 
@@ -193,8 +216,8 @@ describe('GeminiInteractionsSDK', () => {
         },
         system: { kind: 'primitive', value: 'Be concise.' },
         messages: [
-          { role: 'user', content: 'Hello' },
-          { role: 'assistant', content: 'Hi there!' },
+          { role: 'user', content: { kind: 'primitive', value: 'Hello' } },
+          { role: 'assistant', content: { kind: 'primitive', value: 'Hi there!' } },
         ],
       };
 
@@ -204,11 +227,17 @@ describe('GeminiInteractionsSDK', () => {
       expect(raw['system_instruction']).toEqual({ kind: 'primitive', value: 'Be concise.' });
       expect(raw['input']).toBeDefined();
 
-      // Check assistant → model role translation
+      // Check assistant → model_output step translation
       const inputArray = raw['input'] as PropValue & { kind: 'array' };
       expect(inputArray.kind).toBe('array');
-      const secondMsg = inputArray.elements[1] as PropValue & { kind: 'object' };
-      expect(secondMsg.properties.role).toEqual({ kind: 'primitive', value: 'model' });
+      const firstStep = inputArray.elements[0] as PropValue & { kind: 'object' };
+      expect(firstStep.properties.type).toEqual({ kind: 'primitive', value: 'user_input' });
+      const secondStep = inputArray.elements[1] as PropValue & { kind: 'object' };
+      expect(secondStep.properties.type).toEqual({ kind: 'primitive', value: 'model_output' });
+      // Content is wrapped in [{type: 'text', text: <content>}]
+      const secondContent = secondStep.properties.content as PropValue & { kind: 'array' };
+      const secondText = secondContent.elements[0] as PropValue & { kind: 'object' };
+      expect(secondText.properties.text).toEqual({ kind: 'primitive', value: 'Hi there!' });
     });
 
     it('nests modelParameter updates under generation_config', () => {

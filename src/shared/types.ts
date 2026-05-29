@@ -30,8 +30,10 @@ export interface ParsedPrompt {
 export interface NormalizedMessage {
   /** Role identifier (`'system'`, `'user'`, `'assistant'`, `'tool'`, …). */
   role: string;
-  /** Message content, as a plain string. Template syntax (`${…}`) is allowed. */
-  content: string;
+  /** Message content. Typically a primitive or template string, but any
+   * {@link PropValue} is allowed so non-string content (e.g. structured
+   * content arrays) can round-trip through the editor. */
+  content: PropValue;
   /** Optional tool calls attached to an assistant message. */
   toolCalls?: NormalizedToolCall[];
 }
@@ -336,8 +338,8 @@ export type SSEData = PromptChangedSSEData | TraceChangedSSEData;
 
 // #region Model
 
-import type { PropValue, PropDefinition, ImportSpecifier, ExtractedProps, SourceSpan, CalleeBinding } from 'ts-proppy';
-export type { PropDefinition, PropValue, ImportSpecifier, ExtractedProps, SourceSpan, CalleeBinding };
+import type { PropValue, PropDefinition, ImportSpecifier, ExtractedProps, SourceSpan, CalleeBinding, TemplateValue, TemplateToken } from 'ts-proppy';
+export type { PropDefinition, PropValue, ImportSpecifier, ExtractedProps, SourceSpan, CalleeBinding, TemplateValue, TemplateToken };
 
 /**
  * Catalog-only variant of {@link PropValue} where `functionCall.binding` may

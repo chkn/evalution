@@ -64,8 +64,6 @@
   --tool-call-border: #e8e8e8;
 
   /* Template tokens */
-  --token-bg: rgba(52, 120, 246, 0.10);
-  --token-border: rgba(52, 120, 246, 0.28);
   --token-text: #2563eb;
 
   /* Error */
@@ -142,8 +140,6 @@
     --tool-call-border: rgba(255, 255, 255, 0.08);
 
     /* Template tokens */
-    --token-bg: rgba(88, 166, 255, 0.12);
-    --token-border: rgba(88, 166, 255, 0.25);
     --token-text: #58a6ff;
 
     /* Error */
@@ -1974,6 +1970,7 @@ code, pre {
   background: transparent;
   min-height: 44px;
   outline: none;
+  border: none;
   white-space: pre-wrap;
   word-break: break-word;
   box-sizing: border-box;
@@ -1988,18 +1985,27 @@ code, pre {
 }
 
 .te-token {
-  display: inline-block;
-  background: var(--token-bg);
-  border: 1px solid var(--token-border);
   color: var(--token-text);
-  border-radius: 4px;
-  padding: 0 5px;
-  font-size: 0.88em;
   font-weight: 600;
-  line-height: 1.5;
-  user-select: all;
-  cursor: default;
-  vertical-align: baseline;
+}
+
+/* Interpolatable autocomplete dropdown (rendered by ts-proppy's TemplateEditor).
+   The editor's inline styles read these CSS variables, so theming is just a
+   matter of setting them here. */
+.te-suggest {
+  --proppy-menu-bg: var(--panel-bg);
+  --proppy-menu-color: var(--panel-text);
+  --proppy-border: var(--panel-border);
+  --proppy-menu-active-bg: color-mix(in srgb, var(--token-text) 16%, transparent);
+  font-family: inherit;
+}
+
+.te-suggest-item.active {
+  color: var(--token-text);
+}
+
+.te-suggest-action {
+  color: var(--panel-text-secondary);
 }
 
 /* Tool calls */

@@ -26,13 +26,8 @@ async function getCursorOffset(locator: Locator): Promise<number | null> {
       }
       if (node.nodeType === Node.TEXT_NODE) {
         offset += node.textContent?.length ?? 0;
-      } else if (node instanceof HTMLElement) {
-        if (node.classList.contains('te-token')) {
-          offset += node.textContent?.length ?? 0;
-          walker.currentNode = node;
-        } else if (node.tagName === 'BR') {
-          offset += 1;
-        }
+      } else if (node instanceof HTMLElement && node.tagName === 'BR') {
+        offset += 1;
       }
       node = walker.nextNode();
     }
@@ -120,3 +115,4 @@ test('cursor preserved when typing in system editor (immediate save per keystrok
   await page.waitForTimeout(200);
   expect(await getCursorOffset(editor)).toBe(11);
 });
+

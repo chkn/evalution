@@ -4,7 +4,7 @@ import { GoogleGenAI } from '@google/genai';
 
 import type { PropDefinition, PropValue } from 'ts-proppy';
 import { findTypeDeclaration, extractPropertiesFromDeclaration, valueToSourceText } from 'ts-proppy';
-import { findPackageDts, stringToPropValue, type SDKAdapter } from './sdk-adapter.ts';
+import { findPackageDts, type SDKAdapter } from './sdk-adapter.ts';
 import { isEditable } from '../shared/helpers.ts';
 import type {
   ParsedPrompt,
@@ -321,10 +321,9 @@ export class GeminiInteractionsSDK implements SDKAdapter {
 
 /**
  * Convert a {@link NormalizedMessage} array into a PropValue representing the
- * `input` property (an array of `Turn` objects with `{role, content}`).
- *
- * The Interactions API uses `"model"` for assistant messages, so we translate
- * `"assistant"` → `"model"` on the way out.
+ * `input` property: an array of [Step](https://ai.google.dev/api/interactions-api#Resource:Step)
+ * objects (`{type: 'user_input' | 'model_output', content: [...]}`), each
+ * carrying a single text [Content](https://ai.google.dev/api/interactions-api#schema-example-Content-text).
  */
 function messagesToValue(msgs: NormalizedMessage[]): PropValue {
   return {
@@ -332,11 +331,36 @@ function messagesToValue(msgs: NormalizedMessage[]): PropValue {
     elements: msgs.map(msg => ({
       kind: 'object',
       properties: {
-        role: { kind: 'primitive', value: msg.role === 'assistant' ? 'model' : msg.role },
-        content: stringToPropValue(msg.content),
+        type: { kind: 'primitive', value: msg.role === 'assistant' ? 'model_output' : 'user_input' },
+        content: {
+          kind: 'array',
+          elements: [
+            {
+              kind: 'object',
+              properties: {
+                type: { kind: 'primitive', value: 'text' },
+                text: msg.content,
+              },
+            },
+          ],
+        },
       },
     })),
   };
+}
+
+const EMPTY_CONTENT: PropValue = { kind: 'primitive', value: '' };
+
+// Handles a single content object (e.g. {type: 'text', text: '...'})
+function extractContent(el: PropValue | undefined): NormalizedMessage | undefined {
+  if (el?.kind !== 'object' || el.properties.type?.kind !== 'primitive') return;
+  switch (el.properties.type.value) {
+    case 'text':
+      // Content carries no role; default to 'user'. The `model_output` step
+      // handler in extractMessages overwrites this to 'assistant' as needed.
+      return { role: 'user', content: el.properties.text ?? EMPTY_CONTENT };
+    // FIXME: Handle other content types
+  }
 }
 
 /**
@@ -344,8 +368,9 @@ function messagesToValue(msgs: NormalizedMessage[]): PropValue {
  *
  * The `input` field can be:
  * - A primitive string (single user message)
- * - An array of Turn objects (`{role, content}`)
- * - An array of Content objects (`{type: 'text', text: '...'}`)
+ * - A single content object (e.g. `{type: 'text', text: '...'}`)
+ * - An array of Step objects (https://ai.google.dev/api/interactions-api#Resource:Step)
+ * - An array of Content objects (https://ai.google.dev/api/interactions-api#schema-example-Content-text)
  *
  * The Interactions API uses `"model"` for assistant messages; we translate
  * `"model"` → `"assistant"` on the way in.
@@ -353,38 +378,39 @@ function messagesToValue(msgs: NormalizedMessage[]): PropValue {
 function extractMessages(value: PropValue | undefined): NormalizedMessage[] {
   if (!value) return [];
 
-  // Plain string → single user message
-  if (value.kind === 'primitive' && typeof value.value === 'string') {
-    return [{ role: 'user', content: value.value }];
-  }
-  if (value.kind === 'template') {
-    return [{ role: 'user', content: value.value }];
-  }
+  // Single content object case: {type: 'text', text: '...'}
+  const content = extractContent(value);
+  if (content) return [content];
 
-  if (value.kind !== 'array') return [];
+  // Otherwise, if it's not an array, treat as a single user message
+  if (value.kind !== 'array') return [{ role: 'user', content: value }];
 
-  return value.elements.map(el => {
-    // Content object: {type: 'text', text: '...'}
-    if (el.kind === 'object' && el.properties.type) {
-      const text = el.properties.text;
-      const content = text?.kind === 'primitive' ? String(text.value)
-        : text?.kind === 'template' ? text.value : '';
-      return { role: 'user', content };
+  const results: NormalizedMessage[] = [];
+  for (const el of value.elements) {
+    const content = extractContent(el);
+    if (content) {
+      results.push(content);
+      continue;
     }
 
-    // Turn object: {role, content}
-    if (el.kind === 'object') {
-      const roleValue = el.properties.role;
-      let role = roleValue?.kind === 'primitive' ? String(roleValue.value) : 'user';
-      if (role === 'model') role = 'assistant';
-      const contentValue = el.properties.content;
-      const content = contentValue?.kind === 'primitive' ? String(contentValue.value)
-        : contentValue?.kind === 'template' ? contentValue.value : '';
-      return { role, content };
+    if (el.kind !== 'object' || el.properties.type?.kind !== 'primitive') {
+      continue;
     }
 
-    return { role: 'user', content: '' };
-  });
+    // Step object case: {type: 'user_input' | 'model_output', content: [...]}
+    switch (el.properties.type.value) {
+      case 'user_input':
+        results.push(...extractMessages(el.properties.content));
+        break;
+      case 'model_output':
+        for (const msg of extractMessages(el.properties.content)) {
+          results.push({ ...msg, role: 'assistant' });
+        }
+        break;
+      // FIXME: Handle other types of steps?
+    }
+  }
+  return results;
 }
 
 /**

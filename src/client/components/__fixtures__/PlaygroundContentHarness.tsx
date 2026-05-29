@@ -5,7 +5,7 @@ import type { NormalizedPrompt, NormalizedMessage } from '../../../shared/types'
 function makePrompt(messagesCount: number): NormalizedPrompt {
   const messages: NormalizedMessage[] = Array.from({ length: messagesCount }, (_, i) => ({
     role: 'user',
-    content: `Message ${i + 1}: lorem ipsum dolor sit amet, consectetur adipiscing elit.`,
+    content: { kind: 'primitive', value: `Message ${i + 1}: lorem ipsum dolor sit amet, consectetur adipiscing elit.` },
   }));
   return {
     id: 'test',

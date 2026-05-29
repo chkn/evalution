@@ -256,7 +256,7 @@ export function test() {
     const newMessages: PropValue = {
       kind: 'array',
       elements: [
-        { kind: 'object', properties: { role: { kind: 'primitive', value: 'user' }, content: { kind: 'template', value: 'Hello ${name}' } } },
+        { kind: 'object', properties: { role: { kind: 'primitive', value: 'user' }, content: { kind: 'template', value: ['Hello ', { expr: 'name' }, ''] } } },
         { kind: 'object', properties: { role: { kind: 'primitive', value: 'assistant' }, content: { kind: 'primitive', value: 'Hi there!' } } },
       ],
     };
