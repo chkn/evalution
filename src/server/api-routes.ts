@@ -205,7 +205,7 @@ export function setupRoutes({
               [PROMPT_NAME_ATTRIBUTE]: prompt.name,
             },
           },
-          (span) => {
+          span => {
             const { traceId } = span.spanContext();
 
             // Fire-and-forget the real execution; the root span is closed
