@@ -38,19 +38,19 @@ async function main() {
   // Accept: (no args) | "ui" | "ui <path>"
   if (args.length > 0 && args[0] !== 'ui') {
     console.error(`Unknown command: ${args[0]}`);
-    console.error('Usage: evalution [ui] [path]');
+    console.error('Usage: evalution [ui [path]]');
     process.exit(1);
   }
 
   const pathArg = args[1];
   const rootDir = pathArg ? path.resolve(pathArg) : process.cwd();
-  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   const config = await loadConfig(rootDir);
-
   if (config.useDotenv !== false) {
     applyDotenv(rootDir);
   }
+
+  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   const promptProviders = config.promptProviders ?? [new FilePromptProvider({ rootDir })];
   const traceProviders = config.traceProviders ?? [new MemoryTraceProvider()];
 
