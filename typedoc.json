@@ -6,5 +6,10 @@
   "excludePrivate": true,
   "excludeInternal": true,
   "readme": "none",
-  "plugin": ["typedoc-rhineai-theme"]
+  "plugin": ["typedoc-rhineai-theme"],
+  "externalSymbolLinkMappings": {
+    "@opentelemetry/api": {
+      "Tracer": "https://open-telemetry.github.io/opentelemetry-js/interfaces/_opentelemetry_api.Tracer.html"
+    }
+  }
 }

@@ -5,6 +5,19 @@ export function encodePromptId(id: string): string {
 }
 
 /**
+ * Returns a prompt's provider ID, which the server always populates. Logs a
+ * warning and falls back to `''` if it's somehow missing, so the failure is
+ * visible rather than silent (an empty provider ID won't match any prompt).
+ */
+export function requireProviderId(providerId: string | undefined, context: string): string {
+  if (!providerId) {
+    console.warn(`[evalution] Missing providerId for ${context}; prompt linking may not work.`);
+    return '';
+  }
+  return providerId;
+}
+
+/**
  * Returns a sensible initial {@link PropValue} for a parameter type when no
  * explicit `defaultValue` is available (e.g. parameters extracted from SDK
  * type declarations that carry only type information).

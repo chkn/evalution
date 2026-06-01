@@ -125,9 +125,9 @@ export class TSPromptFileType implements PromptFileType {
         return;
       }
       if (ts.isExportAssignment(node)) {
-        const obj = findPromptsHelperObject(node.expression);
-        if (obj) {
-          for (const prop of obj.properties) {
+        const helper = findPromptsHelperCall(node.expression);
+        if (helper) {
+          for (const prop of helper.object.properties) {
             if (getPropertyName(prop) === oldName) {
               const nameNode = (prop as ts.MethodDeclaration | ts.PropertyAssignment).name;
               nameStart = nameNode.getStart(sourceFile);
@@ -185,10 +185,10 @@ export class TSPromptFileType implements PromptFileType {
           if (prompt) prompts.push(prompt);
         }
       } else if (ts.isExportAssignment(node)) {
-        const obj = findPromptsHelperObject(node.expression);
-        if (obj) {
-          for (const prop of obj.properties) {
-            const parsed = this.parseHelperProperty(prop, sourceFile, filePath, rootDir);
+        const helper = findPromptsHelperCall(node.expression);
+        if (helper) {
+          for (const prop of helper.object.properties) {
+            const parsed = this.parseHelperProperty(prop, sourceFile, filePath, rootDir, helper.moduleId);
             if (parsed) prompts.push(parsed);
           }
         }
@@ -205,6 +205,7 @@ export class TSPromptFileType implements PromptFileType {
     sourceFile: ts.SourceFile,
     filePath: string,
     rootDir: string,
+    moduleId?: string,
   ): ParsedFilePrompt | null {
     const name = getPropertyName(prop);
     if (!name) return null;
@@ -222,6 +223,7 @@ export class TSPromptFileType implements PromptFileType {
 
     return {
       id: `${relativeFilePath}#${name}`,
+      globalId: moduleId ? `${moduleId}#${name}` : undefined,
       name,
       functionParameters,
       extractedProps,
@@ -305,9 +307,9 @@ export class TSPromptFileType implements PromptFileType {
         return;
       }
       if (ts.isExportAssignment(node)) {
-        const obj = findPromptsHelperObject(node.expression);
-        if (obj) {
-          for (const prop of obj.properties) {
+        const helper = findPromptsHelperCall(node.expression);
+        if (helper) {
+          for (const prop of helper.object.properties) {
             if (getPropertyName(prop) === functionName) {
               const fn = getPropertyFunction(prop);
               if (fn) returnObj = findReturnObjectInFunctionLike(fn);
@@ -328,16 +330,26 @@ export class TSPromptFileType implements PromptFileType {
 // #region Helper-shape parsing
 
 /**
- * If `expr` is a call like `prompts(factory)` whose factory immediately returns
- * an object literal, return that object literal. Otherwise null.
+ * If `expr` is a call like `prompts(id, factory)` (or the legacy `prompts(factory)`)
+ * whose factory immediately returns an object literal, return that object literal
+ * together with the module ID — the first string-literal argument, when present.
+ * Otherwise null.
  */
-function findPromptsHelperObject(expr: ts.Expression): ts.ObjectLiteralExpression | null {
+function findPromptsHelperCall(
+  expr: ts.Expression,
+): { object: ts.ObjectLiteralExpression; moduleId?: string } | null {
   if (!ts.isCallExpression(expr)) return null;
   if (!ts.isIdentifier(expr.expression) || expr.expression.text !== 'prompts') return null;
-  const factory = expr.arguments[0];
+  const factory = expr.arguments.find(
+    (arg): arg is ts.ArrowFunction | ts.FunctionExpression =>
+      ts.isArrowFunction(arg) || ts.isFunctionExpression(arg),
+  );
   if (!factory) return null;
-  if (!ts.isArrowFunction(factory) && !ts.isFunctionExpression(factory)) return null;
-  return findReturnObjectInFunctionLike(factory);
+  const object = findReturnObjectInFunctionLike(factory);
+  if (!object) return null;
+  const first = expr.arguments[0];
+  const moduleId = first && ts.isStringLiteralLike(first) ? first.text : undefined;
+  return { object, moduleId };
 }
 
 function getPropertyName(prop: ts.ObjectLiteralElementLike): string | null {
@@ -474,8 +486,13 @@ function findEnclosingCallDestructure(
       ts.isIdentifier(node.expression) &&
       node.expression.text === enclosingCall.callee
     ) {
-      const factory = node.arguments[0];
-      if (factory && (ts.isArrowFunction(factory) || ts.isFunctionExpression(factory))) {
+      // The factory is the first function argument — it may follow a leading
+      // module-id string (`prompts('id', factory)`).
+      const factory = node.arguments.find(
+        (arg): arg is ts.ArrowFunction | ts.FunctionExpression =>
+          ts.isArrowFunction(arg) || ts.isFunctionExpression(arg),
+      );
+      if (factory) {
         const param = factory.parameters[0];
         if (param?.name && ts.isObjectBindingPattern(param.name)) {
           found = param.name;

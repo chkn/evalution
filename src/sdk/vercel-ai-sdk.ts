@@ -108,17 +108,11 @@ export class VercelAISDK implements SDKAdapter {
   }
 
   async executeConfig(config: any, stream: boolean): Promise<any> {
-    const configWithTelemetry = {
-      ...config,
-      experimental_telemetry: {
-        isEnabled: true
-      }
-    };
     if (stream) {
-      const result = await streamText(configWithTelemetry);
+      const result = await streamText(config);
       return result.textStream;
     } else {
-      const result = await generateText(configWithTelemetry);
+      const result = await generateText(config);
       return { text: result.text, usage: result.usage, finishReason: result.finishReason };
     }
   }
@@ -143,6 +137,7 @@ export class VercelAISDK implements SDKAdapter {
     return {
       id: prompt.id,
       providerId: prompt.providerId,
+      globalId: prompt.globalId,
       name: prompt.name,
       functionParameters: prompt.functionParameters,
       metadata: prompt.metadata,

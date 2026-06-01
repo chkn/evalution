@@ -84,13 +84,44 @@ describe('TSPromptFileType — prompts() helper', () => {
       const weather = parsed.find(p => p.name === 'checkWeather')!;
       expect(weather.id).toBe(`${filePath}#checkWeather`);
     });
+
+    it('derives globalId from the module id argument and the method name', async () => {
+      const filePath = '/virtual/with-id.prompt.ts';
+      const source = `
+import { prompts } from '@evalution/vercel-ai-sdk';
+export default prompts('orders', ({ openai }) => ({
+  summarize() { return { model: openai('gpt-4o'), system: 'x', messages: [] }; },
+  classify() { return { model: openai('gpt-4o'), system: 'y', messages: [] }; },
+}));
+`;
+      const ft = new TSPromptFileType(new MemoryFileProvider({ [filePath]: source }));
+      const parsed = await ft.parsePrompts([filePath], '');
+
+      expect(parsed.find(p => p.name === 'summarize')!.globalId).toBe('orders#summarize');
+      expect(parsed.find(p => p.name === 'classify')!.globalId).toBe('orders#classify');
+    });
+
+    it('omits globalId when the helper has no module id argument', async () => {
+      const filePath = '/virtual/no-id.prompt.ts';
+      const source = `
+import { prompts } from '@evalution/vercel-ai-sdk';
+export default prompts(({ openai }) => ({
+  summarize() { return { model: openai('gpt-4o'), system: 'x', messages: [] }; },
+}));
+`;
+      const ft = new TSPromptFileType(new MemoryFileProvider({ [filePath]: source }));
+      const parsed = await ft.parsePrompts([filePath], '');
+
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].globalId).toBeUndefined();
+    });
   });
 
   describe('editing', () => {
     const sample = `
 import { prompts } from '@evalution/vercel-ai-sdk';
 
-export default prompts(({ openai }) => ({
+export default prompts('helper', ({ openai }) => ({
   myPrompt() {
     return {
       model: openai('gpt-4o'),
@@ -153,7 +184,7 @@ export default prompts(({ openai }) => ({
       const spaced = `
 import { prompts } from '@evalution/vercel-ai-sdk';
 
-export default prompts(({ openai }) => ({
+export default prompts('helper', ({ openai }) => ({
   myPrompt() {
     return {
       model: openai('gpt-4o'),
@@ -219,8 +250,8 @@ export default prompts(({ openai }) => ({
   describe('loadConfig', () => {
     // Inline the prompts() helper to avoid a real module resolution from a data URL.
     const inlined = `
-const prompts = (factory) => (providers = {}) => factory(providers);
-export default prompts(() => ({
+const prompts = (id, factory) => (providers = {}) => factory(providers);
+export default prompts('load', () => ({
   myPrompt(name) {
     return { model: 'openai/gpt-4o', system: 'hi ' + name, messages: [] };
   },

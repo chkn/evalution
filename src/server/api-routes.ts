@@ -1,13 +1,15 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { SpanStatusCode, type Tracer } from '@opentelemetry/api';
 import type { PromptProvider } from '../prompt/prompt-provider.ts';
-import { type TraceProvider, PROMPT_ID_ATTRIBUTE, PROMPT_NAME_ATTRIBUTE, PROMPT_PROVIDER_ID_ATTRIBUTE, SPAN_KIND_ATTRIBUTE } from '../trace/trace-provider.ts';
-import type { ExecuteRequest, ExecuteResponse, TraceStreamEvent } from '../shared/types.ts';
+import type { PromptRegistry } from '../prompt/prompt-registry.ts';
+import type { TraceProvider } from '../trace/trace-provider.ts';
+import type { ExecuteRequest, ExecuteResponse, Span, TraceStreamEvent } from '../shared/types.ts';
 
 export interface SetupRoutesOptions {
   fastify: FastifyInstance;
   promptProviders: Map<string, PromptProvider>;
   traceProviders: Map<string, TraceProvider>;
+  promptRegistry: PromptRegistry;
   sseClients: Set<FastifyReply>;
   rootPath: string;
   tracer: Tracer;
@@ -18,11 +20,21 @@ export function setupRoutes({
   fastify,
   promptProviders,
   traceProviders,
+  promptRegistry,
   sseClients,
   rootPath,
   tracer,
   defaultTraceProviderId
 }: SetupRoutesOptions) {
+  // Resolve a span's prompt reference (which may be a global ID) to a concrete
+  // provider-scoped prompt the client can open. Done at read time against the
+  // current registry so the stored raw ID stays stable across renames/moves.
+  const resolveSpanPrompt = (span: Span): Span => {
+    if (!span.prompt) return span;
+    const resolved = promptRegistry.resolve(span.prompt.id, span.prompt.providerId);
+    if (!resolved) return span;
+    return { ...span, prompt: { id: resolved.promptId, providerId: resolved.providerId } };
+  };
   // GET /api/config - Get server configuration
   fastify.get('/api/config', async () => {
     return { rootPath };
@@ -196,15 +208,7 @@ export function setupRoutes({
         }
 
         return tracer.startActiveSpan(
-          prompt.name,
-          {
-            attributes: {
-              [SPAN_KIND_ATTRIBUTE]: 'LLM',
-              [PROMPT_PROVIDER_ID_ATTRIBUTE]: providerId,
-              [PROMPT_ID_ATTRIBUTE]: decodedId,
-              [PROMPT_NAME_ATTRIBUTE]: prompt.name,
-            },
-          },
+          `Run playground prompt: ${prompt.name}`,
           span => {
             const { traceId } = span.spanContext();
 
@@ -234,7 +238,7 @@ export function setupRoutes({
               traceId,
               tracerProviderId: defaultTraceProviderId,
               rootSpanId: span.spanContext().spanId,
-            };
+            } satisfies ExecuteResponse;
           }
         );
       } catch (error: any) {
@@ -279,7 +283,7 @@ export function setupRoutes({
       if (!trace) {
         return reply.code(404).send({ error: 'Trace not found' });
       }
-      return trace;
+      return { ...trace, spans: trace.spans.map(resolveSpanPrompt) };
     }
   );
 
@@ -298,22 +302,27 @@ export function setupRoutes({
       reply.raw.setHeader('Connection', 'keep-alive');
       reply.raw.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
 
+      // Resolve a stream event's span (if any) back to a concrete prompt.
+      const resolveEvent = (event: TraceStreamEvent): TraceStreamEvent =>
+        'span' in event ? { ...event, span: resolveSpanPrompt(event.span) } : event;
+
       // Replay existing state so late subscribers aren't stuck waiting for the
       // next event before they can render anything.
       const existing = await tracer.getTrace(id);
       if (existing) {
         for (const span of existing.spans) {
+          const resolved = resolveSpanPrompt(span);
           const initial: TraceStreamEvent =
-            span.endTime === undefined
-              ? { type: 'span-start', span }
-              : { type: 'span-end', span };
+            resolved.endTime === undefined
+              ? { type: 'span-start', span: resolved }
+              : { type: 'span-end', span: resolved };
           reply.raw.write(`data: ${JSON.stringify(initial)}\n\n`);
         }
       }
 
       const unsubscribe = tracer.subscribeTrace(id, (event) => {
         if (reply.raw.destroyed) return;
-        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+        reply.raw.write(`data: ${JSON.stringify(resolveEvent(event))}\n\n`);
       });
 
       request.raw.on('close', () => {

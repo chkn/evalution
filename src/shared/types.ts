@@ -5,6 +5,21 @@ import type { otelOperationToSpanKind } from './helpers.ts';
 // #region Prompt
 
 /**
+ * A reference to a prompt.
+ *
+ * `id` is interpreted as a globally-unique prompt ID unless `providerId` is
+ * present, in which case `id` is scoped to that specific prompt provider. This
+ * mirrors the OpenTelemetry attributes `evalution.prompt.id` (always present)
+ * and `evalution.prompt.provider.id` (optional, scoping).
+ */
+export interface PromptID {
+  /** The prompt ID — global unless {@link providerId} scopes it. */
+  id: string;
+  /** When set, {@link id} is scoped to this prompt provider. */
+  providerId?: string;
+}
+
+/**
  * Low-level prompt representation produced by a
  * {@link PromptFileType}. It exposes the raw `extractedProps` from the parser
  * and uses SDK-specific property names (e.g. `model`, `system`, `messages`).
@@ -16,6 +31,12 @@ import type { otelOperationToSpanKind } from './helpers.ts';
 export interface ParsedPrompt {
   id: string;
   providerId?: string;
+  /**
+   * Author-supplied stable alias for this prompt, globally unique across
+   * providers. Survives file moves/renames and is registered in the prompt
+   * registry so runtime traces can resolve back to this prompt.
+   */
+  globalId?: string;
   name: string;
   functionParameters: PropDefinition[];
   extractedProps: ExtractedProps;
@@ -71,6 +92,12 @@ export interface NormalizedParameter {
 export interface NormalizedPrompt {
   id: string;
   providerId?: string;
+  /**
+   * Author-supplied stable alias for this prompt, globally unique across
+   * providers. Survives file moves/renames and is registered in the prompt
+   * registry so runtime traces can resolve back to this prompt.
+   */
+  globalId?: string;
   name: string;
   functionParameters: PropDefinition[];
   metadata?: unknown;
@@ -203,7 +230,7 @@ export interface ExecuteResponse {
  * - `lmnr.span.type` from https://laminar.sh/docs/tracing/otel
  * - `mlflow.spanType` from https://mlflow.org/docs/latest/genai/tracing/opentelemetry/attribute-mapping/#translated-span-attributes
  * 
- * Mapped from `gen_ai.operation.name` via the {@link otelOperationToSpanKind} function.
+ * Mapped from `gen_ai.operation.name`.
  */
 export type SpanKind =
   | 'LLM'
@@ -256,10 +283,15 @@ export interface Span {
   attributes?: Record<string, unknown>;
   /** LLM-specific details (present for `chat`/`completion`/`embedding` spans). */
   llm?: LLMSpanDetails;
-  /** Evalution prompt provider ID (`evalution.prompt.provider.id`). */
-  promptProviderId?: string;
-  /** Evalution prompt ID (`evalution.prompt.id`). */
-  promptId?: string;
+  /**
+   * The prompt this span is attributed to, if any.
+   *
+   * Stored as emitted (`evalution.prompt.id` plus optional
+   * `evalution.prompt.provider.id`): a {@link PromptID} whose `id` is global
+   * unless `providerId` is set. The server resolves it against the prompt
+   * registry to a provider-scoped reference when a trace is served.
+   */
+  prompt?: PromptID;
 }
 
 /**

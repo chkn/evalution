@@ -1,33 +1,18 @@
 import type { SpanProcessor } from '@opentelemetry/sdk-trace-base';
-import type { PromptProvider } from '../prompt/prompt-provider.ts';
 import type {
-  SpanKind,
   TraceChangeEvent,
   TraceStreamEvent,
   TraceSummary,
   TraceWithSpans,
 } from '../shared/types.ts';
 
-/**
- * Attribute name a span can set to pick one of our {@link SpanKind} values.
- * Falls back to `'DEFAULT'` when absent or unrecognised.
- */
-export const SPAN_KIND_ATTRIBUTE = 'evalution.span.type';
-
-/**
- * Attribute name a span can set to link itself to a specific {@link PromptProvider}.
- */
-export const PROMPT_PROVIDER_ID_ATTRIBUTE = 'evalution.prompt.provider.id';
-
-/**
- * Attribute name a span can set to link itself to a specific prompt.
- */
-export const PROMPT_ID_ATTRIBUTE = 'evalution.prompt.id';
-
-/**
- * Attribute name a span can set to give a human-readable name to the prompt.
- */
-export const PROMPT_NAME_ATTRIBUTE = 'gen_ai.prompt.name';
+export {
+  SPAN_KIND_ATTRIBUTE,
+  PROMPT_PROVIDER_ID_ATTRIBUTE,
+  PROMPT_ID_ATTRIBUTE,
+  PROMPT_NAME_ATTRIBUTE,
+  createTracerForPrompt,
+} from './prompt-tracer.ts';
 
 /**
  * A read-only store of execution traces that the playground can display and

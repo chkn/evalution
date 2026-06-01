@@ -4,22 +4,23 @@ import { useTraces } from './hooks/useTraces';
 import { useSSE } from './hooks/useSSE';
 import { useResizable } from './hooks/useResizable';
 import { renamePrompt } from './api';
+import { requireProviderId } from './utils';
 import PromptList from './components/PromptList';
 import TraceList from './components/TraceList';
 import TraceView from './components/TraceView';
 import AddPromptDialog from './components/AddPromptDialog';
 import PlaygroundContent from './components/PlaygroundContent';
 import { Tab } from './components/Tab';
-import type { ExecuteResponse, SSEData } from '../shared/types';
+import type { ExecuteResponse, PromptID, SSEData } from '../shared/types';
 
 // ─── Tab / Pane model ─────────────────────────────────────────────────────────
 
-interface PromptTab { type: 'prompt'; promptId: string }
+interface PromptTab { type: 'prompt'; providerId: string; promptId: string }
 interface TraceTab { type: 'trace'; providerId: string; traceId: string; rootSpanId: string; label: string }
 type AppTab = PromptTab | TraceTab;
 
 const tabKey = (t: AppTab) =>
-  t.type === 'prompt' ? `prompt:${t.promptId}` : `trace:${t.providerId}:${t.traceId}`;
+  t.type === 'prompt' ? `prompt:${t.providerId}:${t.promptId}` : `trace:${t.providerId}:${t.traceId}`;
 
 interface Pane { id: string; tabs: AppTab[]; activeTabKey: string | null }
 
@@ -112,9 +113,9 @@ function App() {
   // Remove tabs whose prompt ID no longer exists (handles renames and deletions)
   useEffect(() => {
     if (loading) return;
-    const ids = new Set(prompts.map(p => p.id));
+    const ids = new Set(prompts.map(p => `${p.providerId}:${p.id}`));
     setPanes(prev => prev.map(pane => {
-      const tabs = pane.tabs.filter(t => t.type !== 'prompt' || ids.has(t.promptId));
+      const tabs = pane.tabs.filter(t => t.type !== 'prompt' || ids.has(`${t.providerId}:${t.promptId}`));
       if (tabs.length === pane.tabs.length) return pane;
       const activeStillExists = tabs.some(t => tabKey(t) === pane.activeTabKey);
       return {
@@ -147,8 +148,8 @@ function App() {
 
   // ── Pane operations ──────────────────────────────────────────────────────────
 
-  const handleSelectPrompt = (id: string) => {
-    const tab: AppTab = { type: 'prompt', promptId: id };
+  const handleSelectPrompt = (providerId: string, id: string) => {
+    const tab: AppTab = { type: 'prompt', providerId, promptId: id };
     const key = tabKey(tab);
     setPanes(prev => prev.map(p => p.id !== focusedPaneId ? p : {
       ...p,
@@ -203,8 +204,10 @@ function App() {
     });
   };
 
-  const openPromptTabRightOf = (fromPaneId: string, promptId: string) => {
-    const tab: PromptTab = { type: 'prompt', promptId };
+  const openPromptTabRightOf = (fromPaneId: string, prompt: PromptID) => {
+    // `prompt` comes from a resolved span, so `providerId` is set.
+    const providerId = requireProviderId(prompt.providerId, `opening prompt ${prompt.id} from trace`);
+    const tab: PromptTab = { type: 'prompt', providerId, promptId: prompt.id };
     openTabRightOf(fromPaneId, tab);
   };
 
@@ -368,7 +371,7 @@ function App() {
                       {pane.tabs.map(tab => {
                         const key = tabKey(tab);
                         const name = tab.type === 'prompt'
-                          ? (prompts.find(p => p.id === tab.promptId)?.name ?? tab.promptId)
+                          ? (prompts.find(p => p.id === tab.promptId && p.providerId === tab.providerId)?.name ?? tab.promptId)
                           : `Trace: ${tab.label}`;
                         return (
                           <Tab
@@ -412,7 +415,7 @@ function App() {
                         const updated = await renamePrompt(prompt, newName).catch(() => null);
                         if (updated) {
                           refetchPrompts();
-                          handleSelectPrompt(updated.id);
+                          handleSelectPrompt(requireProviderId(updated.providerId ?? prompt.providerId, `selecting renamed prompt ${updated.id}`), updated.id);
                         }
                       }}
                     />
@@ -461,7 +464,7 @@ function App() {
                       const key = tabKey(tab);
                       const visible = key === pane.activeTabKey ? { display: 'contents' } : { display: 'none' };
                       if (tab.type === 'prompt') {
-                        const prompt = prompts.find(p => p.id === tab.promptId) ?? null;
+                        const prompt = prompts.find(p => p.id === tab.promptId && p.providerId === tab.providerId) ?? null;
                         if (!prompt) return null;
                         return (
                           <div key={key} style={visible}>
@@ -477,7 +480,7 @@ function App() {
                       }
                       return (
                         <div key={key} style={visible}>
-                          <TraceView providerId={tab.providerId} traceId={tab.traceId} initialSpanId={tab.rootSpanId || undefined} onOpenPrompt={(promptId) => openPromptTabRightOf(pane.id, promptId)} />
+                          <TraceView providerId={tab.providerId} traceId={tab.traceId} initialSpanId={tab.rootSpanId || undefined} onOpenPrompt={(prompt) => openPromptTabRightOf(pane.id, prompt)} />
                         </div>
                       );
                     })}
@@ -494,7 +497,7 @@ function App() {
           onCreated={(prompt) => {
             setShowAddPrompt(false);
             refetchPrompts();
-            handleSelectPrompt(prompt.id);
+            handleSelectPrompt(requireProviderId(prompt.providerId, `selecting created prompt ${prompt.id}`), prompt.id);
           }}
         />
       )}

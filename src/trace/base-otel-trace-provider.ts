@@ -7,6 +7,7 @@ import type {
 } from '@opentelemetry/sdk-trace-base';
 import type {
   LLMSpanDetails,
+  PromptID,
   Span,
   SpanKind,
   SpanMessage,
@@ -110,10 +111,14 @@ function parseOutput(v: unknown): string | undefined {
 function readLLM(attributes: Record<string, unknown>): LLMSpanDetails | undefined {
   const provider = str(attributes['gen_ai.provider.name']) ?? str(attributes['gen_ai.system']);
   const model = str(attributes['gen_ai.response.model']) ?? str(attributes['gen_ai.request.model']);
-  const promptTokens = num(attributes['gen_ai.usage.input_tokens']);
-  const completionTokens = num(attributes['gen_ai.usage.output_tokens']);
-  const messages = parseMessages(attributes['gen_ai.input.messages']);
-  const output = parseOutput(attributes['gen_ai.output.messages']);
+  // Token usage: OTel GenAI semconv keys, falling back to the Vercel AI SDK's.
+  const promptTokens = num(attributes['gen_ai.usage.input_tokens']) ?? num(attributes['ai.usage.promptTokens']);
+  const completionTokens = num(attributes['gen_ai.usage.output_tokens']) ?? num(attributes['ai.usage.completionTokens']);
+  // Input/output: the OTel GenAI semconv uses `gen_ai.{input,output}.messages`,
+  // but the Vercel AI SDK instead emits `ai.prompt.messages` (a JSON message
+  // array) and `ai.response.text` (a plain string). Support both.
+  const messages = parseMessages(attributes['gen_ai.input.messages'] ?? attributes['ai.prompt.messages']);
+  const output = parseOutput(attributes['gen_ai.output.messages']) ?? str(attributes['ai.response.text']);
 
   const paramEntries = PARAM_ATTRIBUTES
     .map((key) => [key.replace('gen_ai.request.', ''), attributes[key]] as const)
@@ -143,12 +148,15 @@ function readLLM(attributes: Record<string, unknown>): LLMSpanDetails | undefine
 
 function llmAndPrompt(attributes: Record<string, unknown>): Partial<Span> {
   const llm = readLLM(attributes);
-  const promptProviderId = str(attributes['evalution.prompt.provider.id']);
-  const promptId = str(attributes['evalution.prompt.id']);
+  // Store the prompt reference exactly as emitted: `id` is global unless a
+  // provider id scopes it. Resolution to a concrete prompt happens later, when
+  // a trace is served, so the stored (possibly global) id stays stable.
+  const id = str(attributes['evalution.prompt.id']);
+  const providerId = str(attributes['evalution.prompt.provider.id']);
+  const prompt: PromptID | undefined = id ? { id, ...(providerId && { providerId }) } : undefined;
   return {
     ...(llm && { llm }),
-    ...(promptProviderId && { promptProviderId }),
-    ...(promptId && { promptId }),
+    ...(prompt && { prompt }),
   };
 }
 
@@ -156,6 +164,28 @@ function mapStatus(status: SpanStatus): 'ok' | 'error' | undefined {
   if (status.code === SpanStatusCode.ERROR) return 'error';
   if (status.code === SpanStatusCode.OK) return 'ok';
   return undefined;
+}
+
+/**
+ * Merges a later snapshot of a span into an earlier one.
+ *
+ * OpenTelemetry reports each span twice — at `onStart` (creation-time
+ * attributes only) and at `onEnd` (the full set) — and the two snapshots can
+ * carry complementary data. This unions their `attributes` and lets any
+ * *defined* field on `incoming` update `existing`, so nothing recorded at start
+ * is lost when the span ends, and end-only fields (status, timings, token
+ * usage, …) are filled in.
+ */
+export function mergeSpans(existing: Span, incoming: Span): Span {
+  const merged = { ...existing } as Record<string, unknown>;
+  for (const [key, value] of Object.entries(incoming)) {
+    if (value !== undefined) merged[key] = value;
+  }
+  const result = merged as unknown as Span;
+  if (existing.attributes || incoming.attributes) {
+    result.attributes = { ...existing.attributes, ...incoming.attributes };
+  }
+  return result;
 }
 
 /**
@@ -189,7 +219,12 @@ export abstract class BaseOTelTraceProvider implements TraceProvider {
 
   protected abstract addOrUpdateTrace(trace: Trace): Promise<void>;
 
-  protected abstract addOrUpdateSpan(span: Span): Promise<void>;
+  /**
+   * Stores a span, merging it into any existing span with the same ID (see
+   * {@link mergeSpans}). Returns the resulting stored span so callers can
+   * stream the merged view rather than the partial snapshot they passed in.
+   */
+  protected abstract addOrUpdateSpan(span: Span): Promise<Span>;
 
   async getTrace(traceId: string): Promise<TraceWithSpans | undefined> {
     const trace = await this.getTraceWithoutSpans(traceId);
@@ -273,8 +308,8 @@ export abstract class BaseOTelTraceProvider implements TraceProvider {
       attributes: { ...span.attributes },
       ...llmAndPrompt(span.attributes),
     };
-    await this.addOrUpdateSpan(ourSpan);
-    this.emitStream(traceId, { type: 'span-start', span: ourSpan });
+    const stored = await this.addOrUpdateSpan(ourSpan);
+    this.emitStream(traceId, { type: 'span-start', span: stored });
   }
 
   private async handleEnd(span: ReadableSpan): Promise<void> {
@@ -298,17 +333,20 @@ export abstract class BaseOTelTraceProvider implements TraceProvider {
       attributes: { ...span.attributes },
       ...llmAndPrompt(span.attributes),
     };
-    await this.addOrUpdateSpan(ended);
-    this.emitStream(traceId, { type: 'span-end', span: ended });
+    const stored = await this.addOrUpdateSpan(ended);
+    this.emitStream(traceId, { type: 'span-end', span: stored });
 
     // If span is root span, update trace as well
-    if (!ended.parentId) {
+    if (!stored.parentId) {
       const existing = await this.getTraceWithoutSpans(traceId);
       if (existing) {
         const endedTrace: Trace = {
           ...existing,
-          endTime: ended.endTime,
-          status: ended.status === 'error' ? 'error' : 'ok',
+          endTime: stored.endTime,
+          status: stored.status === 'error' ? 'error' : 'ok',
+          // Refresh trace attributes from the root span's final (merged) set —
+          // the root may have accrued attributes after the trace was created.
+          attributes: { ...existing.attributes, ...stored.attributes },
         };
         await this.addOrUpdateTrace(endedTrace);
         this.emitStream(traceId, { type: 'trace-end', trace: endedTrace });

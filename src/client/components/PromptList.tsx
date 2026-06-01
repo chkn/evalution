@@ -1,10 +1,11 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import type { NormalizedPrompt } from '../../shared/types';
+import { requireProviderId } from '../utils';
 
 interface PromptListProps {
   prompts: NormalizedPrompt[];
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (providerId: string, id: string) => void;
   loading: boolean;
   error: string | null;
   onAddPrompt?: () => void;
@@ -191,7 +192,7 @@ function RenameInput({ initialValue, onCommit, onCancel }: {
 
 interface TreeNodeProps {
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (providerId: string, id: string) => void;
   renamingId: string | null;
   onStartRename: (id: string) => void;
   onCommitRename: (id: string, newName: string) => void;
@@ -209,7 +210,7 @@ function PromptRow({ prompt, indent, selectedId, onSelect, renamingId, onStartRe
     <div
       className={`tree-row${isSelected ? ' tree-row-selected' : ''}`}
       style={{ paddingLeft: indent }}
-      onClick={() => onSelect(prompt.id)}
+      onClick={() => onSelect(requireProviderId(prompt.providerId, `selecting prompt ${prompt.id}`), prompt.id)}
       onDoubleClick={e => { e.stopPropagation(); onStartRename(prompt.id); }}
       title={prompt.name}
     >

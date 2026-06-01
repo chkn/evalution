@@ -1,5 +1,9 @@
 import { createRequire } from "node:module";
 import type { generateText, streamText, Agent } from "ai";
+import type { Tracer } from "@opentelemetry/api";
+// Bundled in by tsup; pulls in `createTracerForPrompt` without taking a
+// runtime dependency on the rest of the `evalution` package.
+import { createTracerForPrompt } from "../../../src/trace/prompt-tracer.js";
 
 const require = createRequire(import.meta.url);
 
@@ -141,6 +145,13 @@ class LazilyImportedProviders implements Providers {
   get lmnt() { return this.importProvider('lmnt'); }
 }
 
+/**
+ * Re-exported from evalution: wraps a tracer so the spans it produces are
+ * attributed to a named prompt. Used internally by {@link prompts} and exposed
+ * for callers who configure `experimental_telemetry` themselves.
+ */
+export { createTracerForPrompt };
+
 type GenerateTextConfig = Parameters<typeof generateText>[0];
 type StreamTextConfig = Parameters<typeof streamText>[0];
 type Prompt = GenerateTextConfig | StreamTextConfig | Agent<any, any, any>;
@@ -148,11 +159,17 @@ type Prompt = GenerateTextConfig | StreamTextConfig | Agent<any, any, any>;
 /**
  * Type helper for defining evalution prompt modules using the Vercel AI SDK.
  *
+ * The first argument is a module-level ID that, combined with each prompt's
+ * name, forms a globally-unique prompt ID (`${moduleId}#${name}`). This ID is
+ * attached to every span the prompt produces so runtime traces can be resolved
+ * back to the prompt. Choose a stable, opaque value — it should survive file
+ * renames and moves.
+ *
  * @example
  * ```ts
  * import { prompts } from '@evalution/vercel-ai-sdk';
  *
- * export default prompts(({ openai }) => ({
+ * export default prompts('greeting', ({ openai }) => ({
  *   simplePrompt() {
  *     return {
  *       model: openai('gpt-4o'),
@@ -164,7 +181,44 @@ type Prompt = GenerateTextConfig | StreamTextConfig | Agent<any, any, any>;
  * ```
  */
 export function prompts<T extends Record<string, (...args: any[]) => Prompt>>(
+  id: string,
   factory: (providers: Providers) => T,
 ): (providers?: Partial<Providers>) => T {
-  return provided => factory(new LazilyImportedProviders(provided));
+  return provided => {
+    const definitions = factory(new LazilyImportedProviders(provided));
+
+    const wrapped = {} as T;
+    for (const key of Object.keys(definitions) as (keyof T)[]) {
+      const define = definitions[key];
+      wrapped[key] = ((...args: Parameters<T[keyof T]>) => {
+        const config = define(...args);
+
+        // Agent instances aren't plain config objects — leave them untouched.
+        if (!isPlainConfig(config)) return config;
+
+        const name = String(key);
+        const existing = config.experimental_telemetry;
+
+        return {
+          ...config,
+          experimental_telemetry: {
+            isEnabled: true,
+            recordInputs: true,
+            recordOutputs: true,
+            ...existing,
+
+            tracer: createTracerForPrompt({ name, id: `${id}#${name}` }, existing?.tracer),
+          },
+        };
+      }) as T[keyof T];
+    }
+    return wrapped;
+  };
+}
+
+/** True for plain config objects (i.e. not an `Agent` instance or nullish). */
+function isPlainConfig(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
 }

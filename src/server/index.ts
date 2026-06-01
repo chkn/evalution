@@ -5,6 +5,7 @@ import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import type { PromptProvider } from '../prompt/prompt-provider.ts';
 import type { TraceProvider } from '../trace/trace-provider.ts';
+import { PromptRegistry } from '../prompt/prompt-registry.ts';
 import { setupRoutes } from './api-routes.ts';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -26,6 +27,11 @@ export async function startServer(options: ServerOptions) {
 
   const promptProviderMap = new Map(promptProviders.map(p => [p.id, p]));
   const traceProviderMap = new Map(traceProviders.map(p => [p.id, p]));
+
+  // Maps globally-unique / provider-scoped prompt IDs carried by trace spans
+  // back to a concrete prompt, so runtime traces can link to their prompt.
+  const promptRegistry = new PromptRegistry();
+  await promptRegistry.rebuild(promptProviderMap);
 
   // Wire every trace provider that exposes a SpanProcessor into a shared
   // OpenTelemetry tracer so prompt executions can produce real spans.
@@ -68,6 +74,7 @@ export async function startServer(options: ServerOptions) {
     fastify,
     promptProviders: promptProviderMap,
     traceProviders: traceProviderMap,
+    promptRegistry,
     sseClients,
     rootPath,
     tracer,
@@ -93,7 +100,9 @@ export async function startServer(options: ServerOptions) {
   // Setup file watching for all providers that support it
   for (const [providerId, provider] of promptProviderMap) {
     if (provider.watch) {
-      provider.watch((event) => {
+      provider.watch(async (event) => {
+        // Keep the registry in sync so renames/moves resolve to the latest prompt.
+        await promptRegistry.rebuild(promptProviderMap);
         broadcast({ type: 'prompt-changed', providerId, event });
       });
     }

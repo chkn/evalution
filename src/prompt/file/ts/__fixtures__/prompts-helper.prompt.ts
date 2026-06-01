@@ -1,6 +1,8 @@
 import { prompts } from '@evalution/vercel-ai-sdk';
 
-export default prompts(({ openai, anthropic }) => ({
+export default prompts(
+  "prompts-helper tests",
+  ({ openai, anthropic }) => ({
   checkWeather() {
     return {
       model: openai('gpt-4o'),

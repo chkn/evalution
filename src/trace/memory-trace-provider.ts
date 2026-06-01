@@ -3,7 +3,7 @@ import type {
   Trace,
   TraceSummary,
 } from '../shared/types.ts';
-import { BaseOTelTraceProvider } from './base-otel-trace-provider.ts';
+import { BaseOTelTraceProvider, mergeSpans } from './base-otel-trace-provider.ts';
 
 /**
  * In-memory {@link TraceProvider} populated by OpenTelemetry spans.
@@ -57,7 +57,7 @@ export class MemoryTraceProvider extends BaseOTelTraceProvider {
     this.traces.set(trace.id, trace);
   }
 
-  protected async addOrUpdateSpan(span: Span): Promise<void> {
+  protected async addOrUpdateSpan(span: Span): Promise<Span> {
     let list = this.spansByTrace.get(span.traceId);
     if (!list) {
       list = [];
@@ -65,9 +65,11 @@ export class MemoryTraceProvider extends BaseOTelTraceProvider {
     }
     const idx = list.findIndex(s => s.id === span.id);
     if (idx >= 0) {
-      list[idx] = span;
-    } else {
-      list.push(span);
+      const merged = mergeSpans(list[idx], span);
+      list[idx] = merged;
+      return merged;
     }
+    list.push(span);
+    return span;
   }
 }

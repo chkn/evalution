@@ -17,6 +17,13 @@
 export type { EvalutionConfig } from './config.ts';
 export type { PromptProvider } from './prompt/prompt-provider.ts';
 export type { TraceProvider } from './trace/trace-provider.ts';
+export {
+  createTracerForPrompt,
+  SPAN_KIND_ATTRIBUTE,
+  PROMPT_PROVIDER_ID_ATTRIBUTE,
+  PROMPT_ID_ATTRIBUTE,
+  PROMPT_NAME_ATTRIBUTE,
+} from './trace/prompt-tracer.ts';
 export { MemoryTraceProvider } from './trace/memory-trace-provider.ts';
 export type {
   ChangeEventType,
@@ -40,6 +47,7 @@ export type {
   SpanKind,
   SpanMessage,
   LLMSpanDetails,
+  PromptID,
   Span,
   Trace,
   TraceSummary,

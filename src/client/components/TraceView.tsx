@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Span, Trace, TraceStreamEvent } from '../../shared/types';
+import type { PromptID, Span, Trace, TraceStreamEvent } from '../../shared/types';
 import { getTrace, subscribeTraceEvents } from '../api';
 
 interface Props {
@@ -8,7 +8,7 @@ interface Props {
   /** Span to select and scroll to on first render. */
   initialSpanId?: string;
   /** Called when the user asks to open a linked prompt in a split pane. */
-  onOpenPrompt?: (promptId: string) => void;
+  onOpenPrompt?: (prompt: PromptID) => void;
 }
 
 interface TraceState {
@@ -83,8 +83,10 @@ function TraceView({ providerId, traceId, initialSpanId, onOpenPrompt }: Props) 
           const duration = running ? undefined : spanEnd - span.startTime;
 
           const hasError = span.status === 'error';
-          const canOpenPrompt = !!(span.promptId && onOpenPrompt);
-          const handleOpenPrompt = canOpenPrompt ? () => onOpenPrompt!(span.promptId!) : undefined;
+          // Only resolved prompts (provider-scoped) can be opened; an unresolved
+          // global id wouldn't match any prompt in the list.
+          const canOpenPrompt = !!(span.prompt?.providerId && onOpenPrompt);
+          const handleOpenPrompt = canOpenPrompt ? () => onOpenPrompt!(span.prompt!) : undefined;
           return (
             <div key={span.id} className={`trace-row${isSelected ? ' trace-row-expanded' : ''}${hasError ? ' trace-row-error' : ''}`}>
               <div className="trace-row-main">
@@ -97,7 +99,7 @@ function TraceView({ providerId, traceId, initialSpanId, onOpenPrompt }: Props) 
                     <DisclosureChevron expanded={isSelected} />
                   </button>
                   <SpanErrorIcon visible={hasError} />
-                  <SpanKindPill kind={span.kind} />
+                  {span.kind !== 'DEFAULT' && <SpanKindPill kind={span.kind} />}
                   <span
                     className={`trace-row-name${canOpenPrompt ? ' trace-row-name-linked' : ''}`}
                     onClick={handleOpenPrompt}
