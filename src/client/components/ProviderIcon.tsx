@@ -1,3 +1,5 @@
+import type { JSX } from 'react';
+
 function OpenAIIcon({ size }: { size: number }) {
   return (
     <svg width={size} height={size} strokeLinejoin="round" viewBox="0 0 16 16" className="pg-openai-icon">
