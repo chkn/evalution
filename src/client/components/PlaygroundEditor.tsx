@@ -8,16 +8,16 @@ import type {
   PropValue,
   ModelCatalog,
 } from '../../shared/types';
-import { getModelCatalog, getModelParameters, updatePromptProperties  } from '../api';
+import { getModelParameters } from '../api';
+import ModelPicker from './ModelPicker';
 import { ItemEditor, TemplateEditor, valueToDisplayString, interpolatablesFromDefinitions } from 'ts-proppy/react';
 import { isEditable } from '../../shared/helpers';
 import { defaultValueForType } from '../utils';
-import ModelPicker from './ModelPicker';
 
 interface Props {
   prompt: NormalizedPrompt;
-  onUpdate: (updated: NormalizedPrompt) => void;
-  onDirtyChange: (dirty: boolean) => void;
+  onUpdate: (updates: NormalizedPromptUpdates) => void;
+  modelCatalog: ModelCatalog;
 }
 
 /**
@@ -233,37 +233,98 @@ function ParamCard({ propDef, value, onDelete, onChange }: {
   );
 }
 
+// ─── SettingsModal ────────────────────────────────────────────────────────────
+
+function SettingsModal({ prompt, modelParameters, addableParams, onUpdate, onClose }: {
+  prompt: NormalizedPrompt;
+  modelParameters: PropDefinition[];
+  addableParams: PropDefinition[];
+  onUpdate: (updates: NormalizedPromptUpdates) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="pg-modal-backdrop" onClick={onClose}>
+      <div className="pg-modal" onClick={e => e.stopPropagation()}>
+        <div className="pg-modal-header">
+          <span className="pg-modal-title">Model settings</span>
+          <button className="pg-delete-msg" onClick={onClose} title="Close">×</button>
+        </div>
+        <div className="pg-modal-body">
+          {prompt.modelParameters.length === 0 ? (
+            <div className="pg-modal-empty">No settings configured.</div>
+          ) : (
+            prompt.modelParameters.map((param: NormalizedParameter) => {
+              const propDef = modelParameters.find(cs => cs.name === param.def.name);
+              if (!propDef) {
+                return (
+                  <div key={param.def.name} className="pg-panel-card">
+                    <div className="pg-msg-header">
+                      <span className="pg-role-label">{param.def.name}</span>
+                      {param.value && isEditable(param.value) && (
+                        <button
+                          className="pg-delete-msg"
+                          onClick={() => onUpdate({ modelParameters: { [param.def.name]: null } })}
+                          title="Remove"
+                        >×</button>
+                      )}
+                    </div>
+                    <div className="pg-msg-content" style={{ fontSize: 13, color: '#9ca3af' }}>
+                      {param.value !== undefined ? valueToDisplayString(param.value) : ''}
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <ParamCard
+                  key={param.def.name}
+                  propDef={propDef}
+                  value={param.value}
+                  onDelete={() => onUpdate({ modelParameters: { [param.def.name]: null } })}
+                  onChange={v => onUpdate({ modelParameters: { [param.def.name]: v } })}
+                />
+              );
+            })
+          )}
+        </div>
+        {addableParams.length > 0 && (
+          <div className="pg-modal-footer">
+            <div className="pg-pill-btn pg-add-param-btn">
+              Add setting
+              <select
+                className="pg-model-overlay-select"
+                value=""
+                onChange={e => {
+                  if (!e.target.value) return;
+                  const cs = addableParams.find(p => p.name === e.target.value);
+                  if (!cs) return;
+                  onUpdate({ modelParameters: { [cs.name]: cs.defaultValue ?? defaultValueForType(cs.type) } });
+                }}
+              >
+                <option value="">Choose…</option>
+                {addableParams.map(p => (
+                  <option key={p.name} value={p.name}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── PlaygroundEditor ─────────────────────────────────────────────────────────
 
-const EMPTY_MODEL_CATALOG: ModelCatalog = { models: [] };
-
-function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => { onDirtyChange(saving); }, [saving]);
+function PlaygroundEditor({ prompt, onUpdate, modelCatalog }: Props) {
   const [localMessages, setLocalMessages] = useSyncedExternal(prompt.messages);
   const [modelParameters, setModelParameters] = useState<PropDefinition[]>([]);
-  const [modelCatalog, setModelCatalog] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     if (prompt.providerId) {
       getModelParameters(prompt.providerId).then(setModelParameters).catch(() => {});
-      getModelCatalog(prompt.providerId).then(setModelCatalog).catch(() => {});
     }
   }, [prompt.providerId]);
-
-  const handleUpdate = async (updates: NormalizedPromptUpdates) => {
-    setSaving(true);
-    setError(null);
-    try {
-      onUpdate(await updatePromptProperties(prompt, updates));
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const msgSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const systemSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -271,12 +332,12 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
   const handleMessagesChange = (msgs: NormalizedMessage[]) => {
     setLocalMessages(msgs);
     if (msgSaveTimer.current) clearTimeout(msgSaveTimer.current);
-    msgSaveTimer.current = setTimeout(() => handleUpdate({ messages: msgs }), 600);
+    msgSaveTimer.current = setTimeout(() => onUpdate({ messages: msgs }), 600);
   };
 
   const handleSystemChange = (system: PropValue) => {
     if (systemSaveTimer.current) clearTimeout(systemSaveTimer.current);
-    systemSaveTimer.current = setTimeout(() => handleUpdate({ system }), 600);
+    systemSaveTimer.current = setTimeout(() => onUpdate({ system }), 600);
   };
 
   const handleAddMessage = () => {
@@ -286,11 +347,13 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
     else if (last?.role === 'assistant' && last.toolCalls?.length) role = 'tool';
     const newMsgs: NormalizedMessage[] = [...localMessages, { role, content: { kind: 'primitive', value: '' } }];
     setLocalMessages(newMsgs);
-    handleUpdate({ messages: newMsgs });
+    onUpdate({ messages: newMsgs });
   };
 
   const existingParams = new Set(prompt.modelParameters.map(p => p.def.name));
-  const addableParams = modelParameters.filter(cs => !existingParams.has(cs.name));
+  const addableParams = modelCatalog.models.length > 0
+    ? modelParameters.filter(cs => !existingParams.has(cs.name))
+    : [];
 
   // Identifiers available for `${…}` interpolation in the system/message editors.
   const contentPropDef = useMemo<PropDefinition>(() => ({
@@ -300,80 +363,31 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
 
   return (
     <div className="pg-editor">
-      {error && (
-        <div className="pg-error-bar">
-          {error}
-          <button className="pg-dismiss" onClick={() => setError(null)}>×</button>
-        </div>
+      {settingsOpen && (
+        <SettingsModal
+          prompt={prompt}
+          modelParameters={modelParameters}
+          addableParams={addableParams}
+          onUpdate={onUpdate}
+          onClose={() => setSettingsOpen(false)}
+        />
       )}
-
       <div className="pg-panel">
-        <div className="pg-panel-header">
-          <span className="pg-panel-title">Model</span>
-        </div>
-        <div className="pg-panel-body">
-          <ModelPicker value={prompt.model} onChange={v => handleUpdate({ model: v })} modelCatalog={modelCatalog} />
-          {prompt.modelParameters.map((param: NormalizedParameter) => {
-            const propDef = modelParameters.find(cs => cs.name === param.def.name);
-            if (!propDef) {
-              // No PropDefinition available — show source text as read-only
-              return (
-                <div key={param.def.name} className="pg-panel-card">
-                  <div className="pg-msg-header">
-                    <span className="pg-role-label">{param.def.name}</span>
-                    {param.value && isEditable(param.value) && (
-                      <button
-                        className="pg-delete-msg"
-                        onClick={() => handleUpdate({ modelParameters: { [param.def.name]: null } })}
-                        title="Remove parameter"
-                      >×</button>
-                    )}
-                  </div>
-                  <div className="pg-msg-content" style={{ fontSize: 13, color: '#9ca3af' }}>
-                    {param.value !== undefined ? valueToDisplayString(param.value) : ''}
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <ParamCard
-                key={param.def.name}
-                propDef={propDef}
-                value={param.value}
-                onDelete={() => handleUpdate({ modelParameters: { [param.def.name]: null } })}
-                onChange={v => handleUpdate({ modelParameters: { [param.def.name]: v } })}
-              />
-            );
-          })}
-        </div>
-        {addableParams.length > 0 && (
-          <div className="pg-panel-footer">
-            <div className="pg-pill-btn pg-add-param-btn">
-              ＋ Parameter
-              <select
-                className="pg-model-overlay-select"
-                value=""
-                onChange={e => {
-                  if (!e.target.value) return;
-                  const cs = modelParameters.find(p => p.name === e.target.value);
-                  if (!cs) return;
-                  handleUpdate({ modelParameters: { [cs.name]: cs.defaultValue ?? defaultValueForType(cs.type) } });
-                }}
-              >
-                <option value="">Add parameter…</option>
-                {addableParams.map(p => (
-                  <option key={p.name} value={p.name}>{p.name}</option>
-                ))}
-              </select>
-            </div>
+        <div className="pg-panel-model-row">
+          <ModelPicker
+            value={prompt.model}
+            onChange={v => onUpdate({ model: v })}
+            modelCatalog={modelCatalog}
+          />
+          <div className="pg-panel-model-row-actions">
+            <button className="pg-pill-btn" onClick={() => setSettingsOpen(true)}>Settings</button>
+            <button className="pg-pill-btn" disabled>Tools</button>
+            <button className="pg-pill-btn">Output type: Text ▾</button>
           </div>
-        )}
+        </div>
       </div>
 
       <div className="pg-panel">
-        <div className="pg-panel-header">
-          <span className="pg-panel-title">Messages</span>
-        </div>
         <div className="pg-panel-body">
           <SystemCard
             content={prompt.system}
@@ -392,19 +406,10 @@ function PlaygroundEditor({ prompt, onUpdate, onDirtyChange }: Props) {
           ))}
         </div>
         <div className="pg-panel-footer">
-          <button className="pg-pill-btn" onClick={handleAddMessage}>＋ Message</button>
+          <button className="pg-add-msg-btn" onClick={handleAddMessage}>＋  Add message</button>
         </div>
       </div>
 
-      <div className="pg-panel">
-        <div className="pg-panel-header">
-          <span className="pg-panel-title">Tools</span>
-        </div>
-        <div className="pg-panel-footer">
-          <button className="pg-pill-btn" disabled>＋ Tool</button>
-          <button className="pg-pill-btn">Output type: Text ▾</button>
-        </div>
-      </div>
     </div>
   );
 }

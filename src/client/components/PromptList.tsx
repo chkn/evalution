@@ -141,10 +141,11 @@ function PromptIcon() {
   );
 }
 
-function FilterIcon() {
+function SearchIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M1.5 3h9M3 6h6M4.5 9h3"/>
+    <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="4.5" cy="4.5" r="3"/>
+      <line x1="7" y1="7" x2="9.5" y2="9.5"/>
     </svg>
   );
 }
@@ -298,6 +299,7 @@ function DirNode({ node, depth, ...rest }: { node: CompressedNode & { type: 'dir
 
 function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt, onRenamePrompt }: PromptListProps) {
   const [filter, setFilter] = useState('');
+  const [searchVisible, setSearchVisible] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
 
   const handleCommitRename = (promptId: string, newName: string) => {
@@ -311,10 +313,43 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt
     return filter ? filterNodes(all, filter) : all;
   }, [prompts, filter]);
 
+  const header = (
+    <div className="section-panel-header">
+      <span>Prompts</span>
+      <div className="section-panel-header-actions">
+        <button
+          className="tree-toolbar-btn"
+          title="Toggle search"
+          onClick={() => { setSearchVisible(v => { if (v) setFilter(''); return !v; }); }}
+        >
+          <SearchIcon />
+        </button>
+        {onAddPrompt && (
+          <button className="tree-toolbar-btn" onClick={onAddPrompt} title="New prompt">
+            <PlusIcon />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  const searchBox = searchVisible && (
+    <div className="tree-header-search">
+      <input
+        type="text"
+        placeholder="Filter"
+        value={filter}
+        onChange={e => setFilter(e.target.value)}
+        autoFocus
+      />
+    </div>
+  );
+
   if (loading) {
     return (
       <>
-        <div className="section-panel-header">Prompts</div>
+        {header}
+        {searchBox}
         <div className="section-panel-body">
           <div className="tree-status">Loading...</div>
         </div>
@@ -325,7 +360,8 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt
   if (error) {
     return (
       <>
-        <div className="section-panel-header">Prompts</div>
+        {header}
+        {searchBox}
         <div className="section-panel-body">
           <div className="tree-status tree-error">Error: {error}</div>
         </div>
@@ -336,7 +372,8 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt
   if (prompts.length === 0) {
     return (
       <>
-        <div className="section-panel-header">Prompts</div>
+        {header}
+        {searchBox}
         <div className="section-panel-body">
           <div className="tree-empty-state">
             <p>No prompts found.</p>
@@ -347,29 +384,14 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt
             )}
           </div>
         </div>
-        <div className="tree-toolbar">
-          {onAddPrompt && (
-            <button className="tree-toolbar-btn" onClick={onAddPrompt} title="New prompt">
-              <PlusIcon />
-            </button>
-          )}
-          <div className="tree-filter">
-            <FilterIcon />
-            <input
-              type="text"
-              placeholder="Filter"
-              value={filter}
-              onChange={e => setFilter(e.target.value)}
-            />
-          </div>
-        </div>
       </>
     );
   }
 
   return (
     <>
-      <div className="section-panel-header">Prompts</div>
+      {header}
+      {searchBox}
       <div className="section-panel-body file-tree">
         {nodes.map((node, i) =>
           node.type === 'dir' ? (
@@ -386,22 +408,6 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt
             />
           )
         )}
-      </div>
-      <div className="tree-toolbar">
-        {onAddPrompt && (
-          <button className="tree-toolbar-btn" onClick={onAddPrompt} title="New prompt">
-            <PlusIcon />
-          </button>
-        )}
-        <div className="tree-filter">
-          <FilterIcon />
-          <input
-            type="text"
-            placeholder="Filter"
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-          />
-        </div>
       </div>
     </>
   );

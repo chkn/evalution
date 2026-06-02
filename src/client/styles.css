@@ -1,9 +1,11 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&display=swap');
+
 /* ─── Design tokens ────────────────────────────────────────────────────────── */
 
 :root {
   /* Chrome / titlebar */
-  --chrome-bg: #44445e;
-  --chrome-text: rgba(255, 255, 255, 0.65);
+  --chrome-bg: #fff;
+  --chrome-text: rgba(0, 0, 0, 0.45);
 
   /* Sidebar / file tree */
   --sidebar-bg: #f5f5f7;
@@ -28,7 +30,7 @@
   /* Content area */
   --content-bg: #fff;
   --content-card-bg: #fff;
-  --content-card-shadow: 0 -2px 0 rgba(255, 255, 255, 0.07), 0 -8px 26px rgba(0, 0, 0, 0.5);
+  --content-card-shadow: 0 -2px 0 rgba(255, 255, 255, 0.07), 0 -1px 5px rgba(0, 0, 0, 0.2);
 
   /* Playground panels */
   --panel-bg: #f9fafb;
@@ -39,6 +41,15 @@
   --panel-text: #111827;
   --panel-text-secondary: #9ca3af;
   --panel-text-muted: #d1d5db;
+
+  /* Prompt header */
+  --prompt-header-bg: #f0f0f5;
+  --prompt-header-border: #e0e0e8;
+  --prompt-header-text: #1d1d1f;
+
+  /* Execute panel */
+  --exec-bg: #f0f0f5;
+  --exec-border: #e0e0e8;
 
   /* Buttons / pills */
   --pill-bg: #fff;
@@ -79,7 +90,8 @@
 @media (prefers-color-scheme: dark) {
   :root {
     /* Chrome / titlebar */
-    --chrome-bg: #31364a;
+    --chrome-bg: #000;
+    --chrome-text: rgba(255, 255, 255, 0.5);
 
     /* Sidebar / file tree */
     --sidebar-bg: #1c1c1e;
@@ -104,7 +116,7 @@
     /* Content area */
     --content-bg: #292d3e;
     --content-card-bg: #181b2c;
-    --content-card-shadow: 0 -2px 0 rgba(255, 255, 255, 0.04), 0 -8px 26px rgba(0, 0, 0, 0.6);
+    --content-card-shadow: none;
 
     /* Playground panels */
     --panel-bg: #252838;
@@ -115,6 +127,15 @@
     --panel-text: #e5e5e7;
     --panel-text-secondary: #9aa3b8;
     --panel-text-muted: #6e7280;
+
+    /* Prompt header */
+    --prompt-header-bg: #1f2133;
+    --prompt-header-border: rgba(255, 255, 255, 0.08);
+    --prompt-header-text: #e5e5e7;
+
+    /* Execute panel */
+    --exec-bg: #1f2133;
+    --exec-border: rgba(255, 255, 255, 0.08);
 
     /* Buttons / pills */
     --pill-bg: #2c2c2e;
@@ -213,8 +234,14 @@ code, pre {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--chrome-text);
   z-index: 10;
+}
+
+@media (prefers-color-scheme: dark) {
+  .app-titlebar-icon img {
+    filter: invert(1);
+  }
 }
 
 /* Main row: icon strip + content — pulled up to sit under titlebar */
@@ -281,7 +308,7 @@ code, pre {
   border-radius: 12px 0 0 0;
   box-shadow: var(--content-card-shadow);
   overflow: hidden;
-  background: var(--content-card-bg);
+  background: var(--prompt-header-bg);
 }
 
 .icon-nav-btn {
@@ -294,7 +321,7 @@ code, pre {
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  color: #7a7a9a;
+  color: rgba(0, 0, 0, 0.35);
   margin-bottom: 2px;
   align-self: flex-end;
   transition: color 0.15s, background 0.15s;
@@ -302,22 +329,34 @@ code, pre {
 }
 
 .icon-nav-btn:hover {
-  color: #e0e0f0;
-  background: rgba(255, 255, 255, 0.08);
+  color: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .icon-nav-btn.active {
   color: #667eea;
   background: var(--sidebar-bg);
   border-radius: 4px 0 0 4px;
-  /* inset highlights only — no filter/drop-shadow that would bleed onto the content card */
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 1px 0 0 rgba(255,255,255,0.07), inset 0 -1px 0 rgba(255,255,255,0.07);
+  box-shadow: inset 0 1px 0 rgba(0,0,0,0.06), inset 0 -1px 0 rgba(0,0,0,0.04), inset 1px 0 0 #667eea;
   position: relative;
   z-index: 5;
 }
 
 .icon-nav-btn.active:hover {
   background: var(--sidebar-bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  .icon-nav-btn {
+    color: #7a7a9a;
+  }
+  .icon-nav-btn:hover {
+    color: #e0e0f0;
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .icon-nav-btn.active {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 1px 0 0 rgba(255,255,255,0.07), inset 0 -1px 0 rgba(255,255,255,0.07), inset 1px 0 0 #667eea;
+  }
 }
 
 /* Resize handle */
@@ -345,13 +384,54 @@ code, pre {
 }
 
 .section-panel-header {
-  padding: 8px 10px 7px;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  font-family: 'Geist Mono', ui-monospace, monospace;
   font-size: 10.5px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--sidebar-heading);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: -4px;
+}
+
+.tree-header-search {
+  flex-shrink: 0;
+  padding: 0 6px 5px;
+  border-bottom: 1px solid var(--tree-toolbar-border);
+}
+
+.tree-header-search input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--tree-filter-border);
+  background: var(--tree-filter-bg);
+  color: var(--tree-filter-text);
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-family: inherit;
+  padding: 3px 7px;
+  outline: none;
+}
+
+.tree-header-search input::placeholder {
+  color: var(--tree-text-secondary);
+}
+
+.tree-header-search input:focus {
+  border-color: #3478f6;
+  background: var(--tree-filter-focus-bg);
 }
 
 .section-panel-body {
@@ -789,7 +869,7 @@ code, pre {
   justify-content: center;
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--chrome-text);
   cursor: pointer;
   border-radius: 4px;
   transition: color 0.15s, background 0.15s;
@@ -810,10 +890,10 @@ code, pre {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: #4a4a68;
-  color: #b8b8d0;
+  background: rgba(0, 0, 0, 0.07);
+  color: rgba(0, 0, 0, 0.4);
   border: none;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 1px 0 0 rgba(255,255,255,0.07), inset -1px 0 0 rgba(255,255,255,0.07);
+  box-shadow: inset 0 1px 0 rgba(0,0,0,0.05), inset 1px 0 0 rgba(0,0,0,0.04), inset -1px 0 0 rgba(0,0,0,0.04);
   cursor: pointer;
   font-size: 12px;
   font-family: inherit;
@@ -829,13 +909,26 @@ code, pre {
 }
 
 .tab:hover:not(.tab-active) {
-  background: #565678;
-  color: #d8d8ec;
+  background: rgba(0, 0, 0, 0.11);
+  color: rgba(0, 0, 0, 0.6);
+}
+
+@media (prefers-color-scheme: dark) {
+  .tab {
+    background: #4a4a68;
+    color: #b8b8d0;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 1px 0 0 rgba(255,255,255,0.07), inset -1px 0 0 rgba(255,255,255,0.07);
+  }
+  .tab:hover:not(.tab-active) {
+    background: #565678;
+    color: #d8d8ec;
+  }
 }
 
 .tab.tab-active {
-  background: var(--content-bg);
-  color: var(--panel-text);
+  background: var(--prompt-header-bg);
+  color: var(--prompt-header-text);
+  border-top: 1px solid #667eea;
   z-index: 2;
 }
 
@@ -890,7 +983,7 @@ code, pre {
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--chrome-text);
   font-family: 'Menlo', 'Monaco', monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -898,44 +991,303 @@ code, pre {
 }
 
 .header-path .icloud-icon {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--chrome-text);
   flex-shrink: 0;
+}
+
+/* ─── Playground wrapper + prompt header ───────────────────────────────────── */
+
+.pg-prompt-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  height: 52px;
+  background: var(--prompt-header-bg);
+  border-bottom: 1px solid var(--prompt-header-border);
+}
+
+.pg-prompt-header-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.pg-prompt-header-right {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pg-prompt-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--prompt-header-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pg-prompt-path {
+  font-size: 11px;
+  color: var(--panel-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.pg-header-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  border: 1px solid var(--prompt-header-border);
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--prompt-header-text);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.pg-header-btn--icon {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+
+.pg-header-btn:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  .pg-header-btn { background: rgba(255, 255, 255, 0.06); }
+  .pg-header-btn:hover { background: rgba(255, 255, 255, 0.11); }
+}
+
+/* Error shown inline in the header, right side */
+.pg-header-error {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--error-text);
+  white-space: nowrap;
 }
 
 /* ─── Playground content area ──────────────────────────────────────────────── */
 
-/* Single column (narrow): natural block flow, scroll vertically */
+.pg-playground-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  container-type: inline-size;
+  container-name: playground;
+}
+
 .pg-content {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px;
   background: var(--content-bg);
 }
 
-/* Two-column layout, applied by PlaygroundContent when the pane is wide enough
-   and the content overflows a single column. JS assigns each .pg-panel to a
-   column and row via inline grid-column / grid-row styles; grid-auto-rows: 1px
-   lets panels span an exact pixel count so columns stack independently without
-   row-height alignment. The container grows to fit both columns and scrolls
-   normally via the inherited overflow-y: auto. */
-.pg-content--multicol {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-auto-rows: 1px;
-  column-gap: 12px;
+.pg-editor-col {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 16px;
 }
 
-.pg-content--multicol .pg-editor,
-.pg-content--multicol .pg-exec {
-  display: contents;
+/* Exec column: narrow (bottom-docked) defaults */
+.pg-exec-col {
+  background: var(--exec-bg);
+  border-top: 1px solid var(--exec-border);
+}
+
+/* ─── Execute panel inner layout (narrow / bottom-docked defaults) ─────────── */
+
+.pg-exec-inner {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 10px 0;
+  min-height: 66px;
+  box-sizing: border-box;
+}
+
+.pg-exec-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 16px;
+  flex-shrink: 0;
+  border-bottom: none;
+}
+
+.pg-exec-title {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--panel-text-secondary);
+}
+
+.pg-exec-param-count {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--panel-text-secondary);
+}
+
+.pg-exec-body {
+  flex: 1;
+  min-width: 0;
+  padding: 0 12px;
+}
+
+/* Override PropsEditor's inline flex-direction:column → row in narrow mode */
+.pg-exec-body > div {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap;
+  gap: 8px 16px !important;
+  align-items: flex-end;
+}
+
+.pg-exec-footer {
+  flex-shrink: 0;
+  padding: 0 16px;
+  border-top: none;
+}
+
+.pg-run-btn {
+  width: auto;
+  height: 38px;
+  background: #111827;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 18px;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: background 0.1s;
+}
+
+.pg-run-btn:hover:not(:disabled) {
+  background: #1f2937;
+}
+
+.pg-run-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (prefers-color-scheme: dark) {
+  .pg-run-btn {
+    background: #e5e7eb;
+    color: #111827;
+  }
+  .pg-run-btn:hover:not(:disabled) {
+    background: #d1d5db;
+  }
+}
+
+.pg-exec-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--error-text);
+  margin-top: 8px;
+}
+
+/* Wide layout via container query — must appear after base exec styles so !important rules win */
+@container playground (min-width: 620px) {
+  .pg-content {
+    flex-direction: row;
+    overflow: hidden;
+  }
+
+  .pg-editor-col {
+    overflow-y: auto;
+    height: 100%;
+    box-sizing: border-box;
+  }
+
+  .pg-exec-col {
+    width: 280px;
+    flex-shrink: 0;
+    border-top: none;
+    border-left: 1px solid var(--exec-border);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .pg-exec-inner {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    padding: 0 !important;
+    height: auto !important;
+  }
+
+  .pg-exec-header {
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    border-bottom: none !important;
+    padding: 12px 16px 10px !important;
+    gap: 0 !important;
+  }
+
+  .pg-exec-body {
+    padding: 14px 16px !important;
+    overflow-y: auto;
+    flex: none !important;
+  }
+
+  .pg-exec-body > div {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    flex-wrap: nowrap !important;
+    gap: 12px !important;
+  }
+
+  .pg-exec-footer {
+    padding: 0 16px 14px !important;
+    border-top: none !important;
+  }
+
+  .pg-run-btn {
+    width: 100% !important;
+    height: 42px;
+  }
 }
 
 /* ─── Playground cards ─────────────────────────────────────────────────────── */
 
-.pg-editor,
-.pg-exec {
+.pg-editor {
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -954,38 +1306,60 @@ code, pre {
 .pg-model-picker {
   position: relative;
   padding: 0;
-  border: 1px solid var(--panel-card-border);
-  border-radius: 12px;
+  flex: 1;
+  min-width: 200px;
 }
 
 .pg-model-picker-trigger {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 11px 14px;
+  gap: 8px;
   width: 100%;
-  border: none;
-  background: none;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 9px;
+  border: 1px solid var(--prompt-header-border);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.04);
   cursor: pointer;
   font-family: inherit;
   text-align: left;
+  transition: background 0.1s;
+}
+
+.pg-model-picker-trigger:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  .pg-model-picker-trigger {
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .pg-model-picker-trigger:hover {
+    background: rgba(255, 255, 255, 0.09);
+  }
 }
 
 .pg-model-picker-label {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 500;
-  color: var(--panel-text);
+  color: var(--prompt-header-text);
+  white-space: nowrap;
 }
 
 .pg-model-picker-source {
-  flex: 1;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--panel-text-secondary);
-  text-align: right;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  flex: 1;
+}
+
+.pg-model-picker-trigger svg:last-child {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 /* Dropdown (rendered as a portal on document.body) */
@@ -1170,13 +1544,16 @@ code, pre {
 .pg-msg-header {
   display: flex;
   align-items: center;
-  padding: 12px 14px 8px;
+  padding: 10px 0 5px;
 }
 
 .pg-role-label {
-  font-size: 13.5px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: var(--panel-text-secondary);
+  font-family: 'Geist Mono', ui-monospace, monospace;
 }
 
 .pg-role-wrapper {
@@ -1247,7 +1624,7 @@ code, pre {
 
 /* Inline param input (used inside ParamCard in the Model panel) */
 .pg-param-input-inline {
-  padding: 0 14px 12px;
+  padding: 0 0 10px;
   display: block;
 }
 
@@ -1343,11 +1720,13 @@ code, pre {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 6px 14px;
-  border-radius: 10px;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-radius: 8px;
   border: 1px solid var(--pill-border);
   background: var(--pill-bg);
-  font-size: 13px;
+  font-size: 12px;
   color: var(--pill-text);
   cursor: pointer;
   font-family: inherit;
@@ -1414,6 +1793,69 @@ code, pre {
   font-size: 16px;
   line-height: 1;
   padding: 0 2px;
+}
+
+/* ─── Settings modal ───────────────────────────────────────────────────────── */
+
+.pg-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+}
+
+.pg-modal {
+  background: var(--content-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  width: 420px;
+  max-width: calc(100vw - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pg-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--panel-border);
+  flex-shrink: 0;
+}
+
+.pg-modal-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--panel-text);
+}
+
+.pg-modal-body {
+  overflow-y: auto;
+  max-height: 60vh;
+  padding: 4px 16px;
+}
+
+.pg-modal-empty {
+  padding: 20px 0;
+  font-size: 13px;
+  color: var(--panel-text-secondary);
+  text-align: center;
+}
+
+.pg-modal-body .pg-msg-header { padding: 10px 0 5px; }
+.pg-modal-body .token-editor,
+.pg-modal-body .pg-msg-content,
+.pg-modal-body .pg-param-input-inline { padding-left: 0; padding-right: 0; }
+
+.pg-modal-footer {
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--panel-border);
+  flex-shrink: 0;
 }
 
 .pg-spinner {
@@ -1864,19 +2306,20 @@ code, pre {
   font-weight: 600;
 }
 
-/* ─── Panel (group card — outer container) ─────────────────────────────────── */
+/* ─── Panel (section — flat, no card chrome) ───────────────────────────────── */
 
 .pg-panel {
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 16px;
-  overflow: hidden;
-  margin-bottom: 12px;
   break-inside: avoid;
+  padding-bottom: 4px;
+}
+
+.pg-panel + .pg-panel {
+  border-top: 1px solid var(--panel-border);
+  padding-top: 12px;
 }
 
 .pg-panel-header {
-  padding: 16px 16px 0;
+  padding: 0 0 8px;
 }
 
 .pg-panel-title {
@@ -1888,14 +2331,14 @@ code, pre {
 }
 
 .pg-panel-body {
-  padding: 12px 16px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
 }
 
 .pg-panel-footer {
-  padding: 0 16px 16px;
+  padding: 8px 0 4px;
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -1903,7 +2346,23 @@ code, pre {
 
 /* Panel with no body (header → footer only) */
 .pg-panel-header + .pg-panel-footer {
-  padding-top: 12px;
+  padding-top: 4px;
+}
+
+/* Model picker + action buttons row */
+.pg-panel-model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.pg-panel-model-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 /* Error panel variant */
@@ -1915,13 +2374,14 @@ code, pre {
   color: var(--error-text);
 }
 
-/* ─── Panel card (inner card — model, each message, each param) ─────────────── */
+/* ─── Panel card (inner item — divider-separated, no card chrome) ───────────── */
 
 .pg-panel-card {
-  border: 1px solid var(--panel-card-border);
-  border-radius: 12px;
-  overflow: hidden;
-  background: var(--panel-card-bg);
+  border-top: 1px solid var(--panel-border);
+}
+
+.pg-panel-card:first-child {
+  border-top: none;
 }
 
 /* ─── Message textarea / content ──────────────────────────────────────────── */
@@ -1933,27 +2393,26 @@ code, pre {
   outline: none;
   resize: none;
   overflow: hidden;
-  padding: 0 14px 14px;
+  padding: 0 0 10px;
   font-family: inherit;
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
   color: var(--panel-text);
-  line-height: 1.6;
+  line-height: 1.55;
   background: transparent;
-  min-height: 44px;
+  min-height: 36px;
 }
 
 .pg-msg-textarea::placeholder {
   color: var(--panel-text-muted);
-  font-weight: 400;
 }
 
 .pg-msg-content {
-  padding: 0 14px 14px;
-  font-size: 15px;
-  font-weight: 500;
+  padding: 0 0 10px;
+  font-size: 14px;
+  font-weight: 400;
   color: var(--panel-text);
-  line-height: 1.6;
+  line-height: 1.55;
 }
 
 /* ─── Token editor (contenteditable rich text) ─────────────────────────────── */
@@ -1961,14 +2420,14 @@ code, pre {
 .token-editor {
   display: block;
   width: 100%;
-  padding: 0 14px 14px;
+  padding: 0 0 10px;
   font-family: inherit;
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
   color: var(--panel-text);
-  line-height: 1.6;
+  line-height: 1.55;
   background: transparent;
-  min-height: 44px;
+  min-height: 36px;
   outline: none;
   border: none;
   white-space: pre-wrap;
@@ -2010,7 +2469,7 @@ code, pre {
 
 /* Tool calls */
 .pg-tool-calls {
-  padding: 0 12px 10px;
+  padding: 0 0 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2100,10 +2559,21 @@ code, pre {
 }
 
 .pg-add-msg-btn {
-  font-size: 12.5px;
-  padding: 4px 12px;
-  color: #888;
-  border-color: #e0e0e0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--panel-text-secondary);
+  font-family: inherit;
+  padding: 6px 0 4px;
+  width: 100%;
+}
+
+.pg-add-msg-btn:hover {
+  color: var(--panel-text);
 }
 
 /* ─── Trace list (sidebar) ───────────────────────────────────────────────── */

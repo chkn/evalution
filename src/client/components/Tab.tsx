@@ -13,6 +13,7 @@ function PromptTabIcon() {
 interface TabProps {
   id?: string;
   name: string;
+  icon?: React.ReactNode;
   active: boolean;
   dirty: boolean;
   onClick: () => void;
@@ -21,17 +22,18 @@ interface TabProps {
   onDragEnd: () => void;
 }
 
-export function Tab({ id, name, active, dirty, onClick, onClose, onDragStart, onDragEnd }: TabProps) {
+export function Tab({ id, name, icon, active, dirty, onClick, onClose, onDragStart, onDragEnd }: TabProps) {
   return (
     <button
       id={id}
+      title={name}
       className={`tab${active ? ' tab-active' : ''}`}
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={e => { e.stopPropagation(); onClick(); }}
     >
-      <span className="tab-icon"><PromptTabIcon /></span>
+      <span className="tab-icon">{icon ?? <PromptTabIcon />}</span>
       <span className="tab-label">{name}</span>
       {dirty
         ? <span className="tab-dirty">●</span>

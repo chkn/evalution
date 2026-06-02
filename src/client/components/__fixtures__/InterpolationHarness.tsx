@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import PlaygroundEditor from '../PlaygroundEditor';
-import type { NormalizedPrompt, PropDefinition } from '../../../shared/types';
+import type { NormalizedPrompt, NormalizedPromptUpdates, PropDefinition } from '../../../shared/types';
 
 // A leaf `name` plus an object `config` with `name`/`age` children — exercises
 // both top-level identifiers and nested drill-in (`config.name`).
@@ -44,8 +44,7 @@ export function InterpolationHarness({ withParams = true }: { withParams?: boole
   const [prompt, setPrompt] = useState<NormalizedPrompt>(
     makePrompt(withParams ? FUNCTION_PARAMETERS : []),
   );
-  // The mock API echo doesn't carry functionParameters; keep them across saves.
-  const handleUpdate = (updated: NormalizedPrompt) =>
-    setPrompt(prev => ({ ...updated, functionParameters: prev.functionParameters }));
-  return <PlaygroundEditor prompt={prompt} onUpdate={handleUpdate} onDirtyChange={() => {}} />;
+  const handleUpdate = (updates: NormalizedPromptUpdates) =>
+    setPrompt(prev => ({ ...prev, ...updates } as NormalizedPrompt));
+  return <PlaygroundEditor prompt={prompt} onUpdate={handleUpdate} modelCatalog={{ models: [] }} />;
 }

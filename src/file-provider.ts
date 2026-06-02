@@ -216,13 +216,18 @@ export class LocalFileProvider implements FileProvider {
     options: FileWatchOptions,
     callback: FileWatchCallback
   ): () => void {
-    const includeMatchers = patterns.map(p => makeRe(p)).filter(re => re !== false);
-    const ignoreMatchers = options.ignored?.map(p => makeRe(p)).filter(re => re !== false);
+    const cwd = options.cwd ?? process.cwd();
+    const ignored = options.ignored ?? [];
+    const includeMatchers = patterns.map(p => makeRe(p)).filter((re): re is RegExp => re !== false);
     const matches = (fp: string) => includeMatchers.some(re => re.test(fp));
 
     const watcher = chokidar.watch('.', {
-      cwd: options.cwd,
-      ignored: ignoreMatchers,
+      cwd,
+      // chokidar tests `ignored` against absolute paths; convert to relative before matching
+      ignored: (absPath: string) => {
+        const rel = path.relative(cwd, absPath).replace(/\\/g, '/');
+        return ignored.some(p => minimatch(rel, p, { dot: true }));
+      },
       persistent: true,
       ignoreInitial: options.ignoreInitial ?? true,
     });
@@ -231,6 +236,6 @@ export class LocalFileProvider implements FileProvider {
     watcher.on('add', (fp) => { if (matches(fp)) callback('add', fp); });
     watcher.on('unlink', (fp) => { if (matches(fp)) callback('remove', fp); });
 
-    return () => watcher.close();
+    return () => { watcher.close(); };
   }
 }

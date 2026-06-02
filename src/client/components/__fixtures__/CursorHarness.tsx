@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { TemplateValueBuilder } from 'ts-proppy/react';
 import PlaygroundEditor from '../PlaygroundEditor';
-import type { NormalizedPrompt, TemplateValue } from '../../../shared/types';
+import type { NormalizedPrompt, NormalizedPromptUpdates, TemplateValue } from '../../../shared/types';
 
 // Lets tests pass plain template-syntax strings (`"Hello ${name}"`) and have
 // them split into string segments + tokens, so trailing-token cursor cases
@@ -46,10 +46,12 @@ export function CursorHarness({ initialContent = '', reloadContent }: {
   reloadContent?: string;
 }) {
   const [prompt, setPrompt] = useState<NormalizedPrompt>(makePrompt(initialContent));
+  const handleUpdate = (updates: NormalizedPromptUpdates) =>
+    setPrompt(prev => ({ ...prev, ...updates } as NormalizedPrompt));
 
   return (
     <div>
-      <PlaygroundEditor prompt={prompt} onUpdate={setPrompt} onDirtyChange={() => {}} />
+      <PlaygroundEditor prompt={prompt} onUpdate={handleUpdate} modelCatalog={{ models: [] }} />
       {reloadContent !== undefined && (
         <button
           data-testid="reload"

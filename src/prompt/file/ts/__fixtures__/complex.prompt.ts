@@ -8,7 +8,7 @@ export function complexPrompt(baseTemp: number, multiplier: number) {
       { role: 'system', content: 'You are helpful' },
       { role: 'user', content: 'Hello' }
     ],
-    temperature: baseTemp + 0.2,
+    temperature: `${baseTemp}0.2`,
     maxTokens: 1000 * multiplier,
     topP: 0.9,
     frequencyPenalty: 0.5

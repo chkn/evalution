@@ -1,32 +1,31 @@
 import { test, expect } from '@playwright/experimental-ct-react';
 import { PlaygroundContentHarness } from './PlaygroundContentHarness';
+import type { Locator } from '@playwright/test';
 
-test('narrow pane stays single-column at full width', async ({ mount }) => {
+const rect = (loc: Locator) =>
+  loc.evaluate(el => {
+    const { top, bottom, left, right } = el.getBoundingClientRect();
+    return { top, bottom, left, right };
+  });
+
+test('narrow pane docks the execution pane at the bottom', async ({ mount }) => {
   const component = await mount(
-    <PlaygroundContentHarness width={400} height={300} messagesCount={1} />
+    <PlaygroundContentHarness width={400} height={500} messagesCount={1} />
   );
-  const pg = component.locator('.pg-content');
-  await expect(pg).not.toHaveClass(/pg-content--multicol/);
-  const paneWidth = await component.evaluate(el => el.getBoundingClientRect().width);
-  const contentWidth = await pg.evaluate(el => el.getBoundingClientRect().width);
-  expect(contentWidth).toBe(paneWidth);
+  const editor = await rect(component.locator('.pg-editor-col'));
+  const exec = await rect(component.locator('.pg-exec-col'));
+  // Stacked vertically: exec sits below the editor, sharing the left edge.
+  expect(exec.top).toBeGreaterThanOrEqual(editor.bottom - 1);
+  expect(exec.left).toBeCloseTo(editor.left, 0);
 });
 
-test('wide pane with overflowing content switches to multi-column', async ({ mount }) => {
+test('wide pane docks the execution pane on the right', async ({ mount }) => {
   const component = await mount(
-    <PlaygroundContentHarness width={900} height={200} messagesCount={12} />
+    <PlaygroundContentHarness width={900} height={500} messagesCount={1} />
   );
-  const pg = component.locator('.pg-content');
-  await expect(pg).toHaveClass(/pg-content--multicol/);
-});
-
-test('wide pane with short content stays single-column at full width', async ({ mount }) => {
-  const component = await mount(
-    <PlaygroundContentHarness width={900} height={1200} messagesCount={1} />
-  );
-  const pg = component.locator('.pg-content');
-  await expect(pg).not.toHaveClass(/pg-content--multicol/);
-  const paneWidth = await component.evaluate(el => el.getBoundingClientRect().width);
-  const contentWidth = await pg.evaluate(el => el.getBoundingClientRect().width);
-  expect(contentWidth).toBe(paneWidth);
+  const editor = await rect(component.locator('.pg-editor-col'));
+  const exec = await rect(component.locator('.pg-exec-col'));
+  // Side by side: exec sits to the right of the editor, sharing the top edge.
+  expect(exec.left).toBeGreaterThanOrEqual(editor.right - 1);
+  expect(exec.top).toBeCloseTo(editor.top, 0);
 });

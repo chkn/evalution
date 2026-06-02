@@ -53,41 +53,35 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
     }
   };
 
+  const paramCount = prompt.functionParameters.length;
+
   return (
-    <div className="pg-exec">
-      <div className="pg-panel">
-        <div className="pg-panel-header">
-          <span className="pg-panel-title">Execute</span>
-        </div>
-        {prompt.functionParameters.length > 0 && (
-          <div className="pg-panel-body">
-            <PropsEditor
-              props={{ definitions: prompt.functionParameters, values: paramValues }}
-              onChange={handleParamChange}
-            />
+    <div className="pg-exec-inner">
+      <div className="pg-exec-header">
+        <span className="pg-exec-title">Execute</span>
+        {paramCount > 0 && (
+          <span className="pg-exec-param-count">{paramCount} param{paramCount !== 1 ? 's' : ''}</span>
+        )}
+      </div>
+      <div className="pg-exec-body">
+        {paramCount > 0 && (
+          <PropsEditor
+            props={{ definitions: prompt.functionParameters, values: paramValues }}
+            onChange={handleParamChange}
+          />
+        )}
+        {error && (
+          <div className="pg-exec-error">
+            {error}
+            <button className="pg-dismiss" onClick={() => setError(null)}>×</button>
           </div>
         )}
-        <div className="pg-panel-footer">
-          <button
-            className="pg-pill-btn pg-pill-primary"
-            onClick={handleRun}
-            disabled={executing}
-          >
-            {executing ? '…' : '▶  Run'}
-          </button>
-        </div>
       </div>
-
-      {error && (
-        <div className="pg-panel pg-panel-error">
-          <div className="pg-panel-header">
-            <span className="pg-panel-title pg-panel-title-error">Error</span>
-          </div>
-          <div className="pg-panel-body">
-            <div className="pg-output-body">{error}</div>
-          </div>
-        </div>
-      )}
+      <div className="pg-exec-footer">
+        <button className="pg-run-btn" onClick={handleRun} disabled={executing}>
+          {executing ? '…' : '▶  Run'}
+        </button>
+      </div>
     </div>
   );
 }

@@ -31,13 +31,7 @@ const INIT_PANE = mkPaneId();
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
 function AppIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-         stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="4 17 10 11 4 5"/>
-      <line x1="12" y1="19" x2="20" y2="19"/>
-    </svg>
-  );
+  return <img src="/favicon.svg" width="22" height="30" style={{ display: 'block' }} />;
 }
 
 function TracesIcon() {
@@ -99,6 +93,7 @@ function App() {
   useEffect(() => {
     fetch('/api/config').then(r => r.json()).then(d => setRootPath(d.rootPath)).catch(() => {});
   }, []);
+
 
   const handleSSEMessage = useCallback((data: SSEData) => {
     // FIXME: Delay these for a hot second to debounce multiple rapid changes
@@ -262,12 +257,25 @@ function App() {
       const fromPane = prev.find(p => p.id === fromPaneId)!;
       const tab = fromPane.tabs.find(t => tabKey(t) === key);
       if (!tab) return prev;
+
+      const nextFromTabs = fromPane.tabs.filter(t => tabKey(t) !== key);
+      if (nextFromTabs.length === 0 && prev.length > 1) {
+        paneResize.deleteSize(fromPaneId);
+        const remaining = prev.filter(p => p.id !== fromPaneId);
+        return remaining.map(p => {
+          if (p.id === toPaneId) {
+            const alreadyOpen = p.tabs.some(t => tabKey(t) === key);
+            return { ...p, tabs: alreadyOpen ? p.tabs : [...p.tabs, tab], activeTabKey: key };
+          }
+          return p;
+        });
+      }
+
       return prev.map(p => {
         if (p.id === fromPaneId) {
-          const next = p.tabs.filter(t => tabKey(t) !== key);
           const wasActive = p.activeTabKey === key;
           const idx = p.tabs.findIndex(t => tabKey(t) === key);
-          return { ...p, tabs: next, activeTabKey: wasActive ? (next[Math.min(idx, next.length - 1)] ? tabKey(next[Math.min(idx, next.length - 1)]) : null) : p.activeTabKey };
+          return { ...p, tabs: nextFromTabs, activeTabKey: wasActive ? (nextFromTabs[Math.min(idx, nextFromTabs.length - 1)] ? tabKey(nextFromTabs[Math.min(idx, nextFromTabs.length - 1)]) : null) : p.activeTabKey };
         }
         if (p.id === toPaneId) {
           const alreadyOpen = p.tabs.some(t => tabKey(t) === key);
@@ -285,6 +293,12 @@ function App() {
   const tildeRoot   = rootPath.replace(/^\/Users\/[^/]+/, '~');
   const isICloud    = tildeRoot.startsWith(icloudPrefix);
   const displayPath = isICloud ? tildeRoot.slice(icloudPrefix.length) || '/' : tildeRoot;
+  const pathLabel   = isICloud ? `iCloud Drive${displayPath !== '/' ? displayPath : ''}` : displayPath;
+
+  useEffect(() => {
+    if (!rootPath) return;
+    document.title = pathLabel;
+  }, [pathLabel]);
 
   const focusedPane      = panes.find(p => p.id === focusedPaneId) ?? panes[0];
   const focusedActiveTab = focusedPane?.tabs.find(t => tabKey(t) === focusedPane.activeTabKey) ?? null;
@@ -372,11 +386,13 @@ function App() {
                         const key = tabKey(tab);
                         const name = tab.type === 'prompt'
                           ? (prompts.find(p => p.id === tab.promptId && p.providerId === tab.providerId)?.name ?? tab.promptId)
-                          : `Trace: ${tab.label}`;
+                          : tab.label;
+                        const icon = tab.type === 'trace' ? <TracesIcon /> : undefined;
                         return (
                           <Tab
                             key={key}
                             name={name}
+                            icon={icon}
                             active={key === pane.activeTabKey}
                             dirty={dirtyTabs.has(key)}
                             onClick={() => { setFocusedPaneId(pane.id); setPanes(prev => prev.map(p => p.id === pane.id ? { ...p, activeTabKey: key } : p)); }}

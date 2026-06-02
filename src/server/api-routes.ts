@@ -208,7 +208,7 @@ export function setupRoutes({
         }
 
         return tracer.startActiveSpan(
-          `Run playground prompt: ${prompt.name}`,
+          `Playground: ${prompt.name}`,
           span => {
             const { traceId } = span.spanContext();
 
