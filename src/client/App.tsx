@@ -11,16 +11,22 @@ import TraceView from './components/TraceView';
 import AddPromptDialog from './components/AddPromptDialog';
 import PlaygroundContent from './components/PlaygroundContent';
 import { Tab } from './components/Tab';
+import { WelcomeWizard } from './components/welcome/WelcomeWizard';
 import type { ExecuteResponse, PromptID, SSEData } from '../shared/types';
 
 // ─── Tab / Pane model ─────────────────────────────────────────────────────────
 
 interface PromptTab { type: 'prompt'; providerId: string; promptId: string }
 interface TraceTab { type: 'trace'; providerId: string; traceId: string; rootSpanId: string; label: string }
-type AppTab = PromptTab | TraceTab;
+interface WelcomeTab { type: 'welcome' }
+type AppTab = PromptTab | TraceTab | WelcomeTab;
+
+const WELCOME_TAB_KEY = 'welcome';
 
 const tabKey = (t: AppTab) =>
-  t.type === 'prompt' ? `prompt:${t.providerId}:${t.promptId}` : `trace:${t.providerId}:${t.traceId}`;
+  t.type === 'prompt' ? `prompt:${t.providerId}:${t.promptId}`
+  : t.type === 'trace' ? `trace:${t.providerId}:${t.traceId}`
+  : WELCOME_TAB_KEY;
 
 interface Pane { id: string; tabs: AppTab[]; activeTabKey: string | null }
 
@@ -59,6 +65,10 @@ function PromptsIcon() {
 }
 
 
+function WelcomeIcon() {
+  return <span className="welcome-tab-emoji" role="img" aria-label="Welcome">👋</span>;
+}
+
 function SplitIcon() {
   return (
     <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
@@ -83,6 +93,7 @@ function App() {
   const [dropPaneId, setDropPaneId] = useState<string | null>(null);
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
   const dirtyTabsRef = useRef<Set<string>>(new Set());
+  const prevPromptCount = useRef<number | null>(null);
 
   const sidebar    = useResizable({ initial: { w: 224 }, min: 120, max: 600, storageKey: 'sidebar-width' });
   const paneResize = useResizable({ initial: {}, min: 150, storageKey: 'pane-widths' });
@@ -120,6 +131,38 @@ function App() {
       };
     }));
   }, [prompts, loading]);
+
+  // First-run onboarding: when a project has no prompts, surface a Welcome tab
+  // (collapsing the sidebar); once prompts exist, retire it and reveal the
+  // sidebar. Both are derived from the prompt count so the wizard disappears
+  // automatically the moment the first prompt is created.
+  useEffect(() => {
+    if (loading) return;
+    setPanes(prev => {
+      const hasWelcome = prev.some(pane => pane.tabs.some(t => t.type === 'welcome'));
+      if (prompts.length === 0) {
+        if (hasWelcome) return prev;
+        return prev.map((pane, i) => i === 0
+          ? { ...pane, tabs: [{ type: 'welcome' as const }, ...pane.tabs], activeTabKey: WELCOME_TAB_KEY }
+          : pane);
+      }
+      if (!hasWelcome) return prev;
+      return prev.map(pane => {
+        const tabs = pane.tabs.filter(t => t.type !== 'welcome');
+        const activeStillExists = tabs.some(t => tabKey(t) === pane.activeTabKey);
+        return {
+          ...pane,
+          tabs,
+          activeTabKey: activeStillExists ? pane.activeTabKey : (tabs.at(-1) ? tabKey(tabs.at(-1)!) : null),
+        };
+      });
+    });
+
+    const prev = prevPromptCount.current;
+    if (prompts.length === 0) setSectionVisible(false);
+    else if (prev === 0) setSectionVisible(true); // just created the first prompt
+    prevPromptCount.current = prompts.length;
+  }, [loading, prompts.length]);
 
   const handleDirtyChange = useCallback((key: string, dirty: boolean) => {
     setDirtyTabs(prev => {
@@ -386,8 +429,11 @@ function App() {
                         const key = tabKey(tab);
                         const name = tab.type === 'prompt'
                           ? (prompts.find(p => p.id === tab.promptId && p.providerId === tab.providerId)?.name ?? tab.promptId)
-                          : tab.label;
-                        const icon = tab.type === 'trace' ? <TracesIcon /> : undefined;
+                          : tab.type === 'trace' ? tab.label
+                          : 'Welcome';
+                        const icon = tab.type === 'trace' ? <TracesIcon />
+                          : tab.type === 'welcome' ? <WelcomeIcon />
+                          : undefined;
                         return (
                           <Tab
                             key={key}
@@ -471,14 +517,19 @@ function App() {
                   >
                     {pane.tabs.length === 0 && (
                       <div className="empty-state">
-                        {panes.length === 1
-                          ? <><h2>Select a prompt to get started</h2><p>Choose a prompt from the list on the left to edit and execute it.</p></>
-                          : <p>Open a prompt or drag a tab here</p>}
+                        <img src="/favicon.svg" style={{ width: 96, height: 96, opacity: 0.18 }} />
                       </div>
                     )}
                     {pane.tabs.map(tab => {
                       const key = tabKey(tab);
                       const visible = key === pane.activeTabKey ? { display: 'contents' } : { display: 'none' };
+                      if (tab.type === 'welcome') {
+                        return (
+                          <div key={key} style={visible}>
+                            <WelcomeWizard onCreatePrompt={() => setShowAddPrompt(true)} />
+                          </div>
+                        );
+                      }
                       if (tab.type === 'prompt') {
                         const prompt = prompts.find(p => p.id === tab.promptId && p.providerId === tab.providerId) ?? null;
                         if (!prompt) return null;

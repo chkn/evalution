@@ -4,6 +4,8 @@ import type { PromptProvider } from '../prompt/prompt-provider.ts';
 import type { PromptRegistry } from '../prompt/prompt-registry.ts';
 import type { TraceProvider } from '../trace/trace-provider.ts';
 import type { ExecuteRequest, ExecuteResponse, Span, TraceStreamEvent } from '../shared/types.ts';
+import type { AiSdkChoice } from '../shared/config-template.ts';
+import { scaffoldConfigFile } from './scaffold-config.ts';
 
 export interface SetupRoutesOptions {
   fastify: FastifyInstance;
@@ -39,6 +41,19 @@ export function setupRoutes({
   fastify.get('/api/config', async () => {
     return { rootPath };
   });
+
+  // POST /api/config/create - Scaffold a starter .evalution/config.ts
+  fastify.post<{ Body: { sdk?: AiSdkChoice } }>(
+    '/api/config/create',
+    async (request, reply) => {
+      try {
+        const sdk: AiSdkChoice = request.body?.sdk === 'other' ? 'other' : 'vercel-ai-sdk';
+        return await scaffoldConfigFile(rootPath, sdk);
+      } catch (error: any) {
+        reply.code(400).send({ error: error.message });
+      }
+    }
+  );
 
   // GET /api/providers - List providers with display info
   fastify.get('/api/providers', async () => {

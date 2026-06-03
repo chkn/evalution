@@ -22,6 +22,14 @@ import type { TraceProvider } from './trace/trace-provider.ts';
  */
 export interface EvalutionConfig {
   /**
+   * Whether to load a `.env` file from the directory evalution is launched
+   * from before starting the server.
+   *
+   * @default true
+   */
+  useDotenv?: boolean;
+
+  /**
    * One or more providers that supply prompts to the playground.
    *
    * If omitted, a {@link FilePromptProvider} rooted at the current working
@@ -36,12 +44,4 @@ export interface EvalutionConfig {
    * Traces tab can still be exercised without wiring a real tracing backend.
    */
   traceProviders?: TraceProvider[];
-
-  /**
-   * Whether to load a `.env` file from the directory evalution is launched
-   * from before starting the server.
-   *
-   * @default true
-   */
-  useDotenv?: boolean;
 }

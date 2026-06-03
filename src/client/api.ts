@@ -11,6 +11,7 @@ import type {
   TraceStreamEvent,
   TraceProviderInfo,
 } from '../shared/types';
+import type { AiSdkChoice } from '../shared/config-template';
 import { encodePromptId } from './utils';
 
 function promptUrl(prompt: NormalizedPrompt, suffix: string): string {
@@ -22,6 +23,22 @@ async function throwIfError(res: Response): Promise<void> {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? `Request failed: ${res.status}`);
   }
+}
+
+/**
+ * Asks the server to scaffold a starter `.evalution/config.ts` for the given
+ * AI SDK. Rejects if a config file already exists.
+ */
+export async function createConfigFile(
+  sdk: AiSdkChoice
+): Promise<{ path: string; created: boolean }> {
+  const res = await fetch('/api/config/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sdk }),
+  });
+  await throwIfError(res);
+  return res.json();
 }
 
 export async function getPromptProviders(): Promise<PromptProviderInfo[]> {

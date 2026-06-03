@@ -943,6 +943,12 @@ code, pre {
   color: #667eea;
 }
 
+/* Waving-hand emoji used as the Welcome tab icon. */
+.welcome-tab-emoji {
+  font-size: 13px;
+  line-height: 1;
+}
+
 .tab-label {
   max-width: 120px;
   overflow: hidden;
@@ -1864,8 +1870,10 @@ code, pre {
 }
 
 .empty-state {
-  text-align: center;
-  padding: 4rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
   color: #666;
 }
 
@@ -3011,3 +3019,311 @@ code, pre {
   font-size: 12.5px;
   line-height: 1.5;
 }
+
+/* ─── Welcome / onboarding wizard ───────────────────────────────────────────── */
+
+.welcome {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 48px 24px;
+  background: var(--prompt-header-bg);
+}
+
+.welcome-card {
+  width: 100%;
+  max-width: 560px;
+  background: var(--panel-card-bg);
+  border: 1px solid var(--panel-card-border);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.welcome-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 32px 32px 24px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.welcome-logo { display: block; margin-bottom: 12px; }
+
+.welcome-header h1 {
+  margin: 0 0 20px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--panel-text);
+}
+
+.welcome-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.welcome-progress li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--panel-text-secondary);
+}
+
+.welcome-progress li + li::before {
+  content: '';
+  width: 24px;
+  height: 1px;
+  background: var(--panel-border);
+  margin-right: 2px;
+}
+
+/* A completed, returnable step renders as a button. */
+.welcome-progress-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.welcome-progress-btn:hover .welcome-progress-label { color: #667eea; text-decoration: underline; }
+
+.welcome-progress-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--panel-border);
+  font-size: 11px;
+  font-weight: 600;
+  background: #fff;
+}
+
+.welcome-progress-active .welcome-progress-dot {
+  background: #667eea;
+  border-color: #667eea;
+  color: #fff;
+}
+.welcome-progress-active .welcome-progress-label { color: var(--panel-text); font-weight: 600; }
+
+.welcome-progress-done .welcome-progress-dot {
+  background: #e8eaff;
+  border-color: #c3c9f7;
+  color: #667eea;
+}
+
+.welcome-step-body { padding: 28px 32px 32px; position: relative; }
+
+.welcome-step-body h2 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--panel-text);
+}
+
+.welcome-step-body h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--panel-text);
+}
+
+.welcome-subtitle {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--panel-text-secondary);
+}
+.welcome-subtitle code {
+  background: var(--tree-filter-bg);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 12px;
+}
+
+.welcome-field {
+  display: block;
+  margin-bottom: 14px;
+}
+.welcome-field > span {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--panel-text);
+  margin-bottom: 5px;
+}
+.welcome-field input,
+.welcome-field select {
+  width: 100%;
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  color: var(--panel-text);
+  font-size: 13px;
+  padding: 8px 10px;
+  outline: none;
+}
+.welcome-field input:focus,
+.welcome-field select:focus { border-color: #667eea; }
+
+.welcome-btn-primary {
+  width: 100%;
+  background: #667eea;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 16px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.welcome-btn-primary:hover { background: #5568d3; }
+
+.welcome-btn-secondary {
+  background: #fff;
+  color: var(--panel-text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.welcome-btn-secondary:hover:not(:disabled) { background: var(--pill-hover-bg); }
+.welcome-btn-secondary:disabled { opacity: 0.6; cursor: default; }
+
+.welcome-link {
+  background: none;
+  border: none;
+  color: #667eea;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: none;
+}
+.welcome-link:hover { text-decoration: underline; }
+
+/* "Forgot your login?" sits right-aligned just above the submit button. */
+.welcome-forgot {
+  display: block;
+  text-align: right;
+  margin: -6px 0 14px;
+}
+
+.welcome-login-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+.welcome-skip {
+  background: none;
+  border: none;
+  color: var(--panel-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+}
+.welcome-skip:hover { color: var(--panel-text); }
+
+/* ── Setup step split ── */
+
+.setup-split { display: flex; flex-direction: column; }
+
+.setup-pane { display: flex; flex-direction: column; }
+
+.setup-divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  margin: 22px 0;
+  color: var(--panel-text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.setup-divider::before,
+.setup-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--panel-border);
+}
+.setup-divider span { padding: 0 12px; }
+
+.setup-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.setup-file-status {
+  margin-top: 10px;
+  font-size: 12px;
+}
+.setup-file-created { color: #1a7f37; }
+.setup-file-error { color: #cf222e; }
+
+.setup-create-prompt { margin-top: 18px; }
+
+/* ── Copy box ── */
+
+.copy-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 8px 8px 8px 12px;
+}
+.copy-box-multiline { align-items: flex-start; }
+
+.copy-box-text {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--panel-text);
+  word-break: break-word;
+}
+.copy-box pre {
+  flex: 1;
+  margin: 0;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--panel-text);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.copy-box-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: #667eea;
+  padding: 5px;
+  cursor: pointer;
+}
+.copy-box-btn:hover { background: rgba(102, 126, 234, 0.12); }
