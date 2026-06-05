@@ -27,7 +27,7 @@ export function LoginStep({ onNext }: WizardStepProps) {
     <div className="welcome-login">
       <h2>Log in to Evalution Cloud</h2>
       <p className="welcome-subtitle">
-        Sync prompts, traces, and evals across your team — or skip and stay fully local.
+        Production traces, datasets, and eval results synced across your team —<br />or skip and stay fully local.
       </p>
 
       <form onSubmit={handleSubmit}>

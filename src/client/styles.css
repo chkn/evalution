@@ -3,6 +3,13 @@
 /* ─── Design tokens ────────────────────────────────────────────────────────── */
 
 :root {
+  /* Accent */
+  --accent: #000;
+  --accent-hover: #1a1a1a;
+  --accent-faint: rgba(0, 0, 0, 0.1);
+  --on-accent: #fff;
+  --link: #3478f6;
+
   /* Chrome / titlebar */
   --chrome-bg: #fff;
   --chrome-text: rgba(0, 0, 0, 0.45);
@@ -18,14 +25,14 @@
   --tree-selected-text: #1d1d1f;
   --tree-folder-icon: #4a9eff;
   --tree-file-icon: #86868b;
-  --tree-prompt-icon: #667eea;
+  --tree-prompt-icon: var(--accent);
   --tree-disclosure: #86868b;
   --tree-toolbar-bg: #f5f5f7;
   --tree-toolbar-border: #e0e0e2;
-  --tree-filter-bg: rgba(0, 0, 0, 0.04);
-  --tree-filter-border: #ddd;
-  --tree-filter-text: #333;
-  --tree-filter-focus-bg: #fff;
+  --input-bg: rgba(0, 0, 0, 0.04);
+  --input-border: #ddd;
+  --input-text: #333;
+  --input-focus-bg: #fff;
 
   /* Content area */
   --content-bg: #fff;
@@ -89,6 +96,13 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    /* Accent */
+    --accent: #fff;
+    --accent-hover: rgba(255, 255, 255, 0.85);
+    --accent-faint: rgba(255, 255, 255, 0.15);
+    --on-accent: #000;
+    --link: #4c9ef5;
+
     /* Chrome / titlebar */
     --chrome-bg: #000;
     --chrome-text: rgba(255, 255, 255, 0.5);
@@ -108,10 +122,10 @@
     --tree-disclosure: #9aa3b8;
     --tree-toolbar-bg: #1c1c1e;
     --tree-toolbar-border: rgba(255, 255, 255, 0.08);
-    --tree-filter-bg: rgba(255, 255, 255, 0.06);
-    --tree-filter-border: rgba(255, 255, 255, 0.1);
-    --tree-filter-text: #e5e5e7;
-    --tree-filter-focus-bg: #2c2c2e;
+    --input-bg: rgba(255, 255, 255, 0.06);
+    --input-border: rgba(255, 255, 255, 0.1);
+    --input-text: #e5e5e7;
+    --input-focus-bg: #2c2c2e;
 
     /* Content area */
     --content-bg: #292d3e;
@@ -334,10 +348,10 @@ code, pre {
 }
 
 .icon-nav-btn.active {
-  color: #667eea;
+  color: var(--accent);
   background: var(--sidebar-bg);
   border-radius: 4px 0 0 4px;
-  box-shadow: inset 0 1px 0 rgba(0,0,0,0.06), inset 0 -1px 0 rgba(0,0,0,0.04), inset 1px 0 0 #667eea;
+  box-shadow: inset 0 1px 0 rgba(0,0,0,0.06), inset 0 -1px 0 rgba(0,0,0,0.04), inset 1px 0 0 var(--accent);
   position: relative;
   z-index: 5;
 }
@@ -355,7 +369,7 @@ code, pre {
     background: rgba(255, 255, 255, 0.08);
   }
   .icon-nav-btn.active {
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 1px 0 0 rgba(255,255,255,0.07), inset 0 -1px 0 rgba(255,255,255,0.07), inset 1px 0 0 #667eea;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 1px 0 0 rgba(255,255,255,0.07), inset 0 -1px 0 rgba(255,255,255,0.07), inset 1px 0 0 var(--accent);
   }
 }
 
@@ -370,7 +384,7 @@ code, pre {
 
 .resize-handle:hover,
 .resize-handle:active {
-  background: #667eea55;
+  background: var(--accent-faint);
 }
 
 /* Section panel (sidebar content) */
@@ -415,9 +429,9 @@ code, pre {
 .tree-header-search input {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid var(--tree-filter-border);
-  background: var(--tree-filter-bg);
-  color: var(--tree-filter-text);
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--input-text);
   border-radius: 5px;
   font-size: 11.5px;
   font-family: inherit;
@@ -430,8 +444,8 @@ code, pre {
 }
 
 .tree-header-search input:focus {
-  border-color: #3478f6;
-  background: var(--tree-filter-focus-bg);
+  border-color: var(--accent);
+  background: var(--input-focus-bg);
 }
 
 .section-panel-body {
@@ -550,8 +564,8 @@ code, pre {
 }
 
 .tree-add-prompt-btn {
-  background: #3478f6;
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   border: none;
   border-radius: 5px;
   padding: 5px 14px;
@@ -560,7 +574,7 @@ code, pre {
 }
 
 .tree-add-prompt-btn:hover {
-  background: #2868e0;
+  background: var(--accent-hover);
 }
 
 /* ── Bottom toolbar (Xcode-style) ── */
@@ -599,8 +613,8 @@ code, pre {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: var(--tree-filter-bg);
-  border: 1px solid var(--tree-filter-border);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
   border-radius: 5px;
   padding: 2px 6px;
   color: var(--tree-text-secondary);
@@ -612,7 +626,7 @@ code, pre {
   border: none;
   background: none;
   font-size: 11.5px;
-  color: var(--tree-filter-text);
+  color: var(--input-text);
   outline: none;
   min-width: 0;
   padding: 1px 0;
@@ -623,14 +637,14 @@ code, pre {
 }
 
 .tree-filter:focus-within {
-  border-color: #3478f6;
-  background: var(--tree-filter-focus-bg);
+  border-color: var(--accent);
+  background: var(--input-focus-bg);
 }
 
 .tree-rename-input {
   flex: 1;
   min-width: 0;
-  border: 1px solid #3478f6;
+  border: 1px solid var(--accent);
   border-radius: 3px;
   background: var(--panel-card-bg);
   color: var(--tree-text);
@@ -639,7 +653,7 @@ code, pre {
   padding: 0 4px;
   height: 20px;
   outline: none;
-  box-shadow: 0 0 0 2px rgba(52, 120, 246, 0.25);
+  box-shadow: 0 0 0 2px var(--accent-faint);
 }
 
 /* ── Add Prompt Dialog ────────────────────────────────────────────────── */
@@ -655,12 +669,12 @@ code, pre {
 }
 
 .dialog {
-  background: #2a2a3e;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--chrome-bg);
+  border: 1px solid var(--sidebar-border);
   border-radius: 8px;
   width: 380px;
   max-width: 90vw;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
 
 .dialog-header {
@@ -668,20 +682,20 @@ code, pre {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--panel-border);
 }
 
 .dialog-header h3 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--panel-text);
 }
 
 .dialog-close {
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--panel-text-secondary);
   font-size: 18px;
   cursor: pointer;
   padding: 0 2px;
@@ -689,7 +703,7 @@ code, pre {
 }
 
 .dialog-close:hover {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--panel-text);
 }
 
 .dialog-body {
@@ -698,13 +712,13 @@ code, pre {
 
 .dialog-status {
   font-size: 12px;
-  color: #888;
+  color: var(--panel-text-secondary);
   padding: 8px 0;
 }
 
 .dialog-error {
   font-size: 12px;
-  color: #e53935;
+  color: var(--error-text);
   margin-bottom: 10px;
 }
 
@@ -715,29 +729,30 @@ code, pre {
 .dialog-field label {
   display: block;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--panel-text-secondary);
   margin-bottom: 4px;
 }
 
 .dialog-field input,
 .dialog-field select {
   width: 100%;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
   border-radius: 4px;
-  color: #fff;
+  color: var(--panel-text);
   font-size: 13px;
   padding: 6px 8px;
   outline: none;
+  font-family: inherit;
 }
 
 .dialog-field input:focus,
 .dialog-field select:focus {
-  border-color: #4c8bf5;
+  border-color: var(--accent);
 }
 
 .dialog-field input::placeholder {
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--panel-text-muted);
 }
 
 .dialog-actions {
@@ -749,30 +764,32 @@ code, pre {
 
 .dialog-btn-cancel {
   background: none;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--panel-border);
   border-radius: 4px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--panel-text-secondary);
   font-size: 12px;
   padding: 6px 14px;
   cursor: pointer;
+  font-family: inherit;
 }
 
 .dialog-btn-cancel:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--pill-hover-bg);
 }
 
 .dialog-btn-create {
-  background: #4c8bf5;
+  background: var(--accent);
   border: none;
   border-radius: 4px;
-  color: #fff;
+  color: var(--on-accent);
   font-size: 12px;
   padding: 6px 14px;
   cursor: pointer;
+  font-family: inherit;
 }
 
 .dialog-btn-create:hover {
-  background: #3a7be0;
+  background: var(--accent-hover);
 }
 
 .dialog-providers {
@@ -786,22 +803,23 @@ code, pre {
   align-items: center;
   gap: 10px;
   width: 100%;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--input-bg);
+  border: 1px solid var(--panel-border);
   border-radius: 6px;
   padding: 10px 12px;
-  color: #fff;
+  color: var(--panel-text);
   cursor: pointer;
   text-align: left;
+  font-family: inherit;
 }
 
 .dialog-provider-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--tree-hover);
 }
 
 .dialog-provider-icon {
   flex-shrink: 0;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--panel-text-secondary);
 }
 
 .dialog-provider-name {
@@ -811,7 +829,7 @@ code, pre {
 
 .dialog-provider-desc {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--panel-text-secondary);
   margin-top: 2px;
 }
 
@@ -855,7 +873,7 @@ code, pre {
   align-self: stretch;
   transition: background 0.15s;
 }
-.pane-resize-divider:hover { background: #667eea55; }
+.pane-resize-divider:hover { background: var(--accent-faint); }
 
 .tab-split-btn {
   /* absolutely positioned so it doesn't consume width in the tab bar */
@@ -875,8 +893,14 @@ code, pre {
   transition: color 0.15s, background 0.15s;
 }
 .tab-split-btn:hover {
-  color: rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.08);
+  color: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.08);
+}
+@media (prefers-color-scheme: dark) {
+  .tab-split-btn:hover {
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.08);
+  }
 }
 
 /* ─── Tabs ─────────────────────────────────────────────────────────────────── */
@@ -928,7 +952,7 @@ code, pre {
 .tab.tab-active {
   background: var(--prompt-header-bg);
   color: var(--prompt-header-text);
-  border-top: 1px solid #667eea;
+  border-top: 1px solid var(--accent);
   z-index: 2;
 }
 
@@ -940,7 +964,7 @@ code, pre {
 
 .tab.tab-active .tab-icon {
   opacity: 1;
-  color: #667eea;
+  color: var(--accent);
 }
 
 /* Waving-hand emoji used as the Welcome tab icon. */
@@ -1513,7 +1537,7 @@ code, pre {
 
 .pg-custom-model-row input:focus,
 .pg-custom-gateway-row input:focus {
-  border-color: #a5b4fc;
+  border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(165,180,252,0.25);
 }
 
@@ -1997,13 +2021,13 @@ code, pre {
 }
 
 .parameter-editor textarea.has-tokens {
-  border-color: #667eea;
+  border-color: var(--accent);
   background: #f0f4ff;
 }
 
 .token-indicator {
   font-size: 0.8rem;
-  color: #667eea;
+  color: var(--accent);
   font-weight: normal;
 }
 
@@ -2067,8 +2091,8 @@ code, pre {
 }
 
 .mode-tabs button.active {
-  border-bottom-color: #667eea;
-  color: #667eea;
+  border-bottom-color: var(--accent);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -2099,8 +2123,8 @@ code, pre {
 
 .selection-content button {
   padding: 0.5rem 1rem;
-  background: #667eea;
-  color: white;
+  background: var(--accent);
+  color: var(--on-accent);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -2108,7 +2132,7 @@ code, pre {
 }
 
 .selection-content button:hover {
-  background: #5568d3;
+  background: var(--accent-hover);
 }
 
 .format-toggle {
@@ -2135,8 +2159,8 @@ code, pre {
 
 .add-button {
   padding: 0.5rem 1rem;
-  background: #667eea;
-  color: white;
+  background: var(--accent);
+  color: var(--on-accent);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -2255,8 +2279,8 @@ code, pre {
 
 .execute-button {
   padding: 0.75rem 1.5rem;
-  background: #667eea;
-  color: white;
+  background: var(--accent);
+  color: var(--on-accent);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -2265,7 +2289,7 @@ code, pre {
 }
 
 .execute-button:hover:not(:disabled) {
-  background: #5568d3;
+  background: var(--accent-hover);
 }
 
 .execute-button:disabled {
@@ -2310,7 +2334,7 @@ code, pre {
 }
 
 .spinner {
-  color: #667eea;
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -2526,7 +2550,7 @@ code, pre {
 .pg-tool-name-input {
   width: 30%;
   min-width: 80px;
-  color: #667eea;
+  color: var(--accent);
   font-weight: 600;
   border-right: 1px solid var(--tool-call-border);
   padding-right: 10px;
@@ -3098,7 +3122,7 @@ code, pre {
   color: inherit;
   cursor: pointer;
 }
-.welcome-progress-btn:hover .welcome-progress-label { color: #667eea; text-decoration: underline; }
+.welcome-progress-btn:hover .welcome-progress-label { color: var(--link); text-decoration: underline; }
 
 .welcome-progress-dot {
   display: inline-flex;
@@ -3114,16 +3138,16 @@ code, pre {
 }
 
 .welcome-progress-active .welcome-progress-dot {
-  background: #667eea;
-  border-color: #667eea;
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
 }
 .welcome-progress-active .welcome-progress-label { color: var(--panel-text); font-weight: 600; }
 
 .welcome-progress-done .welcome-progress-dot {
-  background: #e8eaff;
-  border-color: #c3c9f7;
-  color: #667eea;
+  background: #d6f5e3;
+  border-color: #a3dfc0;
+  color: #1a7f4b;
 }
 
 .welcome-step-body { padding: 28px 32px 32px; position: relative; }
@@ -3149,7 +3173,7 @@ code, pre {
   color: var(--panel-text-secondary);
 }
 .welcome-subtitle code {
-  background: var(--tree-filter-bg);
+  background: var(--input-bg);
   border-radius: 3px;
   padding: 1px 5px;
   font-size: 12px;
@@ -3179,12 +3203,12 @@ code, pre {
   outline: none;
 }
 .welcome-field input:focus,
-.welcome-field select:focus { border-color: #667eea; }
+.welcome-field select:focus { border-color: var(--accent); }
 
 .welcome-btn-primary {
   width: 100%;
-  background: #667eea;
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   border: none;
   border-radius: 6px;
   font-size: 13px;
@@ -3193,7 +3217,7 @@ code, pre {
   cursor: pointer;
   margin-top: 4px;
 }
-.welcome-btn-primary:hover { background: #5568d3; }
+.welcome-btn-primary:hover { background: var(--accent-hover); }
 
 .welcome-btn-secondary {
   background: #fff;
@@ -3211,7 +3235,7 @@ code, pre {
 .welcome-link {
   background: none;
   border: none;
-  color: #667eea;
+  color: var(--link);
   font-size: 12px;
   cursor: pointer;
   padding: 0;
@@ -3322,8 +3346,8 @@ code, pre {
   background: none;
   border: none;
   border-radius: 5px;
-  color: #667eea;
+  color: var(--link);
   padding: 5px;
   cursor: pointer;
 }
-.copy-box-btn:hover { background: rgba(102, 126, 234, 0.12); }
+.copy-box-btn:hover { background: rgba(52, 120, 246, 0.12); }
