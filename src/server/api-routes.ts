@@ -1,18 +1,20 @@
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import { SpanStatusCode, type Tracer } from '@opentelemetry/api';
 import type { PromptProvider } from '../prompt/prompt-provider.ts';
 import type { PromptRegistry } from '../prompt/prompt-registry.ts';
 import type { TraceProvider } from '../trace/trace-provider.ts';
-import type { ExecuteRequest, ExecuteResponse, Span, TraceStreamEvent } from '../shared/types.ts';
+import type { ExecuteRequest, ExecuteResponse, SSEData, Span, TraceStreamEvent } from '../shared/types.ts';
 import type { AiSdkChoice } from '../shared/config-template.ts';
 import { scaffoldConfigFile } from './scaffold-config.ts';
 
 export interface SetupRoutesOptions {
-  fastify: FastifyInstance;
+  app: Hono;
   promptProviders: Map<string, PromptProvider>;
   traceProviders: Map<string, TraceProvider>;
   promptRegistry: PromptRegistry;
-  sseClients: Set<FastifyReply>;
+  /** Registry of hot-reload SSE writers; each `/api/events` client adds one. */
+  hotReloadSubscribers: Set<(data: SSEData) => void>;
   rootPath: string;
   /** Whether the server was started with a project config file loaded. */
   hasConfig: boolean;
@@ -21,11 +23,11 @@ export interface SetupRoutesOptions {
 }
 
 export function setupRoutes({
-  fastify,
+  app,
   promptProviders,
   traceProviders,
   promptRegistry,
-  sseClients,
+  hotReloadSubscribers,
   rootPath,
   hasConfig,
   tracer,
@@ -40,88 +42,78 @@ export function setupRoutes({
     if (!resolved) return span;
     return { ...span, prompt: { id: resolved.promptId, providerId: resolved.providerId } };
   };
+
   // GET /api/config - Get server configuration
-  fastify.get('/api/config', async () => {
-    return { rootPath, configured: hasConfig };
-  });
+  app.get('/api/config', (c) => c.json({ rootPath, configured: hasConfig }));
 
   // POST /api/config/create - Scaffold a starter .evalution/config.ts
-  fastify.post<{ Body: { sdk?: AiSdkChoice } }>(
-    '/api/config/create',
-    async (request, reply) => {
-      try {
-        const sdk: AiSdkChoice = request.body?.sdk === 'other' ? 'other' : 'vercel-ai-sdk';
-        return await scaffoldConfigFile(rootPath, sdk);
-      } catch (error: any) {
-        reply.code(400).send({ error: error.message });
-      }
+  app.post('/api/config/create', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const sdk: AiSdkChoice = body?.sdk === 'other' ? 'other' : 'vercel-ai-sdk';
+      return c.json(await scaffoldConfigFile(rootPath, sdk));
+    } catch (error: any) {
+      return c.json({ error: error.message }, 400);
     }
-  );
-
-  // GET /api/providers - List providers with display info
-  fastify.get('/api/providers', async () => {
-    return Array.from(promptProviders.entries()).map(([id, provider]) => ({
-      id,
-      displayName: provider.displayName,
-      description: provider.description,
-      icon: provider.icon,
-      hasAddPrompt: !!provider.addPrompt,
-    }));
   });
 
-  // POST /api/providers/:providerId/add-prompt - Create a new prompt
-  fastify.post<{ Params: { providerId: string }; Body: Record<string, any> }>(
-    '/api/providers/:providerId/add-prompt',
-    async (request, reply) => {
-      try {
-        const { providerId } = request.params;
-        const provider = promptProviders.get(providerId);
-        if (!provider) {
-          return reply.code(404).send({ error: 'Provider not found' });
-        }
-        if (!provider.addPrompt) {
-          return reply.code(405).send({ error: 'This provider does not support adding prompts' });
-        }
-        const result = await provider.addPrompt(request.body);
-        // Distinguish created prompt (has `id`) from context (has `fields`)
-        if ('fields' in result) {
-          return result;
-        }
-        return { ...result, providerId };
-      } catch (error: any) {
-        reply.code(400).send({ error: error.message });
-      }
-    }
+  // GET /api/providers - List providers with display info
+  app.get('/api/providers', (c) =>
+    c.json(
+      Array.from(promptProviders.entries()).map(([id, provider]) => ({
+        id,
+        displayName: provider.displayName,
+        description: provider.description,
+        icon: provider.icon,
+        hasAddPrompt: !!provider.addPrompt,
+      }))
+    )
   );
+
+  // POST /api/providers/:providerId/add-prompt - Create a new prompt
+  app.post('/api/providers/:providerId/add-prompt', async (c) => {
+    try {
+      const { providerId } = c.req.param();
+      const provider = promptProviders.get(providerId);
+      if (!provider) {
+        return c.json({ error: 'Provider not found' }, 404);
+      }
+      if (!provider.addPrompt) {
+        return c.json({ error: 'This provider does not support adding prompts' }, 405);
+      }
+      const result = await provider.addPrompt(await c.req.json());
+      // Distinguish created prompt (has `id`) from context (has `fields`)
+      if ('fields' in result) {
+        return c.json(result);
+      }
+      return c.json({ ...result, providerId });
+    } catch (error: any) {
+      return c.json({ error: error.message }, 400);
+    }
+  });
 
   // GET /api/providers/:providerId/models
-  fastify.get<{ Params: { providerId: string } }>(
-    '/api/providers/:providerId/models',
-    async (request, reply) => {
-      const { providerId } = request.params;
-      const provider = promptProviders.get(providerId);
-      if (!provider) {
-        return reply.code(404).send({ error: 'Provider not found' });
-      }
-      return (await provider.getModelCatalog?.()) ?? { providers: {} };
+  app.get('/api/providers/:providerId/models', async (c) => {
+    const { providerId } = c.req.param();
+    const provider = promptProviders.get(providerId);
+    if (!provider) {
+      return c.json({ error: 'Provider not found' }, 404);
     }
-  );
+    return c.json((await provider.getModelCatalog?.()) ?? { providers: {} });
+  });
 
   // GET /api/providers/:providerId/model-parameters
-  fastify.get<{ Params: { providerId: string } }>(
-    '/api/providers/:providerId/model-parameters',
-    async (request, reply) => {
-      const { providerId } = request.params;
-      const provider = promptProviders.get(providerId);
-      if (!provider) {
-        return reply.code(404).send({ error: 'Provider not found' });
-      }
-      return provider.getModelParameters?.() ?? [];
+  app.get('/api/providers/:providerId/model-parameters', async (c) => {
+    const { providerId } = c.req.param();
+    const provider = promptProviders.get(providerId);
+    if (!provider) {
+      return c.json({ error: 'Provider not found' }, 404);
     }
-  );
+    return c.json(provider.getModelParameters?.() ?? []);
+  });
 
   // GET /api/prompts - Get all prompts from all providers
-  fastify.get('/api/prompts', async (request, reply) => {
+  app.get('/api/prompts', async (c) => {
     try {
       const results = await Promise.all(
         Array.from(promptProviders.entries()).map(async ([providerId, provider]) => {
@@ -129,204 +121,187 @@ export function setupRoutes({
           return prompts.map(prompt => ({ ...prompt, providerId }));
         })
       );
-      return results.flat();
+      return c.json(results.flat());
     } catch (error: any) {
-      reply.code(500).send({ error: error.message });
+      return c.json({ error: error.message }, 500);
     }
   });
 
   // GET /api/prompts/:providerId/:id - Get specific prompt
-  fastify.get<{ Params: { providerId: string; id: string } }>(
-    '/api/prompts/:providerId/:id',
-    async (request, reply) => {
-      try {
-        const { providerId, id } = request.params;
-        const provider = promptProviders.get(providerId);
-        if (!provider) {
-          return reply.code(404).send({ error: 'Provider not found' });
-        }
-
-        const decodedId = Buffer.from(id, 'base64url').toString('utf8');
-        const prompt = await provider.getPrompt(decodedId);
-        if (!prompt) {
-          return reply.code(404).send({ error: 'Prompt not found' });
-        }
-
-        return { ...prompt, providerId };
-      } catch (error: any) {
-        reply.code(500).send({ error: error.message });
+  app.get('/api/prompts/:providerId/:id', async (c) => {
+    try {
+      const { providerId, id } = c.req.param();
+      const provider = promptProviders.get(providerId);
+      if (!provider) {
+        return c.json({ error: 'Provider not found' }, 404);
       }
+
+      const decodedId = Buffer.from(id, 'base64url').toString('utf8');
+      const prompt = await provider.getPrompt(decodedId);
+      if (!prompt) {
+        return c.json({ error: 'Prompt not found' }, 404);
+      }
+
+      return c.json({ ...prompt, providerId });
+    } catch (error: any) {
+      return c.json({ error: error.message }, 500);
     }
-  );
+  });
 
   // POST /api/prompts/:providerId/:id/rename - Rename a prompt
-  fastify.post<{ Params: { providerId: string; id: string }; Body: { newName: string } }>(
-    '/api/prompts/:providerId/:id/rename',
-    async (request, reply) => {
-      try {
-        const { providerId, id } = request.params;
-        const { newName } = request.body;
-        const provider = promptProviders.get(providerId);
-        if (!provider) return reply.code(404).send({ error: 'Provider not found' });
-        if (!provider.renamePrompt) return reply.code(405).send({ error: 'This provider does not support renaming' });
-        const decodedId = Buffer.from(id, 'base64url').toString('utf8');
-        const updatedPrompt = await provider.renamePrompt(decodedId, newName);
-        return { ...updatedPrompt, providerId };
-      } catch (error: any) {
-        reply.code(400).send({ error: error.message });
-      }
+  app.post('/api/prompts/:providerId/:id/rename', async (c) => {
+    try {
+      const { providerId, id } = c.req.param();
+      const { newName } = await c.req.json();
+      const provider = promptProviders.get(providerId);
+      if (!provider) return c.json({ error: 'Provider not found' }, 404);
+      if (!provider.renamePrompt) return c.json({ error: 'This provider does not support renaming' }, 405);
+      const decodedId = Buffer.from(id, 'base64url').toString('utf8');
+      const updatedPrompt = await provider.renamePrompt(decodedId, newName);
+      return c.json({ ...updatedPrompt, providerId });
+    } catch (error: any) {
+      return c.json({ error: error.message }, 400);
     }
-  );
+  });
 
   // POST /api/prompts/:providerId/:id/update - Update prompt properties
-  fastify.post<{ Params: { providerId: string; id: string }; Body: Record<string, any> }>(
-    '/api/prompts/:providerId/:id/update',
-    async (request, reply) => {
-      try {
-        const { providerId, id } = request.params;
-        const provider = promptProviders.get(providerId);
-        if (!provider) {
-          return reply.code(404).send({ error: 'Provider not found' });
-        }
-
-        if (!provider.updatePromptProperties) {
-          return reply.code(405).send({ error: 'This provider does not support editing' });
-        }
-
-        const decodedId = Buffer.from(id, 'base64url').toString('utf8');
-        const updatedPrompt = await provider.updatePromptProperties(decodedId, request.body);
-        return { ...updatedPrompt, providerId };
-      } catch (error: any) {
-        reply.code(400).send({ error: error.message });
+  app.post('/api/prompts/:providerId/:id/update', async (c) => {
+    try {
+      const { providerId, id } = c.req.param();
+      const provider = promptProviders.get(providerId);
+      if (!provider) {
+        return c.json({ error: 'Provider not found' }, 404);
       }
+
+      if (!provider.updatePromptProperties) {
+        return c.json({ error: 'This provider does not support editing' }, 405);
+      }
+
+      const decodedId = Buffer.from(id, 'base64url').toString('utf8');
+      const updatedPrompt = await provider.updatePromptProperties(decodedId, await c.req.json());
+      return c.json({ ...updatedPrompt, providerId });
+    } catch (error: any) {
+      return c.json({ error: error.message }, 400);
     }
-  );
+  });
 
   // POST /api/prompts/:providerId/:id/execute - Execute prompt
   //
   // Returns immediately with a trace reference. The actual execution runs in
   // the background; clients subscribe to
   // `/api/traces/:providerId/:traceId/events` for span-level updates.
-  fastify.post<{ Params: { providerId: string; id: string }; Body: ExecuteRequest }>(
-    '/api/prompts/:providerId/:id/execute',
-    async (request, reply) => {
-      try {
-        const { providerId, id } = request.params;
-        const provider = promptProviders.get(providerId);
-        if (!provider) {
-          return reply.code(404).send({ error: 'Provider not found' });
-        }
-
-        const decodedId = Buffer.from(id, 'base64url').toString('utf8');
-        const { functionParams = [] } = request.body;
-
-        const prompt = await provider.getPrompt(decodedId);
-        if (!prompt) {
-          return reply.code(404).send({ error: 'Prompt not found' });
-        }
-
-        return tracer.startActiveSpan(
-          `Playground: ${prompt.name}`,
-          span => {
-            const { traceId } = span.spanContext();
-
-            // Fire-and-forget the real execution; the root span is closed
-            // when it settles. Child spans emitted via the active context
-            // will be parented correctly.
-            provider
-              .execute(decodedId, functionParams, false)
-              .then(
-                () => {
-                  span.setStatus({ code: SpanStatusCode.OK });
-                },
-                (err: any) => {
-                  fastify.log.error({ err }, 'prompt execution failed');
-                  span.recordException(err);
-                  span.setStatus({
-                    code: SpanStatusCode.ERROR,
-                    message: err?.error ? JSON.stringify(err.error, null, 2) : err?.message ?? String(err),
-                  });
-                }
-              )
-              .finally(() => {
-                span.end();
-              });
-
-            return {
-              traceId,
-              tracerProviderId: defaultTraceProviderId,
-              rootSpanId: span.spanContext().spanId,
-            } satisfies ExecuteResponse;
-          }
-        );
-      } catch (error: any) {
-        if (!reply.sent) {
-          reply.code(500).send({ error: error.message });
-        }
+  app.post('/api/prompts/:providerId/:id/execute', async (c) => {
+    try {
+      const { providerId, id } = c.req.param();
+      const provider = promptProviders.get(providerId);
+      if (!provider) {
+        return c.json({ error: 'Provider not found' }, 404);
       }
-    }
-  );
 
-  // GET /api/trace-providers - List trace providers
-  fastify.get('/api/trace-providers', async () => {
-    return Array.from(traceProviders.entries()).map(([id, provider]) => ({
-      id,
-      displayName: provider.displayName,
-      description: provider.description,
-    }));
+      const decodedId = Buffer.from(id, 'base64url').toString('utf8');
+      const { functionParams = [] } = (await c.req.json().catch(() => ({}))) as ExecuteRequest;
+
+      const prompt = await provider.getPrompt(decodedId);
+      if (!prompt) {
+        return c.json({ error: 'Prompt not found' }, 404);
+      }
+
+      const response = tracer.startActiveSpan(
+        `Playground: ${prompt.name}`,
+        span => {
+          const { traceId } = span.spanContext();
+
+          // Fire-and-forget the real execution; the root span is closed
+          // when it settles. Child spans emitted via the active context
+          // will be parented correctly.
+          provider
+            .execute(decodedId, functionParams, false)
+            .then(
+              () => {
+                span.setStatus({ code: SpanStatusCode.OK });
+              },
+              (err: any) => {
+                console.error('prompt execution failed:', err);
+                span.recordException(err);
+                span.setStatus({
+                  code: SpanStatusCode.ERROR,
+                  message: err?.error ? JSON.stringify(err.error, null, 2) : err?.message ?? String(err),
+                });
+              }
+            )
+            .finally(() => {
+              span.end();
+            });
+
+          return {
+            traceId,
+            tracerProviderId: defaultTraceProviderId,
+            rootSpanId: span.spanContext().spanId,
+          } satisfies ExecuteResponse;
+        }
+      );
+
+      return c.json(response);
+    } catch (error: any) {
+      return c.json({ error: error.message }, 500);
+    }
   });
 
+  // GET /api/trace-providers - List trace providers
+  app.get('/api/trace-providers', (c) =>
+    c.json(
+      Array.from(traceProviders.entries()).map(([id, provider]) => ({
+        id,
+        displayName: provider.displayName,
+        description: provider.description,
+      }))
+    )
+  );
+
   // GET /api/traces - List all traces across all trace providers
-  fastify.get('/api/traces', async (request, reply) => {
+  app.get('/api/traces', async (c) => {
     try {
       const results = await Promise.all(
         Array.from(traceProviders.values()).map((p) => p.getAllTraces())
       );
-      return results.flat();
+      return c.json(results.flat());
     } catch (error: any) {
-      reply.code(500).send({ error: error.message });
+      return c.json({ error: error.message }, 500);
     }
   });
 
   // GET /api/traces/:providerId/:id - Fetch a trace together with its spans
-  fastify.get<{ Params: { providerId: string; id: string } }>(
-    '/api/traces/:providerId/:id',
-    async (request, reply) => {
-      const { providerId, id } = request.params;
-      const tracer = traceProviders.get(providerId);
-      if (!tracer) {
-        return reply.code(404).send({ error: 'Trace provider not found' });
-      }
-      const trace = await tracer.getTrace(id);
-      if (!trace) {
-        return reply.code(404).send({ error: 'Trace not found' });
-      }
-      return { ...trace, spans: trace.spans.map(resolveSpanPrompt) };
+  app.get('/api/traces/:providerId/:id', async (c) => {
+    const { providerId, id } = c.req.param();
+    const provider = traceProviders.get(providerId);
+    if (!provider) {
+      return c.json({ error: 'Trace provider not found' }, 404);
     }
-  );
+    const trace = await provider.getTrace(id);
+    if (!trace) {
+      return c.json({ error: 'Trace not found' }, 404);
+    }
+    return c.json({ ...trace, spans: trace.spans.map(resolveSpanPrompt) });
+  });
 
   // GET /api/traces/:providerId/:id/events - SSE stream of trace updates
-  fastify.get<{ Params: { providerId: string; id: string } }>(
-    '/api/traces/:providerId/:id/events',
-    async (request, reply) => {
-      const { providerId, id } = request.params;
-      const tracer = traceProviders.get(providerId);
-      if (!tracer) {
-        return reply.code(404).send({ error: 'Trace provider not found' });
-      }
+  app.get('/api/traces/:providerId/:id/events', (c) => {
+    const { providerId, id } = c.req.param();
+    const provider = traceProviders.get(providerId);
+    if (!provider) {
+      return c.json({ error: 'Trace provider not found' }, 404);
+    }
 
-      reply.raw.setHeader('Content-Type', 'text/event-stream');
-      reply.raw.setHeader('Cache-Control', 'no-cache');
-      reply.raw.setHeader('Connection', 'keep-alive');
-      reply.raw.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+    // Resolve a stream event's span (if any) back to a concrete prompt.
+    const resolveEvent = (event: TraceStreamEvent): TraceStreamEvent =>
+      'span' in event ? { ...event, span: resolveSpanPrompt(event.span) } : event;
 
-      // Resolve a stream event's span (if any) back to a concrete prompt.
-      const resolveEvent = (event: TraceStreamEvent): TraceStreamEvent =>
-        'span' in event ? { ...event, span: resolveSpanPrompt(event.span) } : event;
+    return streamSSE(c, async (stream) => {
+      await stream.writeSSE({ data: JSON.stringify({ type: 'connected' }) });
 
       // Replay existing state so late subscribers aren't stuck waiting for the
       // next event before they can render anything.
-      const existing = await tracer.getTrace(id);
+      const existing = await provider.getTrace(id);
       if (existing) {
         for (const span of existing.spans) {
           const resolved = resolveSpanPrompt(span);
@@ -334,32 +309,31 @@ export function setupRoutes({
             resolved.endTime === undefined
               ? { type: 'span-start', span: resolved }
               : { type: 'span-end', span: resolved };
-          reply.raw.write(`data: ${JSON.stringify(initial)}\n\n`);
+          await stream.writeSSE({ data: JSON.stringify(initial) });
         }
       }
 
-      const unsubscribe = tracer.subscribeTrace(id, (event) => {
-        if (reply.raw.destroyed) return;
-        reply.raw.write(`data: ${JSON.stringify(resolveEvent(event))}\n\n`);
+      const unsubscribe = provider.subscribeTrace(id, (event) => {
+        void stream.writeSSE({ data: JSON.stringify(resolveEvent(event)) });
       });
 
-      request.raw.on('close', () => {
-        unsubscribe();
+      await new Promise<void>((resolve) => {
+        stream.onAbort(() => { unsubscribe(); resolve(); });
       });
-    }
-  );
-
-  // GET /api/events - Server-Sent Events for hot reload
-  fastify.get('/api/events', async (request, reply) => {
-    reply.raw.setHeader('Content-Type', 'text/event-stream');
-    reply.raw.setHeader('Cache-Control', 'no-cache');
-    reply.raw.setHeader('Connection', 'keep-alive');
-
-    sseClients.add(reply);
-    reply.raw.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
-
-    request.raw.on('close', () => {
-      sseClients.delete(reply);
     });
   });
+
+  // GET /api/events - Server-Sent Events for hot reload
+  app.get('/api/events', (c) =>
+    streamSSE(c, async (stream) => {
+      await stream.writeSSE({ data: JSON.stringify({ type: 'connected' }) });
+
+      const send = (data: SSEData) => { void stream.writeSSE({ data: JSON.stringify(data) }); };
+      hotReloadSubscribers.add(send);
+
+      await new Promise<void>((resolve) => {
+        stream.onAbort(() => { hotReloadSubscribers.delete(send); resolve(); });
+      });
+    })
+  );
 }

@@ -44,8 +44,8 @@ async function makeFixture(withHook: boolean): Promise<{ runner: string; cwd: st
 
   const anchor = pathToFileURL(path.join(pkgDir, 'index.js')).href;
   const register = withHook
-    ? `import module from 'node:module';\n` +
-      `module.register(${JSON.stringify(hookUrl)}, import.meta.url, { data: { parentURL: ${JSON.stringify(anchor)} } });\n`
+    ? `import { registerEvalutionResolver } from ${JSON.stringify(hookUrl)};\n` +
+      `registerEvalutionResolver(${JSON.stringify(anchor)});\n`
     : '';
 
   const runner = path.join(root, 'runner.mjs');

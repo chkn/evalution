@@ -1,5 +1,6 @@
-import Fastify, { type FastifyReply } from 'fastify';
-import fastifyStatic from '@fastify/static';
+import { Hono } from 'hono';
+import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
 import { context, trace, type Tracer } from '@opentelemetry/api';
 import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
@@ -7,13 +8,9 @@ import type { PromptProvider } from '../prompt/prompt-provider.ts';
 import type { TraceProvider } from '../trace/trace-provider.ts';
 import { PromptRegistry } from '../prompt/prompt-registry.ts';
 import { setupRoutes } from './api-routes.ts';
-import path from 'path';
 import { fileURLToPath } from 'url';
 import type { SSEData } from '../shared/types.ts';
 import { MemoryTraceProvider } from '../trace/memory-trace-provider.ts';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 export interface ServerOptions {
   promptProviders: PromptProvider[];
@@ -24,7 +21,17 @@ export interface ServerOptions {
   hasConfig: boolean;
 }
 
-export async function startServer(options: ServerOptions) {
+/** A running server, returned by {@link startServer}. */
+export interface ServerHandle {
+  /**
+   * Stops the server, force-closing any open connections (including live SSE
+   * streams) so it shuts down promptly instead of waiting on them. Used by the
+   * CLI to restart cleanly once a config file appears.
+   */
+  close: () => Promise<void>;
+}
+
+export async function startServer(options: ServerOptions): Promise<ServerHandle> {
   const { promptProviders, traceProviders, port, rootPath, hasConfig } = options;
 
   const promptProviderMap = new Map(promptProviders.map(p => [p.id, p]));
@@ -61,44 +68,33 @@ export async function startServer(options: ServerOptions) {
     throw new Error('At least one trace provider must be configured');
   }
 
-  const fastify = Fastify({
-    logger: {
-      level: 'info',
-    },
-    maxParamLength: 1024,
-  });
+  const app = new Hono();
 
-  // Track SSE clients
-  const sseClients = new Set<FastifyReply>();
+  // Hot-reload SSE subscribers. Each `/api/events` connection registers a
+  // writer here; `broadcast` fans an event out to all of them.
+  const hotReloadSubscribers = new Set<(data: SSEData) => void>();
+  const broadcast = (data: SSEData) => {
+    for (const send of hotReloadSubscribers) send(data);
+  };
 
   // Setup API routes
   setupRoutes({
-    fastify,
+    app,
     promptProviders: promptProviderMap,
     traceProviders: traceProviderMap,
     promptRegistry,
-    sseClients,
+    hotReloadSubscribers,
     rootPath,
     hasConfig,
     tracer,
     defaultTraceProviderId,
   });
 
-  // Serve static client files
-  const clientPath = path.join(__dirname, '..', 'client');
-  fastify.register(fastifyStatic, {
-    root: clientPath,
-    prefix: '/',
-  });
-
-  const broadcast = (data: SSEData) => {
-    const message = `data: ${JSON.stringify(data)}\n\n`;
-    sseClients.forEach((reply) => {
-      if (!reply.raw.destroyed) {
-        reply.raw.write(message);
-      }
-    });
-  };
+  // Serve the built client. `serveStatic`'s root is resolved against
+  // `process.cwd()`, which the CLI changes to the user's project, so anchor it
+  // to this module instead. Registered as a catch-all after the API routes.
+  const clientRoot = fileURLToPath(new URL('../client/', import.meta.url));
+  app.get('*', serveStatic({ root: clientRoot }));
 
   // Setup file watching for all providers that support it
   for (const [providerId, provider] of promptProviderMap) {
@@ -121,28 +117,33 @@ export async function startServer(options: ServerOptions) {
   }
 
   // Start server
-  try {
-    await fastify.listen({ port, host: '0.0.0.0' });
+  const server = serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, () => {
     if (process.env.NODE_ENV === 'production') {
       console.log(`\n✨ Evalution is running at http://localhost:${port}\n`);
     } else {
       console.log(`\n✨ Evalution API server running on http://localhost:${port}`);
       console.log(`   Frontend dev server: http://localhost:5173\n`);
     }
-  } catch (err) {
-    fastify.log.error(err);
-    process.exit(1);
-  }
+  });
+
+  const close = (): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      // Drop open connections (notably long-lived SSE streams) up front, or
+      // `close` would wait on them forever. (`closeAllConnections` exists on
+      // the Node HTTP server but isn't in the union's Http2 arm.)
+      (server as { closeAllConnections?: () => void }).closeAllConnections?.();
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
 
   // Graceful shutdown
   const shutdown = async () => {
     console.log('\n\nShutting down gracefully...');
-    await fastify.close();
+    await close();
     process.exit(0);
   };
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  return fastify;
+  return { close };
 }

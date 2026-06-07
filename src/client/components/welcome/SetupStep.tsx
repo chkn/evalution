@@ -15,7 +15,7 @@ const AGENT_SETUP_URL = 'https://evalut.io/n/docs/setup.md';
 type FileState =
   | { status: 'idle' }
   | { status: 'creating' }
-  | { status: 'created'; message: string }
+  | { status: 'created' }
   | { status: 'error'; message: string };
 
 /**
@@ -34,7 +34,7 @@ export function SetupStep() {
     setFile({ status: 'creating' });
     try {
       const { path } = await createConfigFile(sdk);
-      setFile({ status: 'created', message: `Created ${path}` });
+      setFile({ status: 'created' });
     } catch (e: any) {
       setFile({ status: 'error', message: e.message });
     }
@@ -46,7 +46,7 @@ export function SetupStep() {
       <section className="setup-pane">
         <h3>Set up with a coding agent</h3>
         <p className="welcome-subtitle">
-          Paste this into your coding agent and let it wire up Evalution for you:
+          Paste this prompt into your coding agent and let it wire up Evalution for you:
         </p>
         <CopyBox text={`Follow the guide at ${AGENT_SETUP_URL} to set up Evalution.`}>
           Follow the guide at{' '}
@@ -82,9 +82,9 @@ export function SetupStep() {
             type="button"
             className="welcome-btn-secondary"
             onClick={handleCreateFile}
-            disabled={file.status === 'creating'}
+            disabled={file.status === 'creating' || file.status === 'created'}
           >
-            {file.status === 'creating' ? 'Creating…' : 'Create the file for me'}
+            {file.status === 'creating' || file.status === 'created' ? 'Creating…' : 'Create the file for me'}
           </button>
           <a className="welcome-link" href={CONFIG_DOCS_URL} target="_blank" rel="noreferrer">
             Config docs ↗

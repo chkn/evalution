@@ -1,19 +1,17 @@
 import path from 'path';
 import fs from 'fs/promises';
-import module from 'node:module';
 import { pathToFileURL } from 'url';
 import type { EvalutionConfig } from '../config.ts';
 import { MemoryTraceProvider } from '../trace/memory-trace-provider.ts';
 import { startServer } from '../server/index.ts';
 import { watchForConfigCreation } from './config-watcher.ts';
+import { registerEvalutionResolver } from './config-loader-hooks.ts';
 
 // Make a project's config resolve `import ... from 'evalution'` against this
 // CLI rather than the project's node_modules, so configs load even when
 // evalution is run via `npx` with no local install. Registered once, up front,
 // before any config import happens.
-module.register('./config-loader-hooks.ts', import.meta.url, {
-  data: { parentURL: import.meta.url },
-});
+registerEvalutionResolver(import.meta.url);
 
 async function findRootDir(startDir: string): Promise<{ rootDir: string; hasConfig: boolean }> {
   let dir = startDir;

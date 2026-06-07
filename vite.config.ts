@@ -16,7 +16,16 @@ export default defineConfig({
       '^/api/': {
         target: 'http://localhost:3000',
         changeOrigin: true,
-      },
+        configure: (proxy, options) => {
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            proxyRes.on('close', () => {
+              if (!res.writableEnded) {
+                res.destroy();
+              }
+            });
+          });
+        },
+      }
     },
   },
   resolve: {

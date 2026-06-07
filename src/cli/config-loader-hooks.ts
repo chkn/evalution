@@ -1,60 +1,33 @@
-/**
- * ESM module-resolution hooks, registered via {@link https://nodejs.org/api/module.html#moduleregisterspecifier-parenturl-options | `module.register`}
- * before a project's `.evalution/config.ts` is imported.
- *
- * A generated config imports the framework with a bare specifier
- * (`import { FilePromptProvider } from 'evalution'`). By default Node resolves
- * that against the config file's directory, which fails when evalution is run
- * via `npx` (or pointed at another directory) and isn't installed in the
- * project's `node_modules`. These hooks redirect the `evalution` specifier to
- * resolve from the running CLI instead, so the config always binds to the same
- * evalution the CLI is executing — no local install required.
- *
- * This module runs in a separate loader thread, so it shares no state with the
- * main module; the CLI's location is handed over through {@link initialize}.
- */
-
-/** Module URL the `evalution` specifier is resolved against (the running CLI). */
-let parentURL: string | undefined;
-
-/** Context passed to the {@link resolve} hook by Node's module loader. */
-interface ResolveContext {
-  conditions: string[];
-  importAttributes: Record<string, string>;
-  parentURL?: string;
-}
-
-/** Result returned from a `resolve` hook. */
-interface ResolveResult {
-  url: string;
-  format?: string | null;
-  shortCircuit?: boolean;
-  importAttributes?: Record<string, string>;
-}
-
-type NextResolve = (specifier: string, context: ResolveContext) => Promise<ResolveResult>;
+import module from 'node:module';
 
 /**
- * Receives the data passed to `module.register`. Called once when the hooks are
- * registered.
+ * Registers an in-thread module-resolution hook so a project's
+ * `.evalution/config.ts` can import the framework by bare specifier
+ * (`import { FilePromptProvider } from 'evalution'`) regardless of where it
+ * lives or whether evalution is installed in the project's `node_modules`.
  *
- * @param data - Carries the CLI's module URL to anchor `evalution` resolution.
+ * By default Node resolves `evalution` against the config file's directory,
+ * which fails when evalution is run via `npx` (or pointed at another directory)
+ * and isn't installed locally. This hook redirects the `evalution` specifier
+ * (and its subpaths) to resolve from the running CLI instead, so the config
+ * always binds to the same evalution the CLI is executing — no local install
+ * required.
+ *
+ * Uses {@link https://nodejs.org/api/module.html#moduleregisterhooksoptions | `module.registerHooks`}
+ * (synchronous, same-thread) rather than `module.register`, so it needs no
+ * separate loader file — it survives bundling and behaves identically whether
+ * the CLI runs from source (dev) or the compiled bundle (published).
+ *
+ * @param parentURL - Module URL the `evalution` specifier is resolved against;
+ *   pass the CLI's own `import.meta.url`.
  */
-export async function initialize(data: { parentURL: string }): Promise<void> {
-  parentURL = data.parentURL;
-}
-
-/**
- * Resolve hook: redirects `evalution` (and its subpaths) to resolve from the
- * CLI, and defers everything else to the default resolver.
- */
-export async function resolve(
-  specifier: string,
-  context: ResolveContext,
-  nextResolve: NextResolve,
-): Promise<ResolveResult> {
-  if (parentURL && (specifier === 'evalution' || specifier.startsWith('evalution/'))) {
-    return nextResolve(specifier, { ...context, parentURL });
-  }
-  return nextResolve(specifier, context);
+export function registerEvalutionResolver(parentURL: string): void {
+  module.registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (specifier === 'evalution' || specifier.startsWith('evalution/')) {
+        return nextResolve(specifier, { ...context, parentURL });
+      }
+      return nextResolve(specifier, context);
+    },
+  });
 }
