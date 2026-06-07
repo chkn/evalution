@@ -49,8 +49,8 @@ export function setupRoutes({
   // POST /api/config/create - Scaffold a starter .evalution/config.ts
   app.post('/api/config/create', async (c) => {
     try {
-      const body = await c.req.json().catch(() => ({}));
-      const sdk: AiSdkChoice = body?.sdk === 'other' ? 'other' : 'vercel-ai-sdk';
+      await c.req.json().catch(() => ({}));
+      const sdk: AiSdkChoice = 'vercel-ai-sdk';
       return c.json(await scaffoldConfigFile(rootPath, sdk));
     } catch (error: any) {
       return c.json({ error: error.message }, 400);

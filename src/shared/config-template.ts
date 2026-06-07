@@ -7,7 +7,7 @@
  */
 
 /** An AI SDK the user can pick during manual onboarding setup. */
-export type AiSdkChoice = 'vercel-ai-sdk' | 'other';
+export type AiSdkChoice = 'vercel-ai-sdk';
 
 /** Path, relative to the project root, where evalution looks for its config. */
 export const CONFIG_FILE_RELATIVE_PATH = '.evalution/config.ts';
@@ -17,8 +17,7 @@ export const CONFIG_DOCS_URL = 'https://evalut.io/n/docs/config';
 
 /** Selectable AI SDK options, in display order, for the manual setup picker. */
 export const AI_SDK_OPTIONS: ReadonlyArray<{ value: AiSdkChoice; label: string }> = [
-  { value: 'vercel-ai-sdk', label: 'Vercel AI SDK' },
-  { value: 'other', label: 'Other' },
+  { value: 'vercel-ai-sdk', label: 'AI SDK' },
 ];
 
 /**
@@ -28,9 +27,8 @@ export const AI_SDK_OPTIONS: ReadonlyArray<{ value: AiSdkChoice; label: string }
  * into a project; it is both shown to the user as a copyable snippet and
  * written verbatim when they ask evalution to create the file for them.
  */
-export function configFileTemplate(sdk: AiSdkChoice): string {
-  if (sdk === 'vercel-ai-sdk') {
-    return `import type { EvalutionConfig } from 'evalution';
+export function configFileTemplate(_sdk: AiSdkChoice): string {
+  return `import type { EvalutionConfig } from 'evalution';
 import { FilePromptProvider, VercelAISDK } from 'evalution';
 
 export default {
@@ -40,23 +38,5 @@ export default {
     }),
   ],
 } satisfies EvalutionConfig;
-`;
-  }
-
-  return `import type { EvalutionConfig } from 'evalution';
-import { FilePromptProvider } from 'evalution';
-
-// You selected "Other": implement the SDKAdapter interface for your stack and
-// pass an instance as \`sdk\` below. See ${CONFIG_DOCS_URL} for a guide.
-const config: EvalutionConfig = {
-  promptProviders: [
-    new FilePromptProvider({
-      rootDir: './prompts',
-      sdk: new YourSDKAdapter(), // TODO: replace with your SDKAdapter implementation
-    }),
-  ],
-};
-
-export default config;
 `;
 }

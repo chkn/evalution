@@ -3205,6 +3205,63 @@ code, pre {
 .welcome-field input:focus,
 .welcome-field select:focus { border-color: var(--accent); }
 
+.setup-sdk-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.setup-sdk-option {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--content-card-bg);
+  color: var(--panel-text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.setup-sdk-option:hover {
+  background: var(--pill-hover-bg);
+}
+
+.setup-sdk-option:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+.setup-sdk-option-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.setup-sdk-icon {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
+}
+
+.setup-sdk-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.setup-sdk-icon .vercel-square {
+  fill: currentColor;
+}
+
+.setup-sdk-icon .vercel-triangle {
+  fill: var(--on-accent);
+}
+
 .welcome-btn-primary {
   width: 100%;
   background: var(--accent);

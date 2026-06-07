@@ -25,14 +25,14 @@ describe('scaffoldConfigFile', () => {
   });
 
   it('creates the .evalution directory when missing', async () => {
-    await scaffoldConfigFile(root, 'other');
+    await scaffoldConfigFile(root, 'vercel-ai-sdk');
     const stat = await fs.stat(path.join(root, '.evalution'));
     expect(stat.isDirectory()).toBe(true);
   });
 
   it('refuses to overwrite an existing config file', async () => {
     await scaffoldConfigFile(root, 'vercel-ai-sdk');
-    await expect(scaffoldConfigFile(root, 'other')).rejects.toThrow('already exists');
+    await expect(scaffoldConfigFile(root, 'vercel-ai-sdk')).rejects.toThrow('already exists');
 
     // The original (Vercel) template must be left intact.
     const written = await fs.readFile(path.join(root, CONFIG_FILE_RELATIVE_PATH), 'utf8');

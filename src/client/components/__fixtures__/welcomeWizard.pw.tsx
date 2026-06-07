@@ -13,15 +13,15 @@ test('starts on the setup step with no next/create-prompt action', async ({ moun
   await expect(component.getByRole('button', { name: /Next/ })).toHaveCount(0);
 });
 
-test('changing the AI SDK updates the config snippet', async ({ mount }) => {
+test('manual setup shows the Vercel SDK snippet and links other SDKs externally', async ({ mount }) => {
   const component = await mount(<WelcomeWizardHarness />);
 
   const snippet = component.locator('.copy-box-multiline pre');
   await expect(snippet).toContainText('VercelAISDK');
 
-  await component.getByRole('combobox').selectOption('other');
-  await expect(snippet).not.toContainText('VercelAISDK');
-  await expect(snippet).toContainText('YourSDKAdapter');
+  await expect(component.getByRole('button', { name: /Vercel AI SDK/ })).toHaveAttribute('aria-pressed', 'true');
+  const other = component.getByRole('link', { name: 'Other' });
+  await expect(other).toHaveAttribute('target', '_blank');
 });
 
 test('advances to the all-set step once a config is loaded', async ({ mount }) => {

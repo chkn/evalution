@@ -7,10 +7,13 @@ import {
   type AiSdkChoice,
 } from '../../../shared/config-template';
 import { createConfigFile } from '../../api';
+import vercelLogo from '../../assets/providers/vercel.svg?raw';
 import { CopyBox } from './CopyBox';
 
 /** Setup instructions URL the coding agent is pointed at. */
 const AGENT_SETUP_URL = 'https://evalut.io/n/docs/setup.md';
+/** Placeholder URL for non-Vercel SDK setup guidance. */
+const OTHER_SDK_URL = 'https://evalut.io/n/docs/other-sdk';
 
 type FileState =
   | { status: 'idle' }
@@ -25,7 +28,7 @@ type FileState =
  * config file is detected and loaded by the server.
  */
 export function SetupStep() {
-  const [sdk, setSdk] = useState<AiSdkChoice>('vercel-ai-sdk');
+  const sdk: AiSdkChoice = 'vercel-ai-sdk';
   const [file, setFile] = useState<FileState>({ status: 'idle' });
 
   const snippet = configFileTemplate(sdk);
@@ -63,14 +66,30 @@ export function SetupStep() {
       <section className="setup-pane">
         <h3>Manual setup</h3>
 
-        <label className="welcome-field">
-          <span>Which AI SDK are you using?</span>
-          <select value={sdk} onChange={e => setSdk(e.target.value as AiSdkChoice)}>
+        <div className="welcome-field">
+          <span>Which SDK are you using?</span>
+          <div className="setup-sdk-options" role="group" aria-label="AI SDK">
             {AI_SDK_OPTIONS.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
+              <button
+                key={opt.value}
+                type="button"
+                className="setup-sdk-option setup-sdk-option-selected"
+                aria-pressed="true"
+              >
+                <span className="setup-sdk-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: vercelLogo }} />
+                <span>{opt.label}</span>
+              </button>
             ))}
-          </select>
-        </label>
+            <a
+              className="setup-sdk-option setup-sdk-option-link"
+              href={OTHER_SDK_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Other
+            </a>
+          </div>
+        </div>
 
         <p className="welcome-subtitle">
           Add this to <code>{CONFIG_FILE_RELATIVE_PATH}</code>:
