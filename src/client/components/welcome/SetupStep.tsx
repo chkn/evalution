@@ -8,7 +8,6 @@ import {
 } from '../../../shared/config-template';
 import { createConfigFile } from '../../api';
 import { CopyBox } from './CopyBox';
-import type { WizardStepProps } from './types';
 
 /** Setup instructions URL the coding agent is pointed at. */
 const AGENT_SETUP_URL = 'https://evalut.io/n/docs/setup.md';
@@ -21,10 +20,11 @@ type FileState =
 
 /**
  * Project setup step: offers two paths — hand the work to a coding agent, or
- * set things up manually by choosing an AI SDK, dropping in a config snippet,
- * and creating the first prompt.
+ * set things up manually by choosing an AI SDK and dropping in a config
+ * snippet. There is no "next" action; the wizard advances on its own once the
+ * config file is detected and loaded by the server.
  */
-export function SetupStep({ onCreatePrompt }: WizardStepProps) {
+export function SetupStep() {
   const [sdk, setSdk] = useState<AiSdkChoice>('vercel-ai-sdk');
   const [file, setFile] = useState<FileState>({ status: 'idle' });
 
@@ -48,11 +48,12 @@ export function SetupStep({ onCreatePrompt }: WizardStepProps) {
         <p className="welcome-subtitle">
           Paste this into your coding agent and let it wire up Evalution for you:
         </p>
-        <CopyBox text={`Follow the instructions at ${AGENT_SETUP_URL}`}>
-          Follow the instructions at{' '}
+        <CopyBox text={`Follow the guide at ${AGENT_SETUP_URL} to set up Evalution.`}>
+          Follow the guide at{' '}
           <a className="welcome-link" href={AGENT_SETUP_URL} target="_blank">
             {AGENT_SETUP_URL}
           </a>
+          {' '}to set up Evalution.
         </CopyBox>
       </section>
 
@@ -89,13 +90,9 @@ export function SetupStep({ onCreatePrompt }: WizardStepProps) {
             Config docs ↗
           </a>
         </div>
-        {(file.status === 'created' || file.status === 'error') && (
+        {file.status === 'error' && (
           <div className={`setup-file-status setup-file-${file.status}`}>{file.message}</div>
         )}
-
-        <button type="button" className="welcome-btn-primary setup-create-prompt" onClick={onCreatePrompt}>
-          Create New Prompt
-        </button>
       </section>
     </div>
   );

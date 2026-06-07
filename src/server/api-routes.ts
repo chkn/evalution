@@ -14,6 +14,8 @@ export interface SetupRoutesOptions {
   promptRegistry: PromptRegistry;
   sseClients: Set<FastifyReply>;
   rootPath: string;
+  /** Whether the server was started with a project config file loaded. */
+  hasConfig: boolean;
   tracer: Tracer;
   defaultTraceProviderId: string;
 }
@@ -25,6 +27,7 @@ export function setupRoutes({
   promptRegistry,
   sseClients,
   rootPath,
+  hasConfig,
   tracer,
   defaultTraceProviderId
 }: SetupRoutesOptions) {
@@ -39,7 +42,7 @@ export function setupRoutes({
   };
   // GET /api/config - Get server configuration
   fastify.get('/api/config', async () => {
-    return { rootPath };
+    return { rootPath, configured: hasConfig };
   });
 
   // POST /api/config/create - Scaffold a starter .evalution/config.ts

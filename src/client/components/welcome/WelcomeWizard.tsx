@@ -1,10 +1,16 @@
-import { useState } from 'react';
-import { WIZARD_STEPS } from './steps';
+import { useEffect, useState } from 'react';
+import { ALL_SET_STEP_ID, WIZARD_STEPS } from './steps';
 import type { WizardStep } from './types';
 
 interface WelcomeWizardProps {
   /** Opens the existing "create new prompt" flow. */
   onCreatePrompt: () => void;
+  /**
+   * Whether a project config is loaded. When `true`, the wizard jumps straight
+   * to the final "you're all set" step — both on first render (config already
+   * present at launch) and when it flips to `true` after the user creates one.
+   */
+  configured?: boolean;
   /** Step registry override, primarily for testing. Defaults to {@link WIZARD_STEPS}. */
   steps?: WizardStep[];
 }
@@ -14,8 +20,16 @@ interface WelcomeWizardProps {
  * no prompts yet. Steps are data-driven (see {@link WIZARD_STEPS}); this shell
  * only tracks the current index and renders the progress header.
  */
-export function WelcomeWizard({ onCreatePrompt, steps = WIZARD_STEPS }: WelcomeWizardProps) {
-  const [index, setIndex] = useState(0);
+export function WelcomeWizard({ onCreatePrompt, configured = false, steps = WIZARD_STEPS }: WelcomeWizardProps) {
+  const allSetIndex = steps.findIndex(s => s.id === ALL_SET_STEP_ID);
+  // Start on the final step if we already have a config; otherwise at the top.
+  const [index, setIndex] = useState(configured && allSetIndex >= 0 ? allSetIndex : 0);
+
+  // Advance to the final step once a config is loaded (e.g. after the user
+  // creates one and the server restarts with it).
+  useEffect(() => {
+    if (configured && allSetIndex >= 0) setIndex(allSetIndex);
+  }, [configured, allSetIndex]);
 
   const step = steps[index];
   const isFirst = index === 0;
@@ -43,7 +57,7 @@ export function WelcomeWizard({ onCreatePrompt, steps = WIZARD_STEPS }: WelcomeW
                     </button>
                   ) : (
                     <>
-                      <span className="welcome-progress-dot">{i + 1}</span>
+                      {steps.length > 1 && <span className="welcome-progress-dot">{i + 1}</span>}
                       <span className="welcome-progress-label">{s.title}</span>
                     </>
                   )}

@@ -13,7 +13,7 @@ export type AiSdkChoice = 'vercel-ai-sdk' | 'other';
 export const CONFIG_FILE_RELATIVE_PATH = '.evalution/config.ts';
 
 /** URL of the configuration documentation, linked from the onboarding wizard. */
-export const CONFIG_DOCS_URL = 'https://evalut.io/docs/config';
+export const CONFIG_DOCS_URL = 'https://evalut.io/n/docs/config';
 
 /** Selectable AI SDK options, in display order, for the manual setup picker. */
 export const AI_SDK_OPTIONS: ReadonlyArray<{ value: AiSdkChoice; label: string }> = [
@@ -33,16 +33,13 @@ export function configFileTemplate(sdk: AiSdkChoice): string {
     return `import type { EvalutionConfig } from 'evalution';
 import { FilePromptProvider, VercelAISDK } from 'evalution';
 
-const config: EvalutionConfig = {
+export default {
   promptProviders: [
     new FilePromptProvider({
-      rootDir: './prompts',
       sdk: new VercelAISDK(),
     }),
   ],
-};
-
-export default config;
+} satisfies EvalutionConfig;
 `;
   }
 
@@ -55,7 +52,7 @@ const config: EvalutionConfig = {
   promptProviders: [
     new FilePromptProvider({
       rootDir: './prompts',
-      // sdk: new YourSDKAdapter(),
+      sdk: new YourSDKAdapter(), // TODO: replace with your SDKAdapter implementation
     }),
   ],
 };

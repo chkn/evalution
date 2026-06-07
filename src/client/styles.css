@@ -3306,7 +3306,8 @@ code, pre {
 .setup-file-created { color: #1a7f37; }
 .setup-file-error { color: #cf222e; }
 
-.setup-create-prompt { margin-top: 18px; }
+.setup-allset { display: flex; flex-direction: column; }
+.setup-allset .setup-actions { margin-top: 20px; }
 
 /* ── Copy box ── */
 

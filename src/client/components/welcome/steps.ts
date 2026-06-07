@@ -1,6 +1,10 @@
 import { LoginStep } from './LoginStep';
 import { SetupStep } from './SetupStep';
+import { AllSetStep } from './AllSetStep';
 import type { WizardStep } from './types';
+
+/** ID of the final step, which the wizard jumps to once a config is loaded. */
+export const ALL_SET_STEP_ID = 'all-set';
 
 /**
  * The ordered list of onboarding steps. To add or reorder steps, edit this
@@ -8,6 +12,7 @@ import type { WizardStep } from './types';
  * it, so nothing else needs to change.
  */
 export const WIZARD_STEPS: WizardStep[] = [
-  { id: 'login', title: 'Sign in', canReturn: true, Component: LoginStep },
+  //{ id: 'login', title: 'Sign in', canReturn: true, Component: LoginStep },
   { id: 'setup', title: 'Set up project', Component: SetupStep },
+  { id: ALL_SET_STEP_ID, title: "You're all set", Component: AllSetStep },
 ];

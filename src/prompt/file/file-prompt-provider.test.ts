@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { FilePromptProvider } from './file-prompt-provider.ts';
 import { MemoryFileProvider } from '../../file-provider.ts';
+import { VercelAISDK } from '../../sdk/vercel-ai-sdk.ts';
 import { valueToSourceText } from 'ts-proppy';
 import fs from 'fs/promises';
 import path from 'path';
@@ -18,7 +19,7 @@ describe('FilePromptProvider', () => {
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'evalution-provider-test-'));
-    provider = new FilePromptProvider({ rootDir: tempDir });
+    provider = new FilePromptProvider({ rootDir: tempDir, sdk: new VercelAISDK() });
   });
 
   afterEach(async () => {
@@ -315,6 +316,7 @@ export function myPrompt() {
     const watchedProvider = new FilePromptProvider({
       rootDir: '/virtual',
       fileProvider,
+      sdk: new VercelAISDK(),
     });
 
     await watchedProvider.getAllPrompts();
@@ -381,6 +383,7 @@ export function valid() { return { model: 'openai/gpt-4o', system: 'Valid' }; }
         rootDir: tempDir,
         includePatterns: ['**/*.custom.ts'],
         ignorePatterns: [],
+        sdk: new VercelAISDK(),
       });
 
       await fs.writeFile(path.join(tempDir, 'test.custom.ts'), `

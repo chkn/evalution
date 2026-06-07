@@ -87,6 +87,7 @@ function App() {
   const [panes, setPanes] = useState<Pane[]>([{ id: INIT_PANE, tabs: [], activeTabKey: null }]);
   const [focusedPaneId, setFocusedPaneId] = useState(INIT_PANE);
   const [rootPath, setRootPath] = useState('');
+  const [configured, setConfigured] = useState(false);
   const [activeSection, setActiveSection] = useState<'prompts' | 'traces'>('prompts');
   const [showAddPrompt, setShowAddPrompt] = useState(false);
   const [sectionVisible, setSectionVisible] = useState(true);
@@ -101,10 +102,17 @@ function App() {
   const contentCardRef = useRef<HTMLDivElement>(null);
   const dragTabRef     = useRef<{ paneId: string; key: string } | null>(null);
 
-  useEffect(() => {
-    fetch('/api/config').then(r => r.json()).then(d => setRootPath(d.rootPath)).catch(() => {});
+  const refetchConfig = useCallback(() => {
+    // `no-store`: this is refetched after the server restarts itself with a new
+    // config, and the browser HTTP cache would otherwise hand back the stale
+    // pre-config response, leaving the UI stuck in onboarding.
+    fetch('/api/config', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { setRootPath(d.rootPath); setConfigured(!!d.configured); })
+      .catch(() => {});
   }, []);
 
+  useEffect(() => { refetchConfig(); }, [refetchConfig]);
 
   const handleSSEMessage = useCallback((data: SSEData) => {
     // FIXME: Delay these for a hot second to debounce multiple rapid changes
@@ -114,7 +122,16 @@ function App() {
       refetchTraces();
     }
   }, [refetchPrompts, refetchTraces]);
-  useSSE(handleSSEMessage);
+
+  // Re-pull config and prompts whenever the SSE stream (re)connects. After the
+  // server restarts itself when a config file is created, this is what flips
+  // the UI out of onboarding without a manual refresh.
+  const handleSSEOpen = useCallback(() => {
+    refetchConfig();
+    refetchPrompts();
+  }, [refetchConfig, refetchPrompts]);
+
+  useSSE(handleSSEMessage, handleSSEOpen);
 
   // Remove tabs whose prompt ID no longer exists (handles renames and deletions)
   useEffect(() => {
@@ -526,7 +543,7 @@ function App() {
                       if (tab.type === 'welcome') {
                         return (
                           <div key={key} style={visible}>
-                            <WelcomeWizard onCreatePrompt={() => setShowAddPrompt(true)} />
+                            <WelcomeWizard configured={configured} onCreatePrompt={() => setShowAddPrompt(true)} />
                           </div>
                         );
                       }

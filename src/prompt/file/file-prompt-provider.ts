@@ -17,7 +17,6 @@ import { isEditable } from '../../shared/helpers.ts';
 
 import { TSPromptFileType } from './ts/ts-prompt-file-type.ts';
 import { LocalFileProvider, type FileProvider } from '../../file-provider.ts';
-import { VercelAISDK } from '../../sdk/vercel-ai-sdk.ts';
 
 const DEFAULT_IGNORE_PATTERNS = ['**/node_modules/**', '**/dist/**', '**/.git/**'];
 
@@ -54,9 +53,9 @@ export interface FilePromptProviderOptions {
   fileType?: PromptFileType;
 
   /**
-   * SDK adapter that governs prompt structure and execution. Defaults to an instance of {@link VercelAISDK}, which supports Vercel AI SDK conventions.
+   * SDK adapter that governs prompt structure and execution.
    */
-  sdk?: SDKAdapter;
+  sdk: SDKAdapter;
 }
 
 let defaultIDCounter = 0;
@@ -71,7 +70,7 @@ let defaultIDCounter = 0;
  *
  * @example
  * ```ts
- * const provider = new FilePromptProvider({ rootDir: '/my/project' });
+ * const provider = new FilePromptProvider({ rootDir: '/my/project', sdk: new VercelAISDK() });
  * const prompts = await provider.getAllPrompts();
  * ```
  */
@@ -97,8 +96,8 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
     fileType,
     includePatterns,
     ignorePatterns = DEFAULT_IGNORE_PATTERNS,
-    sdk = new VercelAISDK(),
-  }: FilePromptProviderOptions = {}) {
+    sdk,
+  }: FilePromptProviderOptions) {
     fileType ??= new TSPromptFileType(fileProvider);
     this.id = id;
     this.rootDir = rootDir;

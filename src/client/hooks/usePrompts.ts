@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { NormalizedPrompt } from '../../shared/types';
 import { getPrompts } from '../api';
 
@@ -11,7 +11,7 @@ export function usePrompts() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchPrompts = async () => {
+  const fetchPrompts = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -21,13 +21,13 @@ export function usePrompts() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchPrompts();
-  }, []);
+  }, [fetchPrompts]);
 
-  const patchPrompt = (updated: NormalizedPrompt) => {
+  const patchPrompt = useCallback((updated: NormalizedPrompt) => {
     setPrompts(prev => {
       let found = false;
       const next = prev.map(prompt => {
@@ -37,7 +37,7 @@ export function usePrompts() {
       });
       return found ? next : [...prev, updated];
     });
-  };
+  }, []);
 
   return { prompts, loading, error, refetch: fetchPrompts, patchPrompt };
 }

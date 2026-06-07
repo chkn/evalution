@@ -20,10 +20,12 @@ export interface ServerOptions {
   traceProviders: TraceProvider[];
   port: number;
   rootPath: string;
+  /** Whether the server was started with a project config file loaded. */
+  hasConfig: boolean;
 }
 
 export async function startServer(options: ServerOptions) {
-  const { promptProviders, traceProviders, port, rootPath } = options;
+  const { promptProviders, traceProviders, port, rootPath, hasConfig } = options;
 
   const promptProviderMap = new Map(promptProviders.map(p => [p.id, p]));
   const traceProviderMap = new Map(traceProviders.map(p => [p.id, p]));
@@ -77,6 +79,7 @@ export async function startServer(options: ServerOptions) {
     promptRegistry,
     sseClients,
     rootPath,
+    hasConfig,
     tracer,
     defaultTraceProviderId,
   });

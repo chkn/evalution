@@ -13,7 +13,7 @@ describe('configFileTemplate', () => {
     const out = configFileTemplate('other');
     expect(out).toContain("import { FilePromptProvider } from 'evalution';");
     expect(out).not.toContain('VercelAISDK');
-    expect(out).toContain('// sdk: new YourSDKAdapter()');
+    expect(out).toContain('sdk: new YourSDKAdapter()');
     expect(out).toContain(CONFIG_DOCS_URL);
   });
 
