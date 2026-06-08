@@ -81,8 +81,10 @@ function PlaygroundContent({ prompt, onUpdate, onDirtyChange, onExecuted }: Prop
               <button className="pg-dismiss" onClick={() => setError(null)}>×</button>
             </div>
           )}
+          {/*
           <button className="pg-header-btn pg-header-btn--icon" title="Show traces"><TracesIcon /></button>
           <button className="pg-header-btn pg-header-btn--icon" title="New variant"><NewVariantIcon /></button>
+          */}
         </div>
       </div>
       <div className="pg-content">

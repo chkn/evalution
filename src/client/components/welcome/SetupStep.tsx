@@ -8,7 +8,7 @@ import {
   type SetupTask,
 } from '../../../shared/setup-task';
 import { executeSetupStep, getSetupTasks } from '../../api';
-import vercelLogo from '../../assets/providers/vercel.svg?raw';
+import ProviderIcon from '../ProviderIcon';
 import type { WizardStepProps } from './types';
 import { CopyBox } from './CopyBox';
 
@@ -16,11 +16,6 @@ import { CopyBox } from './CopyBox';
 const AGENT_SETUP_URL = 'https://evalut.io/n/docs/setup.md';
 /** Placeholder URL for non-Vercel SDK setup guidance. */
 const OTHER_SDK_URL = 'https://evalut.io/n/docs/other-sdk';
-
-/** Maps a {@link SetupTask.icon} id to a bundled SVG asset. */
-const PROVIDER_ICONS: Record<string, string> = {
-  vercel: vercelLogo,
-};
 
 type SetupStepProps = Pick<WizardStepProps, 'onOpenTerminal'>;
 
@@ -124,13 +119,9 @@ export function SetupStep({ onOpenTerminal }: SetupStepProps) {
                 aria-pressed={task.id === selectedId}
                 onClick={() => setSelectedId(task.id)}
               >
-                {PROVIDER_ICONS[task.icon] && (
-                  <span
-                    className="setup-sdk-icon"
-                    aria-hidden="true"
-                    dangerouslySetInnerHTML={{ __html: PROVIDER_ICONS[task.icon] }}
-                  />
-                )}
+                <span className="setup-sdk-icon" aria-hidden="true">
+                  <ProviderIcon provider={task.icon} size={20} />
+                </span>
                 <span>{task.label}</span>
               </button>
             ))}

@@ -124,12 +124,23 @@ export class VercelAISDK implements SDKAdapter {
       groups: {
         OpenAI: { customValueTemplates: { function: customValueTemplate('openai') } },
         Anthropic: { customValueTemplates: { function: customValueTemplate('anthropic') } },
+        Google: { customValueTemplates: { function: customValueTemplate('google') } },
       },
       models: [
-        model('OpenAI',    'GPT-4o',           'openai',    'gpt-4o'),
-        model('Anthropic', 'Claude Opus 4.7',  'anthropic', 'claude-opus-4-7'),
-        model('Anthropic', 'Claude Sonnet 4.6','anthropic', 'claude-sonnet-4-6'),
-        model('Anthropic', 'Claude Haiku 4.5', 'anthropic', 'claude-haiku-4-5'),
+        model('OpenAI',    'GPT-5.5 Pro',            'openai',    'gpt-5.5-pro'),
+        model('OpenAI',    'GPT-5.5',                'openai',    'gpt-5.5'),
+        model('OpenAI',    'GPT-5.4 Pro',            'openai',    'gpt-5.4-pro'),
+        model('OpenAI',    'GPT-5.4',                'openai',    'gpt-5.4'),
+        model('OpenAI',    'GPT-5.4 mini',           'openai',    'gpt-5.4-mini'),
+        model('OpenAI',    'GPT-5.4 nano',           'openai',    'gpt-5.4-nano'),
+
+        model('Anthropic', 'Claude Opus 4.8',        'anthropic', 'claude-opus-4-8'),
+        model('Anthropic', 'Claude Sonnet 4.6',      'anthropic', 'claude-sonnet-4-6'),
+        model('Anthropic', 'Claude Haiku 4.5',       'anthropic', 'claude-haiku-4-5'),
+
+        model('Google',    'Gemini 3.5 Flash',       'google',    'gemini-3.5-flash'),
+        model('Google',    'Gemini 3.1 Pro Preview', 'google',    'gemini-3.1-pro-preview'),
+        model('Google',    'Gemini 3.1 Flash-Lite',  'google',    'gemini-3.1-flash-lite'),
       ],
     });
   }

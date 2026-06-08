@@ -2,6 +2,7 @@ import type { JSX } from 'react';
 import anthropicIcon from '../assets/providers/anthropic.svg?raw';
 import googleIcon from '../assets/providers/google.svg?raw';
 import openAIIcon from '../assets/providers/openai.svg?raw';
+import vercelIcon from '../assets/providers/vercel.svg?raw';
 
 function RawProviderIcon({ icon, size }: { icon: string; size: number }) {
   return (
@@ -26,6 +27,7 @@ const ICON_COMPONENTS: Record<string, (props: { size: number }) => JSX.Element> 
   OpenAI: ({ size }) => <RawProviderIcon icon={openAIIcon} size={size} />,
   Anthropic: ({ size }) => <RawProviderIcon icon={anthropicIcon} size={size} />,
   Google: ({ size }) => <RawProviderIcon icon={googleIcon} size={size} />,
+  vercel: ({ size }) => <RawProviderIcon icon={vercelIcon} size={size} />,
 };
 
 export default function ProviderIcon({ provider, size = 24 }: { provider?: string; size?: number }) {
