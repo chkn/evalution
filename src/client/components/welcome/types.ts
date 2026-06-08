@@ -11,11 +11,13 @@ export interface WizardStepProps {
   /** Opens the existing "create new prompt" flow. */
   onCreatePrompt: () => void;
   /**
-   * Opens an interactive terminal tab (split to the right) with `command`
-   * queued up, ready for the user to run. Optional so steps degrade gracefully
-   * when no host is wired up (e.g. in isolated component tests).
+   * Opens an interactive terminal tab (split to the right) for a setup step,
+   * queued up and ready for the user to run. `taskId`/`stepId` identify the
+   * step so the server can resolve the command from its own registry; `command`
+   * is the display string and `label` the tab title. Optional so steps degrade
+   * gracefully when no host is wired up (e.g. in isolated component tests).
    */
-  onOpenTerminal?: (command: string, label?: string) => void;
+  onOpenTerminal?: (taskId: string, stepId: string, command: string, label?: string) => void;
 }
 
 /**

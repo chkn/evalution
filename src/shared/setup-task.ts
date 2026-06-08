@@ -13,6 +13,21 @@ export const CONFIG_FILE_RELATIVE_PATH = '.evalution/config.ts';
 /** URL of the configuration documentation, linked from the onboarding wizard. */
 export const CONFIG_DOCS_URL = 'https://evalut.io/n/docs/config';
 
+/**
+ * Name of the browser `CustomEvent` dispatched (with a {@link SetupStepDoneDetail}
+ * payload) when a terminal-run setup step exits successfully, so the manual-setup
+ * list can mark the step complete without re-fetching.
+ */
+export const SETUP_STEP_DONE_EVENT = 'evalution:setup-step-done';
+
+/** Payload of the {@link SETUP_STEP_DONE_EVENT} custom event. */
+export interface SetupStepDoneDetail {
+  /** Id of the task the completed step belongs to. */
+  taskId: string;
+  /** Id of the step that completed. */
+  stepId: string;
+}
+
 /** Fields shared by every {@link SetupStep} kind. */
 export interface SetupStepBase {
   /** Stable identifier, unique within the owning {@link SetupTask}. */

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
-import { serve } from '@hono/node-server';
+import { serve, upgradeWebSocket } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
+import { WebSocketServer } from 'ws';
 import { context, trace, type Tracer } from '@opentelemetry/api';
 import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
@@ -8,6 +9,7 @@ import type { PromptProvider } from '../prompt/prompt-provider.ts';
 import type { TraceProvider } from '../trace/trace-provider.ts';
 import { PromptRegistry } from '../prompt/prompt-registry.ts';
 import { setupRoutes } from './api-routes.ts';
+import { registerTerminalRoute } from './terminal.ts';
 import { fileURLToPath } from 'url';
 import type { SSEData } from '../shared/types.ts';
 import { MemoryTraceProvider } from '../trace/memory-trace-provider.ts';
@@ -90,6 +92,10 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
     defaultTraceProviderId,
   });
 
+  // Interactive terminal for onboarding `run_command`/`install_package` steps.
+  // Registered before the static catch-all so the upgrade request is routed.
+  registerTerminalRoute(app, upgradeWebSocket, rootPath);
+
   // Serve the built client. `serveStatic`'s root is resolved against
   // `process.cwd()`, which the CLI changes to the user's project, so anchor it
   // to this module instead. Registered as a catch-all after the API routes.
@@ -116,8 +122,10 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
     }
   }
 
-  // Start server
-  const server = serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, () => {
+  // Start server. `noServer: true` lets @hono/node-server own the HTTP upgrade
+  // handshake and hand matching requests to the WebSocket routes above.
+  const wss = new WebSocketServer({ noServer: true });
+  const server = serve({ fetch: app.fetch, port, hostname: '0.0.0.0', websocket: { server: wss } }, () => {
     if (process.env.NODE_ENV === 'production') {
       console.log(`\n✨ Evalution is running at http://localhost:${port}\n`);
     } else {

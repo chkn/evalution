@@ -3471,28 +3471,19 @@ code, pre {
   font-size: 12px;
 }
 
-/* ── Terminal pane (placeholder) ── */
+/* ── Terminal pane ── */
 
 .terminal-view {
-  height: 100%;
-  padding: 16px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
-  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  padding: 8px 10px;
+  background: var(--panel-bg);
+  overflow: hidden;
 }
-.terminal-view-line { margin: 0; white-space: pre-wrap; }
-.terminal-view-prompt { color: var(--panel-text-secondary); }
-.terminal-view-hint {
-  margin-top: 10px;
-  color: var(--panel-text-secondary);
-  font-size: 12px;
-}
-.terminal-view-hint kbd {
-  font-family: inherit;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  padding: 0 4px;
-}
+/* Let xterm's viewport fill the padded container. */
+.terminal-view .xterm,
+.terminal-view .xterm-viewport,
+.terminal-view .xterm-screen { height: 100% !important; }
 
 /* ── Copy box ── */
 

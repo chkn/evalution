@@ -13,6 +13,12 @@ export default defineConfig({
     port: 5173,
     open: true,
     proxy: {
+      // Interactive-terminal WebSocket; must precede the generic /api/ rule and
+      // opt into ws so the upgrade handshake is forwarded to the API server.
+      '/api/terminal': {
+        target: 'ws://localhost:3000',
+        ws: true,
+      },
       '^/api/': {
         target: 'http://localhost:3000',
         changeOrigin: true,

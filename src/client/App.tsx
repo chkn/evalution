@@ -20,7 +20,7 @@ import type { ExecuteResponse, PromptID, SSEData } from '../shared/types';
 interface PromptTab { type: 'prompt'; providerId: string; promptId: string }
 interface TraceTab { type: 'trace'; providerId: string; traceId: string; rootSpanId: string; label: string }
 interface WelcomeTab { type: 'welcome' }
-interface TerminalTab { type: 'terminal'; id: string; command: string; label: string }
+interface TerminalTab { type: 'terminal'; id: string; taskId: string; stepId: string; command: string; label: string }
 type AppTab = PromptTab | TraceTab | WelcomeTab | TerminalTab;
 
 const WELCOME_TAB_KEY = 'welcome';
@@ -274,9 +274,9 @@ function App() {
     });
   };
 
-  /** Opens an interactive terminal tab (split right) with `command` queued up. */
-  const openTerminalRightOf = (fromPaneId: string, command: string, label?: string) => {
-    const tab: TerminalTab = { type: 'terminal', id: `t${++_terminalSeq}`, command, label: label ?? command };
+  /** Opens an interactive terminal tab (split right) with a setup step queued up. */
+  const openTerminalRightOf = (fromPaneId: string, taskId: string, stepId: string, command: string, label?: string) => {
+    const tab: TerminalTab = { type: 'terminal', id: `t${++_terminalSeq}`, taskId, stepId, command, label: label ?? command };
     openTabRightOf(fromPaneId, tab);
   };
 
@@ -569,7 +569,7 @@ function App() {
                             <WelcomeWizard
                               configured={configured}
                               onCreatePrompt={() => setShowAddPrompt(true)}
-                              onOpenTerminal={(command, label) => openTerminalRightOf(pane.id, command, label)}
+                              onOpenTerminal={(taskId, stepId, command, label) => openTerminalRightOf(pane.id, taskId, stepId, command, label)}
                             />
                           </div>
                         );
@@ -577,7 +577,7 @@ function App() {
                       if (tab.type === 'terminal') {
                         return (
                           <div key={key} style={visible}>
-                            <TerminalView command={tab.command} />
+                            <TerminalView taskId={tab.taskId} stepId={tab.stepId} command={tab.command} />
                           </div>
                         );
                       }

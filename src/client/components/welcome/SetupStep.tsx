@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
   CONFIG_DOCS_URL,
+  SETUP_STEP_DONE_EVENT,
   setupStepCommand,
   type SetupStep as SetupStepDef,
+  type SetupStepDoneDetail,
   type SetupTask,
 } from '../../../shared/setup-task';
 import { executeSetupStep, getSetupTasks } from '../../api';
@@ -44,6 +46,17 @@ export function SetupStep({ onOpenTerminal }: SetupStepProps) {
       setSelectedId(prev => prev ?? loaded[0]?.id ?? null);
     }).catch(() => {/* leave the picker empty; the agent path still works */});
     return () => { cancelled = true; };
+  }, []);
+
+  // A terminal step that exits 0 announces itself; mark it done so the list
+  // reflects completion (e.g. an install flips to "Installed") without a refetch.
+  useEffect(() => {
+    const onDone = (e: Event) => {
+      const { stepId } = (e as CustomEvent<SetupStepDoneDetail>).detail;
+      setDone(prev => new Set(prev).add(stepId));
+    };
+    window.addEventListener(SETUP_STEP_DONE_EVENT, onDone);
+    return () => window.removeEventListener(SETUP_STEP_DONE_EVENT, onDone);
   }, []);
 
   const selected = tasks.find(t => t.id === selectedId);
@@ -147,9 +160,9 @@ export function SetupStep({ onOpenTerminal }: SetupStepProps) {
                       expanded: expanded.has(step.id),
                       onCreate: () => handleCreate(step),
                       onRun: () => {
-                        if (step.kind === 'create_config') return;
+                        if (step.kind === 'create_config' || !selected) return;
                         const label = step.kind === 'install_package' ? `Install ${step.package}` : step.label;
-                        onOpenTerminal?.(setupStepCommand(step), label);
+                        onOpenTerminal?.(selected.id, step.id, setupStepCommand(step), label);
                       },
                       onToggleExpand: () => toggleExpanded(step.id),
                     })}

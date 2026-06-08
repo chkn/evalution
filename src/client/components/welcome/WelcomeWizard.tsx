@@ -5,8 +5,8 @@ import type { WizardStep } from './types';
 interface WelcomeWizardProps {
   /** Opens the existing "create new prompt" flow. */
   onCreatePrompt: () => void;
-  /** Opens an interactive terminal tab with `command` queued up. */
-  onOpenTerminal?: (command: string, label?: string) => void;
+  /** Opens an interactive terminal tab for a setup step, queued up to run. */
+  onOpenTerminal?: (taskId: string, stepId: string, command: string, label?: string) => void;
   /**
    * Whether a project config is loaded. When `true`, the wizard jumps straight
    * to the final "you're all set" step — both on first render (config already
