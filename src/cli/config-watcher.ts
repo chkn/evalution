@@ -1,6 +1,6 @@
 import path from 'node:path';
 import chokidar from 'chokidar';
-import { CONFIG_FILE_RELATIVE_PATH } from '../shared/config-template.ts';
+import { CONFIG_FILE_RELATIVE_PATH } from '../shared/setup-task.ts';
 
 /**
  * Watches `rootDir` for `.evalution/config.ts` appearing or changing and runs

@@ -10,6 +10,12 @@ export interface WizardStepProps {
   isLast: boolean;
   /** Opens the existing "create new prompt" flow. */
   onCreatePrompt: () => void;
+  /**
+   * Opens an interactive terminal tab (split to the right) with `command`
+   * queued up, ready for the user to run. Optional so steps degrade gracefully
+   * when no host is wired up (e.g. in isolated component tests).
+   */
+  onOpenTerminal?: (command: string, label?: string) => void;
 }
 
 /**

@@ -5,6 +5,8 @@ import type { WizardStep } from './types';
 interface WelcomeWizardProps {
   /** Opens the existing "create new prompt" flow. */
   onCreatePrompt: () => void;
+  /** Opens an interactive terminal tab with `command` queued up. */
+  onOpenTerminal?: (command: string, label?: string) => void;
   /**
    * Whether a project config is loaded. When `true`, the wizard jumps straight
    * to the final "you're all set" step — both on first render (config already
@@ -20,7 +22,7 @@ interface WelcomeWizardProps {
  * no prompts yet. Steps are data-driven (see {@link WIZARD_STEPS}); this shell
  * only tracks the current index and renders the progress header.
  */
-export function WelcomeWizard({ onCreatePrompt, configured = false, steps = WIZARD_STEPS }: WelcomeWizardProps) {
+export function WelcomeWizard({ onCreatePrompt, onOpenTerminal, configured = false, steps = WIZARD_STEPS }: WelcomeWizardProps) {
   const allSetIndex = steps.findIndex(s => s.id === ALL_SET_STEP_ID);
   // Start on the final step if we already have a config; otherwise at the top.
   const [index, setIndex] = useState(configured && allSetIndex >= 0 ? allSetIndex : 0);
@@ -73,6 +75,7 @@ export function WelcomeWizard({ onCreatePrompt, configured = false, steps = WIZA
             isFirst={isFirst}
             isLast={isLast}
             onCreatePrompt={onCreatePrompt}
+            onOpenTerminal={onOpenTerminal}
           />
         </div>
       </div>

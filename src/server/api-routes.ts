@@ -5,8 +5,7 @@ import type { PromptProvider } from '../prompt/prompt-provider.ts';
 import type { PromptRegistry } from '../prompt/prompt-registry.ts';
 import type { TraceProvider } from '../trace/trace-provider.ts';
 import type { ExecuteRequest, ExecuteResponse, SSEData, Span, TraceStreamEvent } from '../shared/types.ts';
-import type { AiSdkChoice } from '../shared/config-template.ts';
-import { scaffoldConfigFile } from './scaffold-config.ts';
+import { executeSetupStep, resolveSetupTasks, SetupStepNotFoundError } from './setup-tasks.ts';
 
 export interface SetupRoutesOptions {
   app: Hono;
@@ -46,14 +45,17 @@ export function setupRoutes({
   // GET /api/config - Get server configuration
   app.get('/api/config', (c) => c.json({ rootPath, configured: hasConfig }));
 
-  // POST /api/config/create - Scaffold a starter .evalution/config.ts
-  app.post('/api/config/create', async (c) => {
+  // GET /api/setup-tasks - Onboarding tasks (with per-step completion status)
+  app.get('/api/setup-tasks', (c) => c.json(resolveSetupTasks(rootPath)));
+
+  // POST /api/setup-tasks/:taskId/steps/:stepId/execute - Run one onboarding step
+  app.post('/api/setup-tasks/:taskId/steps/:stepId/execute', async (c) => {
+    const { taskId, stepId } = c.req.param();
     try {
-      await c.req.json().catch(() => ({}));
-      const sdk: AiSdkChoice = 'vercel-ai-sdk';
-      return c.json(await scaffoldConfigFile(rootPath, sdk));
+      return c.json(await executeSetupStep(rootPath, taskId, stepId));
     } catch (error: any) {
-      return c.json({ error: error.message }, 400);
+      const status = error instanceof SetupStepNotFoundError ? 404 : 400;
+      return c.json({ error: error.message }, status);
     }
   });
 

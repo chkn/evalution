@@ -71,6 +71,15 @@ export {
 export { TSPromptFileType } from './prompt/file/ts/ts-prompt-file-type.ts';
 export { type FileProvider, type FileWatchOptions, type FileWatchCallback, type GlobOptions, LocalFileProvider, MemoryFileProvider } from './file-provider.ts';
 export type { SDKAdapter } from './sdk/sdk-adapter.ts';
+export type {
+  SetupTask,
+  SetupStep,
+  SetupStepBase,
+  SetupCreateConfigStep,
+  SetupRunCommandStep,
+  SetupInstallPackageStep,
+} from './shared/setup-task.ts';
+export { setupStepCommand } from './shared/setup-task.ts';
 export { VercelAISDK } from './sdk/vercel-ai-sdk.ts';
 export { GeminiInteractionsSDK } from './sdk/gemini-interactions-sdk.ts';
 export { FilePromptProvider, type FilePromptProviderOptions } from './prompt/file/file-prompt-provider.ts';

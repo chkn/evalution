@@ -3329,6 +3329,9 @@ code, pre {
 .setup-split { display: flex; flex-direction: column; }
 
 .setup-pane { display: flex; flex-direction: column; }
+/* Match the header→subtitle gap of the agent pane (the subtitle's line-height
+   leading makes its 6px margin read larger than the bare selector below). */
+.setup-pane h3 + .welcome-field { margin-top: 4px; }
 
 .setup-divider {
   display: flex;
@@ -3365,6 +3368,131 @@ code, pre {
 
 .setup-allset { display: flex; flex-direction: column; }
 .setup-allset .setup-actions { margin-top: 20px; }
+
+/* ── Manual-setup step list ── */
+
+.setup-steps {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.setup-step {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--panel-border);
+}
+.setup-step:last-child { border-bottom: none; }
+
+.setup-step-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.setup-step-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--panel-text);
+}
+/* Checkbox marker: an empty box that fills with a check once the step is done. */
+.setup-step-label::before {
+  content: '';
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: var(--input-bg);
+}
+.setup-step-done .setup-step-label::before {
+  content: '✓';
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--panel-bg);
+  border-color: var(--accent);
+  background: var(--accent);
+}
+/* While a step runs, the checkbox becomes a spinning ring. */
+.setup-step-running .setup-step-label::before {
+  content: '';
+  background: transparent;
+  border-color: var(--panel-border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: setup-step-spin 0.6s linear infinite;
+}
+@keyframes setup-step-spin {
+  to { transform: rotate(360deg); }
+}
+.setup-step-label code {
+  font-size: 12px;
+  background: var(--input-bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.setup-step-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+/* Light separator between adjacent action links (e.g. View | Create). */
+.setup-step-action > * + * {
+  border-left: 1px solid var(--panel-border);
+  padding-left: 12px;
+}
+
+.setup-step-status {
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.setup-step-status::before { content: '✓'; }
+
+.setup-step-done .setup-step-label { color: var(--panel-text-secondary); }
+
+.setup-step .copy-box { margin-top: 8px; }
+
+/* Config snippet with a docs link tucked into the lower-right corner. */
+.setup-config-snippet { position: relative; }
+.setup-config-snippet .copy-box { padding-bottom: 26px; }
+.setup-config-docs {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  font-size: 12px;
+}
+
+/* ── Terminal pane (placeholder) ── */
+
+.terminal-view {
+  height: 100%;
+  padding: 16px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  overflow: auto;
+}
+.terminal-view-line { margin: 0; white-space: pre-wrap; }
+.terminal-view-prompt { color: var(--panel-text-secondary); }
+.terminal-view-hint {
+  margin-top: 10px;
+  color: var(--panel-text-secondary);
+  font-size: 12px;
+}
+.terminal-view-hint kbd {
+  font-family: inherit;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
 
 /* ── Copy box ── */
 

@@ -5,6 +5,7 @@ import { generateText, streamText } from 'ai';
 import type { PropDefinition, PropValue } from 'ts-proppy';
 import { findTypeDeclaration, extractPropertiesFromDeclaration } from 'ts-proppy';
 import { findPackageDts, type SDKAdapter } from './sdk-adapter.ts';
+import { CONFIG_FILE_RELATIVE_PATH, type SetupTask } from '../shared/setup-task.ts';
 import { isEditable } from '../shared/helpers.ts';
 import type {
   ParsedPrompt,
@@ -66,6 +67,19 @@ function customValueTemplate(provider: string): ModelPropValue {
   };
 }
 
+/** Starter contents of `.evalution/config.ts` for the Vercel AI SDK. */
+const CONFIG_FILE_CONTENTS = `import type { EvalutionConfig } from 'evalution';
+import { FilePromptProvider, VercelAISDK } from 'evalution';
+
+export default {
+  promptProviders: [
+    new FilePromptProvider({
+      sdk: new VercelAISDK(),
+    }),
+  ],
+} satisfies EvalutionConfig;
+`;
+
 /**
  * {@link SDKAdapter} implementation for the
  * [Vercel AI SDK](https://sdk.vercel.ai/).
@@ -75,6 +89,31 @@ function customValueTemplate(provider: string): ModelPropValue {
  * - `executeConfig` delegates to `generateText` or `streamText`.
  */
 export class VercelAISDK implements SDKAdapter {
+  /** Onboarding task: install the SDK package, then drop a starter config. */
+  static readonly setupTask: SetupTask = {
+    id: 'vercel-ai-sdk',
+    label: 'AI SDK',
+    icon: 'vercel',
+    steps: [
+      {
+        kind: 'install_package',
+        id: 'install-ai',
+        package: 'ai',
+      },
+      {
+        kind: 'install_package',
+        id: 'install-evalution-vercel-ai-sdk',
+        package: '@evalution/vercel-ai-sdk',
+      },
+      {
+        kind: 'create_config',
+        id: 'create-config',
+        path: CONFIG_FILE_RELATIVE_PATH,
+        contents: CONFIG_FILE_CONTENTS,
+      },
+    ],
+  };
+
   getModelCatalog() {
     // FIXME: Can we read this from the SDK instead of hardcoding it?
     return Promise.resolve({

@@ -11,7 +11,7 @@ import type {
   TraceStreamEvent,
   TraceProviderInfo,
 } from '../shared/types';
-import type { AiSdkChoice } from '../shared/config-template';
+import type { SetupTask } from '../shared/setup-task';
 import { encodePromptId } from './utils';
 
 function promptUrl(prompt: NormalizedPrompt, suffix: string): string {
@@ -25,18 +25,31 @@ async function throwIfError(res: Response): Promise<void> {
   }
 }
 
+/** Fetches the onboarding setup tasks shown in the manual-setup picker. */
+export async function getSetupTasks(): Promise<SetupTask[]> {
+  const res = await fetch('/api/setup-tasks');
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Result of executing a setup step via {@link executeSetupStep}. */
+export interface ExecuteSetupStepResult {
+  /** For a `create_config` step: the project-relative path that was written. */
+  path?: string;
+}
+
 /**
- * Asks the server to scaffold a starter `.evalution/config.ts` for the given
- * AI SDK. Rejects if a config file already exists.
+ * Runs a single onboarding step by id. The server resolves the step from its
+ * own registry, so no file contents or commands are sent from the client.
  */
-export async function createConfigFile(
-  sdk: AiSdkChoice
-): Promise<{ path: string; created: boolean }> {
-  const res = await fetch('/api/config/create', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sdk }),
-  });
+export async function executeSetupStep(
+  taskId: string,
+  stepId: string,
+): Promise<ExecuteSetupStepResult> {
+  const res = await fetch(
+    `/api/setup-tasks/${encodeURIComponent(taskId)}/steps/${encodeURIComponent(stepId)}/execute`,
+    { method: 'POST' },
+  );
   await throwIfError(res);
   return res.json();
 }

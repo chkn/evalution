@@ -10,6 +10,7 @@ import TraceList from './components/TraceList';
 import TraceView from './components/TraceView';
 import AddPromptDialog from './components/AddPromptDialog';
 import PlaygroundContent from './components/PlaygroundContent';
+import { TerminalView } from './components/TerminalView';
 import { Tab } from './components/Tab';
 import { WelcomeWizard } from './components/welcome/WelcomeWizard';
 import type { ExecuteResponse, PromptID, SSEData } from '../shared/types';
@@ -19,14 +20,18 @@ import type { ExecuteResponse, PromptID, SSEData } from '../shared/types';
 interface PromptTab { type: 'prompt'; providerId: string; promptId: string }
 interface TraceTab { type: 'trace'; providerId: string; traceId: string; rootSpanId: string; label: string }
 interface WelcomeTab { type: 'welcome' }
-type AppTab = PromptTab | TraceTab | WelcomeTab;
+interface TerminalTab { type: 'terminal'; id: string; command: string; label: string }
+type AppTab = PromptTab | TraceTab | WelcomeTab | TerminalTab;
 
 const WELCOME_TAB_KEY = 'welcome';
 
 const tabKey = (t: AppTab) =>
   t.type === 'prompt' ? `prompt:${t.providerId}:${t.promptId}`
   : t.type === 'trace' ? `trace:${t.providerId}:${t.traceId}`
+  : t.type === 'terminal' ? `terminal:${t.id}`
   : WELCOME_TAB_KEY;
+
+let _terminalSeq = 0;
 
 interface Pane { id: string; tabs: AppTab[]; activeTabKey: string | null }
 
@@ -67,6 +72,16 @@ function PromptsIcon() {
 
 function WelcomeIcon() {
   return <span className="welcome-tab-emoji" role="img" aria-label="Welcome">👋</span>;
+}
+
+function TerminalIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="4 17 10 11 4 5"/>
+      <line x1="12" y1="19" x2="20" y2="19"/>
+    </svg>
+  );
 }
 
 function SplitIcon() {
@@ -259,6 +274,12 @@ function App() {
     });
   };
 
+  /** Opens an interactive terminal tab (split right) with `command` queued up. */
+  const openTerminalRightOf = (fromPaneId: string, command: string, label?: string) => {
+    const tab: TerminalTab = { type: 'terminal', id: `t${++_terminalSeq}`, command, label: label ?? command };
+    openTabRightOf(fromPaneId, tab);
+  };
+
   const openPromptTabRightOf = (fromPaneId: string, prompt: PromptID) => {
     // `prompt` comes from a resolved span, so `providerId` is set.
     const providerId = requireProviderId(prompt.providerId, `opening prompt ${prompt.id} from trace`);
@@ -447,9 +468,11 @@ function App() {
                         const name = tab.type === 'prompt'
                           ? (prompts.find(p => p.id === tab.promptId && p.providerId === tab.providerId)?.name ?? tab.promptId)
                           : tab.type === 'trace' ? tab.label
+                          : tab.type === 'terminal' ? tab.label
                           : 'Welcome';
                         const icon = tab.type === 'trace' ? <TracesIcon />
                           : tab.type === 'welcome' ? <WelcomeIcon />
+                          : tab.type === 'terminal' ? <TerminalIcon />
                           : undefined;
                         return (
                           <Tab
@@ -543,7 +566,18 @@ function App() {
                       if (tab.type === 'welcome') {
                         return (
                           <div key={key} style={visible}>
-                            <WelcomeWizard configured={configured} onCreatePrompt={() => setShowAddPrompt(true)} />
+                            <WelcomeWizard
+                              configured={configured}
+                              onCreatePrompt={() => setShowAddPrompt(true)}
+                              onOpenTerminal={(command, label) => openTerminalRightOf(pane.id, command, label)}
+                            />
+                          </div>
+                        );
+                      }
+                      if (tab.type === 'terminal') {
+                        return (
+                          <div key={key} style={visible}>
+                            <TerminalView command={tab.command} />
                           </div>
                         );
                       }

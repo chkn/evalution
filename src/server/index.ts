@@ -131,8 +131,10 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
       // Drop open connections (notably long-lived SSE streams) up front, or
       // `close` would wait on them forever. (`closeAllConnections` exists on
       // the Node HTTP server but isn't in the union's Http2 arm.)
-      (server as { closeAllConnections?: () => void }).closeAllConnections?.();
-      server.close((err) => (err ? reject(err) : resolve()));
+      if ('closeAllConnections' in server) {
+        server.closeAllConnections();
+      }
+      server.close(err => err ? reject(err) : resolve());
     });
 
   // Graceful shutdown

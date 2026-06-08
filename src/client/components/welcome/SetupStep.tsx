@@ -1,13 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  AI_SDK_OPTIONS,
   CONFIG_DOCS_URL,
-  CONFIG_FILE_RELATIVE_PATH,
-  configFileTemplate,
-  type AiSdkChoice,
-} from '../../../shared/config-template';
-import { createConfigFile } from '../../api';
+  setupStepCommand,
+  type SetupStep as SetupStepDef,
+  type SetupTask,
+} from '../../../shared/setup-task';
+import { executeSetupStep, getSetupTasks } from '../../api';
 import vercelLogo from '../../assets/providers/vercel.svg?raw';
+import type { WizardStepProps } from './types';
 import { CopyBox } from './CopyBox';
 
 /** Setup instructions URL the coding agent is pointed at. */
@@ -15,31 +15,66 @@ const AGENT_SETUP_URL = 'https://evalut.io/n/docs/setup.md';
 /** Placeholder URL for non-Vercel SDK setup guidance. */
 const OTHER_SDK_URL = 'https://evalut.io/n/docs/other-sdk';
 
-type FileState =
-  | { status: 'idle' }
-  | { status: 'creating' }
-  | { status: 'created' }
-  | { status: 'error'; message: string };
+/** Maps a {@link SetupTask.icon} id to a bundled SVG asset. */
+const PROVIDER_ICONS: Record<string, string> = {
+  vercel: vercelLogo,
+};
+
+type SetupStepProps = Pick<WizardStepProps, 'onOpenTerminal'>;
 
 /**
  * Project setup step: offers two paths — hand the work to a coding agent, or
- * set things up manually by choosing an AI SDK and dropping in a config
- * snippet. There is no "next" action; the wizard advances on its own once the
+ * set things up manually by choosing an AI SDK and working through its ordered
+ * steps. There is no "next" action; the wizard advances on its own once the
  * config file is detected and loaded by the server.
  */
-export function SetupStep() {
-  const sdk: AiSdkChoice = 'vercel-ai-sdk';
-  const [file, setFile] = useState<FileState>({ status: 'idle' });
+export function SetupStep({ onOpenTerminal }: SetupStepProps) {
+  const [tasks, setTasks] = useState<SetupTask[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [running, setRunning] = useState<Set<string>>(new Set());
+  const [done, setDone] = useState<Set<string>>(new Set());
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const snippet = configFileTemplate(sdk);
+  useEffect(() => {
+    let cancelled = false;
+    getSetupTasks().then(loaded => {
+      if (cancelled) return;
+      setTasks(loaded);
+      setSelectedId(prev => prev ?? loaded[0]?.id ?? null);
+    }).catch(() => {/* leave the picker empty; the agent path still works */});
+    return () => { cancelled = true; };
+  }, []);
 
-  const handleCreateFile = async () => {
-    setFile({ status: 'creating' });
+  const selected = tasks.find(t => t.id === selectedId);
+
+  const isDone = (step: SetupStepDef, i: number) =>
+    (step.completed || done.has(step.id)) &&
+    // Don't mark config as done if it's the last step, because we should automatically detect it and redirect
+    (step.kind !== 'create_config' || i < selected!.steps.length - 1);
+
+  const isRunning = (step: SetupStepDef, i: number) =>
+    running.has(step.id) ||
+    (step.kind === 'create_config' && (step.completed || done.has(step.id)) && i === selected!.steps.length - 1);
+
+  const toggleExpanded = (stepId: string) =>
+    setExpanded(prev => {
+      const next = new Set(prev);
+      next.has(stepId) ? next.delete(stepId) : next.add(stepId);
+      return next;
+    });
+
+  const handleCreate = async (step: SetupStepDef) => {
+    if (!selected) return;
+    setRunning(prev => new Set(prev).add(step.id));
+    setErrors(prev => { const { [step.id]: _, ...rest } = prev; return rest; });
     try {
-      const { path } = await createConfigFile(sdk);
-      setFile({ status: 'created' });
+      await executeSetupStep(selected.id, step.id);
+      setDone(prev => new Set(prev).add(step.id));
     } catch (e: any) {
-      setFile({ status: 'error', message: e.message });
+      setErrors(prev => ({ ...prev, [step.id]: e.message }));
+    } finally {
+      setRunning(prev => { const next = new Set(prev); next.delete(step.id); return next; });
     }
   };
 
@@ -67,52 +102,130 @@ export function SetupStep() {
         <h3>Manual setup</h3>
 
         <div className="welcome-field">
-          <span>Which SDK are you using?</span>
           <div className="setup-sdk-options" role="group" aria-label="AI SDK">
-            {AI_SDK_OPTIONS.map(opt => (
+            {tasks.map(task => (
               <button
-                key={opt.value}
+                key={task.id}
                 type="button"
-                className="setup-sdk-option setup-sdk-option-selected"
-                aria-pressed="true"
+                className={`setup-sdk-option${task.id === selectedId ? ' setup-sdk-option-selected' : ''}`}
+                aria-pressed={task.id === selectedId}
+                onClick={() => setSelectedId(task.id)}
               >
-                <span className="setup-sdk-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: vercelLogo }} />
-                <span>{opt.label}</span>
+                {PROVIDER_ICONS[task.icon] && (
+                  <span
+                    className="setup-sdk-icon"
+                    aria-hidden="true"
+                    dangerouslySetInnerHTML={{ __html: PROVIDER_ICONS[task.icon] }}
+                  />
+                )}
+                <span>{task.label}</span>
               </button>
             ))}
             <a
               className="setup-sdk-option setup-sdk-option-link"
               href={OTHER_SDK_URL}
               target="_blank"
-              rel="noreferrer"
             >
               Other
             </a>
           </div>
         </div>
 
-        <p className="welcome-subtitle">
-          Add this to <code>{CONFIG_FILE_RELATIVE_PATH}</code>:
-        </p>
-        <CopyBox text={snippet} multiline />
-
-        <div className="setup-actions">
-          <button
-            type="button"
-            className="welcome-btn-secondary"
-            onClick={handleCreateFile}
-            disabled={file.status === 'creating' || file.status === 'created'}
-          >
-            {file.status === 'creating' || file.status === 'created' ? 'Creating…' : 'Create the file for me'}
-          </button>
-          <a className="welcome-link" href={CONFIG_DOCS_URL} target="_blank" rel="noreferrer">
-            Config docs ↗
-          </a>
-        </div>
-        {file.status === 'error' && (
-          <div className={`setup-file-status setup-file-${file.status}`}>{file.message}</div>
+        {selected && (
+          <ol className="setup-steps">
+            {selected.steps.map((step, i) => (
+              <li
+                key={step.id}
+                className={`setup-step${isDone(step, i) ? ' setup-step-done' : ''}${isRunning(step, i) ? ' setup-step-running' : ''}`}
+              >
+                <div className="setup-step-row">
+                  <span className="setup-step-label">{renderStepLabel(step)}</span>
+                  <span className="setup-step-action">
+                    {renderStepAction(step, {
+                      done: isDone(step, i),
+                      running: isRunning(step, i),
+                      expanded: expanded.has(step.id),
+                      onCreate: () => handleCreate(step),
+                      onRun: () => {
+                        if (step.kind === 'create_config') return;
+                        const label = step.kind === 'install_package' ? `Install ${step.package}` : step.label;
+                        onOpenTerminal?.(setupStepCommand(step), label);
+                      },
+                      onToggleExpand: () => toggleExpanded(step.id),
+                    })}
+                  </span>
+                </div>
+                {step.kind === 'create_config' && expanded.has(step.id) && (
+                  <div className="setup-config-snippet">
+                    <CopyBox text={step.contents} multiline />
+                    <a
+                      className="welcome-link setup-config-docs"
+                      href={CONFIG_DOCS_URL}
+                      target="_blank"
+                    >
+                      Config docs ↗
+                    </a>
+                  </div>
+                )}
+                {errors[step.id] && (
+                  <div className="setup-file-status setup-file-error">{errors[step.id]}</div>
+                )}
+              </li>
+            ))}
+          </ol>
         )}
       </section>
     </div>
+  );
+}
+
+/** The instruction text shown for a step (e.g. "Create `config.ts`"). */
+function renderStepLabel(step: SetupStepDef) {
+  switch (step.kind) {
+    case 'create_config':
+      return <>Create config: <code>{step.path}</code></>;
+    case 'install_package':
+      return <>Install package: <code>{step.package}</code></>;
+    case 'run_command':
+      return <>Run <code>{step.command}</code></>;
+  }
+}
+
+interface StepActionState {
+  done: boolean;
+  running: boolean;
+  expanded: boolean;
+  onCreate: () => void;
+  onRun: () => void;
+  onToggleExpand: () => void;
+}
+
+/** The right-hand action(s) for a step: create/run link, done indicator, expander. */
+function renderStepAction(step: SetupStepDef, s: StepActionState) {
+  if (step.kind === 'create_config') {
+    return (
+      <>
+        <button type="button" className="setup-step-expand welcome-link" onClick={s.onToggleExpand}>
+          {s.expanded ? 'Hide' : 'Show'}
+        </button>
+        {s.done
+          ? <span className="setup-step-status setup-file-created">Created</span>
+          : (
+            <button type="button" className="welcome-link" onClick={s.onCreate} disabled={s.running}>
+              {s.running ? 'Creating…' : 'Create'}
+            </button>
+          )}
+      </>
+    );
+  }
+
+  // run_command / install_package
+  if (step.kind === 'install_package' && s.done) {
+    return <span className="setup-step-status setup-file-created">Installed</span>;
+  }
+  return (
+    <button type="button" className="welcome-link" onClick={s.onRun}>
+      {step.kind === 'install_package' ? 'Install' : 'Run'}
+    </button>
   );
 }
