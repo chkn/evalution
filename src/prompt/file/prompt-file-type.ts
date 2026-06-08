@@ -46,6 +46,12 @@ export interface PromptFileType {
   defaultIncludePatterns: readonly string[];
 
   /**
+   * File extension appended to a new prompt's filename when the user does not
+   * supply one (e.g. `'.prompt.ts'`). Includes the leading dot.
+   */
+  defaultFileExtension: string;
+
+  /**
    * Parses the given files and returns all discovered prompts.
    * Reads fresh file content at the time of the call.
    * @param files - Absolute paths of the files to parse.

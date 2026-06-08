@@ -39,6 +39,7 @@ import type { ModelPropValue, CalleeBinding } from '../../../shared/types.ts';
 
 export class TSPromptFileType implements PromptFileType {
   defaultIncludePatterns = ['**/*.prompt.ts', '**/*.promp.ts'];
+  defaultFileExtension = '.prompt.ts';
 
   private fileProvider: FileProvider;
 
@@ -356,6 +357,9 @@ function getPropertyName(prop: ts.ObjectLiteralElementLike): string | null {
   if (ts.isMethodDeclaration(prop) || ts.isPropertyAssignment(prop)) {
     const name = prop.name;
     if (ts.isIdentifier(name) || ts.isStringLiteral(name)) return name.text;
+    if (ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)) {
+      return name.expression.text;
+    }
   } else if (ts.isShorthandPropertyAssignment(prop)) {
     return prop.name.text;
   }

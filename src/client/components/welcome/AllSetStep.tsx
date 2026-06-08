@@ -13,17 +13,15 @@ export function AllSetStep({ onCreatePrompt }: WizardStepProps) {
     <div className="setup-allset">
       <h3>You're all set! 🎉</h3>
       <p className="welcome-subtitle">
-        Evalution found your config. Create your first prompt to start iterating,
-        or browse the docs to see what's possible.
+        Create your first prompt to start iterating, or browse the docs to see what's possible.
       </p>
-
+      <a className="welcome-link" href={GETTING_STARTED_URL} target="_blank" rel="noreferrer">
+        Read the docs ↗
+      </a>
       <div className="setup-actions">
         <button type="button" className="welcome-btn-primary" onClick={onCreatePrompt}>
           Create New Prompt
         </button>
-        <a className="welcome-link" href={GETTING_STARTED_URL} target="_blank" rel="noreferrer">
-          Read the docs ↗
-        </a>
       </div>
     </div>
   );

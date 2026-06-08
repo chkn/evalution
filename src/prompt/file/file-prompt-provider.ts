@@ -206,14 +206,30 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
     const name = partial.name;
 
     if (relFilePath && name) {
-      // Enough info — create the file
-      const absPath = path.join(this.rootDir, relFilePath);
-      const content = `export function ${name}() {\n  return {};\n}\n`;
+      const normalizedRelFilePath = path.extname(relFilePath)
+        ? relFilePath
+        : relFilePath + this.fileType.defaultFileExtension;
+      const baseName = path.basename(normalizedRelFilePath);
+      const firstDot = baseName.indexOf('.');
+      const promptsId = firstDot >= 0 ? baseName.slice(0, firstDot) : baseName;
+      // FIXME: This file content should be owned by the SDK adapter (?)
+      const absPath = path.join(this.rootDir, normalizedRelFilePath);
+      const content = `import { prompts } from "@evalution/vercel-ai-sdk";
+
+export default prompts(
+  "${promptsId}",
+  () => ({
+    ["${name}"]: () => ({
+    })
+}))`;
 
       this.suppressNextWatchEvent(absPath, 'add');
       await this.fileProvider.writeFile(absPath, content);
+      if (this.files && !this.files.includes(absPath)) {
+        this.files.push(absPath);
+      }
 
-      const prompt = await this.getPrompt(`${relFilePath}#${name}`);
+      const prompt = await this.getPrompt(`${normalizedRelFilePath}#${name}`);
       if (!prompt) throw new Error('Failed to create prompt');
       return prompt;
     }
@@ -250,7 +266,7 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
           label: 'File name',
           type: 'text' as const,
           required: true,
-          placeholder: 'my-prompt.prompt.ts',
+          placeholder: `my-prompt (or my-prompt${this.fileType.defaultFileExtension})`,
         },
         {
           name: 'name',
@@ -282,6 +298,9 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
             callback({ type: eventType === 'change' ? 'change' : 'add', promptId: prompt.id });
           });
         } else {
+          if (this.files) {
+            this.files = this.files.filter(f => f !== absolutePath);
+          }
           // filePath is relative to rootDir (chokidar cwd)
           callback({ type: 'remove', promptId: filePath });
         }

@@ -139,8 +139,11 @@ function SystemCard({ content, editable, propDef, onChange }: {
             value={local}
             onChange={handleChange}
             className="token-editor"
+            placeholder="System message…"
           />
-        : <div className="pg-msg-content">{content !== undefined ? valueToDisplayString(content) : ''}</div>
+        : <div className={`pg-msg-content${content === undefined ? ' pg-placeholder' : ''}`}>
+            {content !== undefined ? valueToDisplayString(content) : 'System message…'}
+          </div>
       }
     </div>
   );

@@ -224,7 +224,7 @@ npm run dev
 
 1. **Scanning**: Evalution scans your project for `**/*.prompt.ts` and `**/*.promp.ts` files
 2. **Parsing**: TypeScript AST parser extracts exported functions and their configurations
-3. **Server**: Fastify serves the web UI and API endpoints
+3. **Server**: Hono serves the web UI and API endpoints
 4. **Editing**: When you edit in the UI, changes are written back to source files using precise character-range replacement. Adding or removing parameters updates the source file automatically.
 5. **Parameters**: Available call settings are read at startup from the `CallSettings` type in your locally installed `ai` package, so the list always reflects your SDK version. JSDoc descriptions are extracted and shown in the UI.
 6. **Execution**: Node's native TypeScript support dynamically imports your prompt files and calls the functions with provided parameters
@@ -234,9 +234,9 @@ npm run dev
 
 - **Parser**: TypeScript Compiler API for AST parsing and call settings introspection
 - **Editor**: Character-range replacement preserving formatting, with add/remove support
-- **Server**: Fastify with Server-Sent Events for hot reload
-- **Client**: React playground UI with Server-Sent Events for real-time updates
-- **Build**: tsup for server, Vite for client
+- **Server**: Hono with SSE for hot reload
+- **Client**: React playground UI with SSE for real-time updates
+- **Build**: tsdown for server, Vite for client
 
 ## License
 

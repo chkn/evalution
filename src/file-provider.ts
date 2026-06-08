@@ -58,6 +58,13 @@ export interface FileProvider {
   writeFile(filePath: string, content: string): Promise<void>;
 
   /**
+   * Deletes the file at `filePath`.
+   * When the path falls inside an active {@link watch} scope, the watcher
+   * callback is invoked automatically with `'remove'`.
+   */
+  deleteFile(filePath: string): Promise<void>;
+
+  /**
    * Dynamically imports the module at `filePath` and returns its namespace
    * object. Rejects if the file does not exist.
    */
@@ -131,6 +138,11 @@ export class MemoryFileProvider implements FileProvider {
     this.notifyWatchers(isNew ? 'add' : 'change', filePath);
   }
 
+  async deleteFile(filePath: string): Promise<void> {
+    this.files.delete(filePath);
+    this.notifyWatchers('remove', filePath);
+  }
+
   async import(filePath: string): Promise<any> {
     const content = this.files.get(filePath);
     if (content === undefined) throw new Error(`File not found: ${filePath}`);
@@ -194,6 +206,10 @@ export class LocalFileProvider implements FileProvider {
   async writeFile(filePath: string, content: string): Promise<void> {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, content, 'utf-8');
+  }
+
+  async deleteFile(filePath: string): Promise<void> {
+    await fs.unlink(filePath);
   }
 
   async import(filePath: string): Promise<any> {

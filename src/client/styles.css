@@ -2447,6 +2447,11 @@ code, pre {
   line-height: 1.55;
 }
 
+.pg-placeholder {
+  color: var(--panel-text-secondary);
+  font-style: italic;
+}
+
 /* ─── Token editor (contenteditable rich text) ─────────────────────────────── */
 
 .token-editor {

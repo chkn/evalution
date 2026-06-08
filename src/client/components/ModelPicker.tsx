@@ -93,7 +93,7 @@ export default function ModelPicker({ value: propertyValue, onChange, modelCatal
   }, [modes[0]?.[0]]);
 
   const valueString = propertyValue ? valueToDisplayString(propertyValue) : undefined;
-  const displayLabel = selectedModel?.label ?? valueString ?? '';
+  const displayLabel = selectedModel?.label ?? valueString ?? undefined;
 
   const updatePosition = useCallback(() => {
     if (!triggerRef.current) return;
@@ -261,7 +261,9 @@ export default function ModelPicker({ value: propertyValue, onChange, modelCatal
         title={valueString}
       >
         <ProviderIcon provider={selectedModel?.group} size={20} />
-        <span className="pg-model-picker-label">{displayLabel}</span>
+        <span className={`pg-model-picker-label${displayLabel ? '' : ' pg-placeholder'}`}>
+          {displayLabel ?? 'Select a model…'}
+        </span>
         {propertyValue && selectedModel && (
           <span className="pg-model-picker-source">{valueString}</span>
         )}

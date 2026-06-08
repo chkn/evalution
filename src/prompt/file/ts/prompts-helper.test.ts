@@ -101,6 +101,25 @@ export default prompts('orders', ({ openai }) => ({
       expect(parsed.find(p => p.name === 'classify')!.globalId).toBe('orders#classify');
     });
 
+    it('parses computed string-literal keys (e.g. ["myPrompt"])', async () => {
+      const filePath = '/virtual/computed-key.prompt.ts';
+      const source = `
+import { prompts } from "@evalution/vercel-ai-sdk";
+export default prompts(
+  "prompt2",
+  () => ({
+    ["newPrompt"]: () => ({
+    })
+}))
+`;
+      const ft = new TSPromptFileType(new MemoryFileProvider({ [filePath]: source }));
+      const parsed = await ft.parsePrompts([filePath], '');
+
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].name).toBe('newPrompt');
+      expect(parsed[0].globalId).toBe('prompt2#newPrompt');
+    });
+
     it('omits globalId when the helper has no module id argument', async () => {
       const filePath = '/virtual/no-id.prompt.ts';
       const source = `

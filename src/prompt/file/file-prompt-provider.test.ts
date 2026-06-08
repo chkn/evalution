@@ -266,6 +266,29 @@ export function myPrompt() {
     expect(events[0].type).toBe('change');
   });
 
+  it('getAllPrompts does not throw after a watched file is deleted', async () => {
+    const fileProvider = new MemoryFileProvider({
+      '/virtual/test.prompt.ts': `
+export function myPrompt() {
+  return { model: 'openai/gpt-4o', system: 'Test' };
+}
+`,
+    });
+    const watchedProvider = new FilePromptProvider({
+      rootDir: '/virtual',
+      fileProvider,
+      sdk: new VercelAISDK(),
+    });
+
+    expect(await watchedProvider.getAllPrompts()).toHaveLength(1);
+
+    const cleanup = watchedProvider.watch!(() => {});
+    await fileProvider.deleteFile('/virtual/test.prompt.ts');
+    cleanup();
+
+    await expect(watchedProvider.getAllPrompts()).resolves.toHaveLength(0);
+  });
+
   it('should cleanup watcher when cleanup function is called', async () => {
     const filePath = path.join(tempDir, 'test.prompt.ts');
     await fs.writeFile(filePath, `
