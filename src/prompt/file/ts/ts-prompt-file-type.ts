@@ -37,9 +37,25 @@ import type { ModelPropValue, CalleeBinding } from '../../../shared/types.ts';
  * ```
  */
 
+function isValidIdentifier(name: string): boolean {
+  return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name);
+}
+
 export class TSPromptFileType implements PromptFileType {
   defaultIncludePatterns = ['**/*.prompt.ts', '**/*.promp.ts'];
   defaultFileExtension = '.prompt.ts';
+
+  newPromptSkeleton(promptsId: string, name: string, importPath: string): string {
+    const key = isValidIdentifier(name) ? name : `[${JSON.stringify(name)}]`;
+    return `import { prompts } from ${JSON.stringify(importPath)};
+
+export default prompts(
+  ${JSON.stringify(promptsId)},
+  () => ({
+    ${key}: () => ({
+    })
+}));`;
+  }
 
   private fileProvider: FileProvider;
 
@@ -114,6 +130,7 @@ export class TSPromptFileType implements PromptFileType {
 
     let nameStart = -1;
     let nameEnd = -1;
+    let isFunctionDeclaration = false;
 
     const visit = (node: ts.Node) => {
       if (nameStart >= 0) return;
@@ -123,6 +140,7 @@ export class TSPromptFileType implements PromptFileType {
       ) {
         nameStart = node.name.getStart(sourceFile);
         nameEnd = node.name.getEnd();
+        isFunctionDeclaration = true;
         return;
       }
       if (ts.isExportAssignment(node)) {
@@ -144,7 +162,11 @@ export class TSPromptFileType implements PromptFileType {
 
     if (nameStart < 0) throw new Error(`Function '${oldName}' not found in ${filePath}`);
 
-    const newSource = sourceCode.slice(0, nameStart) + newName + sourceCode.slice(nameEnd);
+    if (!isValidIdentifier(newName) && isFunctionDeclaration) {
+      throw new Error(`'${newName}' is not a valid function name`);
+    }
+    const replacement = isValidIdentifier(newName) ? newName : `[${JSON.stringify(newName)}]`;
+    const newSource = sourceCode.slice(0, nameStart) + replacement + sourceCode.slice(nameEnd);
     await this.fileProvider.writeFile(filePath, newSource);
   }
 

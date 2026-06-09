@@ -29,20 +29,20 @@ Requires Node.js 22.18.0 or higher.
 1. Create a `.prompt.ts` file in your project:
 
 ```typescript
-// weather.prompt.ts
-import { openai } from '@ai-sdk/openai';
+// simple.prompt.ts
+import { prompts } from "@evalution/vercel-ai-sdk";
 
-export function checkWeather() {
-  return {
-    model: openai('gpt-4o'),
-    system: 'You are a weather assistant',
-    messages: [
-      { role: 'user', content: 'What is the weather in San Francisco?' }
-    ],
-    temperature: 0.7,
-    maxTokens: 500
-  };
-}
+export default prompts(
+  "Simple", // <- this is an ID that should not change
+  ({ openai }) => ({
+
+  simplePrompt: () => ({
+    model: openai("gpt-5.4-mini"),
+    system: "You are a helpful assistant",
+    messages: [{ role: "user", content: "Hello!" }],
+  }),
+
+}));
 ```
 
 2. Run Evalution:

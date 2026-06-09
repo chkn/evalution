@@ -97,7 +97,7 @@ test('all-set step links to the docs in a new tab', async ({ mount }) => {
   const component = await mount(<WelcomeWizardHarness initialConfigured />);
 
   const docs = component.getByRole('link', { name: /Read the docs/ });
-  await expect(docs).toHaveAttribute('href', 'https://evalut.io/docs/getting-started');
+  await expect(docs).toHaveAttribute('href', 'https://evalut.io/n/docs/getting-started');
   await expect(docs).toHaveAttribute('target', '_blank');
 });
 

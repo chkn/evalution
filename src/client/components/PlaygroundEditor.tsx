@@ -292,7 +292,7 @@ function SettingsModal({ prompt, modelParameters, addableParams, onUpdate, onClo
         {addableParams.length > 0 && (
           <div className="pg-modal-footer">
             <div className="pg-pill-btn pg-add-param-btn">
-              Add setting
+              + Add setting
               <select
                 className="pg-model-overlay-select"
                 value=""

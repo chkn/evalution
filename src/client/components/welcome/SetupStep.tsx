@@ -94,12 +94,11 @@ export function SetupStep({ onOpenTerminal }: SetupStepProps) {
         <p className="welcome-subtitle">
           Paste this prompt into your coding agent and let it wire up Evalution for you:
         </p>
-        <CopyBox text={`Follow the guide at ${AGENT_SETUP_URL} to set up Evalution.`}>
-          Follow the guide at{' '}
+        <CopyBox text={`Fetch ${AGENT_SETUP_URL}`}>
+          Fetch{' '}
           <a className="welcome-link" href={AGENT_SETUP_URL} target="_blank">
             {AGENT_SETUP_URL}
           </a>
-          {' '}to set up Evalution.
         </CopyBox>
       </section>
 

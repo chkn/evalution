@@ -327,4 +327,13 @@ export function test() {
     // but the valueSpan should be missing for raw/dynamic values
     expect(systemDef.valueSpan).toBeDefined();
   });
+
+  it('throws when renaming a function-declaration prompt to a non-identifier name', async () => {
+    const { filePath, editor } = await setup(`
+export function myPrompt() {
+  return { model: 'openai/gpt-4o', system: 'x', messages: [] };
+}
+`);
+    await expect(editor.renamePrompt(filePath, 'myPrompt', 'my-prompt')).rejects.toThrow();
+  });
 });

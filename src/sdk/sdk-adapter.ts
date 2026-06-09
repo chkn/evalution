@@ -18,6 +18,12 @@ import type {
  */
 export interface SDKAdapter {
   /**
+   * The package that exports the `prompts()` helper used in new prompt files
+   * (e.g. `'@evalution/vercel-ai-sdk'`). Used by {@link PromptFileType.newPromptSkeleton}.
+   */
+  promptsHelperImport: string;
+
+  /**
    * Returns model catalog information: the set of known providers and a
    * curated list of popular models for this SDK.
    */

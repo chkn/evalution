@@ -86,9 +86,11 @@ export default {
  *
  * - `getModelParameters` reads `CallSettings` from the SDK's `.d.ts` bundle
  *   and surfaces parameters with simple types that can be edited in the UI.
- * - `executeConfig` delegates to `generateText` or `streamText`.
+ * - `executeConfig` delegates to `generateText`.
  */
 export class VercelAISDK implements SDKAdapter {
+  readonly promptsHelperImport = PROMPTS_HELPER_CALL.import.from;
+
   /** Onboarding task: install the SDK package, then drop a starter config. */
   static readonly setupTask: SetupTask = {
     id: 'vercel-ai-sdk',

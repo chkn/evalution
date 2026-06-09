@@ -231,11 +231,18 @@ function App() {
   const handleSelectTrace = (providerId: string, traceId: string, label: string) => {
     const tab: AppTab = { type: 'trace', providerId, traceId, rootSpanId: '', label };
     const key = tabKey(tab);
-    setPanes(prev => prev.map(p => p.id !== focusedPaneId ? p : {
-      ...p,
-      tabs: p.tabs.some(t => tabKey(t) === key) ? p.tabs : [...p.tabs, tab],
-      activeTabKey: key,
-    }));
+    setPanes(prev => {
+      const existing = prev.find(p => p.tabs.some(t => tabKey(t) === key));
+      if (existing) {
+        setFocusedPaneId(existing.id);
+        return prev.map(p => p.id === existing.id ? { ...p, activeTabKey: key } : p);
+      }
+      return prev.map(p => p.id !== focusedPaneId ? p : {
+        ...p,
+        tabs: [...p.tabs, tab],
+        activeTabKey: key,
+      });
+    });
   };
 
   const openTabRightOf = (fromPaneId: string, tab: AppTab) => {

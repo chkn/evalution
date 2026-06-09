@@ -203,25 +203,18 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
 
   async addPrompt(partial: Partial<NormalizedFilePrompt>): Promise<NormalizedFilePrompt | AddPromptContext> {
     const relFilePath = (partial.metadata as FilePromptMetadata | undefined)?.relativeFilePath;
-    const name = partial.name;
 
-    if (relFilePath && name) {
+    if (relFilePath) {
       const normalizedRelFilePath = path.extname(relFilePath)
         ? relFilePath
         : relFilePath + this.fileType.defaultFileExtension;
+      const absPath = path.join(this.rootDir, normalizedRelFilePath);
       const baseName = path.basename(normalizedRelFilePath);
       const firstDot = baseName.indexOf('.');
       const promptsId = firstDot >= 0 ? baseName.slice(0, firstDot) : baseName;
-      // FIXME: This file content should be owned by the SDK adapter (?)
-      const absPath = path.join(this.rootDir, normalizedRelFilePath);
-      const content = `import { prompts } from "@evalution/vercel-ai-sdk";
+      const name = partial.name ?? promptsId;
 
-export default prompts(
-  "${promptsId}",
-  () => ({
-    ["${name}"]: () => ({
-    })
-}))`;
+      const content = this.fileType.newPromptSkeleton(promptsId, name, this.sdkAdapter.promptsHelperImport);
 
       this.suppressNextWatchEvent(absPath, 'add');
       await this.fileProvider.writeFile(absPath, content);
@@ -270,10 +263,10 @@ export default prompts(
         },
         {
           name: 'name',
-          label: 'Function name',
+          label: 'Prompt name',
           type: 'text' as const,
-          required: true,
-          placeholder: 'myPrompt',
+          required: false,
+          placeholder: 'Default: file name without extension',
         },
       ],
     };

@@ -52,6 +52,14 @@ export interface PromptFileType {
   defaultFileExtension: string;
 
   /**
+   * Generates the starter source code for a new prompt file.
+   * @param promptsId - The module ID passed to the `prompts()` helper (typically derived from the file name).
+   * @param name - The initial prompt function name.
+   * @param importPath - The package path to import the `prompts()` helper from.
+   */
+  newPromptSkeleton(promptsId: string, name: string, importPath: string): string;
+
+  /**
    * Parses the given files and returns all discovered prompts.
    * Reads fresh file content at the time of the call.
    * @param files - Absolute paths of the files to parse.

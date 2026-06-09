@@ -264,6 +264,18 @@ export default prompts('helper', ({ openai }) => ({
       expect(after).toContain('renamed()');
       expect(after).not.toContain('myPrompt');
     });
+
+    it('renames a helper-defined prompt to a non-identifier name using computed-property syntax', async () => {
+      const filePath = '/virtual/helper.prompt.ts';
+      const fp = new MemoryFileProvider({ [filePath]: sample });
+      const ft = new TSPromptFileType(fp);
+
+      await ft.renamePrompt(filePath, 'myPrompt', 'my-prompt');
+
+      const after = await fp.readFile(filePath);
+      expect(after).toContain('["my-prompt"]()');
+      expect(after).not.toContain('myPrompt');
+    });
   });
 
   describe('loadConfig', () => {
