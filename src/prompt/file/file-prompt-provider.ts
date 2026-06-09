@@ -64,9 +64,10 @@ let defaultIDCounter = 0;
  * A {@link PromptProvider} that discovers and serves prompts from
  * files on the local file system (or any {@link FileProvider}).
  *
- * Out of the box it scans for `**\/*.prompt.ts` files, parses them with
- * {@link TSPromptFileType}, and executes them via {@link VercelAISDK}. All
- * three defaults are replaceable through {@link FilePromptProviderOptions}.
+ * Out of the box it scans for `**\/*.prompt.ts` files and parses them with
+ * {@link TSPromptFileType}. Pass a {@link FilePromptProviderOptions} to the
+ * constructor to customize this behavior. You must specify at least
+ * {@link FilePromptProviderOptions.sdk}.
  *
  * @example
  * ```ts

@@ -1,11 +1,9 @@
 {
+  // TypeDoc documents only the public API entry point (src/index.ts). Compiling
+  // just that file lets TypeScript pull in its transitive imports automatically;
+  // we deliberately do NOT include src/server or src/cli, which aren't part of
+  // the published surface and carry deps (ws, @lydell/node-pty) that needn't be
+  // present to generate the API reference.
   "extends": "./tsconfig.json",
-  "include": [
-    "src/index.ts",
-    "src/cli/**/*",
-    "src/server/**/*",
-    "src/parser/**/*",
-    "src/providers/**/*",
-    "src/shared/**/*"
-  ]
+  "include": ["src/index.ts"]
 }

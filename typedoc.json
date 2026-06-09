@@ -1,6 +1,6 @@
 {
   "entryPoints": ["src/index.ts"],
-  "out": "docs",
+  "out": "docs/extensibility/api",
   "tsconfig": "tsconfig.typedoc.json",
   "name": "evalution",
   "excludePrivate": true,

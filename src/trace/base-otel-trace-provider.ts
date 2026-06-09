@@ -220,8 +220,8 @@ export abstract class BaseOTelTraceProvider implements TraceProvider {
   protected abstract addOrUpdateTrace(trace: Trace): Promise<void>;
 
   /**
-   * Stores a span, merging it into any existing span with the same ID (see
-   * {@link mergeSpans}). Returns the resulting stored span so callers can
+   * Stores a span, merging it into any existing span with the same ID (via the
+   * internal `mergeSpans` helper). Returns the resulting stored span so callers can
    * stream the merged view rather than the partial snapshot they passed in.
    */
   protected abstract addOrUpdateSpan(span: Span): Promise<Span>;

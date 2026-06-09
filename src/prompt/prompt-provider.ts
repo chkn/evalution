@@ -6,13 +6,16 @@ import type {
   AddPromptContext,
   ModelCatalog,
 } from '../shared/types.ts';
+import type { FilePromptProvider } from './file/file-prompt-provider.ts';
+import type { PromptFileType } from './file/prompt-file-type.ts';
 
 /**
  * A source of prompts that the playground can display and execute.
  *
  * Implement this interface to add a custom prompt source — for example,
- * prompts stored in a database, fetched from a remote API, or written in a
- * non-TypeScript format.
+ * prompts stored in a database or fetched from a remote API. If you simply
+ * need to support a file format other than TypeScript, use {@link FilePromptProvider}
+ * with a custom {@link PromptFileType}.
  */
 export interface PromptProvider<TPrompt extends NormalizedPrompt = NormalizedPrompt> {
   /** Uniquely identifies this provider when multiple providers are used. */

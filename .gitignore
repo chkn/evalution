@@ -5,7 +5,10 @@ dist/
 coverage/
 .env
 .env.local
-docs/
+
+# Hand-written docs under docs/ are committed; only the generated TypeDoc API
+# reference (built into docs/extensibility/api by `npm run docs`) is ignored.
+docs/extensibility/api/
 
 # Playwright
 playwright/.cache/

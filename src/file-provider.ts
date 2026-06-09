@@ -37,9 +37,9 @@ export interface FileWatchOptions {
 export type FileWatchCallback = (eventType: ChangeEventType, filePath: string) => void;
 
 /**
- * Abstraction over file system I/O used throughout evalution.
+ * Abstraction over file system I/O used throughout Evalution.
  *
- * Swap in a different implementation to adapt evalution to non-local
+ * Swap in a different implementation to adapt Evalution to non-local
  * environments or to make tests fully in-memory (see {@link MemoryFileProvider}).
  * {@link LocalFileProvider} is the default implementation for production use.
  */

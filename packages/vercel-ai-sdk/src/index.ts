@@ -154,7 +154,7 @@ export { createTracerForPrompt };
 
 type GenerateTextConfig = Parameters<typeof generateText>[0];
 type StreamTextConfig = Parameters<typeof streamText>[0];
-type Prompt = GenerateTextConfig | StreamTextConfig | Agent<any, any, any>;
+type Prompt = GenerateTextConfig | StreamTextConfig; // | Agent<any, any, any>; // (agent not supported yet)
 
 /**
  * Type helper for defining evalution prompt modules using the Vercel AI SDK.

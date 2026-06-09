@@ -2,27 +2,33 @@ import type { PromptProvider } from './prompt/prompt-provider.ts';
 import type { TraceProvider } from './trace/trace-provider.ts';
 
 /**
- * Top-level configuration for an evalution instance.
+ * Top-level configuration for an Evalution instance.
  *
  * Place a default export of this type in `.evalution/config.ts` at the root
- * of your project to customise how evalution discovers and serves prompts.
+ * of your project to customise how Evalution discovers and serves prompts
+ * and traces.
+ * 
+ * If no config file is found, Evalution will show an onboarding wizard
+ * to help you create one.
  *
  * @example
  * ```ts
  * // .evalution/config.ts
- * import { FilePromptProvider } from 'evalution';
+ * import type { EvalutionConfig } from 'evalution';
+ * import { FilePromptProvider, VercelAISDK } from 'evalution';
  *
- * const config: EvalutionConfig = {
+ * export default {
  *   promptProviders: [
- *     new FilePromptProvider({ rootDir: './prompts' }),
+ *     new FilePromptProvider({
+ *       sdk: new VercelAISDK(),
+ *     }),
  *   ],
- * };
- * export default config;
+ * } satisfies EvalutionConfig;
  * ```
  */
 export interface EvalutionConfig {
   /**
-   * Whether to load a `.env` file from the directory evalution is launched
+   * Whether to load a `.env` file from the directory Evalution is launched
    * from before starting the server.
    *
    * @default true
