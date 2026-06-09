@@ -25,6 +25,8 @@ export interface ServerOptions {
 
 /** A running server, returned by {@link startServer}. */
 export interface ServerHandle {
+  /** The URL the server is listening on, e.g. `http://localhost:3000`. */
+  url: string;
   /**
    * Stops the server, force-closing any open connections (including live SSE
    * streams) so it shuts down promptly instead of waiting on them. Used by the
@@ -125,13 +127,24 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
   // Start server. `noServer: true` lets @hono/node-server own the HTTP upgrade
   // handshake and hand matching requests to the WebSocket routes above.
   const wss = new WebSocketServer({ noServer: true });
-  const server = serve({ fetch: app.fetch, port, hostname: '0.0.0.0', websocket: { server: wss } }, () => {
-    if (process.env.NODE_ENV === 'production') {
-      console.log(`\n✨ Evalution is running at http://localhost:${port}\n`);
-    } else {
-      console.log(`\n✨ Evalution API server running on http://localhost:${port}`);
-      console.log(`   Frontend dev server: http://localhost:5173\n`);
-    }
+  const url = `http://localhost:${port}`;
+
+  // When running from a bundled build the client is served by this process;
+  // when running from source (`npm run dev`) the client lives on a separate
+  // Vite dev server. Key off the module path rather than `NODE_ENV`, which
+  // isn't set under `npx evalution`.
+  const isDevServer = import.meta.url.includes('/src/');
+
+  const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
+    const s = serve({ fetch: app.fetch, port, hostname: '0.0.0.0', websocket: { server: wss } }, () => {
+      if (isDevServer) {
+        console.log(`\n✨ Evalution API server running on ${url}`);
+        console.log(`   Frontend dev server: http://localhost:5173\n`);
+      } else {
+        console.log(`\n✨ Evalution is running at ${url}\n`);
+      }
+      resolve(s);
+    });
   });
 
   const close = (): Promise<void> =>
@@ -155,5 +168,5 @@ export async function startServer(options: ServerOptions): Promise<ServerHandle>
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  return { close };
+  return { url, close };
 }

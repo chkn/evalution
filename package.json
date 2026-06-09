@@ -23,6 +23,7 @@
     "node": ">=22.18.0"
   },
   "scripts": {
+    "prepublishOnly": "npm run build",
     "build": "npm run build:cli && npm run build:client",
     "build:cli": "tsdown",
     "build:client": "vite build",

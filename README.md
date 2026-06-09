@@ -240,7 +240,7 @@ npm run dev
 
 ## License
 
-MIT
+AGPL
 
 ## Contributing
 

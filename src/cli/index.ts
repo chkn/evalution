@@ -6,6 +6,8 @@ import { MemoryTraceProvider } from '../trace/memory-trace-provider.ts';
 import { startServer } from '../server/index.ts';
 import { watchForConfigCreation } from './config-watcher.ts';
 import { registerEvalutionResolver } from './config-loader-hooks.ts';
+import { openBrowser } from './open-browser.ts';
+import { findAvailablePort } from './find-port.ts';
 
 // Make a project's config resolve `import ... from 'evalution'` against this
 // CLI rather than the project's node_modules, so configs load even when
@@ -50,12 +52,11 @@ function applyDotenv(rootDir: string): void {
   }
 }
 
-function startConfiguredServer(rootDir: string, config: EvalutionConfig, hasConfig: boolean) {
+function startConfiguredServer(rootDir: string, config: EvalutionConfig, hasConfig: boolean, port: number) {
   if (config.useDotenv !== false) {
     applyDotenv(rootDir);
   }
 
-  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   const promptProviders = config.promptProviders ?? [];
   const traceProviders = config.traceProviders ?? [new MemoryTraceProvider()];
 
@@ -76,15 +77,34 @@ async function main() {
   const startDir = pathArg ? path.resolve(pathArg) : process.cwd();
   const { rootDir, hasConfig } = await findRootDir(startDir);
 
+  // Resolve the port once, up front, so the onboarding restart binds the same
+  // port the browser was opened on. An explicit `PORT` is honored strictly; a
+  // busy default (3000) falls back to the next free port instead of crashing.
+  let port: number;
+  if (process.env.PORT) {
+    port = parseInt(process.env.PORT, 10);
+  } else {
+    port = await findAvailablePort(3000);
+  }
+
+  // Open the browser once the first server is listening. Subsequent restarts
+  // (after a config file appears) reuse the same URL, so we don't reopen.
+  // `EVALUTION_NO_OPEN` opts out (CI, remote/headless hosts).
+  const maybeOpen = (url: string) => {
+    if (!process.env.EVALUTION_NO_OPEN) openBrowser(url);
+  };
+
   if (hasConfig) {
-    await startConfiguredServer(rootDir, await loadConfig(rootDir), true);
+    const handle = await startConfiguredServer(rootDir, await loadConfig(rootDir), true, port);
+    maybeOpen(handle.url);
     return;
   }
 
   // No config yet: start in onboarding mode with defaults so the UI (and its
   // `POST /api/config/create` route) is reachable, then watch for the config
   // file to appear and restart the server with the real config once it does.
-  let server = await startConfiguredServer(rootDir, {}, false);
+  let server = await startConfiguredServer(rootDir, {}, false, port);
+  maybeOpen(server.url);
   console.log(`👀 No config found; watching ${path.join(rootDir, '.evalution', 'config.ts')} for creation...`);
 
   const stopWatching = watchForConfigCreation(rootDir, async () => {
@@ -95,7 +115,7 @@ async function main() {
     console.log('⚙️ Config loaded; restarting server...');
     stopWatching();
     await server.close();
-    server = await startConfiguredServer(rootDir, config, true);
+    server = await startConfiguredServer(rootDir, config, true, port);
   });
 }
 
