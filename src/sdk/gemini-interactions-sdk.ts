@@ -90,9 +90,11 @@ const FALLBACK_GENERATION_CONFIG_PARAMS: PropDefinition[] = [
 /**
  * {@link SDKAdapter} implementation for the Google GenAI
  * [Interactions API](https://ai.google.dev/gemini-api/docs/interactions)
- * (`@google/genai` package).
+ * (`@google/genai` package). Currently experimental and untested.
  */
 export class GeminiInteractionsSDK implements SDKAdapter {
+  readonly promptsHelperImport = "FIXME";
+
   getModelCatalog() {
     return Promise.resolve({
       modelValueTypes: {

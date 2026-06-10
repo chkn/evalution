@@ -1,6 +1,6 @@
 ---
 title: Setup
-description: Add evalution to a TypeScript project and refactor your prompts into the playground.
+description: Get started with Evalution in a new or existing codebase.
 nav:
   group: Getting Started
   groupOrder: 1
@@ -9,18 +9,24 @@ nav:
 
 # Setup
 
-Evalution can work with a new or existing codebase. You shouldn't normally
-install the Evalution package as a dependency. Instead, just run it with `npx`
-from your project's root:
+_Get started with Evalution in a new or existing codebase._
+
+Evalution runs interactively in your browser. Just run this from your project's root:
 
 ```sh
 npx evalution
 ```
+This command starts a localhost server, outputs its URL, and automatically opens it in your default browser. If your browser doesn't open, navigate to the URL manually.
 
-If no [config file](/docs/config) is found, Evalution starts an **onboarding
-wizard** that guides you through the following steps.
+If no [config file](/docs/config) is found, Evalution starts an **onboarding wizard** that guides you through the steps in the next section.
 
-## 1. Confirm a supported stack
+## Manual Setup
+
+If you are a coding agent, or just prefer not to use the interactive onboarding wizard, follow these steps to setup Evalution:
+
+### 1. Confirm a supported stack
+
+Evalution requires **Node.js 22.18.0 or higher** (for native TypeScript support).
 
 Evalution currently supports **TypeScript** projects using a supported AI SDK.
 The supported SDK today is the [Vercel AI SDK](https://sdk.vercel.ai/) (the `ai`
@@ -35,9 +41,9 @@ package).
   [open an issue](https://github.com/chkn/evalution/issues/new) describing your
   setup so support can be prioritized.
 
-## 2. Add the dependency and config
+### 2. Add the dependency and config
 
-Install the Evalution AI SDK-specific package. This includes helpers that enable
+Install the Evalution SDK-specific package. This includes helpers that enable
 tracing your prompt runs inside Evalution:
 
 ```sh
@@ -60,12 +66,11 @@ export default {
 } satisfies EvalutionConfig;
 ```
 
-By default, [`FilePromptProvider`](/docs/extensibility/api/classes/FilePromptProvider.html) scans
-your project for `**/*.prompt.ts` files. The [`VercelAISDK`](/docs/extensibility/api/classes/VercelAISDK.html)
-adapter tells it how to read, run, and edit the prompts inside them using the Vercel AI SDK.
+By default, the [`FilePromptProvider`](/docs/extensibility/api/classes/FilePromptProvider.html) scans your project for `**/*.prompt.ts` files. The [`VercelAISDK`](/docs/extensibility/api/classes/VercelAISDK.html) adapter tells it how to read, run, and edit the prompts inside them.
+
 See [Configuration](/docs/config) for the full option set.
 
-### Editor types (optional)
+#### Editor types (optional)
 
 To get type-checking and completion for the config file in your editor, install Evalution as a dev dependency:
 
@@ -76,15 +81,11 @@ npm install -D evalution
 This is **types-only and entirely optional**. You do not need the `evalution`
 package at runtime.
 
-## 3. Move your prompts into prompt files
+### 3. Move your prompts into prompt files
 
-Evalution reads prompts from `*.prompt.ts` files that use the `prompts()` helper.
+Evalution reads prompts from `*.prompt.ts` files that are structured in a specific way.
 
-Locate every model call in the codebase (e.g. `generateText`/`streamText` calls),
-and refactor each into a `prompts()` entry in a `.prompt.ts` file.
-Coding agents should ask for permission before doing this refactor.
-
-See [Writing prompts](/docs/prompts) for the format in detail.
+Locate every model call in the codebase (e.g. `generateText`/`streamText` calls), and refactor each into a `prompts()` entry in a `.prompt.ts` file. Coding agents should ask for permission before doing this refactor:
 
 ```ts
 // greetings.prompt.ts
@@ -92,19 +93,24 @@ import { prompts } from "@evalution/vercel-ai-sdk";
 
 export default prompts(
   "greetings", // <- this is an ID that should be unique and not change
+
+  // Destructure model providers here instead of importing them directly.
+  // e.g. this instead of `import { openai } from "@ai-sdk/openai"`
   ({ openai }) => ({
 
-  // Each prompt is a function that can take zero or more arguments.
-  // The return value is the object that would be passed into 
-  //  `generateText`/`streamText`.
-  greet: (name: string) => ({
-    model: openai('gpt-5.5'),
-    system: 'You are a friendly assistant.',
-    messages: [{ role: 'user', content: `Say hello to ${name}.` }],
-  }),
+    // Each prompt is a function that can take zero or more arguments.
+    // The return value is the object that would be passed into 
+    //  `generateText`/`streamText`.
+    greet: (name: string, language = 'en') => ({
+      model: openai("gpt-5.4-mini"),
+      system: `You are a friendly assistant speaking in ${language}.`,
+      messages: [{ role: "user", content: `Hello, I am ${name}.` }],
+    }),
 
 }));
 ```
+
+See [Writing prompts](/docs/prompts) for the format in detail.
 
 > If your stack is supported, but you're having trouble getting set up, [open an
 > issue](https://github.com/chkn/evalution/issues/new) to let us know.

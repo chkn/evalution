@@ -33,4 +33,3 @@ See the [API reference](/docs/extensibility/api/interfaces/EvalutionConfig.html)
 ## See also
 
 - [Extensibility](/docs/extensibility) — implement custom providers and adapters.
-- [API reference](/docs/extensibility/api/)

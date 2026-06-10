@@ -17,7 +17,7 @@ export {
 /**
  * A read-only store of execution traces that the playground can display and
  * subscribe to in real time. Implement this interface to integrate a tracing
- * backend (in-memory, OpenTelemetry collector, LangSmith, Langfuse, …).
+ * backend.
  *
  * Traces and spans are created via the OpenTelemetry API
  * (`@opentelemetry/api`). A `TraceProvider` implementation's job is to expose
