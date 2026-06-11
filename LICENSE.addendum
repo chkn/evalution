@@ -1,0 +1,79 @@
+EVALUTION — ADDITIONAL TERMS UNDER SECTION 7 OF THE GNU AGPL v3.0
+
+Copyright (C) 2026 Alexander Corrado
+
+The program "evalution" is licensed under the GNU Affero General Public
+License, version 3.0 only ("AGPL-3.0-only"), the full text of which is in
+the accompanying LICENSE file. The following additional terms apply under
+section 7 of that license. In the event of any conflict between these terms
+and the AGPL, the AGPL governs except where it expressly permits additional
+terms.
+
+--------------------------------------------------------------------------
+0. Definitions
+--------------------------------------------------------------------------
+
+"The Program" means evalution and any work based on it, as defined by the
+AGPL.
+
+"Provider Interface" means any of the TypeScript interfaces published by the
+Program for supplying prompts, traces, or comparable extension data —
+including, without limitation, `PromptProvider` and `TraceProvider` as
+exported from the Program — together with the data structures those
+interfaces exchange.
+
+"Provider" means a separate and independent work, distributed apart from the
+Program, whose purpose is to implement one or more Provider Interfaces and to
+be loaded into the Program at runtime through the Program's configuration
+(for example, a `.evalution/config.ts` file). A Provider is a "separate and
+independent work" only while it is distributed on its own and not
+incorporated into a copy of the Program's own source.
+
+"Network Use" of the Program means making the functionality of the Program
+available to one or more users who interact with it remotely through a
+computer network, within the meaning of section 13 of the AGPL. The AGPL,
+in section 0, provides that mere network interaction without transfer of a
+copy is not "conveying"; "Network Use" is defined here precisely to name
+that section-13 activity, and no inference about the meaning of "convey"
+should be drawn from the term.
+
+--------------------------------------------------------------------------
+1. Additional permission for combination with Providers
+--------------------------------------------------------------------------
+
+As an additional permission under section 7 of the AGPL:
+
+(a) Running a local combination. You are granted the right to combine the
+Program with one or more Providers and to run the resulting combination,
+WITHOUT that combination causing the Providers themselves to become subject
+to the AGPL, and without the Providers' Corresponding Source being required
+as part of the Program's Corresponding Source — PROVIDED THAT you do not put
+the combination to Network Use.
+
+(b) Distributing Providers. A Provider — and any separate work whose purpose
+is to depend on and load a Provider — may be authored, licensed, and
+conveyed by anyone under any license of its author's choosing, and others
+may depend on it and load it into a local invocation of the Program (for
+example, via `npx evalution`), PROVIDED THAT it remains a separate and
+independent work as defined in section 0 (that is, it is distributed on its
+own and is not incorporated into a copy of the Program's own source). This
+permission concerns the form in which the work is distributed, not the uses
+to which recipients later put it; a recipient's own combination and use of
+the Program remain governed by paragraph (a) and by section 2.
+
+--------------------------------------------------------------------------
+2. Scope of the covered work under Network Use
+--------------------------------------------------------------------------
+
+The permission in section 1 does NOT extend to Network Use of the Program.
+When you put the Program to Network Use with one or more Providers loaded
+through its configuration, each such Provider is, for the duration of that
+use, part of the covered work and part of the Corresponding Source that
+section 13 of the AGPL requires you to offer to users interacting with the
+Program remotely.
+
+For the avoidance of doubt: this section grants no permission. It records
+that, outside the permissions in section 1, the unmodified copyleft scope of
+the AGPL applies to the combination, so that a network operator who loads a
+Provider must be able to, and must, provide that Provider's Corresponding
+Source to remote users.

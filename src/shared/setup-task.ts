@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 /**
  * Shared, dependency-free types describing the onboarding "setup tasks" a user
  * can run to wire up an AI SDK.

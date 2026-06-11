@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Alexander Corrado
+
 import { createRequire } from "node:module";
 import type { generateText, streamText, Agent } from "ai";
 import type { Tracer } from "@opentelemetry/api";

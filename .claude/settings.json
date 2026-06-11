@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/add-license-headers.mjs\" --hook",
+            "statusMessage": "Adding license header"
+          }
+        ]
+      }
+    ]
+  }
+}

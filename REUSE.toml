@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Alexander Corrado
+
+version = 1
+
+# Every comment-capable file (code, configs, assets) carries its own in-file
+# SPDX header — see scripts/add-license-headers.mjs. The rules below cover only
+# the file types that have NO comment syntax (.json, .md) and the license texts
+# themselves. A new code/asset file with no header therefore matches no rule and
+# fails `reuse lint`, which is the point: it forces a deliberate license choice.
+
+# Comment-incapable files default to the AGPL-3.0-only core license.
+[[annotations]]
+path = ["**/*.json", "**/*.md", "LICENSE", "LICENSE.addendum"]
+SPDX-FileCopyrightText = "2026 Alexander Corrado"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
+# …except inside the MIT adapter package (last matching rule wins).
+[[annotations]]
+path = ["packages/vercel-ai-sdk/**/*.json", "packages/vercel-ai-sdk/**/*.md"]
+SPDX-FileCopyrightText = "2026 Alexander Corrado"
+SPDX-License-Identifier = "MIT"

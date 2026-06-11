@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import { useEffect, useState } from 'react';
 import { ALL_SET_STEP_ID, WIZARD_STEPS } from './steps';
 import type { WizardStep } from './types';

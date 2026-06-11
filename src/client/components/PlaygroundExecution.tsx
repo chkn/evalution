@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import { useState } from 'react';
 import type { ExecuteResponse, NormalizedPrompt, PropValue } from '../../shared/types';
 import { PropsEditor, materializeValue } from 'ts-proppy/react';

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
 import { usePrompts } from './hooks/usePrompts';
 import { useTraces } from './hooks/useTraces';

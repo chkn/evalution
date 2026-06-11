@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import path from 'path';
 import type { PromptProvider } from '../prompt-provider.ts';
 import type { PromptFileType } from './prompt-file-type.ts';

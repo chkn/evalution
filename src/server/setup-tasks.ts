@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';

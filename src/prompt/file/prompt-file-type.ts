@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import type { PropDefinition, PropValue } from 'ts-proppy';
 import type { ParsedPrompt, NormalizedPrompt, ModelPropValue } from '../../shared/types.ts';
 import type { TSPromptFileType } from './ts/ts-prompt-file-type.ts';

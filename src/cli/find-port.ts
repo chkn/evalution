@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import net from 'node:net';
 
 /** Probes whether `port` can be bound on `host`, resolving to `true` if free. */

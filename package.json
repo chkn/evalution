@@ -14,7 +14,10 @@
   },
   "files": [
     "bin",
-    "dist"
+    "dist",
+    "LICENSE",
+    "LICENSE.addendum",
+    "LICENSING.md"
   ],
   "workspaces": [
     "packages/vercel-ai-sdk"
@@ -87,6 +90,10 @@
     "playground",
     "vercel-ai-sdk"
   ],
-  "author": "",
-  "license": "MIT"
+  "author": "Alex Corrado <chkn@hey.com>",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chkn/evalution.git"
+  }
 }

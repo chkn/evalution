@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import { describe, it, expect, vi } from 'vitest';
 import { trace, type Span, type SpanOptions, type Tracer } from '@opentelemetry/api';
 import {

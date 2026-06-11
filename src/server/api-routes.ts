@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { SpanStatusCode, type Tracer } from '@opentelemetry/api';

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import { describe, it, expect, afterEach } from 'vitest';
 import net from 'node:net';
 import { findAvailablePort } from './find-port.ts';

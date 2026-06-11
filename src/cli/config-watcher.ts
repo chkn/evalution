@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import path from 'node:path';
 import chokidar from 'chokidar';
 import { CONFIG_FILE_RELATIVE_PATH } from '../shared/setup-task.ts';

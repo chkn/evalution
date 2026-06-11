@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import { useState, useCallback, type ReactNode } from 'react';
 import checkIcon from '../../assets/check.svg?raw';
 import copyIcon from '../../assets/copy.svg?raw';

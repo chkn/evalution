@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import type { SetupStep, SetupTask } from '../shared/setup-task.ts';
 import type { SDKAdapter } from './sdk-adapter.ts';
 import { VercelAISDK } from './vercel-ai-sdk.ts';

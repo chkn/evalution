@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import { useState, useMemo, useRef, useEffect } from 'react';
 import type { NormalizedPrompt } from '../../shared/types';
 import { requireProviderId } from '../utils';

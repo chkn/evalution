@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import * as pty from '@lydell/node-pty';
 import type { Hono } from 'hono';
 import type { UpgradeWebSocket, WSContext } from 'hono/ws';

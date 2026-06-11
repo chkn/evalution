@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import type { PropValue } from 'ts-proppy';
 import type { ModelPropValue, SpanKind } from './types.ts';
 

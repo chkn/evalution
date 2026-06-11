@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import type { Context, HrTime, SpanStatus } from '@opentelemetry/api';
 import { SpanStatusCode } from '@opentelemetry/api';
 import type {

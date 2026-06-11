@@ -1,3 +1,11 @@
+// SPDX-License-Identifier: MIT OR AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+//
+// This file is dual-licensed. As shipped inside the AGPL-licensed `evalution`
+// core it is covered by AGPL-3.0-only; as bundled into the MIT-licensed
+// `@evalution/vercel-ai-sdk` package it is covered by MIT. Keep this file
+// self-contained — it must import nothing from the rest of the core, or the
+// MIT bundle would pull AGPL-only code into an MIT artifact. See LICENSING.md.
 import { trace, type Context, type Span, type SpanOptions, type Tracer } from '@opentelemetry/api';
 
 /**

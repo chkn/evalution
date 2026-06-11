@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Alexander Corrado
+
 import { describe, it, expect, vi } from 'vitest';
 import { prompts, type Providers } from './index.js';
 

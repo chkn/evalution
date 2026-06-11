@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import { useState } from 'react';
 import PlaygroundContent from '../PlaygroundContent';
 import type { NormalizedPrompt, NormalizedMessage } from '../../../shared/types';

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Alexander Corrado
+
 import { describe, it, expect } from 'vitest';
 import type { Span, SpanOptions, Tracer } from '@opentelemetry/api';
 import { prompts } from './index.js';

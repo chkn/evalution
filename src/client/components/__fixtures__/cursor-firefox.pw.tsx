@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import { test, expect } from '@playwright/experimental-ct-react';
 import type { Page } from '@playwright/test';
 import { CursorHarness } from './CursorHarness';

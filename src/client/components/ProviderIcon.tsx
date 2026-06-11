@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import type { JSX } from 'react';
 import anthropicIcon from '../assets/providers/anthropic.svg?raw';
 import googleIcon from '../assets/providers/google.svg?raw';

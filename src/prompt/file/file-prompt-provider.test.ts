@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { FilePromptProvider } from './file-prompt-provider.ts';
 import { MemoryFileProvider } from '../../file-provider.ts';

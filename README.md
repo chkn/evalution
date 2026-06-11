@@ -48,7 +48,3 @@ Other useful commands:
 ## License
 
 AGPL
-
-## Contributing
-
-Contributions welcome! Please open an [issue](https://github.com/chkn/evalution/issues/new) or PR.
