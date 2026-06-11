@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import fs from 'fs/promises';
-import path from 'path';
-import { pathToFileURL } from 'url';
-import { glob as globLib } from 'fs/promises';
-import { makeRe, minimatch } from 'minimatch';
-import chokidar from 'chokidar';
-import type { ChangeEventType } from './shared/types.ts';
+import fs, { glob as globLib } from "node:fs/promises";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import chokidar from "chokidar";
+import { makeRe, minimatch } from "minimatch";
+import type { ChangeEventType } from "./shared/types.ts";
 
 /** Options accepted by {@link FileProvider.glob}. */
 export interface GlobOptions {
@@ -37,7 +36,10 @@ export interface FileWatchOptions {
  * @param eventType - The kind of change: `'add'`, `'change'`, or `'remove'`.
  * @param filePath - The affected file path, relative to the watcher's `cwd`.
  */
-export type FileWatchCallback = (eventType: ChangeEventType, filePath: string) => void;
+export type FileWatchCallback = (
+  eventType: ChangeEventType,
+  filePath: string,
+) => void;
 
 /**
  * Abstraction over file system I/O used throughout Evalution.
@@ -92,7 +94,7 @@ export interface FileProvider {
   watch(
     patterns: readonly string[],
     options: FileWatchOptions,
-    callback: FileWatchCallback
+    callback: FileWatchCallback,
   ): () => void;
 }
 
@@ -138,26 +140,31 @@ export class MemoryFileProvider implements FileProvider {
   async writeFile(filePath: string, content: string): Promise<void> {
     const isNew = !this.files.has(filePath);
     this.files.set(filePath, content);
-    this.notifyWatchers(isNew ? 'add' : 'change', filePath);
+    this.notifyWatchers(isNew ? "add" : "change", filePath);
   }
 
   async deleteFile(filePath: string): Promise<void> {
     this.files.delete(filePath);
-    this.notifyWatchers('remove', filePath);
+    this.notifyWatchers("remove", filePath);
   }
 
   async import(filePath: string): Promise<any> {
     const content = this.files.get(filePath);
     if (content === undefined) throw new Error(`File not found: ${filePath}`);
-    return import(`data:text/javascript;charset=utf-8,${encodeURIComponent(content)}`);
+    return import(
+      `data:text/javascript;charset=utf-8,${encodeURIComponent(content)}`
+    );
   }
 
-  async* glob(pattern: string, options: GlobOptions = {}): AsyncIterableIterator<string> {
+  async *glob(
+    pattern: string,
+    options: GlobOptions = {},
+  ): AsyncIterableIterator<string> {
     const { cwd = process.cwd(), ignore = [], absolute = false } = options;
 
     for (const filePath of this.files.keys()) {
       if (!filePath.startsWith(cwd + path.sep)) continue;
-      const relativePath = path.relative(cwd, filePath).replace(/\\/g, '/');
+      const relativePath = path.relative(cwd, filePath).replace(/\\/g, "/");
       if (!minimatch(relativePath, pattern)) continue;
       if (ignore.some(p => minimatch(relativePath, p))) continue;
       yield absolute ? filePath : relativePath;
@@ -167,7 +174,7 @@ export class MemoryFileProvider implements FileProvider {
   watch(
     patterns: readonly string[],
     options: FileWatchOptions,
-    callback: FileWatchCallback
+    callback: FileWatchCallback,
   ): () => void {
     const watcher: MemoryWatcher = {
       patterns,
@@ -176,14 +183,16 @@ export class MemoryFileProvider implements FileProvider {
       callback,
     };
     this.watchers.add(watcher);
-    return () => { this.watchers.delete(watcher); };
+    return () => {
+      this.watchers.delete(watcher);
+    };
   }
 
   private notifyWatchers(eventType: ChangeEventType, filePath: string): void {
     for (const watcher of this.watchers) {
       const { cwd, patterns, ignored, callback } = watcher;
       if (!filePath.startsWith(cwd + path.sep)) continue;
-      const relativePath = path.relative(cwd, filePath).replace(/\\/g, '/');
+      const relativePath = path.relative(cwd, filePath).replace(/\\/g, "/");
       if (!patterns.some(p => minimatch(relativePath, p))) continue;
       if (ignored.some(p => minimatch(relativePath, p))) continue;
       callback(eventType, relativePath);
@@ -203,12 +212,12 @@ export class MemoryFileProvider implements FileProvider {
  */
 export class LocalFileProvider implements FileProvider {
   async readFile(filePath: string): Promise<string> {
-    return fs.readFile(filePath, 'utf-8');
+    return fs.readFile(filePath, "utf-8");
   }
 
   async writeFile(filePath: string, content: string): Promise<void> {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, content, 'utf-8');
+    await fs.writeFile(filePath, content, "utf-8");
   }
 
   async deleteFile(filePath: string): Promise<void> {
@@ -219,12 +228,15 @@ export class LocalFileProvider implements FileProvider {
     return import(pathToFileURL(filePath).href);
   }
 
-  async* glob(pattern: string, options: GlobOptions = {}): AsyncIterableIterator<string> {
+  async *glob(
+    pattern: string,
+    options: GlobOptions = {},
+  ): AsyncIterableIterator<string> {
     const { cwd, ignore = [], absolute = false } = options;
     const baseCwd = cwd ?? process.cwd();
 
     for await (const file of globLib(pattern, { cwd: baseCwd })) {
-      const relativePath = file.replace(/\\/g, '/');
+      const relativePath = file.replace(/\\/g, "/");
       if (ignore.some(p => minimatch(relativePath, p))) continue;
       yield absolute ? path.resolve(baseCwd, file) : file;
     }
@@ -233,28 +245,38 @@ export class LocalFileProvider implements FileProvider {
   watch(
     patterns: readonly string[],
     options: FileWatchOptions,
-    callback: FileWatchCallback
+    callback: FileWatchCallback,
   ): () => void {
     const cwd = options.cwd ?? process.cwd();
     const ignored = options.ignored ?? [];
-    const includeMatchers = patterns.map(p => makeRe(p)).filter((re): re is RegExp => re !== false);
+    const includeMatchers = patterns
+      .map(p => makeRe(p))
+      .filter((re): re is RegExp => re !== false);
     const matches = (fp: string) => includeMatchers.some(re => re.test(fp));
 
-    const watcher = chokidar.watch('.', {
+    const watcher = chokidar.watch(".", {
       cwd,
       // chokidar tests `ignored` against absolute paths; convert to relative before matching
       ignored: (absPath: string) => {
-        const rel = path.relative(cwd, absPath).replace(/\\/g, '/');
+        const rel = path.relative(cwd, absPath).replace(/\\/g, "/");
         return ignored.some(p => minimatch(rel, p, { dot: true }));
       },
       persistent: true,
       ignoreInitial: options.ignoreInitial ?? true,
     });
 
-    watcher.on('change', (fp) => { if (matches(fp)) callback('change', fp); });
-    watcher.on('add', (fp) => { if (matches(fp)) callback('add', fp); });
-    watcher.on('unlink', (fp) => { if (matches(fp)) callback('remove', fp); });
+    watcher.on("change", fp => {
+      if (matches(fp)) callback("change", fp);
+    });
+    watcher.on("add", fp => {
+      if (matches(fp)) callback("add", fp);
+    });
+    watcher.on("unlink", fp => {
+      if (matches(fp)) callback("remove", fp);
+    });
 
-    return () => { watcher.close(); };
+    return () => {
+      watcher.close();
+    };
   }
 }

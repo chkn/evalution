@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { PropDefinition, PropValue } from 'ts-proppy';
-import type { ParsedPrompt, NormalizedPrompt, ModelPropValue } from '../../shared/types.ts';
-import type { TSPromptFileType } from './ts/ts-prompt-file-type.ts';
+import type { PropDefinition } from "ts-proppy";
+import type {
+  ModelPropValue,
+  NormalizedPrompt,
+  ParsedPrompt,
+} from "../../shared/types.ts";
+import type { TSPromptFileType } from "./ts/ts-prompt-file-type.ts";
 
 /** Metadata attached to prompts that originate from a file on disk. */
 export interface FilePromptMetadata {
   /** Path to the source file relative to the {@link FilePromptProviderOptions.rootDir}. */
-  relativeFilePath: string
+  relativeFilePath: string;
 }
 
 /**
@@ -60,7 +64,11 @@ export interface PromptFileType {
    * @param name - The initial prompt function name.
    * @param importPath - The package path to import the `prompts()` helper from.
    */
-  newPromptSkeleton(promptsId: string, name: string, importPath: string): string;
+  newPromptSkeleton(
+    promptsId: string,
+    name: string,
+    importPath: string,
+  ): string;
 
   /**
    * Parses the given files and returns all discovered prompts.
@@ -77,7 +85,12 @@ export interface PromptFileType {
    * @param value - The new value to write.
    * @param promptId - The prompt ID, used to re-parse for fresh spans.
    */
-  updateProperty(filePath: string, propDef: PropDefinition, value: ModelPropValue, promptId?: string): Promise<void>;
+  updateProperty(
+    filePath: string,
+    propDef: PropDefinition,
+    value: ModelPropValue,
+    promptId?: string,
+  ): Promise<void>;
 
   /**
    * Removes a property from a prompt source file entirely.
@@ -93,7 +106,12 @@ export interface PromptFileType {
    * @param propertyName - The key to add.
    * @param value - The value to assign.
    */
-  addProperty(filePath: string, promptName: string, propertyName: string, value: ModelPropValue): Promise<void>;
+  addProperty(
+    filePath: string,
+    promptName: string,
+    propertyName: string,
+    value: ModelPropValue,
+  ): Promise<void>;
 
   /**
    * Renames an exported prompt in a source file.
@@ -101,7 +119,11 @@ export interface PromptFileType {
    * @param oldName - Current prompt name.
    * @param newName - New prompt name.
    */
-  renamePrompt(filePath: string, oldName: string, newName: string): Promise<void>;
+  renamePrompt(
+    filePath: string,
+    oldName: string,
+    newName: string,
+  ): Promise<void>;
 
   /**
    * Dynamically imports `filePath`, calls the exported function named

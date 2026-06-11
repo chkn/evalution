@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useState, useEffect, useCallback } from 'react';
-import type { TraceSummary } from '../../shared/types';
-import { getTraces } from '../api';
+import { useCallback, useEffect, useState } from "react";
+import type { TraceSummary } from "../../shared/types";
+import { getTraces } from "../api";
 
 /**
  * Fetches the set of traces known to every trace provider and keeps the list
@@ -27,7 +27,9 @@ export function useTraces() {
     }
   }, []);
 
-  useEffect(() => { refetch(); }, [refetch]);
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
 
   return { traces, loading, error, refetch };
 }

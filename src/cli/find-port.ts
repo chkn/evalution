@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import net from 'node:net';
+import net from "node:net";
 
 /** Probes whether `port` can be bound on `host`, resolving to `true` if free. */
 function isPortFree(port: number, host: string): Promise<boolean> {
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     const tester = net
       .createServer()
-      .once('error', (err: NodeJS.ErrnoException) => {
+      .once("error", () => {
         // EADDRINUSE (and EACCES for privileged ports) mean "not usable here";
         // anything else we also treat as unusable and move on.
         resolve(false);
         tester.close();
       })
-      .once('listening', () => {
+      .once("listening", () => {
         tester.close(() => resolve(true));
       })
       .listen(port, host);
@@ -33,7 +33,7 @@ function isPortFree(port: number, host: string): Promise<boolean> {
  */
 export async function findAvailablePort(
   preferred: number,
-  host = '0.0.0.0',
+  host = "0.0.0.0",
   maxAttempts = 20,
 ): Promise<number> {
   for (let port = preferred; port < preferred + maxAttempts; port++) {

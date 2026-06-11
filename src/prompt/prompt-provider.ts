@@ -2,15 +2,14 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type {
+  AddPromptContext,
+  ModelCatalog,
   NormalizedPrompt,
   NormalizedPromptUpdates,
   PromptChangeEvent,
   PropDefinition,
-  AddPromptContext,
-  ModelCatalog,
-} from '../shared/types.ts';
-import type { FilePromptProvider } from './file/file-prompt-provider.ts';
-import type { PromptFileType } from './file/prompt-file-type.ts';
+} from "../shared/types.ts";
+import type { PromptFileType } from "./file/prompt-file-type.ts";
 
 /**
  * A source of prompts that the playground can display and execute.
@@ -20,7 +19,9 @@ import type { PromptFileType } from './file/prompt-file-type.ts';
  * need to support a file format other than TypeScript, use {@link FilePromptProvider}
  * with a custom {@link PromptFileType}.
  */
-export interface PromptProvider<TPrompt extends NormalizedPrompt = NormalizedPrompt> {
+export interface PromptProvider<
+  TPrompt extends NormalizedPrompt = NormalizedPrompt,
+> {
   /** Uniquely identifies this provider when multiple providers are used. */
   readonly id: string;
 
@@ -55,7 +56,7 @@ export interface PromptProvider<TPrompt extends NormalizedPrompt = NormalizedPro
    */
   updatePromptProperties?(
     promptId: string,
-    updates: NormalizedPromptUpdates
+    updates: NormalizedPromptUpdates,
   ): Promise<TPrompt>;
 
   /**

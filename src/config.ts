@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { PromptProvider } from './prompt/prompt-provider.ts';
-import type { TraceProvider } from './trace/trace-provider.ts';
+import type { PromptProvider } from "./prompt/prompt-provider.ts";
+import type { TraceProvider } from "./trace/trace-provider.ts";
 
 /**
  * Top-level configuration for an Evalution instance.
@@ -10,7 +10,7 @@ import type { TraceProvider } from './trace/trace-provider.ts';
  * Place a default export of this type in `.evalution/config.ts` at the root
  * of your project to customise how Evalution discovers and serves prompts
  * and traces.
- * 
+ *
  * If no config file is found, Evalution will show an onboarding wizard
  * to help you create one.
  *

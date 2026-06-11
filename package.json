@@ -30,11 +30,13 @@
     "build": "npm run build:cli && npm run build:client",
     "build:cli": "tsdown",
     "build:client": "vite build",
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev": "concurrently 'npm run dev:server' 'npm run dev:client'",
     "dev:server": "node src/cli/index.ts",
     "dev:server:debug": "node --inspect src/cli/index.ts",
     "dev:client": "vite --mode development",
-    "typecheck": "(tsc --noEmit & tsc --noEmit -p tsconfig.client.json & tsc --noEmit -p packages/vercel-ai-sdk ) && wait",
+    "typecheck": "concurrently 'tsc --noEmit' 'tsc --noEmit -p tsconfig.client.json' 'tsc --noEmit -p packages/vercel-ai-sdk'",
+    "lint": "biome check .",
+    "format": "biome check --write .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -61,6 +63,7 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.14",
     "@playwright/experimental-ct-react": "^1.58.2",
     "@playwright/test": "^1.58.2",
     "@types/node": ">=22.18.0",

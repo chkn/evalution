@@ -11,17 +11,17 @@
  */
 
 /** Path, relative to the project root, where evalution looks for its config. */
-export const CONFIG_FILE_RELATIVE_PATH = '.evalution/config.ts';
+export const CONFIG_FILE_RELATIVE_PATH = ".evalution/config.ts";
 
 /** URL of the configuration documentation, linked from the onboarding wizard. */
-export const CONFIG_DOCS_URL = 'https://evalut.io/n/docs/config';
+export const CONFIG_DOCS_URL = "https://evalut.io/n/docs/config";
 
 /**
  * Name of the browser `CustomEvent` dispatched (with a {@link SetupStepDoneDetail}
  * payload) when a terminal-run setup step exits successfully, so the manual-setup
  * list can mark the step complete without re-fetching.
  */
-export const SETUP_STEP_DONE_EVENT = 'evalution:setup-step-done';
+export const SETUP_STEP_DONE_EVENT = "evalution:setup-step-done";
 
 /** Payload of the {@link SETUP_STEP_DONE_EVENT} custom event. */
 export interface SetupStepDoneDetail {
@@ -46,7 +46,7 @@ export interface SetupStepBase {
 /** Writes evalution's starter config file. */
 export interface SetupCreateConfigStep extends SetupStepBase {
   /** Discriminant: this step creates the project config file. */
-  kind: 'create_config';
+  kind: "create_config";
   /** Project-relative path the file will be written to. */
   path: string;
   /**
@@ -63,7 +63,7 @@ export interface SetupCreateConfigStep extends SetupStepBase {
  */
 export interface SetupRunCommandStep extends SetupStepBase {
   /** Discriminant: this step runs a shell command. */
-  kind: 'run_command';
+  kind: "run_command";
   /** The command line to run, e.g. `npm run build`. */
   command: string;
   /** Optional human-friendly label shown alongside the command. */
@@ -78,7 +78,7 @@ export interface SetupRunCommandStep extends SetupStepBase {
  */
 export interface SetupInstallPackageStep extends SetupStepBase {
   /** Discriminant: this step installs an npm package. */
-  kind: 'install_package';
+  kind: "install_package";
   /** The npm package to install, e.g. `@evalution/vercel-ai-sdk`. */
   package: string;
 }
@@ -99,8 +99,12 @@ export type SetupStep =
  * The shell command a run-style step executes. `install_package` steps map to
  * `npm i <package>`; `run_command` steps carry their command verbatim.
  */
-export function setupStepCommand(step: SetupRunCommandStep | SetupInstallPackageStep): string {
-  return step.kind === 'install_package' ? `npm i ${step.package}` : step.command;
+export function setupStepCommand(
+  step: SetupRunCommandStep | SetupInstallPackageStep,
+): string {
+  return step.kind === "install_package"
+    ? `npm i ${step.package}`
+    : step.command;
 }
 
 /**

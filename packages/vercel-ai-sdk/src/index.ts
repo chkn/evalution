@@ -2,42 +2,41 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { createRequire } from "node:module";
-import type { generateText, streamText, Agent } from "ai";
-import type { Tracer } from "@opentelemetry/api";
+import type { generateText, streamText } from "ai";
 // Bundled in by tsup; pulls in `createTracerForPrompt` without taking a
 // runtime dependency on the rest of the `evalution` package.
 import { createTracerForPrompt } from "../../../src/trace/prompt-tracer.js";
 
 const require = createRequire(import.meta.url);
 
-import type { OpenAIProvider } from "@ai-sdk/openai";
-import type { AnthropicProvider } from "@ai-sdk/anthropic";
-import type { GoogleGenerativeAIProvider } from "@ai-sdk/google";
-import type { GoogleVertexProvider } from "@ai-sdk/google-vertex";
-import type { AzureOpenAIProvider } from "@ai-sdk/azure";
 import type { AmazonBedrockProvider } from "@ai-sdk/amazon-bedrock";
-import type { CohereProvider } from "@ai-sdk/cohere";
-import type { MistralProvider } from "@ai-sdk/mistral";
-import type { GroqProvider } from "@ai-sdk/groq";
+import type { AnthropicProvider } from "@ai-sdk/anthropic";
+import type { AssemblyAIProvider } from "@ai-sdk/assemblyai";
+import type { AzureOpenAIProvider } from "@ai-sdk/azure";
 import type { CerebrasProvider } from "@ai-sdk/cerebras";
+import type { CohereProvider } from "@ai-sdk/cohere";
+import type { DeepgramProvider } from "@ai-sdk/deepgram";
 import type { DeepInfraProvider } from "@ai-sdk/deepinfra";
 import type { DeepSeekProvider } from "@ai-sdk/deepseek";
-import type { FireworksProvider } from "@ai-sdk/fireworks";
-import type { PerplexityProvider } from "@ai-sdk/perplexity";
-import type { ReplicateProvider } from "@ai-sdk/replicate";
-import type { TogetherAIProvider } from "@ai-sdk/togetherai";
-import type { XaiProvider } from "@ai-sdk/xai";
-import type { VercelProvider } from "@ai-sdk/vercel";
-import type { GatewayProvider } from "@ai-sdk/gateway";
 import type { ElevenLabsProvider } from "@ai-sdk/elevenlabs";
-import type { AssemblyAIProvider } from "@ai-sdk/assemblyai";
-import type { DeepgramProvider } from "@ai-sdk/deepgram";
-import type { GladiaProvider } from "@ai-sdk/gladia";
-import type { RevaiProvider } from "@ai-sdk/revai";
-import type { LumaProvider } from "@ai-sdk/luma";
 import type { FalProvider } from "@ai-sdk/fal";
+import type { FireworksProvider } from "@ai-sdk/fireworks";
+import type { GatewayProvider } from "@ai-sdk/gateway";
+import type { GladiaProvider } from "@ai-sdk/gladia";
+import type { GoogleGenerativeAIProvider } from "@ai-sdk/google";
+import type { GoogleVertexProvider } from "@ai-sdk/google-vertex";
+import type { GroqProvider } from "@ai-sdk/groq";
 import type { HumeProvider } from "@ai-sdk/hume";
 import type { LMNTProvider } from "@ai-sdk/lmnt";
+import type { LumaProvider } from "@ai-sdk/luma";
+import type { MistralProvider } from "@ai-sdk/mistral";
+import type { OpenAIProvider } from "@ai-sdk/openai";
+import type { PerplexityProvider } from "@ai-sdk/perplexity";
+import type { ReplicateProvider } from "@ai-sdk/replicate";
+import type { RevaiProvider } from "@ai-sdk/revai";
+import type { TogetherAIProvider } from "@ai-sdk/togetherai";
+import type { VercelProvider } from "@ai-sdk/vercel";
+import type { XaiProvider } from "@ai-sdk/xai";
 
 /**
  * Provider instances that can be injected into a {@link prompts} factory.
@@ -113,39 +112,99 @@ class LazilyImportedProviders implements Providers {
   }
 
   private importProvider<K extends keyof Providers>(key: K): Providers[K] {
-    return this.values[key]
-        ?? require(`@ai-sdk/${key}`)?.[key]
-        ?? (() => { throw new Error(`Unable to import "${key}" from "@ai-sdk/${key}"`); });
+    return (
+      this.values[key] ??
+      require(`@ai-sdk/${key}`)?.[key] ??
+      (() => {
+        throw new Error(`Unable to import "${key}" from "@ai-sdk/${key}"`);
+      })
+    );
   }
 
-  get openai() { return this.importProvider('openai'); }
-  get anthropic() { return this.importProvider('anthropic'); }
-  get google() { return this.importProvider('google'); }
-  get vertex() { return this.importProvider('vertex'); }
-  get azure() { return this.importProvider('azure'); }
-  get bedrock() { return this.importProvider('bedrock'); }
-  get cohere() { return this.importProvider('cohere'); }
-  get mistral() { return this.importProvider('mistral'); }
-  get groq() { return this.importProvider('groq'); }
-  get cerebras() { return this.importProvider('cerebras'); }
-  get deepinfra() { return this.importProvider('deepinfra'); }
-  get deepseek() { return this.importProvider('deepseek'); }
-  get fireworks() { return this.importProvider('fireworks'); }
-  get perplexity() { return this.importProvider('perplexity'); }
-  get replicate() { return this.importProvider('replicate'); }
-  get togetherai() { return this.importProvider('togetherai'); }
-  get xai() { return this.importProvider('xai'); }
-  get vercel() { return this.importProvider('vercel'); }
-  get gateway() { return this.importProvider('gateway'); }
-  get elevenlabs() { return this.importProvider('elevenlabs'); }
-  get assemblyai() { return this.importProvider('assemblyai'); }
-  get deepgram() { return this.importProvider('deepgram'); }
-  get gladia() { return this.importProvider('gladia'); }
-  get revai() { return this.importProvider('revai'); }
-  get luma() { return this.importProvider('luma'); }
-  get fal() { return this.importProvider('fal'); }
-  get hume() { return this.importProvider('hume'); }
-  get lmnt() { return this.importProvider('lmnt'); }
+  get openai() {
+    return this.importProvider("openai");
+  }
+  get anthropic() {
+    return this.importProvider("anthropic");
+  }
+  get google() {
+    return this.importProvider("google");
+  }
+  get vertex() {
+    return this.importProvider("vertex");
+  }
+  get azure() {
+    return this.importProvider("azure");
+  }
+  get bedrock() {
+    return this.importProvider("bedrock");
+  }
+  get cohere() {
+    return this.importProvider("cohere");
+  }
+  get mistral() {
+    return this.importProvider("mistral");
+  }
+  get groq() {
+    return this.importProvider("groq");
+  }
+  get cerebras() {
+    return this.importProvider("cerebras");
+  }
+  get deepinfra() {
+    return this.importProvider("deepinfra");
+  }
+  get deepseek() {
+    return this.importProvider("deepseek");
+  }
+  get fireworks() {
+    return this.importProvider("fireworks");
+  }
+  get perplexity() {
+    return this.importProvider("perplexity");
+  }
+  get replicate() {
+    return this.importProvider("replicate");
+  }
+  get togetherai() {
+    return this.importProvider("togetherai");
+  }
+  get xai() {
+    return this.importProvider("xai");
+  }
+  get vercel() {
+    return this.importProvider("vercel");
+  }
+  get gateway() {
+    return this.importProvider("gateway");
+  }
+  get elevenlabs() {
+    return this.importProvider("elevenlabs");
+  }
+  get assemblyai() {
+    return this.importProvider("assemblyai");
+  }
+  get deepgram() {
+    return this.importProvider("deepgram");
+  }
+  get gladia() {
+    return this.importProvider("gladia");
+  }
+  get revai() {
+    return this.importProvider("revai");
+  }
+  get luma() {
+    return this.importProvider("luma");
+  }
+  get fal() {
+    return this.importProvider("fal");
+  }
+  get hume() {
+    return this.importProvider("hume");
+  }
+  get lmnt() {
+    return this.importProvider("lmnt");
+  }
 }
 
 /**
@@ -210,7 +269,10 @@ export function prompts<T extends Record<string, (...args: any[]) => Prompt>>(
             recordOutputs: true,
             ...existing,
 
-            tracer: createTracerForPrompt({ name, id: `${id}#${name}` }, existing?.tracer),
+            tracer: createTracerForPrompt(
+              { name, id: `${id}#${name}` },
+              existing?.tracer,
+            ),
           },
         };
       }) as T[keyof T];

@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useEffect, useState } from 'react';
-import { ALL_SET_STEP_ID, WIZARD_STEPS } from './steps';
-import type { WizardStep } from './types';
+import { useEffect, useState } from "react";
+import { ALL_SET_STEP_ID, WIZARD_STEPS } from "./steps";
+import type { WizardStep } from "./types";
 
 interface WelcomeWizardProps {
   /** Opens the existing "create new prompt" flow. */
   onCreatePrompt: () => void;
   /** Opens an interactive terminal tab for a setup step, queued up to run. */
-  onOpenTerminal?: (taskId: string, stepId: string, command: string, label?: string) => void;
+  onOpenTerminal?: (
+    taskId: string,
+    stepId: string,
+    command: string,
+    label?: string,
+  ) => void;
   /**
    * Whether a project config is loaded. When `true`, the wizard jumps straight
    * to the final "you're all set" step — both on first render (config already
@@ -25,10 +30,17 @@ interface WelcomeWizardProps {
  * no prompts yet. Steps are data-driven (see {@link WIZARD_STEPS}); this shell
  * only tracks the current index and renders the progress header.
  */
-export function WelcomeWizard({ onCreatePrompt, onOpenTerminal, configured = false, steps = WIZARD_STEPS }: WelcomeWizardProps) {
+export function WelcomeWizard({
+  onCreatePrompt,
+  onOpenTerminal,
+  configured = false,
+  steps = WIZARD_STEPS,
+}: WelcomeWizardProps) {
   const allSetIndex = steps.findIndex(s => s.id === ALL_SET_STEP_ID);
   // Start on the final step if we already have a config; otherwise at the top.
-  const [index, setIndex] = useState(configured && allSetIndex >= 0 ? allSetIndex : 0);
+  const [index, setIndex] = useState(
+    configured && allSetIndex >= 0 ? allSetIndex : 0,
+  );
 
   // Advance to the final step once a config is loaded (e.g. after the user
   // creates one and the server restarts with it).
@@ -47,22 +59,35 @@ export function WelcomeWizard({ onCreatePrompt, onOpenTerminal, configured = fal
     <div className="welcome">
       <div className="welcome-card">
         <header className="welcome-header">
-          <img className="welcome-logo" src="/favicon.svg" width="36" height="49" alt="" />
+          <img
+            className="welcome-logo"
+            src="/favicon.svg"
+            width="36"
+            height="49"
+            alt=""
+          />
           <ol className="welcome-progress">
             {steps.map((s, i) => {
-              const state = i === index ? 'active' : i < index ? 'done' : 'todo';
+              const state =
+                i === index ? "active" : i < index ? "done" : "todo";
               // A completed step is navigable only if it opted in via canReturn.
               const canNavigate = i < index && !!s.canReturn;
               return (
                 <li key={s.id} className={`welcome-progress-${state}`}>
                   {canNavigate ? (
-                    <button type="button" className="welcome-progress-btn" onClick={() => setIndex(i)}>
+                    <button
+                      type="button"
+                      className="welcome-progress-btn"
+                      onClick={() => setIndex(i)}
+                    >
                       <span className="welcome-progress-dot">{i + 1}</span>
                       <span className="welcome-progress-label">{s.title}</span>
                     </button>
                   ) : (
                     <>
-                      {steps.length > 1 && <span className="welcome-progress-dot">{i + 1}</span>}
+                      {steps.length > 1 && (
+                        <span className="welcome-progress-dot">{i + 1}</span>
+                      )}
                       <span className="welcome-progress-label">{s.title}</span>
                     </>
                   )}

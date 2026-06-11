@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import * as pty from '@lydell/node-pty';
-import type { Hono } from 'hono';
-import type { UpgradeWebSocket, WSContext } from 'hono/ws';
-import { findSetupStep } from '../sdk/registry.ts';
-import { setupStepCommand } from '../shared/setup-task.ts';
+import * as pty from "@lydell/node-pty";
+import type { Hono } from "hono";
+import type { UpgradeWebSocket, WSContext } from "hono/ws";
+import { findSetupStep } from "../sdk/registry.ts";
+import { setupStepCommand } from "../shared/setup-task.ts";
 
 /**
  * Messages the terminal client sends up the WebSocket. The command is never
@@ -14,18 +14,20 @@ import { setupStepCommand } from '../shared/setup-task.ts';
  * keystrokes, resize), not anything the server will execute verbatim.
  */
 type ClientMessage =
-  | { type: 'start'; cols: number; rows: number }
-  | { type: 'input'; data: string }
-  | { type: 'resize'; cols: number; rows: number };
+  | { type: "start"; cols: number; rows: number }
+  | { type: "input"; data: string }
+  | { type: "resize"; cols: number; rows: number };
 
 /** Messages the server streams down to the terminal client. */
 type ServerMessage =
-  | { type: 'data'; data: string }
-  | { type: 'exit'; code: number }
-  | { type: 'error'; message: string };
+  | { type: "data"; data: string }
+  | { type: "exit"; code: number }
+  | { type: "error"; message: string };
 
 /** Shell used to run a resolved step command, so shell syntax in it works. */
-const SHELL = process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : 'bash');
+const SHELL =
+  process.env.SHELL ||
+  (process.platform === "win32" ? "powershell.exe" : "bash");
 
 /**
  * Arguments to run `command` in {@link SHELL}, skipping the user's startup files
@@ -36,9 +38,9 @@ const SHELL = process.env.SHELL || (process.platform === 'win32' ? 'powershell.e
  */
 export function shellCommandArgs(command: string): string[] {
   const shell = SHELL.toLowerCase();
-  if (shell.includes('zsh')) return ['-f', '-c', command];
-  if (shell.includes('bash')) return ['--norc', '--noprofile', '-c', command];
-  return ['-c', command];
+  if (shell.includes("zsh")) return ["-f", "-c", command];
+  if (shell.includes("bash")) return ["--norc", "--noprofile", "-c", command];
+  return ["-c", command];
 }
 
 /**
@@ -47,9 +49,12 @@ export function shellCommandArgs(command: string): string[] {
  * Returns `null` when the step is unknown or is not a runnable command (e.g.
  * `create_config`, which writes a file instead of running in a terminal).
  */
-export function resolveTerminalCommand(taskId: string, stepId: string): string | null {
+export function resolveTerminalCommand(
+  taskId: string,
+  stepId: string,
+): string | null {
   const step = findSetupStep(taskId, stepId);
-  if (!step || step.kind === 'create_config') return null;
+  if (!step || step.kind === "create_config") return null;
   return setupStepCommand(step);
 }
 
@@ -74,31 +79,35 @@ export function registerTerminalRoute(
   rootPath: string,
 ): void {
   app.get(
-    '/api/terminal',
-    upgradeWebSocket((c) => {
-      const taskId = c.req.query('taskId');
-      const stepId = c.req.query('stepId');
+    "/api/terminal",
+    upgradeWebSocket(c => {
+      const taskId = c.req.query("taskId");
+      const stepId = c.req.query("stepId");
       let child: pty.IPty | undefined;
 
       const start = (ws: WSContext, cols: number, rows: number) => {
         if (child) return; // already running; ignore duplicate starts
-        const command = taskId && stepId ? resolveTerminalCommand(taskId, stepId) : null;
+        const command =
+          taskId && stepId ? resolveTerminalCommand(taskId, stepId) : null;
         if (!command) {
-          send(ws, { type: 'error', message: 'Unknown or non-runnable setup step.' });
+          send(ws, {
+            type: "error",
+            message: "Unknown or non-runnable setup step.",
+          });
           ws.close();
           return;
         }
 
         child = pty.spawn(SHELL, shellCommandArgs(command), {
-          name: 'xterm-color',
+          name: "xterm-color",
           cols: cols || 80,
           rows: rows || 24,
           cwd: rootPath,
           env: process.env as Record<string, string>,
         });
-        child.onData((data) => send(ws, { type: 'data', data }));
+        child.onData(data => send(ws, { type: "data", data }));
         child.onExit(({ exitCode }) => {
-          send(ws, { type: 'exit', code: exitCode });
+          send(ws, { type: "exit", code: exitCode });
           ws.close();
         });
       };
@@ -112,13 +121,13 @@ export function registerTerminalRoute(
             return;
           }
           switch (msg.type) {
-            case 'start':
+            case "start":
               start(ws, msg.cols, msg.rows);
               break;
-            case 'input':
+            case "input":
               child?.write(msg.data);
               break;
-            case 'resize':
+            case "resize":
               child?.resize(msg.cols || 80, msg.rows || 24);
               break;
           }

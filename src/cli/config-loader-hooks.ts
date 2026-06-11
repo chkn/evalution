@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import module from 'node:module';
+import module from "node:module";
 
 /**
  * Registers an in-thread module-resolution hook so a project's
@@ -27,7 +27,7 @@ import module from 'node:module';
 export function registerEvalutionResolver(parentURL: string): void {
   module.registerHooks({
     resolve(specifier, context, nextResolve) {
-      if (specifier === 'evalution' || specifier.startsWith('evalution/')) {
+      if (specifier === "evalution" || specifier.startsWith("evalution/")) {
         return nextResolve(specifier, { ...context, parentURL });
       }
       return nextResolve(specifier, context);

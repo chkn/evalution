@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { SDKAdapter } from '../sdk/sdk-adapter.ts';
-import type { PromptProvider } from '../prompt/prompt-provider.ts';
-import type { otelOperationToSpanKind } from './helpers.ts';
+import type { PromptProvider } from "../prompt/prompt-provider.ts";
+import type { SDKAdapter } from "../sdk/sdk-adapter.ts";
 
 // #region Prompt
 
@@ -155,7 +154,7 @@ export interface NormalizedPromptUpdates {
 }
 
 /** The kind of change that occurred to a prompt. */
-export type ChangeEventType = 'change' | 'add' | 'remove';
+export type ChangeEventType = "change" | "add" | "remove";
 
 /**
  * Describes a single change emitted by {@link PromptProvider.watch}.
@@ -174,7 +173,7 @@ export interface AddPromptField {
   /** Human-readable label shown next to the input. */
   label: string;
   /** The kind of input control to render. */
-  type: 'text' | 'select';
+  type: "text" | "select";
   /** Whether the field must be filled before submission. */
   required?: boolean;
   /** Pre-filled value. */
@@ -232,15 +231,10 @@ export interface ExecuteResponse {
  * Classification of a {@link Span}. See also:
  * - `lmnr.span.type` from https://laminar.sh/docs/tracing/otel
  * - `mlflow.spanType` from https://mlflow.org/docs/latest/genai/tracing/opentelemetry/attribute-mapping/#translated-span-attributes
- * 
+ *
  * Mapped from `gen_ai.operation.name`.
  */
-export type SpanKind =
-  | 'LLM'
-  | 'TOOL'
-  | 'AGENT'
-  | 'EMBEDDING'
-  | 'DEFAULT';
+export type SpanKind = "LLM" | "TOOL" | "AGENT" | "EMBEDDING" | "DEFAULT";
 
 /** A single message within an LLM span's input/output. */
 export interface SpanMessage {
@@ -279,7 +273,7 @@ export interface Span {
   startTime: number;
   /** End timestamp in milliseconds since epoch, or `undefined` while running. */
   endTime?: number;
-  status?: 'ok' | 'error';
+  status?: "ok" | "error";
   /** Error message if `status` is `'error'`. */
   errorMessage?: string;
   /** Free-form attributes to show in the span's details pane. */
@@ -308,7 +302,7 @@ export interface Trace {
   startTime: number;
   /** End timestamp (ms), or `undefined` while the trace is still running. */
   endTime?: number;
-  status: 'running' | 'ok' | 'error';
+  status: "running" | "ok" | "error";
   /** Free-form attributes (e.g. prompt ID, function params). */
   attributes?: Record<string, unknown>;
 }
@@ -320,7 +314,7 @@ export interface TraceSummary {
   name: string;
   startTime: number;
   endTime?: number;
-  status: 'running' | 'ok' | 'error';
+  status: "running" | "ok" | "error";
   /** Number of spans currently associated with the trace. */
   spanCount: number;
 }
@@ -332,7 +326,7 @@ export interface TraceWithSpans {
 }
 
 /** The kind of change that occurred to a trace. */
-export type TraceChangeType = 'add' | 'update' | 'remove';
+export type TraceChangeType = "add" | "update" | "remove";
 
 /** Describes a single change emitted by `TraceProvider.watch`. */
 export interface TraceChangeEvent {
@@ -342,11 +336,11 @@ export interface TraceChangeEvent {
 
 /** Real-time event pushed over the per-trace SSE subscription. */
 export type TraceStreamEvent =
-  | { type: 'span-start'; span: Span }
-  | { type: 'span-end'; span: Span }
-  | { type: 'span-update'; span: Span }
-  | { type: 'trace-update'; trace: Trace }
-  | { type: 'trace-end'; trace: Trace };
+  | { type: "span-start"; span: Span }
+  | { type: "span-end"; span: Span }
+  | { type: "span-update"; span: Span }
+  | { type: "trace-update"; trace: Trace }
+  | { type: "trace-end"; trace: Trace };
 
 /** Information about a registered trace provider, returned by `GET /api/trace-providers`. */
 export interface TraceProviderInfo {
@@ -358,13 +352,13 @@ export interface TraceProviderInfo {
 // #endregion
 
 export interface PromptChangedSSEData {
-  type: 'prompt-changed';
+  type: "prompt-changed";
   providerId: string;
   event: PromptChangeEvent;
 }
 
 export interface TraceChangedSSEData {
-  type: 'trace-changed';
+  type: "trace-changed";
   providerId: string;
   event: TraceChangeEvent;
 }
@@ -373,8 +367,27 @@ export type SSEData = PromptChangedSSEData | TraceChangedSSEData;
 
 // #region Model
 
-import type { PropValue, PropDefinition, ImportSpecifier, ExtractedProps, SourceSpan, CalleeBinding, TemplateValue, TemplateToken } from 'ts-proppy';
-export type { PropDefinition, PropValue, ImportSpecifier, ExtractedProps, SourceSpan, CalleeBinding, TemplateValue, TemplateToken };
+import type {
+  CalleeBinding,
+  ExtractedProps,
+  ImportSpecifier,
+  PropDefinition,
+  PropValue,
+  SourceSpan,
+  TemplateToken,
+  TemplateValue,
+} from "ts-proppy";
+
+export type {
+  CalleeBinding,
+  ExtractedProps,
+  ImportSpecifier,
+  PropDefinition,
+  PropValue,
+  SourceSpan,
+  TemplateToken,
+  TemplateValue,
+};
 
 /**
  * Catalog-only variant of {@link PropValue} where `functionCall.binding` may
@@ -385,13 +398,17 @@ export type { PropDefinition, PropValue, ImportSpecifier, ExtractedProps, Source
  * Plain {@link PropValue} is assignable to `ModelPropValue` (single binding ⊆ array).
  */
 export type ModelPropValue =
-  | Exclude<PropValue, { kind: 'functionCall' | 'object' | 'array' | 'tuple' }>
-  | (Omit<Extract<PropValue, { kind: 'functionCall' }>, 'binding' | 'args'> & {
+  | Exclude<PropValue, { kind: "functionCall" | "object" | "array" | "tuple" }>
+  | (Omit<Extract<PropValue, { kind: "functionCall" }>, "binding" | "args"> & {
       binding?: CalleeBinding | CalleeBinding[];
       args: ModelPropValue[];
     })
-  | (Omit<Extract<PropValue, { kind: 'object' }>, 'properties'> & { properties: Record<string, ModelPropValue> })
-  | (Omit<Extract<PropValue, { kind: 'array' | 'tuple' }>, 'elements'> & { elements: ModelPropValue[] });
+  | (Omit<Extract<PropValue, { kind: "object" }>, "properties"> & {
+      properties: Record<string, ModelPropValue>;
+    })
+  | (Omit<Extract<PropValue, { kind: "array" | "tuple" }>, "elements"> & {
+      elements: ModelPropValue[];
+    });
 
 /** A pre-defined model option shown in quick-select UIs. */
 export interface ModelInfo {
@@ -446,9 +463,6 @@ export interface ModelCatalog {
 
   /** Per-group metadata for constructing custom model PropValues. Keyed by group name. */
   groups?: Record<string, ModelGroupInfo>;
-};
+}
 
 // #endregion
-
-
-

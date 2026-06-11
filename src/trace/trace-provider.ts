@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type {
   TraceChangeEvent,
   TraceStreamEvent,
   TraceSummary,
   TraceWithSpans,
-} from '../shared/types.ts';
+} from "../shared/types.ts";
 
 export {
-  SPAN_KIND_ATTRIBUTE,
-  PROMPT_PROVIDER_ID_ATTRIBUTE,
+  createTracerForPrompt,
   PROMPT_ID_ATTRIBUTE,
   PROMPT_NAME_ATTRIBUTE,
-  createTracerForPrompt,
-} from './prompt-tracer.ts';
+  PROMPT_PROVIDER_ID_ATTRIBUTE,
+  SPAN_KIND_ATTRIBUTE,
+} from "./prompt-tracer.ts";
 
 /**
  * A read-only store of execution traces that the playground can display and
@@ -59,7 +59,7 @@ export interface TraceProvider {
    */
   subscribeTrace(
     traceId: string,
-    callback: (event: TraceStreamEvent) => void
+    callback: (event: TraceStreamEvent) => void,
   ): () => void;
 
   /**

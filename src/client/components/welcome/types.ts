@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { ComponentType } from 'react';
+import type { ComponentType } from "react";
 
 /** Props passed to every onboarding wizard step. */
 export interface WizardStepProps {
@@ -20,7 +20,12 @@ export interface WizardStepProps {
    * is the display string and `label` the tab title. Optional so steps degrade
    * gracefully when no host is wired up (e.g. in isolated component tests).
    */
-  onOpenTerminal?: (taskId: string, stepId: string, command: string, label?: string) => void;
+  onOpenTerminal?: (
+    taskId: string,
+    stepId: string,
+    command: string,
+    label?: string,
+  ) => void;
 }
 
 /**

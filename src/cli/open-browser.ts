@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { spawn } from 'node:child_process';
+import { spawn } from "node:child_process";
 
 /**
  * Returns the platform-specific command and args used to open `url` in the
@@ -16,14 +16,14 @@ export function browserOpenCommand(
   platform: NodeJS.Platform = process.platform,
 ): { command: string; args: string[] } {
   switch (platform) {
-    case 'darwin':
-      return { command: 'open', args: [url] };
-    case 'win32':
+    case "darwin":
+      return { command: "open", args: [url] };
+    case "win32":
       // `start` is a cmd builtin; the empty "" is the window title it expects
       // as its first quoted argument.
-      return { command: 'cmd', args: ['/c', 'start', '""', url] };
+      return { command: "cmd", args: ["/c", "start", '""', url] };
     default:
-      return { command: 'xdg-open', args: [url] };
+      return { command: "xdg-open", args: [url] };
   }
 }
 
@@ -38,8 +38,8 @@ export function browserOpenCommand(
 export function openBrowser(url: string): void {
   try {
     const { command, args } = browserOpenCommand(url);
-    const child = spawn(command, args, { stdio: 'ignore', detached: true });
-    child.on('error', () => {});
+    const child = spawn(command, args, { stdio: "ignore", detached: true });
+    child.on("error", () => {});
     child.unref();
   } catch {
     // Ignore — the URL has already been logged for the user to open manually.

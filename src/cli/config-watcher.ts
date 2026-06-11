@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import path from 'node:path';
-import chokidar from 'chokidar';
-import { CONFIG_FILE_RELATIVE_PATH } from '../shared/setup-task.ts';
+import path from "node:path";
+import chokidar from "chokidar";
+import { CONFIG_FILE_RELATIVE_PATH } from "../shared/setup-task.ts";
 
 /**
  * Watches `rootDir` for `.evalution/config.ts` appearing or changing and runs
@@ -61,8 +61,10 @@ export function watchForConfigCreation(
     }
   };
 
-  watcher.on('add', handle);
-  watcher.on('change', handle);
+  watcher.on("add", handle);
+  watcher.on("change", handle);
 
-  return () => { void watcher.close(); };
+  return () => {
+    void watcher.close();
+  };
 }

@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import fs from 'fs';
-import path from 'path';
+import fs from "node:fs";
+import path from "node:path";
 
-import type { PropDefinition, PropValue } from 'ts-proppy';
+import type { PropDefinition, PropValue } from "ts-proppy";
 import type {
   ModelCatalog,
   ModelPropValue,
-  ParsedPrompt,
   NormalizedPrompt,
   NormalizedPromptUpdates,
-} from '../shared/types.ts';
+  ParsedPrompt,
+} from "../shared/types.ts";
 
 /**
  * Adapter that provides values and execution for a particular AI SDK.
@@ -68,7 +68,10 @@ export interface SDKAdapter {
    * @returns A `Record` keyed by the SDK's actual property names. Values may
    *   be `null` (to remove) or a `PropValue`.
    */
-  denormalizeUpdates(updates: NormalizedPromptUpdates, currentValues?: Record<string, PropValue>): Record<string, ModelPropValue | null>;
+  denormalizeUpdates(
+    updates: NormalizedPromptUpdates,
+    currentValues?: Record<string, PropValue>,
+  ): Record<string, ModelPropValue | null>;
 }
 
 // ─── Generic helpers ──────────────────────────────────────────────────────────
@@ -77,13 +80,17 @@ export interface SDKAdapter {
  * Walk up the directory tree from both `rootDir` and `process.cwd()` looking
  * for `node_modules/<packageName>/<dtsRelPath>`.
  */
-export function findPackageDts(packageName: string, dtsRelPath: string, rootDir: string): string | null {
+export function findPackageDts(
+  packageName: string,
+  dtsRelPath: string,
+  rootDir: string,
+): string | null {
   const seen = new Set<string>();
   for (const start of [rootDir, process.cwd()]) {
     let dir = start;
     while (!seen.has(dir)) {
       seen.add(dir);
-      const candidate = path.join(dir, 'node_modules', packageName, dtsRelPath);
+      const candidate = path.join(dir, "node_modules", packageName, dtsRelPath);
       try {
         fs.accessSync(candidate);
         return candidate;

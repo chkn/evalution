@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import fs from 'node:fs/promises';
-import fsSync from 'node:fs';
-import path from 'node:path';
-import { AI_SDK_REGISTRY, findSetupStep } from '../sdk/registry.ts';
-import type { SetupCreateConfigStep, SetupStep, SetupTask } from '../shared/setup-task.ts';
+import fsSync from "node:fs";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { AI_SDK_REGISTRY, findSetupStep } from "../sdk/registry.ts";
+import type {
+  SetupCreateConfigStep,
+  SetupStep,
+  SetupTask,
+} from "../shared/setup-task.ts";
 
 /**
  * Thrown when a requested task or step id does not exist in the registry. The
@@ -14,7 +18,7 @@ import type { SetupCreateConfigStep, SetupStep, SetupTask } from '../shared/setu
 export class SetupStepNotFoundError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'SetupStepNotFoundError';
+    this.name = "SetupStepNotFoundError";
   }
 }
 
@@ -45,13 +49,16 @@ export async function executeSetupStep(
   stepId: string,
 ): Promise<ExecuteSetupStepResult> {
   const step = findSetupStep(taskId, stepId);
-  if (!step) throw new SetupStepNotFoundError(`Unknown step '${stepId}' for task '${taskId}'`);
+  if (!step)
+    throw new SetupStepNotFoundError(
+      `Unknown step '${stepId}' for task '${taskId}'`,
+    );
 
   switch (step.kind) {
-    case 'create_config':
+    case "create_config":
       return { path: await writeConfigFile(rootPath, step) };
-    case 'run_command':
-    case 'install_package':
+    case "run_command":
+    case "install_package":
       // Command steps run in an interactive terminal over WebSocket; execution
       // lands in a later pass.
       throw new Error(`${step.kind} steps are not yet supported`);
@@ -75,11 +82,14 @@ export function resolveSetupTasks(rootPath: string): SetupTask[] {
 /** Adds the runtime `completed` flag to a single step where determinable. */
 function resolveStepStatus(rootPath: string, step: SetupStep): SetupStep {
   switch (step.kind) {
-    case 'install_package':
+    case "install_package":
       return { ...step, completed: isPackageInstalled(rootPath, step.package) };
-    case 'create_config':
-      return { ...step, completed: fsSync.existsSync(path.join(rootPath, step.path)) };
-    case 'run_command':
+    case "create_config":
+      return {
+        ...step,
+        completed: fsSync.existsSync(path.join(rootPath, step.path)),
+      };
+    case "run_command":
       // No reliable way to know whether an arbitrary command has been run.
       return step;
   }
@@ -95,7 +105,8 @@ function resolveStepStatus(rootPath: string, step: SetupStep): SetupStep {
 export function isPackageInstalled(rootPath: string, pkg: string): boolean {
   let dir = rootPath;
   while (true) {
-    if (fsSync.existsSync(path.join(dir, 'node_modules', pkg, 'package.json'))) return true;
+    if (fsSync.existsSync(path.join(dir, "node_modules", pkg, "package.json")))
+      return true;
     const parent = path.dirname(dir);
     if (parent === dir) return false;
     dir = parent;
@@ -106,7 +117,10 @@ export function isPackageInstalled(rootPath: string, pkg: string): boolean {
  * Writes the config file for a `create_config` step, creating parent
  * directories as needed. Refuses to clobber an existing file.
  */
-async function writeConfigFile(rootPath: string, step: SetupCreateConfigStep): Promise<string> {
+async function writeConfigFile(
+  rootPath: string,
+  step: SetupCreateConfigStep,
+): Promise<string> {
   const filePath = path.join(rootPath, step.path);
 
   try {
@@ -114,10 +128,10 @@ async function writeConfigFile(rootPath: string, step: SetupCreateConfigStep): P
     throw new Error(`${step.path} already exists`);
   } catch (err: any) {
     // ENOENT is the happy path (no existing file); anything else propagates.
-    if (err?.code !== 'ENOENT') throw err;
+    if (err?.code !== "ENOENT") throw err;
   }
 
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, step.contents, 'utf8');
+  await fs.writeFile(filePath, step.contents, "utf8");
   return step.path;
 }

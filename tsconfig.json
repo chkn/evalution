@@ -21,8 +21,9 @@
     "src/server/**/*",
     "src/parser/**/*",
     "src/prompt/**/*",
-    "src/shared/**/*"
-, "src/sdk/sdk-adapter.ts"  ],
+    "src/shared/**/*",
+    "src/sdk/sdk-adapter.ts"
+  ],
   "exclude": [
     "node_modules",
     "dist",

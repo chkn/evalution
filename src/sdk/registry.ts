@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { SetupStep, SetupTask } from '../shared/setup-task.ts';
-import type { SDKAdapter } from './sdk-adapter.ts';
-import { VercelAISDK } from './vercel-ai-sdk.ts';
+import type { SetupStep, SetupTask } from "../shared/setup-task.ts";
+import type { SDKAdapter } from "./sdk-adapter.ts";
+import { VercelAISDK } from "./vercel-ai-sdk.ts";
 
 /**
  * The static side of an {@link SDKAdapter} class: it must be constructible and
@@ -37,6 +37,9 @@ export function findSetupTask(taskId: string): SetupTask | undefined {
  * Look up a step within a task by both ids, or `undefined` if either is
  * unknown.
  */
-export function findSetupStep(taskId: string, stepId: string): SetupStep | undefined {
+export function findSetupStep(
+  taskId: string,
+  stepId: string,
+): SetupStep | undefined {
   return findSetupTask(taskId)?.steps.find(s => s.id === stepId);
 }

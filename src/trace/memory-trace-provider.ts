@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type {
-  Span,
-  Trace,
-  TraceSummary,
-} from '../shared/types.ts';
-import { BaseOTelTraceProvider, mergeSpans } from './base-otel-trace-provider.ts';
+import type { Span, Trace, TraceSummary } from "../shared/types.ts";
+import {
+  BaseOTelTraceProvider,
+  mergeSpans,
+} from "./base-otel-trace-provider.ts";
 
 /**
  * In-memory {@link TraceProvider} populated by OpenTelemetry spans.
@@ -19,9 +18,9 @@ export class MemoryTraceProvider extends BaseOTelTraceProvider {
   private spansByTrace = new Map<string, Span[]>();
 
   constructor({
-    id = 'memory',
-    displayName = 'In-Memory Traces',
-    description = 'Stores OpenTelemetry spans in memory for the current process.',
+    id = "memory",
+    displayName = "In-Memory Traces",
+    description = "Stores OpenTelemetry spans in memory for the current process.",
   }: { id?: string; displayName?: string; description?: string } = {}) {
     super({
       id,
@@ -48,7 +47,9 @@ export class MemoryTraceProvider extends BaseOTelTraceProvider {
     return this.traces.has(traceId);
   }
 
-  protected async getTraceWithoutSpans(traceId: string): Promise<Trace | undefined> {
+  protected async getTraceWithoutSpans(
+    traceId: string,
+  ): Promise<Trace | undefined> {
     return this.traces.get(traceId);
   }
 

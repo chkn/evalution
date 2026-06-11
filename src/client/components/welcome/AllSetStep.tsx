@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { WizardStepProps } from './types';
+import type { WizardStepProps } from "./types";
 
 /** Guide the user is pointed at once their project is configured. */
-const GETTING_STARTED_URL = 'https://evalut.io/n/docs/getting-started';
+const GETTING_STARTED_URL = "https://evalut.io/n/docs/getting-started";
 
 /**
  * Final onboarding step, shown once a project config is loaded. Confirms the
@@ -16,13 +16,23 @@ export function AllSetStep({ onCreatePrompt }: WizardStepProps) {
     <div className="setup-allset">
       <h3>You're all set! 🎉</h3>
       <p className="welcome-subtitle">
-        Create your first prompt to start iterating, or browse the docs to see what's possible.
+        Create your first prompt to start iterating, or browse the docs to see
+        what's possible.
       </p>
-      <a className="welcome-link" href={GETTING_STARTED_URL} target="_blank" rel="noreferrer">
+      <a
+        className="welcome-link"
+        href={GETTING_STARTED_URL}
+        target="_blank"
+        rel="noreferrer"
+      >
         Read the docs ↗
       </a>
       <div className="setup-actions">
-        <button type="button" className="welcome-btn-primary" onClick={onCreatePrompt}>
+        <button
+          type="button"
+          className="welcome-btn-primary"
+          onClick={onCreatePrompt}
+        >
           Create New Prompt
         </button>
       </div>

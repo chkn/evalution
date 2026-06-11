@@ -1,27 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import path from 'path';
-import type { PromptProvider } from '../prompt-provider.ts';
-import type { PromptFileType } from './prompt-file-type.ts';
-import type { SDKAdapter } from '../../sdk/sdk-adapter.ts';
+import path from "node:path";
+import { type FileProvider, LocalFileProvider } from "../../file-provider.ts";
+import type { SDKAdapter } from "../../sdk/sdk-adapter.ts";
+import { isEditable } from "../../shared/helpers.ts";
 import type {
   AddPromptContext,
   ChangeEventType,
   NormalizedPromptUpdates,
   PromptChangeEvent,
-} from '../../shared/types.ts';
+} from "../../shared/types.ts";
+import type { PromptProvider } from "../prompt-provider.ts";
 import type {
   FilePromptMetadata,
   NormalizedFilePrompt,
   ParsedFilePrompt,
-} from './prompt-file-type.ts';
-import { isEditable } from '../../shared/helpers.ts';
+  PromptFileType,
+} from "./prompt-file-type.ts";
+import { TSPromptFileType } from "./ts/ts-prompt-file-type.ts";
 
-import { TSPromptFileType } from './ts/ts-prompt-file-type.ts';
-import { LocalFileProvider, type FileProvider } from '../../file-provider.ts';
-
-const DEFAULT_IGNORE_PATTERNS = ['**/node_modules/**', '**/dist/**', '**/.git/**'];
+const DEFAULT_IGNORE_PATTERNS = [
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/.git/**",
+];
 
 /**
  * Configuration options for the {@link FilePromptProvider}.
@@ -78,11 +81,14 @@ let defaultIDCounter = 0;
  * const prompts = await provider.getAllPrompts();
  * ```
  */
-export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> {
+export class FilePromptProvider
+  implements PromptProvider<NormalizedFilePrompt>
+{
   readonly id: string;
-  readonly displayName = 'File System';
-  readonly description = 'Create a .prompt.ts file';
-  readonly icon = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3A1.5 1.5 0 000 4.5v8A1.5 1.5 0 001.5 14h13a1.5 1.5 0 001.5-1.5v-7A1.5 1.5 0 0014.5 4H8L6.5 2.5h-5z"/></svg>';
+  readonly displayName = "File System";
+  readonly description = "Create a .prompt.ts file";
+  readonly icon =
+    '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3A1.5 1.5 0 000 4.5v8A1.5 1.5 0 001.5 14h13a1.5 1.5 0 001.5-1.5v-7A1.5 1.5 0 0014.5 4H8L6.5 2.5h-5z"/></svg>';
 
   private files: string[] | null = null;
   private rootDir: string;
@@ -91,10 +97,13 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
   private includePatterns: readonly string[];
   private ignorePatterns: readonly string[];
   private sdkAdapter: SDKAdapter;
-  private suppressedWatchEvents = new Map<string, { remaining: number; expiresAt: number }>();
+  private suppressedWatchEvents = new Map<
+    string,
+    { remaining: number; expiresAt: number }
+  >();
 
   constructor({
-    id = 'fs' + (defaultIDCounter++ ? defaultIDCounter : ''),
+    id = "fs" + (defaultIDCounter++ ? defaultIDCounter : ""),
     rootDir = process.cwd(),
     fileProvider = new LocalFileProvider(),
     fileType,
@@ -125,11 +134,11 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
 
   async updatePromptProperties(
     promptId: string,
-    updates: NormalizedPromptUpdates
+    updates: NormalizedPromptUpdates,
   ): Promise<NormalizedFilePrompt> {
     const parsed = await this.getParsedPrompt(promptId);
     if (!parsed) {
-      throw new Error('Prompt not found');
+      throw new Error("Prompt not found");
     }
 
     const [filePath, promptName] = this.parsePromptId(promptId);
@@ -137,7 +146,7 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
     const rawUpdates = this.sdkAdapter.denormalizeUpdates(updates, values);
 
     for (const [propertyName, value] of Object.entries(rawUpdates)) {
-      this.suppressNextWatchEvent(filePath, 'change');
+      this.suppressNextWatchEvent(filePath, "change");
       const propDef = definitions.find(d => d.name === propertyName);
       const currentValue = values?.[propertyName];
 
@@ -147,14 +156,21 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
         await this.fileType.removeProperty(filePath, propDef);
       } else if (!propDef) {
         // unknown key → add as a new property
-        await this.fileType.addProperty(filePath, promptName, propertyName, value);
+        await this.fileType.addProperty(
+          filePath,
+          promptName,
+          propertyName,
+          value,
+        );
       } else {
         // existing key → update in place
         if (currentValue && !isEditable(currentValue)) {
           throw new Error(`Property '${propertyName}' is not editable`);
         }
         if (!propDef.valueSpan) {
-          throw new Error(`Property '${propertyName}' is missing source metadata`);
+          throw new Error(
+            `Property '${propertyName}' is missing source metadata`,
+          );
         }
         await this.fileType.updateProperty(filePath, propDef, value, promptId);
       }
@@ -188,25 +204,35 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
     return this.sdkAdapter.getModelParameters(this.rootDir);
   }
 
-  async execute(promptId: string, params: any[], stream: boolean): Promise<any> {
+  async execute(
+    promptId: string,
+    params: any[],
+    stream: boolean,
+  ): Promise<any> {
     const [filePath, promptName] = this.parsePromptId(promptId);
     const config = await this.fileType.loadConfig(filePath, promptName, params);
     return this.sdkAdapter.executeConfig(config, stream);
   }
 
-  async renamePrompt(promptId: string, newName: string): Promise<NormalizedFilePrompt> {
+  async renamePrompt(
+    promptId: string,
+    newName: string,
+  ): Promise<NormalizedFilePrompt> {
     const [filePath, oldName] = this.parsePromptId(promptId);
-    this.suppressNextWatchEvent(filePath, 'change');
+    this.suppressNextWatchEvent(filePath, "change");
     await this.fileType.renamePrompt(filePath, oldName, newName);
 
     const relFilePath = path.relative(this.rootDir, filePath);
     const prompt = await this.getPrompt(`${relFilePath}#${newName}`);
-    if (!prompt) throw new Error('Failed to find renamed prompt');
+    if (!prompt) throw new Error("Failed to find renamed prompt");
     return prompt;
   }
 
-  async addPrompt(partial: Partial<NormalizedFilePrompt>): Promise<NormalizedFilePrompt | AddPromptContext> {
-    const relFilePath = (partial.metadata as FilePromptMetadata | undefined)?.relativeFilePath;
+  async addPrompt(
+    partial: Partial<NormalizedFilePrompt>,
+  ): Promise<NormalizedFilePrompt | AddPromptContext> {
+    const relFilePath = (partial.metadata as FilePromptMetadata | undefined)
+      ?.relativeFilePath;
 
     if (relFilePath) {
       const normalizedRelFilePath = path.extname(relFilePath)
@@ -214,20 +240,24 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
         : relFilePath + this.fileType.defaultFileExtension;
       const absPath = path.join(this.rootDir, normalizedRelFilePath);
       const baseName = path.basename(normalizedRelFilePath);
-      const firstDot = baseName.indexOf('.');
+      const firstDot = baseName.indexOf(".");
       const promptsId = firstDot >= 0 ? baseName.slice(0, firstDot) : baseName;
       const name = partial.name ?? promptsId;
 
-      const content = this.fileType.newPromptSkeleton(promptsId, name, this.sdkAdapter.promptsHelperImport);
+      const content = this.fileType.newPromptSkeleton(
+        promptsId,
+        name,
+        this.sdkAdapter.promptsHelperImport,
+      );
 
-      this.suppressNextWatchEvent(absPath, 'add');
+      this.suppressNextWatchEvent(absPath, "add");
       await this.fileProvider.writeFile(absPath, content);
       if (this.files && !this.files.includes(absPath)) {
         this.files.push(absPath);
       }
 
       const prompt = await this.getPrompt(`${normalizedRelFilePath}#${name}`);
-      if (!prompt) throw new Error('Failed to create prompt');
+      if (!prompt) throw new Error("Failed to create prompt");
       return prompt;
     }
 
@@ -239,7 +269,7 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
       const dir = path.dirname(p.metadata.relativeFilePath);
       dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
     }
-    let defaultDir = '.';
+    let defaultDir = ".";
     let maxCount = 0;
     for (const [dir, count] of dirCounts) {
       if (count > maxCount && directories.includes(dir)) {
@@ -251,26 +281,29 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
     return {
       fields: [
         {
-          name: 'directory',
-          label: 'Directory',
-          type: 'select' as const,
+          name: "directory",
+          label: "Directory",
+          type: "select" as const,
           required: true,
           defaultValue: defaultDir,
-          options: directories.map(d => ({ label: d === '.' ? '(root)' : d, value: d })),
+          options: directories.map(d => ({
+            label: d === "." ? "(root)" : d,
+            value: d,
+          })),
         },
         {
-          name: 'fileName',
-          label: 'File name',
-          type: 'text' as const,
+          name: "fileName",
+          label: "File name",
+          type: "text" as const,
           required: true,
           placeholder: `my-prompt (or my-prompt${this.fileType.defaultFileExtension})`,
         },
         {
-          name: 'name',
-          label: 'Prompt name',
-          type: 'text' as const,
+          name: "name",
+          label: "Prompt name",
+          type: "text" as const,
           required: false,
-          placeholder: 'Default: file name without extension',
+          placeholder: "Default: file name without extension",
         },
       ],
     };
@@ -286,22 +319,28 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
           return;
         }
 
-        if (eventType === 'change' || eventType === 'add') {
+        if (eventType === "change" || eventType === "add") {
           if (this.files && !this.files.includes(absolutePath)) {
             this.files.push(absolutePath);
           }
-          const prompts = await this.fileType.parsePrompts([absolutePath], this.rootDir);
+          const prompts = await this.fileType.parsePrompts(
+            [absolutePath],
+            this.rootDir,
+          );
           prompts.forEach(prompt => {
-            callback({ type: eventType === 'change' ? 'change' : 'add', promptId: prompt.id });
+            callback({
+              type: eventType === "change" ? "change" : "add",
+              promptId: prompt.id,
+            });
           });
         } else {
           if (this.files) {
             this.files = this.files.filter(f => f !== absolutePath);
           }
           // filePath is relative to rootDir (chokidar cwd)
-          callback({ type: 'remove', promptId: filePath });
+          callback({ type: "remove", promptId: filePath });
         }
-      }
+      },
     );
   }
 
@@ -311,8 +350,11 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
     }
   }
 
-  private suppressNextWatchEvent(filePath: string, eventType: ChangeEventType): void {
-    if (eventType !== 'change' && eventType !== 'add') return;
+  private suppressNextWatchEvent(
+    filePath: string,
+    eventType: ChangeEventType,
+  ): void {
+    if (eventType !== "change" && eventType !== "add") return;
     const key = `${eventType}:${filePath}`;
     const entry = this.suppressedWatchEvents.get(key);
     this.suppressedWatchEvents.set(key, {
@@ -321,7 +363,10 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
     });
   }
 
-  private consumeSuppressedWatchEvent(filePath: string, eventType: ChangeEventType): boolean {
+  private consumeSuppressedWatchEvent(
+    filePath: string,
+    eventType: ChangeEventType,
+  ): boolean {
     const key = `${eventType}:${filePath}`;
     const entry = this.suppressedWatchEvents.get(key);
     if (!entry) return false;
@@ -340,7 +385,7 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
     return true;
   }
 
-  private async* findPromptFiles(): AsyncIterableIterator<string> {
+  private async *findPromptFiles(): AsyncIterableIterator<string> {
     const uniqueFiles = new Set<string>();
 
     for (const pattern of this.includePatterns) {
@@ -359,7 +404,7 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
   }
 
   private parsePromptId(id: string): [string, string] {
-    const hashIdx = id.lastIndexOf('#');
+    const hashIdx = id.lastIndexOf("#");
     if (hashIdx < 0) {
       throw new Error(`Invalid prompt ID format: ${id}`);
     }
@@ -372,21 +417,21 @@ export class FilePromptProvider implements PromptProvider<NormalizedFilePrompt> 
   }
 
   private async listDirectories(): Promise<string[]> {
-    const dirs = new Set<string>(['.']);
-    const iter = this.fileProvider.glob('**/', {
+    const dirs = new Set<string>(["."]);
+    const iter = this.fileProvider.glob("**/", {
       cwd: this.rootDir,
       ignore: this.ignorePatterns,
     });
     for await (const dir of iter) {
       // glob yields trailing-slash paths like "src/prompts/"
-      const clean = dir.replace(/\/$/, '');
+      const clean = dir.replace(/\/$/, "");
       if (clean) dirs.add(clean);
     }
     return Array.from(dirs).sort();
   }
 
   private resolveFilePath(relativePath: string): string {
-    if (relativePath.startsWith('/')) {
+    if (relativePath.startsWith("/")) {
       return relativePath;
     }
     return `${this.rootDir}/${relativePath}`;

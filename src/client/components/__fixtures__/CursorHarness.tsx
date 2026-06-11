@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useState } from 'react';
-import { TemplateValueBuilder } from 'ts-proppy/react';
-import PlaygroundEditor from '../PlaygroundEditor';
-import type { NormalizedPrompt, NormalizedPromptUpdates, TemplateValue } from '../../../shared/types';
+import { useState } from "react";
+import { TemplateValueBuilder } from "ts-proppy/react";
+import type {
+  NormalizedPrompt,
+  NormalizedPromptUpdates,
+  TemplateValue,
+} from "../../../shared/types";
+import PlaygroundEditor from "../PlaygroundEditor";
 
 // Lets tests pass plain template-syntax strings (`"Hello ${name}"`) and have
 // them split into string segments + tokens, so trailing-token cursor cases
@@ -13,10 +17,16 @@ function toTemplateValue(text: string): TemplateValue {
   const builder = new TemplateValueBuilder();
   let i = 0;
   while (i < text.length) {
-    const open = text.indexOf('${', i);
-    if (open === -1) { builder.appendString(text.slice(i)); break; }
-    const close = text.indexOf('}', open + 2);
-    if (close === -1) { builder.appendString(text.slice(i)); break; }
+    const open = text.indexOf("${", i);
+    if (open === -1) {
+      builder.appendString(text.slice(i));
+      break;
+    }
+    const close = text.indexOf("}", open + 2);
+    if (close === -1) {
+      builder.appendString(text.slice(i));
+      break;
+    }
     builder.appendString(text.slice(i, open));
     builder.appendToken(text.slice(open + 2, close));
     i = close + 1;
@@ -26,14 +36,19 @@ function toTemplateValue(text: string): TemplateValue {
 
 export function makePrompt(content: string): NormalizedPrompt {
   return {
-    id: 'test',
-    providerId: 'test',
-    name: 'test',
+    id: "test",
+    providerId: "test",
+    name: "test",
     functionParameters: [],
     modelEditable: true,
-    system: { kind: 'template', value: [''] },
+    system: { kind: "template", value: [""] },
     systemEditable: true,
-    messages: [{ role: 'user', content: { kind: 'template', value: toTemplateValue(content) } }],
+    messages: [
+      {
+        role: "user",
+        content: { kind: "template", value: toTemplateValue(content) },
+      },
+    ],
     messagesEditable: true,
     modelParameters: [],
   };
@@ -44,22 +59,32 @@ export function makePrompt(content: string): NormalizedPrompt {
  * refetch after a save). Clicking the `[data-testid="reload"]` button replaces
  * the prompt with a fresh object built from `reloadContent`.
  */
-export function CursorHarness({ initialContent = '', reloadContent }: {
+export function CursorHarness({
+  initialContent = "",
+  reloadContent,
+}: {
   initialContent?: string;
   reloadContent?: string;
 }) {
-  const [prompt, setPrompt] = useState<NormalizedPrompt>(makePrompt(initialContent));
+  const [prompt, setPrompt] = useState<NormalizedPrompt>(
+    makePrompt(initialContent),
+  );
   const handleUpdate = (updates: NormalizedPromptUpdates) =>
-    setPrompt(prev => ({ ...prev, ...updates } as NormalizedPrompt));
+    setPrompt(prev => ({ ...prev, ...updates }) as NormalizedPrompt);
 
   return (
     <div>
-      <PlaygroundEditor prompt={prompt} onUpdate={handleUpdate} modelCatalog={{ models: [] }} />
+      <PlaygroundEditor
+        prompt={prompt}
+        onUpdate={handleUpdate}
+        modelCatalog={{ models: [] }}
+      />
       {reloadContent !== undefined && (
         <button
+          type="button"
           data-testid="reload"
           onClick={() => setPrompt(makePrompt(reloadContent))}
-          style={{ position: 'fixed', bottom: 8, right: 8 }}
+          style={{ position: "fixed", bottom: 8, right: 8 }}
         />
       )}
     </div>

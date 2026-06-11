@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useState } from 'react';
-import type { ExecuteResponse, NormalizedPrompt, PropValue } from '../../shared/types';
-import { PropsEditor, materializeValue } from 'ts-proppy/react';
-import { executePrompt } from '../api';
+import { useState } from "react";
+import { materializeValue, PropsEditor } from "ts-proppy/react";
+import type {
+  ExecuteResponse,
+  NormalizedPrompt,
+  PropValue,
+} from "../../shared/types";
+import { executePrompt } from "../api";
 
 interface Props {
   prompt: NormalizedPrompt;
@@ -63,26 +67,42 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
       <div className="pg-exec-header">
         <span className="pg-exec-title">Execute</span>
         {paramCount > 0 && (
-          <span className="pg-exec-param-count">{paramCount} param{paramCount !== 1 ? 's' : ''}</span>
+          <span className="pg-exec-param-count">
+            {paramCount} param{paramCount !== 1 ? "s" : ""}
+          </span>
         )}
       </div>
       <div className="pg-exec-body">
         {paramCount > 0 && (
           <PropsEditor
-            props={{ definitions: prompt.functionParameters, values: paramValues }}
+            props={{
+              definitions: prompt.functionParameters,
+              values: paramValues,
+            }}
             onChange={handleParamChange}
           />
         )}
         {error && (
           <div className="pg-exec-error">
             {error}
-            <button className="pg-dismiss" onClick={() => setError(null)}>×</button>
+            <button
+              type="button"
+              className="pg-dismiss"
+              onClick={() => setError(null)}
+            >
+              ×
+            </button>
           </div>
         )}
       </div>
       <div className="pg-exec-footer">
-        <button className="pg-run-btn" onClick={handleRun} disabled={executing}>
-          {executing ? '…' : '▶  Run'}
+        <button
+          type="button"
+          className="pg-run-btn"
+          onClick={handleRun}
+          disabled={executing}
+        >
+          {executing ? "…" : "▶  Run"}
         </button>
       </div>
     </div>

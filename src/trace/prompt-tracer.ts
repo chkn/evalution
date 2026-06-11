@@ -6,32 +6,38 @@
 // `@evalution/vercel-ai-sdk` package it is covered by MIT. Keep this file
 // self-contained — it must import nothing from the rest of the core, or the
 // MIT bundle would pull AGPL-only code into an MIT artifact. See LICENSING.md.
-import { trace, type Context, type Span, type SpanOptions, type Tracer } from '@opentelemetry/api';
+import {
+  type Context,
+  type Span,
+  type SpanOptions,
+  type Tracer,
+  trace,
+} from "@opentelemetry/api";
 
 /**
  * Attribute name a span can set to pick one of evalution's span-kind values
  * (`'LLM'`, `'TOOL'`, `'AGENT'`, `'EMBEDDING'`, `'DEFAULT'`). Falls back to
  * `'DEFAULT'` when absent or unrecognised.
  */
-export const SPAN_KIND_ATTRIBUTE = 'evalution.span.type';
+export const SPAN_KIND_ATTRIBUTE = "evalution.span.type";
 
 /**
  * Attribute name a span can set to scope its {@link PROMPT_ID_ATTRIBUTE} to a
  * specific prompt provider. When absent, the prompt ID is treated as global.
  */
-export const PROMPT_PROVIDER_ID_ATTRIBUTE = 'evalution.prompt.provider.id';
+export const PROMPT_PROVIDER_ID_ATTRIBUTE = "evalution.prompt.provider.id";
 
 /**
  * Attribute name a span can set to link itself to a specific prompt. The value
  * is a globally-unique prompt ID unless {@link PROMPT_PROVIDER_ID_ATTRIBUTE} is
  * also set, in which case it is scoped to that provider.
  */
-export const PROMPT_ID_ATTRIBUTE = 'evalution.prompt.id';
+export const PROMPT_ID_ATTRIBUTE = "evalution.prompt.id";
 
 /**
  * Attribute name a span can set to give a human-readable name to the prompt.
  */
-export const PROMPT_NAME_ATTRIBUTE = 'gen_ai.prompt.name';
+export const PROMPT_NAME_ATTRIBUTE = "gen_ai.prompt.name";
 
 /**
  * Wraps a {@link Tracer} so that every span it produces is tagged with the
@@ -57,12 +63,12 @@ export function createTracerForPrompt(
   prompt: { name: string; id?: string },
   tracer?: Tracer,
 ): Tracer {
-  const inner = tracer ?? trace.getTracer('evalution');
+  const inner = tracer ?? trace.getTracer("evalution");
 
   const withPromptAttributes = (options?: SpanOptions): SpanOptions => ({
     ...options,
     attributes: {
-      [SPAN_KIND_ATTRIBUTE]: 'LLM',
+      [SPAN_KIND_ATTRIBUTE]: "LLM",
       [PROMPT_NAME_ATTRIBUTE]: prompt.name,
       ...(prompt.id !== undefined && { [PROMPT_ID_ATTRIBUTE]: prompt.id }),
       ...options?.attributes,
@@ -77,13 +83,22 @@ export function createTracerForPrompt(
     startActiveSpan(name: string, ...rest: any[]): any {
       // Mirror the three `startActiveSpan` overloads:
       //   (name, fn) | (name, options, fn) | (name, options, context, fn)
-      if (typeof rest[0] === 'function') {
+      if (typeof rest[0] === "function") {
         return inner.startActiveSpan(name, withPromptAttributes(), rest[0]);
       }
-      if (typeof rest[1] === 'function') {
-        return inner.startActiveSpan(name, withPromptAttributes(rest[0]), rest[1]);
+      if (typeof rest[1] === "function") {
+        return inner.startActiveSpan(
+          name,
+          withPromptAttributes(rest[0]),
+          rest[1],
+        );
       }
-      return inner.startActiveSpan(name, withPromptAttributes(rest[0]), rest[1], rest[2]);
+      return inner.startActiveSpan(
+        name,
+        withPromptAttributes(rest[0]),
+        rest[1],
+        rest[2],
+      );
     },
   };
 }

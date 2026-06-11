@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { SetupTask } from "../shared/setup-task";
 import type {
+  AddPromptContext,
+  ExecuteResponse,
+  ModelCatalog,
   NormalizedPrompt,
   NormalizedPromptUpdates,
-  PropDefinition,
-  AddPromptContext,
   PromptProviderInfo,
-  ModelCatalog,
-  ExecuteResponse,
+  PropDefinition,
+  TraceProviderInfo,
+  TraceStreamEvent,
   TraceSummary,
   TraceWithSpans,
-  TraceStreamEvent,
-  TraceProviderInfo,
-} from '../shared/types';
-import type { SetupTask } from '../shared/setup-task';
-import { encodePromptId } from './utils';
+} from "../shared/types";
+import { encodePromptId } from "./utils";
 
 function promptUrl(prompt: NormalizedPrompt, suffix: string): string {
   return `/api/prompts/${prompt.providerId}/${encodePromptId(prompt.id)}/${suffix}`;
@@ -30,7 +30,7 @@ async function throwIfError(res: Response): Promise<void> {
 
 /** Fetches the onboarding setup tasks shown in the manual-setup picker. */
 export async function getSetupTasks(): Promise<SetupTask[]> {
-  const res = await fetch('/api/setup-tasks');
+  const res = await fetch("/api/setup-tasks");
   await throwIfError(res);
   return res.json();
 }
@@ -51,25 +51,25 @@ export async function executeSetupStep(
 ): Promise<ExecuteSetupStepResult> {
   const res = await fetch(
     `/api/setup-tasks/${encodeURIComponent(taskId)}/steps/${encodeURIComponent(stepId)}/execute`,
-    { method: 'POST' },
+    { method: "POST" },
   );
   await throwIfError(res);
   return res.json();
 }
 
 export async function getPromptProviders(): Promise<PromptProviderInfo[]> {
-  const res = await fetch('/api/providers');
+  const res = await fetch("/api/providers");
   await throwIfError(res);
   return res.json();
 }
 
 export async function addPrompt(
   providerId: string,
-  partial: Record<string, any>
+  partial: Record<string, any>,
 ): Promise<NormalizedPrompt | AddPromptContext> {
   const res = await fetch(`/api/providers/${providerId}/add-prompt`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(partial),
   });
   await throwIfError(res);
@@ -77,27 +77,34 @@ export async function addPrompt(
 }
 
 export async function getPrompts(): Promise<NormalizedPrompt[]> {
-  const res = await fetch('/api/prompts');
+  const res = await fetch("/api/prompts");
   await throwIfError(res);
   return res.json();
 }
 
-export async function getModelCatalog(providerId: string): Promise<ModelCatalog> {
+export async function getModelCatalog(
+  providerId: string,
+): Promise<ModelCatalog> {
   const res = await fetch(`/api/providers/${providerId}/models`);
   await throwIfError(res);
   return res.json();
 }
 
-export async function getModelParameters(providerId: string): Promise<PropDefinition[]> {
+export async function getModelParameters(
+  providerId: string,
+): Promise<PropDefinition[]> {
   const res = await fetch(`/api/providers/${providerId}/model-parameters`);
   await throwIfError(res);
   return res.json();
 }
 
-export async function renamePrompt(prompt: NormalizedPrompt, newName: string): Promise<NormalizedPrompt> {
-  const res = await fetch(promptUrl(prompt, 'rename'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+export async function renamePrompt(
+  prompt: NormalizedPrompt,
+  newName: string,
+): Promise<NormalizedPrompt> {
+  const res = await fetch(promptUrl(prompt, "rename"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ newName }),
   });
   await throwIfError(res);
@@ -106,11 +113,11 @@ export async function renamePrompt(prompt: NormalizedPrompt, newName: string): P
 
 export async function updatePromptProperties(
   prompt: NormalizedPrompt,
-  updates: NormalizedPromptUpdates
+  updates: NormalizedPromptUpdates,
 ): Promise<NormalizedPrompt> {
-  const res = await fetch(promptUrl(prompt, 'update'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  const res = await fetch(promptUrl(prompt, "update"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
   });
   await throwIfError(res);
@@ -119,11 +126,11 @@ export async function updatePromptProperties(
 
 export async function executePrompt(
   prompt: NormalizedPrompt,
-  functionParams: any[]
+  functionParams: any[],
 ): Promise<ExecuteResponse> {
-  const res = await fetch(promptUrl(prompt, 'execute'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  const res = await fetch(promptUrl(prompt, "execute"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ functionParams }),
   });
   await throwIfError(res);
@@ -131,22 +138,24 @@ export async function executePrompt(
 }
 
 export async function getTraceProviders(): Promise<TraceProviderInfo[]> {
-  const res = await fetch('/api/trace-providers');
+  const res = await fetch("/api/trace-providers");
   await throwIfError(res);
   return res.json();
 }
 
 export async function getTraces(): Promise<TraceSummary[]> {
-  const res = await fetch('/api/traces');
+  const res = await fetch("/api/traces");
   await throwIfError(res);
   return res.json();
 }
 
 export async function getTrace(
   providerId: string,
-  traceId: string
+  traceId: string,
 ): Promise<TraceWithSpans> {
-  const res = await fetch(`/api/traces/${encodeURIComponent(providerId)}/${encodeURIComponent(traceId)}`);
+  const res = await fetch(
+    `/api/traces/${encodeURIComponent(providerId)}/${encodeURIComponent(traceId)}`,
+  );
   await throwIfError(res);
   return res.json();
 }
@@ -159,14 +168,14 @@ export async function getTrace(
 export function subscribeTraceEvents(
   providerId: string,
   traceId: string,
-  onEvent: (event: TraceStreamEvent) => void
+  onEvent: (event: TraceStreamEvent) => void,
 ): () => void {
   const url = `/api/traces/${encodeURIComponent(providerId)}/${encodeURIComponent(traceId)}/events`;
   const es = new EventSource(url);
-  es.onmessage = (msg) => {
+  es.onmessage = msg => {
     try {
       const data = JSON.parse(msg.data);
-      if (data && data.type && data.type !== 'connected') {
+      if (data?.type && data.type !== "connected") {
         onEvent(data as TraceStreamEvent);
       }
     } catch {

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useState, useMemo, useRef, useEffect } from 'react';
-import type { NormalizedPrompt } from '../../shared/types';
-import { requireProviderId } from '../utils';
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { NormalizedPrompt } from "../../shared/types";
+import { requireProviderId } from "../utils";
 
 interface PromptListProps {
   prompts: NormalizedPrompt[];
@@ -23,8 +23,8 @@ interface RawTree {
 }
 
 type CompressedNode =
-  | { type: 'dir'; label: string; children: CompressedNode[] }
-  | { type: 'file'; label: string; prompts: NormalizedPrompt[] };
+  | { type: "dir"; label: string; children: CompressedNode[] }
+  | { type: "file"; label: string; prompts: NormalizedPrompt[] };
 
 function buildRawTree(prompts: NormalizedPrompt[]): RawTree {
   const root: RawTree = { subdirs: {}, files: {} };
@@ -74,15 +74,19 @@ function compressTree(tree: RawTree): CompressedNode[] {
       Object.keys(current.files).length === 0
     ) {
       const [childName, childTree] = Object.entries(current.subdirs)[0];
-      label += '/' + childName;
+      label += "/" + childName;
       current = childTree;
     }
 
-    nodes.push({ type: 'dir', label, children: compressTree(current) });
+    nodes.push({ type: "dir", label, children: compressTree(current) });
   }
 
   for (const fileName of sortedFiles) {
-    nodes.push({ type: 'file', label: fileName, prompts: tree.files[fileName] });
+    nodes.push({
+      type: "file",
+      label: fileName,
+      prompts: tree.files[fileName],
+    });
   }
 
   return nodes;
@@ -93,14 +97,20 @@ function filterNodes(nodes: CompressedNode[], query: string): CompressedNode[] {
   const result: CompressedNode[] = [];
 
   for (const node of nodes) {
-    if (node.type === 'dir') {
+    if (node.type === "dir") {
       const filteredChildren = filterNodes(node.children, query);
       if (filteredChildren.length > 0 || node.label.toLowerCase().includes(q)) {
-        result.push({ ...node, children: filteredChildren.length > 0 ? filteredChildren : node.children });
+        result.push({
+          ...node,
+          children:
+            filteredChildren.length > 0 ? filteredChildren : node.children,
+        });
       }
     } else {
       const matchesFile = node.label.toLowerCase().includes(q);
-      const matchingPrompts = node.prompts.filter(p => p.name.toLowerCase().includes(q));
+      const matchingPrompts = node.prompts.filter(p =>
+        p.name.toLowerCase().includes(q),
+      );
       if (matchesFile) {
         result.push(node);
       } else if (matchingPrompts.length > 0) {
@@ -116,55 +126,97 @@ function filterNodes(nodes: CompressedNode[], query: string): CompressedNode[] {
 
 function DisclosureTriangle({ expanded }: { expanded: boolean }) {
   return (
-    <svg className="tree-disclosure" width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
-      {expanded
-        ? <path d="M1 2h6L4 6.5z"/>
-        : <path d="M2 1v6L6.5 4z"/>
-      }
+    <svg
+      className="tree-disclosure"
+      width="8"
+      height="8"
+      viewBox="0 0 8 8"
+      fill="currentColor"
+    >
+      {expanded ? <path d="M1 2h6L4 6.5z" /> : <path d="M2 1v6L6.5 4z" />}
     </svg>
   );
 }
 
 function FolderIcon() {
   return (
-    <svg className="tree-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
-         stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+    <svg
+      className="tree-icon"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
     </svg>
   );
 }
 
 function PromptIcon() {
   return (
-    <svg className="tree-icon" width="12" height="12" viewBox="0 0 24 24" fill="none"
-         stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-      <polyline points="14 2 14 8 20 8"/>
+    <svg
+      className="tree-icon"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
     </svg>
   );
 }
 
 function SearchIcon() {
   return (
-    <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="4.5" cy="4.5" r="3"/>
-      <line x1="7" y1="7" x2="9.5" y2="9.5"/>
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 11 11"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="4.5" cy="4.5" r="3" />
+      <line x1="7" y1="7" x2="9.5" y2="9.5" />
     </svg>
   );
 }
 
 function PlusIcon() {
   return (
-    <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-      <line x1="5.5" y1="1.5" x2="5.5" y2="9.5"/>
-      <line x1="1.5" y1="5.5" x2="9.5" y2="5.5"/>
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 11 11"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+    >
+      <line x1="5.5" y1="1.5" x2="5.5" y2="9.5" />
+      <line x1="1.5" y1="5.5" x2="9.5" y2="5.5" />
     </svg>
   );
 }
 
 // --- Inline rename input ---
 
-function RenameInput({ initialValue, onCommit, onCancel }: {
+function RenameInput({
+  initialValue,
+  onCommit,
+  onCancel,
+}: {
   initialValue: string;
   onCommit: (v: string) => void;
   onCancel: () => void;
@@ -183,10 +235,21 @@ function RenameInput({ initialValue, onCommit, onCancel }: {
       value={value}
       onChange={e => setValue(e.target.value)}
       onKeyDown={e => {
-        if (e.key === 'Enter') { e.preventDefault(); if (value.trim()) onCommit(value.trim()); else onCancel(); }
-        if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (value.trim()) onCommit(value.trim());
+          else onCancel();
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
       }}
-      onBlur={() => { if (value.trim() && value.trim() !== initialValue) onCommit(value.trim()); else onCancel(); }}
+      onBlur={() => {
+        if (value.trim() && value.trim() !== initialValue)
+          onCommit(value.trim());
+        else onCancel();
+      }}
       onClick={e => e.stopPropagation()}
     />
   );
@@ -203,7 +266,16 @@ interface TreeNodeProps {
   onCancelRename: () => void;
 }
 
-function PromptRow({ prompt, indent, selectedId, onSelect, renamingId, onStartRename, onCommitRename, onCancelRename }: {
+function PromptRow({
+  prompt,
+  indent,
+  selectedId,
+  onSelect,
+  renamingId,
+  onStartRename,
+  onCommitRename,
+  onCancelRename,
+}: {
   prompt: NormalizedPrompt;
   indent: number;
 } & TreeNodeProps) {
@@ -212,13 +284,23 @@ function PromptRow({ prompt, indent, selectedId, onSelect, renamingId, onStartRe
 
   return (
     <div
-      className={`tree-row${isSelected ? ' tree-row-selected' : ''}`}
+      className={`tree-row${isSelected ? " tree-row-selected" : ""}`}
       style={{ paddingLeft: indent }}
-      onClick={() => onSelect(requireProviderId(prompt.providerId, `selecting prompt ${prompt.id}`), prompt.id)}
-      onDoubleClick={e => { e.stopPropagation(); onStartRename(prompt.id); }}
+      onClick={() =>
+        onSelect(
+          requireProviderId(prompt.providerId, `selecting prompt ${prompt.id}`),
+          prompt.id,
+        )
+      }
+      onDoubleClick={e => {
+        e.stopPropagation();
+        onStartRename(prompt.id);
+      }}
       title={prompt.name}
     >
-      <span className="tree-icon-prompt"><PromptIcon /></span>
+      <span className="tree-icon-prompt">
+        <PromptIcon />
+      </span>
       {isRenaming ? (
         <RenameInput
           initialValue={prompt.name}
@@ -230,7 +312,7 @@ function PromptRow({ prompt, indent, selectedId, onSelect, renamingId, onStartRe
           <span className="tree-row-label">{prompt.name}</span>
           {prompt.functionParameters.length > 0 && (
             <span className="tree-row-params">
-              ({prompt.functionParameters.map(p => p.name).join(', ')})
+              ({prompt.functionParameters.map(p => p.name).join(", ")})
             </span>
           )}
         </>
@@ -239,13 +321,19 @@ function PromptRow({ prompt, indent, selectedId, onSelect, renamingId, onStartRe
   );
 }
 
-function FileNode({ node, depth, ...rest }: { node: CompressedNode & { type: 'file' }; depth: number } & TreeNodeProps) {
+function FileNode({
+  node,
+  depth,
+  ...rest
+}: { node: CompressedNode & { type: "file" }; depth: number } & TreeNodeProps) {
   const [expanded, setExpanded] = useState(true);
   const hasManyPrompts = node.prompts.length > 1;
   const indent = depth * 18;
 
   if (!hasManyPrompts) {
-    return <PromptRow prompt={node.prompts[0]} indent={10 + indent + 14} {...rest} />;
+    return (
+      <PromptRow prompt={node.prompts[0]} indent={10 + indent + 14} {...rest} />
+    );
   }
 
   return (
@@ -257,17 +345,29 @@ function FileNode({ node, depth, ...rest }: { node: CompressedNode & { type: 'fi
         title={node.label}
       >
         <DisclosureTriangle expanded={expanded} />
-        <span className="tree-icon-file"><PromptIcon /></span>
+        <span className="tree-icon-file">
+          <PromptIcon />
+        </span>
         <span className="tree-row-label">{node.label}</span>
       </div>
-      {expanded && node.prompts.map(prompt => (
-        <PromptRow key={prompt.id} prompt={prompt} indent={10 + indent + 18 + 16} {...rest} />
-      ))}
+      {expanded &&
+        node.prompts.map(prompt => (
+          <PromptRow
+            key={prompt.id}
+            prompt={prompt}
+            indent={10 + indent + 18 + 16}
+            {...rest}
+          />
+        ))}
     </div>
   );
 }
 
-function DirNode({ node, depth, ...rest }: { node: CompressedNode & { type: 'dir' }; depth: number } & TreeNodeProps) {
+function DirNode({
+  node,
+  depth,
+  ...rest
+}: { node: CompressedNode & { type: "dir" }; depth: number } & TreeNodeProps) {
   const [expanded, setExpanded] = useState(true);
   const indent = depth * 18;
 
@@ -280,17 +380,19 @@ function DirNode({ node, depth, ...rest }: { node: CompressedNode & { type: 'dir
         title={node.label}
       >
         <DisclosureTriangle expanded={expanded} />
-        <span className="tree-icon-folder"><FolderIcon /></span>
+        <span className="tree-icon-folder">
+          <FolderIcon />
+        </span>
         <span className="tree-row-label">{node.label}</span>
       </div>
       {expanded && (
         <div>
           {node.children.map((child, i) =>
-            child.type === 'dir' ? (
+            child.type === "dir" ? (
               <DirNode key={i} node={child} depth={depth + 1} {...rest} />
             ) : (
               <FileNode key={i} node={child} depth={depth + 1} {...rest} />
-            )
+            ),
           )}
         </div>
       )}
@@ -300,8 +402,16 @@ function DirNode({ node, depth, ...rest }: { node: CompressedNode & { type: 'dir
 
 // --- Main component ---
 
-function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt, onRenamePrompt }: PromptListProps) {
-  const [filter, setFilter] = useState('');
+function PromptList({
+  prompts,
+  selectedId,
+  onSelect,
+  loading,
+  error,
+  onAddPrompt,
+  onRenamePrompt,
+}: PromptListProps) {
+  const [filter, setFilter] = useState("");
   const [searchVisible, setSearchVisible] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
 
@@ -321,14 +431,25 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt
       <span>Prompts</span>
       <div className="section-panel-header-actions">
         <button
+          type="button"
           className="tree-toolbar-btn"
           title="Toggle search"
-          onClick={() => { setSearchVisible(v => { if (v) setFilter(''); return !v; }); }}
+          onClick={() => {
+            setSearchVisible(v => {
+              if (v) setFilter("");
+              return !v;
+            });
+          }}
         >
           <SearchIcon />
         </button>
         {onAddPrompt && (
-          <button className="tree-toolbar-btn" onClick={onAddPrompt} title="New prompt">
+          <button
+            type="button"
+            className="tree-toolbar-btn"
+            onClick={onAddPrompt}
+            title="New prompt"
+          >
             <PlusIcon />
           </button>
         )}
@@ -381,7 +502,11 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt
           <div className="tree-empty-state">
             <p>No prompts found.</p>
             {onAddPrompt && (
-              <button className="tree-add-prompt-btn" onClick={onAddPrompt}>
+              <button
+                type="button"
+                className="tree-add-prompt-btn"
+                onClick={onAddPrompt}
+              >
                 Create a prompt
               </button>
             )}
@@ -397,19 +522,31 @@ function PromptList({ prompts, selectedId, onSelect, loading, error, onAddPrompt
       {searchBox}
       <div className="section-panel-body file-tree">
         {nodes.map((node, i) =>
-          node.type === 'dir' ? (
-            <DirNode key={i} node={node} depth={0}
-              selectedId={selectedId} onSelect={onSelect}
-              renamingId={renamingId} onStartRename={setRenamingId}
-              onCommitRename={handleCommitRename} onCancelRename={() => setRenamingId(null)}
+          node.type === "dir" ? (
+            <DirNode
+              key={i}
+              node={node}
+              depth={0}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              renamingId={renamingId}
+              onStartRename={setRenamingId}
+              onCommitRename={handleCommitRename}
+              onCancelRename={() => setRenamingId(null)}
             />
           ) : (
-            <FileNode key={i} node={node} depth={0}
-              selectedId={selectedId} onSelect={onSelect}
-              renamingId={renamingId} onStartRename={setRenamingId}
-              onCommitRename={handleCommitRename} onCancelRename={() => setRenamingId(null)}
+            <FileNode
+              key={i}
+              node={node}
+              depth={0}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              renamingId={renamingId}
+              onStartRename={setRenamingId}
+              onCommitRename={handleCommitRename}
+              onCancelRename={() => setRenamingId(null)}
             />
-          )
+          ),
         )}
       </div>
     </>

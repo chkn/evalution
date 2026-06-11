@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useEffect, useRef } from 'react';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal } from "@xterm/xterm";
+import { useEffect, useRef } from "react";
 import {
   SETUP_STEP_DONE_EVENT,
   type SetupStepDoneDetail,
-} from '../../shared/setup-task';
-import '@xterm/xterm/css/xterm.css';
+} from "../../shared/setup-task";
+import "@xterm/xterm/css/xterm.css";
 
 interface TerminalViewProps {
   /** Id of the setup task this terminal's step belongs to. */
@@ -21,13 +21,13 @@ interface TerminalViewProps {
 
 /** Messages streamed down from the server's PTY (see `server/terminal.ts`). */
 type ServerMessage =
-  | { type: 'data'; data: string }
-  | { type: 'exit'; code: number }
-  | { type: 'error'; message: string };
+  | { type: "data"; data: string }
+  | { type: "exit"; code: number }
+  | { type: "error"; message: string };
 
 /** Builds the terminal WebSocket URL, honouring the page's host and TLS. */
 function terminalSocketUrl(taskId: string, stepId: string): string {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const proto = location.protocol === "https:" ? "wss" : "ws";
   const params = new URLSearchParams({ taskId, stepId });
   return `${proto}://${location.host}/api/terminal?${params}`;
 }
@@ -49,18 +49,24 @@ export function TerminalView({ taskId, stepId, command }: TerminalViewProps) {
     const css = getComputedStyle(container);
     const term = new Terminal({
       cursorBlink: true,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
       fontSize: 13,
       theme: {
-        background: css.getPropertyValue('--panel-bg').trim() || '#1e1e1e',
-        foreground: css.getPropertyValue('--panel-text').trim() || '#eaeaea',
-        cursor: css.getPropertyValue('--panel-text').trim() || '#eaeaea',
+        background: css.getPropertyValue("--panel-bg").trim() || "#1e1e1e",
+        foreground: css.getPropertyValue("--panel-text").trim() || "#eaeaea",
+        cursor: css.getPropertyValue("--panel-text").trim() || "#eaeaea",
       },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(container);
-    const safeFit = () => { try { fit.fit(); } catch { /* container detached/unsized */ } };
+    const safeFit = () => {
+      try {
+        fit.fit();
+      } catch {
+        /* container detached/unsized */
+      }
+    };
     safeFit();
     // The container may not have its final layout on the first synchronous
     // pass; refit after a frame so the initial dimensions are accurate.
@@ -75,7 +81,9 @@ export function TerminalView({ taskId, stepId, command }: TerminalViewProps) {
 
     // Hint first, then the command on its own line with the cursor parked at
     // the end of it (no trailing newline) so it reads like a real prompt.
-    term.write('\x1b[2m# Press Return to run, or close this tab to skip.\x1b[0m\r\n');
+    term.write(
+      "\x1b[2m# Press Return to run, or close this tab to skip.\x1b[0m\r\n",
+    );
     term.write(`\x1b[1m$ ${command}\x1b[0m`);
 
     const startPayload = () => {
@@ -83,7 +91,11 @@ export function TerminalView({ taskId, stepId, command }: TerminalViewProps) {
       // actually looking at — npm and friends suppress their progress UI when
       // the reported terminal is too small.
       safeFit();
-      return JSON.stringify({ type: 'start', cols: term.cols, rows: term.rows });
+      return JSON.stringify({
+        type: "start",
+        cols: term.cols,
+        rows: term.rows,
+      });
     };
 
     const sendStart = () => {
@@ -97,16 +109,16 @@ export function TerminalView({ taskId, stepId, command }: TerminalViewProps) {
       if (pendingStart) ws.send(startPayload());
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = event => {
       const msg: ServerMessage = JSON.parse(event.data);
       switch (msg.type) {
-        case 'data':
+        case "data":
           term.write(msg.data);
           break;
-        case 'error':
+        case "error":
           term.write(`\r\n\x1b[31m${msg.message}\x1b[0m\r\n`);
           break;
-        case 'exit':
+        case "exit":
           exited = true;
           term.write(
             msg.code === 0
@@ -115,7 +127,9 @@ export function TerminalView({ taskId, stepId, command }: TerminalViewProps) {
           );
           if (msg.code === 0) {
             window.dispatchEvent(
-              new CustomEvent<SetupStepDoneDetail>(SETUP_STEP_DONE_EVENT, { detail: { taskId, stepId } }),
+              new CustomEvent<SetupStepDoneDetail>(SETUP_STEP_DONE_EVENT, {
+                detail: { taskId, stepId },
+              }),
             );
           }
           break;
@@ -123,24 +137,25 @@ export function TerminalView({ taskId, stepId, command }: TerminalViewProps) {
     };
 
     ws.onclose = () => {
-      if (!exited) term.write('\r\n\x1b[2m(disconnected)\x1b[0m\r\n');
+      if (!exited) term.write("\r\n\x1b[2m(disconnected)\x1b[0m\r\n");
     };
 
-    const onData = term.onData((data) => {
+    const onData = term.onData(data => {
       if (!started) {
         // Before the command runs, only Return launches it; ignore other keys.
-        if (data === '\r' || data === '\n') {
-          term.write('\r\n'); // drop to a fresh line before the command's output
+        if (data === "\r" || data === "\n") {
+          term.write("\r\n"); // drop to a fresh line before the command's output
           sendStart();
         }
         return;
       }
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
+      if (ws.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ type: "input", data }));
     });
 
     const onResize = term.onResize(({ cols, rows }) => {
       if (started && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        ws.send(JSON.stringify({ type: "resize", cols, rows }));
       }
     });
 

@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { describe, it, expect, afterEach } from 'vitest';
-import net from 'node:net';
-import { findAvailablePort } from './find-port.ts';
+import net from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+import { findAvailablePort } from "./find-port.ts";
 
-describe('findAvailablePort', () => {
+describe("findAvailablePort", () => {
   const servers: net.Server[] = [];
 
   afterEach(async () => {
     await Promise.all(
-      servers.splice(0).map((s) => new Promise<void>((r) => s.close(() => r()))),
+      servers.splice(0).map(s => new Promise<void>(r => s.close(() => r()))),
     );
   });
 
@@ -19,27 +19,27 @@ describe('findAvailablePort', () => {
     new Promise<void>((resolve, reject) => {
       const s = net.createServer();
       servers.push(s);
-      s.once('error', reject).listen(port, '127.0.0.1', () => resolve());
+      s.once("error", reject).listen(port, "127.0.0.1", () => resolve());
     });
 
-  it('returns the preferred port when it is free', async () => {
+  it("returns the preferred port when it is free", async () => {
     // 45123 is almost certainly free in the test environment; a free preferred
     // port is returned unchanged.
-    const port = await findAvailablePort(45123, '127.0.0.1');
+    const port = await findAvailablePort(45123, "127.0.0.1");
     expect(port).toBe(45123);
   });
 
-  it('falls back to the next free port when the preferred is taken', async () => {
-    const base = await findAvailablePort(40000, '127.0.0.1');
+  it("falls back to the next free port when the preferred is taken", async () => {
+    const base = await findAvailablePort(40000, "127.0.0.1");
     await occupy(base);
-    const next = await findAvailablePort(base, '127.0.0.1');
+    const next = await findAvailablePort(base, "127.0.0.1");
     expect(next).toBeGreaterThan(base);
   });
 
-  it('throws when no port is free in range', async () => {
-    const base = await findAvailablePort(41000, '127.0.0.1');
+  it("throws when no port is free in range", async () => {
+    const base = await findAvailablePort(41000, "127.0.0.1");
     await occupy(base);
-    await expect(findAvailablePort(base, '127.0.0.1', 1)).rejects.toThrow(
+    await expect(findAvailablePort(base, "127.0.0.1", 1)).rejects.toThrow(
       /No free port/,
     );
   });

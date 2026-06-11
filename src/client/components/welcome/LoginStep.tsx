@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useState } from 'react';
-import type { WizardStepProps } from './types';
+import { useState } from "react";
+import type { WizardStepProps } from "./types";
 
 /** External Evalution Cloud auth pages, opened in a new tab. */
-const SIGNUP_URL = 'https://evalut.io/signup';
-const FORGOT_LOGIN_URL = 'https://evalut.io/forgot';
+const SIGNUP_URL = "https://evalut.io/signup";
+const FORGOT_LOGIN_URL = "https://evalut.io/forgot";
 
 /**
  * Stubbed login screen for Evalution Cloud.
@@ -17,8 +17,8 @@ const FORGOT_LOGIN_URL = 'https://evalut.io/forgot';
  * later.
  */
 export function LoginStep({ onNext }: WizardStepProps) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,7 +30,9 @@ export function LoginStep({ onNext }: WizardStepProps) {
     <div className="welcome-login">
       <h2>Log in to Evalution Cloud</h2>
       <p className="welcome-subtitle">
-        Production traces, datasets, and eval results synced across your team —<br />or skip and stay fully local.
+        Production traces, datasets, and eval results synced across your team —
+        <br />
+        or skip and stay fully local.
       </p>
 
       <form onSubmit={handleSubmit}>
@@ -55,7 +57,12 @@ export function LoginStep({ onNext }: WizardStepProps) {
           />
         </label>
 
-        <a className="welcome-link welcome-forgot" href={FORGOT_LOGIN_URL} target="_blank">
+        <a
+          className="welcome-link welcome-forgot"
+          href={FORGOT_LOGIN_URL}
+          target="_blank"
+          rel="noopener"
+        >
           Forgot your login?
         </a>
 
@@ -65,7 +72,12 @@ export function LoginStep({ onNext }: WizardStepProps) {
       </form>
 
       <div className="welcome-login-footer">
-        <a className="welcome-link" href={SIGNUP_URL} target="_blank" rel="noreferrer">
+        <a
+          className="welcome-link"
+          href={SIGNUP_URL}
+          target="_blank"
+          rel="noreferrer"
+        >
           Need an account? Sign up
         </a>
         <button type="button" className="welcome-skip" onClick={onNext}>

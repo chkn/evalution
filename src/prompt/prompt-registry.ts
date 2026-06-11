@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { PromptProvider } from './prompt-provider.ts';
-import type { PromptID } from '../shared/types.ts';
+import type { PromptID } from "../shared/types.ts";
+import type { PromptProvider } from "./prompt-provider.ts";
 
 /** A provider-scoped prompt reference that a {@link PromptID} resolves to. */
 export interface ResolvedPrompt {
@@ -37,14 +37,21 @@ export class PromptRegistry {
       for (const prompt of prompts) {
         this.register(next, prompt.id, { providerId, promptId: prompt.id });
         if (prompt.globalId) {
-          this.register(next, prompt.globalId, { providerId, promptId: prompt.id });
+          this.register(next, prompt.globalId, {
+            providerId,
+            promptId: prompt.id,
+          });
         }
       }
     }
     this.map = next;
   }
 
-  private register(map: Map<string, ResolvedPrompt | null>, key: string, value: ResolvedPrompt): void {
+  private register(
+    map: Map<string, ResolvedPrompt | null>,
+    key: string,
+    value: ResolvedPrompt,
+  ): void {
     if (map.has(key)) {
       // Collision: the key can't unambiguously identify a single prompt.
       map.set(key, null);

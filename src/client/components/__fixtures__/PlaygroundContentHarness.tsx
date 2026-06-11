@@ -1,19 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useState } from 'react';
-import PlaygroundContent from '../PlaygroundContent';
-import type { NormalizedPrompt, NormalizedMessage } from '../../../shared/types';
+import { useState } from "react";
+import type {
+  NormalizedMessage,
+  NormalizedPrompt,
+} from "../../../shared/types";
+import PlaygroundContent from "../PlaygroundContent";
 
 function makePrompt(messagesCount: number): NormalizedPrompt {
-  const messages: NormalizedMessage[] = Array.from({ length: messagesCount }, (_, i) => ({
-    role: 'user',
-    content: { kind: 'primitive', value: `Message ${i + 1}: lorem ipsum dolor sit amet, consectetur adipiscing elit.` },
-  }));
+  const messages: NormalizedMessage[] = Array.from(
+    { length: messagesCount },
+    (_, i) => ({
+      role: "user",
+      content: {
+        kind: "primitive",
+        value: `Message ${i + 1}: lorem ipsum dolor sit amet, consectetur adipiscing elit.`,
+      },
+    }),
+  );
   return {
-    id: 'test',
-    providerId: 'test',
-    name: 'test',
+    id: "test",
+    providerId: "test",
+    name: "test",
     functionParameters: [],
     modelEditable: true,
     systemEditable: true,
@@ -36,7 +45,9 @@ export function PlaygroundContentHarness({
   height: number;
   messagesCount: number;
 }) {
-  const [prompt, setPrompt] = useState<NormalizedPrompt>(makePrompt(messagesCount));
+  const [prompt, setPrompt] = useState<NormalizedPrompt>(
+    makePrompt(messagesCount),
+  );
   return (
     <div className="main-content" style={{ width, height }}>
       <PlaygroundContent

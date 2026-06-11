@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useState, useCallback, type ReactNode } from 'react';
-import checkIcon from '../../assets/check.svg?raw';
-import copyIcon from '../../assets/copy.svg?raw';
+import { type ReactNode, useCallback, useState } from "react";
+import checkIcon from "../../assets/check.svg?raw";
+import copyIcon from "../../assets/copy.svg?raw";
 
 interface CopyBoxProps {
   /** The text written to the clipboard on copy. */
@@ -36,16 +36,22 @@ export function CopyBox({ text, multiline, children }: CopyBoxProps) {
   }, [text]);
 
   return (
-    <div className={`copy-box${multiline ? ' copy-box-multiline' : ''}`}>
-      {multiline ? <pre>{text}</pre> : <span className="copy-box-text">{children ?? text}</span>}
+    <div className={`copy-box${multiline ? " copy-box-multiline" : ""}`}>
+      {multiline ? (
+        <pre>{text}</pre>
+      ) : (
+        <span className="copy-box-text">{children ?? text}</span>
+      )}
       <button
         type="button"
         className="copy-box-btn"
         onClick={copy}
-        title={copied ? 'Copied!' : 'Copy to clipboard'}
-        aria-label={copied ? 'Copied' : 'Copy to clipboard'}
+        title={copied ? "Copied!" : "Copy to clipboard"}
+        aria-label={copied ? "Copied" : "Copy to clipboard"}
       >
-        <span dangerouslySetInnerHTML={{ __html: copied ? checkIcon : copyIcon }} />
+        <span
+          dangerouslySetInnerHTML={{ __html: copied ? checkIcon : copyIcon }}
+        />
       </button>
     </div>
   );

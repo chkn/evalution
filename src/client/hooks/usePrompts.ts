@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useState, useEffect, useCallback } from 'react';
-import type { NormalizedPrompt } from '../../shared/types';
-import { getPrompts } from '../api';
+import { useCallback, useEffect, useState } from "react";
+import type { NormalizedPrompt } from "../../shared/types";
+import { getPrompts } from "../api";
 
 function samePrompt(a: NormalizedPrompt, b: NormalizedPrompt): boolean {
   return a.id === b.id && a.providerId === b.providerId;

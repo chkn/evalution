@@ -10,6 +10,15 @@
             "statusMessage": "Adding license header"
           }
         ]
+      },
+      {
+        "matcher": "Edit|MultiEdit|Write|Update",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read file_path; if echo \"$file_path\" | grep -Eq '\\.(json|tsx?)$'; then npx biome check --write \"$file_path\" || (exit 2 2>/dev/null); fi; }"
+          }
+        ]
       }
     ]
   }

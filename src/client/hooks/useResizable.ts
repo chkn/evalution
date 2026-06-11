@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from "react";
 
 interface UseResizableOptions {
   initial: Record<string, number>;
   min?: number;
   max?: number;
-  direction?: 'horizontal' | 'vertical';
+  direction?: "horizontal" | "vertical";
   storageKey?: string;
 }
 
@@ -15,7 +15,7 @@ export function useResizable({
   initial,
   min = 0,
   max = Infinity,
-  direction = 'horizontal',
+  direction = "horizontal",
   storageKey,
 }: UseResizableOptions) {
   const [sizes, setSizesState] = useState<Record<string, number>>(() => {
@@ -24,9 +24,11 @@ export function useResizable({
         const stored = localStorage.getItem(storageKey);
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (parsed && typeof parsed === 'object') return parsed;
+          if (parsed && typeof parsed === "object") return parsed;
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     return initial;
   });
@@ -45,31 +47,38 @@ export function useResizable({
   };
 
   const activeKey = useRef<string | null>(null);
-  const startPos  = useRef(0);
+  const startPos = useRef(0);
   const startSize = useRef(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: drag listeners are attached once and read mutable refs / the latest setSizes closure.
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (!activeKey.current) return;
-      const pos  = direction === 'horizontal' ? e.clientX : e.clientY;
-      const next = Math.max(min, Math.min(max, startSize.current + (pos - startPos.current)));
+      const pos = direction === "horizontal" ? e.clientX : e.clientY;
+      const next = Math.max(
+        min,
+        Math.min(max, startSize.current + (pos - startPos.current)),
+      );
       setSizes({ ...sizesRef.current, [activeKey.current]: next });
     };
-    const onMouseUp = () => { activeKey.current = null; };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup',   onMouseUp);
+    const onMouseUp = () => {
+      activeKey.current = null;
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
     return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup',   onMouseUp);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
     };
   }, [direction, min, max]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const getOnMouseDown = (key: string, size: number) => (e: React.MouseEvent) => {
-    activeKey.current = key;
-    startPos.current  = direction === 'horizontal' ? e.clientX : e.clientY;
-    startSize.current = size;
-    e.preventDefault();
-  };
+  const getOnMouseDown =
+    (key: string, size: number) => (e: React.MouseEvent) => {
+      activeKey.current = key;
+      startPos.current = direction === "horizontal" ? e.clientX : e.clientY;
+      startSize.current = size;
+      e.preventDefault();
+    };
 
   const setSize = (key: string, value: number) =>
     setSizes({ ...sizesRef.current, [key]: value });

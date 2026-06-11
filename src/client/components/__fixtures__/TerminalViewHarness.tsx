@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useState } from 'react';
-import { TerminalView } from '../TerminalView';
-import '../../styles.css';
+import { useState } from "react";
+import { TerminalView } from "../TerminalView";
+import "../../styles.css";
 
 /**
  * Minimal stand-in for the browser `WebSocket` that records the JSON messages
@@ -45,7 +45,7 @@ class CapturingWebSocket {
   }
 }
 
-if (typeof window !== 'undefined' && !(window as any).__wsStubbed) {
+if (typeof window !== "undefined" && !(window as any).__wsStubbed) {
   (window as any).__wsStubbed = true;
   (window as any).__terminalSent = [];
   (window as any).WebSocket = CapturingWebSocket;
@@ -63,14 +63,25 @@ interface TerminalViewHarnessProps {
  * mimics a real pane, plus a button that widens the container so tests can
  * verify the terminal reports the right size both on launch and on resize.
  */
-export function TerminalViewHarness({ width = 600, height = 400 }: TerminalViewHarnessProps) {
+export function TerminalViewHarness({
+  width = 600,
+  height = 400,
+}: TerminalViewHarnessProps) {
   const [w, setW] = useState(width);
   return (
-    <div style={{ width: w, height, display: 'flex', flexDirection: 'column' }}>
-      <button type="button" data-testid="grow" onClick={() => setW(v => v + 400)}>
+    <div style={{ width: w, height, display: "flex", flexDirection: "column" }}>
+      <button
+        type="button"
+        data-testid="grow"
+        onClick={() => setW(v => v + 400)}
+      >
         grow
       </button>
-      <TerminalView taskId="vercel-ai-sdk" stepId="install-ai" command="npm i ai" />
+      <TerminalView
+        taskId="vercel-ai-sdk"
+        stepId="install-ai"
+        command="npm i ai"
+      />
     </div>
   );
 }

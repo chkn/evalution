@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import ts from 'typescript';
-import path from 'path';
-import type { PropDefinition, PropValue } from 'ts-proppy';
+import path from "node:path";
+import type { PropDefinition, PropValue } from "ts-proppy";
 import {
-  updateProperty as applyUpdate,
   addProperty as applyAdd,
   removeProperty as applyRemove,
+  updateProperty as applyUpdate,
   extractPropertiesFromObjectLiteral,
   extractPropertiesFromParameters,
-} from 'ts-proppy';
-import { type FileProvider, LocalFileProvider } from '../../../file-provider.ts';
-import type { PromptFileType, ParsedFilePrompt } from '../prompt-file-type.ts';
-import type { ModelPropValue, CalleeBinding } from '../../../shared/types.ts';
+} from "ts-proppy";
+import ts from "typescript";
+import {
+  type FileProvider,
+  LocalFileProvider,
+} from "../../../file-provider.ts";
+import type { CalleeBinding, ModelPropValue } from "../../../shared/types.ts";
+import type { ParsedFilePrompt, PromptFileType } from "../prompt-file-type.ts";
 
 /**
  * {@link PromptFileType} implementation for TypeScript `.prompt.ts` files.
@@ -45,10 +48,14 @@ function isValidIdentifier(name: string): boolean {
 }
 
 export class TSPromptFileType implements PromptFileType {
-  defaultIncludePatterns = ['**/*.prompt.ts', '**/*.promp.ts'];
-  defaultFileExtension = '.prompt.ts';
+  defaultIncludePatterns = ["**/*.prompt.ts", "**/*.promp.ts"];
+  defaultFileExtension = ".prompt.ts";
 
-  newPromptSkeleton(promptsId: string, name: string, importPath: string): string {
+  newPromptSkeleton(
+    promptsId: string,
+    name: string,
+    importPath: string,
+  ): string {
     const key = isValidIdentifier(name) ? name : `[${JSON.stringify(name)}]`;
     return `import { prompts } from ${JSON.stringify(importPath)};
 
@@ -66,17 +73,25 @@ export default prompts(
     this.fileProvider = fileProvider;
   }
 
-  async parsePrompts(files: string[], rootDir: string = ''): Promise<ParsedFilePrompt[]> {
+  async parsePrompts(
+    files: string[],
+    rootDir: string = "",
+  ): Promise<ParsedFilePrompt[]> {
     const results = await Promise.all(
       files.map(async filePath => {
         const sourceCode = await this.fileProvider.readFile(filePath);
         return this.parseFileContent(filePath, sourceCode, rootDir);
-      })
+      }),
     );
     return results.flat();
   }
 
-  async updateProperty(filePath: string, propDef: PropDefinition, value: ModelPropValue, promptId?: string): Promise<void> {
+  async updateProperty(
+    filePath: string,
+    propDef: PropDefinition,
+    value: ModelPropValue,
+    promptId?: string,
+  ): Promise<void> {
     if (!propDef.valueSpan) {
       throw new Error(`Property '${propDef.name}' is missing valueSpan`);
     }
@@ -90,11 +105,20 @@ export default prompts(
 
     // Re-parse to get fresh spans (guards against stale spans from concurrent saves
     // and against shifts introduced by destructure-augmentation above).
-    const functionName = promptId?.slice(promptId.lastIndexOf('#') + 1);
+    const functionName = promptId?.slice(promptId.lastIndexOf("#") + 1);
     if (functionName) {
-      const freshDef = this.findFreshDefinition(sourceCode, filePath, functionName, propDef.name);
+      const freshDef = this.findFreshDefinition(
+        sourceCode,
+        filePath,
+        functionName,
+        propDef.name,
+      );
       if (freshDef) {
-        propDef = { ...propDef, valueSpan: freshDef.valueSpan, fullSpan: freshDef.fullSpan };
+        propDef = {
+          ...propDef,
+          valueSpan: freshDef.valueSpan,
+          fullSpan: freshDef.fullSpan,
+        };
       }
     }
 
@@ -102,7 +126,10 @@ export default prompts(
     await this.fileProvider.writeFile(filePath, sourceCode);
   }
 
-  async removeProperty(filePath: string, propDef: PropDefinition): Promise<void> {
+  async removeProperty(
+    filePath: string,
+    propDef: PropDefinition,
+  ): Promise<void> {
     if (!propDef.fullSpan) {
       throw new Error(`Property '${propDef.name}' is missing fullSpan`);
     }
@@ -111,25 +138,49 @@ export default prompts(
     await this.fileProvider.writeFile(filePath, newSourceCode);
   }
 
-  async addProperty(filePath: string, promptName: string, propertyName: string, value: ModelPropValue): Promise<void> {
+  async addProperty(
+    filePath: string,
+    promptName: string,
+    propertyName: string,
+    value: ModelPropValue,
+  ): Promise<void> {
     let sourceCode = await this.fileProvider.readFile(filePath);
 
     const adjusted = resolveBindingsAndAugment(sourceCode, value);
     sourceCode = adjusted.sourceCode;
     const resolvedValue = adjusted.value;
 
-    const sourceFile = ts.createSourceFile(filePath, sourceCode, ts.ScriptTarget.Latest, true);
+    const sourceFile = ts.createSourceFile(
+      filePath,
+      sourceCode,
+      ts.ScriptTarget.Latest,
+      true,
+    );
     const returnObj = this.findReturnObjectInSource(sourceFile, promptName);
-    if (!returnObj) throw new Error(`Return object not found in function '${promptName}'`);
+    if (!returnObj)
+      throw new Error(`Return object not found in function '${promptName}'`);
 
-    const extracted = extractPropertiesFromObjectLiteral(returnObj, undefined, sourceFile);
+    const extracted = extractPropertiesFromObjectLiteral(
+      returnObj,
+      undefined,
+      sourceFile,
+    );
     sourceCode = applyAdd(sourceCode, extracted, propertyName, resolvedValue);
     await this.fileProvider.writeFile(filePath, sourceCode);
   }
 
-  async renamePrompt(filePath: string, oldName: string, newName: string): Promise<void> {
+  async renamePrompt(
+    filePath: string,
+    oldName: string,
+    newName: string,
+  ): Promise<void> {
     const sourceCode = await this.fileProvider.readFile(filePath);
-    const sourceFile = ts.createSourceFile(filePath, sourceCode, ts.ScriptTarget.Latest, true);
+    const sourceFile = ts.createSourceFile(
+      filePath,
+      sourceCode,
+      ts.ScriptTarget.Latest,
+      true,
+    );
 
     let nameStart = -1;
     let nameEnd = -1;
@@ -137,10 +188,7 @@ export default prompts(
 
     const visit = (node: ts.Node) => {
       if (nameStart >= 0) return;
-      if (
-        ts.isFunctionDeclaration(node) &&
-        node.name?.text === oldName
-      ) {
+      if (ts.isFunctionDeclaration(node) && node.name?.text === oldName) {
         nameStart = node.name.getStart(sourceFile);
         nameEnd = node.name.getEnd();
         isFunctionDeclaration = true;
@@ -151,7 +199,9 @@ export default prompts(
         if (helper) {
           for (const prop of helper.object.properties) {
             if (getPropertyName(prop) === oldName) {
-              const nameNode = (prop as ts.MethodDeclaration | ts.PropertyAssignment).name;
+              const nameNode = (
+                prop as ts.MethodDeclaration | ts.PropertyAssignment
+              ).name;
               nameStart = nameNode.getStart(sourceFile);
               nameEnd = nameNode.getEnd();
               return;
@@ -163,34 +213,43 @@ export default prompts(
     };
     visit(sourceFile);
 
-    if (nameStart < 0) throw new Error(`Function '${oldName}' not found in ${filePath}`);
+    if (nameStart < 0)
+      throw new Error(`Function '${oldName}' not found in ${filePath}`);
 
     if (!isValidIdentifier(newName) && isFunctionDeclaration) {
       throw new Error(`'${newName}' is not a valid function name`);
     }
-    const replacement = isValidIdentifier(newName) ? newName : `[${JSON.stringify(newName)}]`;
-    const newSource = sourceCode.slice(0, nameStart) + replacement + sourceCode.slice(nameEnd);
+    const replacement = isValidIdentifier(newName)
+      ? newName
+      : `[${JSON.stringify(newName)}]`;
+    const newSource =
+      sourceCode.slice(0, nameStart) + replacement + sourceCode.slice(nameEnd);
     await this.fileProvider.writeFile(filePath, newSource);
   }
 
-  async loadConfig(filePath: string, promptName: string, params: any[]): Promise<any> {
+  async loadConfig(
+    filePath: string,
+    promptName: string,
+    params: any[],
+  ): Promise<any> {
     const module = await this.fileProvider.import(filePath);
     let fn = module[promptName];
 
     // Fall back to the prompts() helper shape: `export default prompts(factory)`
     // resolves to a function that returns an object of prompt methods.
-    if (typeof fn !== 'function' && typeof module.default === 'function') {
+    if (typeof fn !== "function" && typeof module.default === "function") {
       const obj = module.default();
-      if (obj && typeof obj[promptName] === 'function') fn = obj[promptName].bind(obj);
+      if (obj && typeof obj[promptName] === "function")
+        fn = obj[promptName].bind(obj);
     }
 
-    if (typeof fn !== 'function') {
+    if (typeof fn !== "function") {
       throw new Error(`Function '${promptName}' not found in ${filePath}`);
     }
 
     const config = fn(...params);
 
-    if (!config || typeof config !== 'object') {
+    if (!config || typeof config !== "object") {
       throw new Error(`'${promptName}' did not return a valid config object`);
     }
 
@@ -199,22 +258,44 @@ export default prompts(
 
   // #region Parsing
 
-  private parseFileContent(filePath: string, sourceCode: string, rootDir: string): ParsedFilePrompt[] {
-    const sourceFile = ts.createSourceFile(filePath, sourceCode, ts.ScriptTarget.ESNext, true);
+  private parseFileContent(
+    filePath: string,
+    sourceCode: string,
+    rootDir: string,
+  ): ParsedFilePrompt[] {
+    const sourceFile = ts.createSourceFile(
+      filePath,
+      sourceCode,
+      ts.ScriptTarget.ESNext,
+      true,
+    );
     const prompts: ParsedFilePrompt[] = [];
 
     const visitNode = (node: ts.Node) => {
       if (ts.isFunctionDeclaration(node) && node.name) {
-        const isExported = node.modifiers?.some(mod => mod.kind === ts.SyntaxKind.ExportKeyword);
+        const isExported = node.modifiers?.some(
+          mod => mod.kind === ts.SyntaxKind.ExportKeyword,
+        );
         if (isExported) {
-          const prompt = this.parseFunctionDeclaration(node, sourceFile, filePath, rootDir);
+          const prompt = this.parseFunctionDeclaration(
+            node,
+            sourceFile,
+            filePath,
+            rootDir,
+          );
           if (prompt) prompts.push(prompt);
         }
       } else if (ts.isExportAssignment(node)) {
         const helper = findPromptsHelperCall(node.expression);
         if (helper) {
           for (const prop of helper.object.properties) {
-            const parsed = this.parseHelperProperty(prop, sourceFile, filePath, rootDir, helper.moduleId);
+            const parsed = this.parseHelperProperty(
+              prop,
+              sourceFile,
+              filePath,
+              rootDir,
+              helper.moduleId,
+            );
             if (parsed) prompts.push(parsed);
           }
         }
@@ -242,10 +323,19 @@ export default prompts(
     const returnObject = findReturnObjectInFunctionLike(fn);
     if (!returnObject) return null;
 
-    const functionParameters = extractPropertiesFromParameters(fn.parameters, sourceFile).definitions;
-    const relativeFilePath = rootDir ? path.relative(rootDir, filePath) : filePath;
-    const extractedProps = extractPropertiesFromObjectLiteral(returnObject, undefined, sourceFile);
-    const treePath = relativeFilePath.split('/').filter(Boolean);
+    const functionParameters = extractPropertiesFromParameters(
+      fn.parameters,
+      sourceFile,
+    ).definitions;
+    const relativeFilePath = rootDir
+      ? path.relative(rootDir, filePath)
+      : filePath;
+    const extractedProps = extractPropertiesFromObjectLiteral(
+      returnObject,
+      undefined,
+      sourceFile,
+    );
+    const treePath = relativeFilePath.split("/").filter(Boolean);
 
     return {
       id: `${relativeFilePath}#${name}`,
@@ -262,19 +352,28 @@ export default prompts(
     node: ts.FunctionDeclaration,
     sourceFile: ts.SourceFile,
     filePath: string,
-    rootDir: string
+    rootDir: string,
   ): ParsedFilePrompt | null {
     if (!node.name) return null;
 
     const functionName = node.name.text;
-    const functionParameters = extractPropertiesFromParameters(node.parameters, sourceFile).definitions;
+    const functionParameters = extractPropertiesFromParameters(
+      node.parameters,
+      sourceFile,
+    ).definitions;
     const returnObject = this.findReturnObjectInFunction(node);
     if (!returnObject) return null;
 
-    const relativeFilePath = rootDir ? path.relative(rootDir, filePath) : filePath;
+    const relativeFilePath = rootDir
+      ? path.relative(rootDir, filePath)
+      : filePath;
     const promptId = `${relativeFilePath}#${functionName}`;
-    const extractedProps = extractPropertiesFromObjectLiteral(returnObject, undefined, sourceFile);
-    const treePath = relativeFilePath.split('/').filter(Boolean);
+    const extractedProps = extractPropertiesFromObjectLiteral(
+      returnObject,
+      undefined,
+      sourceFile,
+    );
+    const treePath = relativeFilePath.split("/").filter(Boolean);
 
     return {
       id: promptId,
@@ -293,17 +392,28 @@ export default prompts(
     sourceCode: string,
     filePath: string,
     functionName: string,
-    propertyName: string
+    propertyName: string,
   ): PropDefinition | null {
-    const sourceFile = ts.createSourceFile(filePath, sourceCode, ts.ScriptTarget.Latest, true);
+    const sourceFile = ts.createSourceFile(
+      filePath,
+      sourceCode,
+      ts.ScriptTarget.Latest,
+      true,
+    );
     const returnObj = this.findReturnObjectInSource(sourceFile, functionName);
     if (!returnObj) return null;
 
-    const extracted = extractPropertiesFromObjectLiteral(returnObj, undefined, sourceFile);
+    const extracted = extractPropertiesFromObjectLiteral(
+      returnObj,
+      undefined,
+      sourceFile,
+    );
     return extracted.definitions.find(d => d.name === propertyName) ?? null;
   }
 
-  private findReturnObjectInFunction(node: ts.FunctionDeclaration): ts.ObjectLiteralExpression | null {
+  private findReturnObjectInFunction(
+    node: ts.FunctionDeclaration,
+  ): ts.ObjectLiteralExpression | null {
     let returnObject: ts.ObjectLiteralExpression | null = null;
 
     const visitNode = (n: ts.Node) => {
@@ -311,7 +421,10 @@ export default prompts(
         if (ts.isObjectLiteralExpression(n.expression)) {
           returnObject = n.expression;
         }
-      } else if (ts.isArrowFunction(n) && ts.isObjectLiteralExpression(n.body)) {
+      } else if (
+        ts.isArrowFunction(n) &&
+        ts.isObjectLiteralExpression(n.body)
+      ) {
         returnObject = n.body;
       }
       if (!returnObject) ts.forEachChild(n, visitNode);
@@ -323,7 +436,7 @@ export default prompts(
 
   private findReturnObjectInSource(
     sourceFile: ts.SourceFile,
-    functionName: string
+    functionName: string,
   ): ts.ObjectLiteralExpression | null {
     let returnObj: ts.ObjectLiteralExpression | null = null;
 
@@ -365,7 +478,8 @@ function findPromptsHelperCall(
   expr: ts.Expression,
 ): { object: ts.ObjectLiteralExpression; moduleId?: string } | null {
   if (!ts.isCallExpression(expr)) return null;
-  if (!ts.isIdentifier(expr.expression) || expr.expression.text !== 'prompts') return null;
+  if (!ts.isIdentifier(expr.expression) || expr.expression.text !== "prompts")
+    return null;
   const factory = expr.arguments.find(
     (arg): arg is ts.ArrowFunction | ts.FunctionExpression =>
       ts.isArrowFunction(arg) || ts.isFunctionExpression(arg),
@@ -374,7 +488,8 @@ function findPromptsHelperCall(
   const object = findReturnObjectInFunctionLike(factory);
   if (!object) return null;
   const first = expr.arguments[0];
-  const moduleId = first && ts.isStringLiteralLike(first) ? first.text : undefined;
+  const moduleId =
+    first && ts.isStringLiteralLike(first) ? first.text : undefined;
   return { object, moduleId };
 }
 
@@ -382,7 +497,10 @@ function getPropertyName(prop: ts.ObjectLiteralElementLike): string | null {
   if (ts.isMethodDeclaration(prop) || ts.isPropertyAssignment(prop)) {
     const name = prop.name;
     if (ts.isIdentifier(name) || ts.isStringLiteral(name)) return name.text;
-    if (ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)) {
+    if (
+      ts.isComputedPropertyName(name) &&
+      ts.isStringLiteralLike(name.expression)
+    ) {
       return name.expression.text;
     }
   } else if (ts.isShorthandPropertyAssignment(prop)) {
@@ -391,9 +509,14 @@ function getPropertyName(prop: ts.ObjectLiteralElementLike): string | null {
   return null;
 }
 
-type FunctionLike = ts.MethodDeclaration | ts.FunctionExpression | ts.ArrowFunction;
+type FunctionLike =
+  | ts.MethodDeclaration
+  | ts.FunctionExpression
+  | ts.ArrowFunction;
 
-function getPropertyFunction(prop: ts.ObjectLiteralElementLike): FunctionLike | null {
+function getPropertyFunction(
+  prop: ts.ObjectLiteralElementLike,
+): FunctionLike | null {
   if (ts.isMethodDeclaration(prop)) return prop;
   if (ts.isPropertyAssignment(prop)) {
     const init = prop.initializer;
@@ -424,20 +547,25 @@ function resolveBindingsAndAugment(
   sourceCode: string,
   value: ModelPropValue,
 ): { sourceCode: string; value: PropValue } {
-  const sourceFile = ts.createSourceFile('helper-adjust.ts', sourceCode, ts.ScriptTarget.Latest, true);
+  const sourceFile = ts.createSourceFile(
+    "helper-adjust.ts",
+    sourceCode,
+    ts.ScriptTarget.Latest,
+    true,
+  );
 
   // Per-destructure list of names to add (deduped, position-sorted later).
   const destructureAdditions = new Map<ts.ObjectBindingPattern, Set<string>>();
 
   const resolveCandidate = (
-    fc: Extract<ModelPropValue, { kind: 'functionCall' }>,
+    _fc: Extract<ModelPropValue, { kind: "functionCall" }>,
     candidates: CalleeBinding[],
   ): { binding?: CalleeBinding; viaDestructure?: ts.ObjectBindingPattern } => {
     for (const c of candidates) {
-      if (c.kind === 'parameter') {
+      if (c.kind === "parameter") {
         const dest = findEnclosingCallDestructure(sourceFile, c.enclosingCall);
         if (dest) return { viaDestructure: dest };
-      } else if (c.kind === 'import') {
+      } else if (c.kind === "import") {
         return { binding: c };
       }
     }
@@ -445,21 +573,27 @@ function resolveBindingsAndAugment(
   };
 
   const adjusted = mapFunctionCalls(value, fc => {
-    if (!fc.binding) return fc as Extract<PropValue, { kind: 'functionCall' }>;
-    const candidates: CalleeBinding[] = Array.isArray(fc.binding) ? fc.binding : [fc.binding];
+    if (!fc.binding) return fc as Extract<PropValue, { kind: "functionCall" }>;
+    const candidates: CalleeBinding[] = Array.isArray(fc.binding)
+      ? fc.binding
+      : [fc.binding];
     const result = resolveCandidate(fc, candidates);
     if (result.viaDestructure) {
-      const set = destructureAdditions.get(result.viaDestructure) ?? new Set<string>();
+      const set =
+        destructureAdditions.get(result.viaDestructure) ?? new Set<string>();
       set.add(fc.callee);
       destructureAdditions.set(result.viaDestructure, set);
       const { binding: _drop, ...rest } = fc;
-      return rest as Extract<PropValue, { kind: 'functionCall' }>;
+      return rest as Extract<PropValue, { kind: "functionCall" }>;
     }
     if (result.binding) {
-      return { ...fc, binding: result.binding } as Extract<PropValue, { kind: 'functionCall' }>;
+      return { ...fc, binding: result.binding } as Extract<
+        PropValue,
+        { kind: "functionCall" }
+      >;
     }
     const { binding: _none, ...rest } = fc;
-    return rest as Extract<PropValue, { kind: 'functionCall' }>;
+    return rest as Extract<PropValue, { kind: "functionCall" }>;
   });
 
   // Apply destructure augmentations from latest position to earliest so earlier
@@ -479,10 +613,14 @@ function resolveBindingsAndAugment(
   let nextSource = sourceCode;
   for (const { dest, toAdd } of augmentations) {
     let closeOffset = dest.getEnd() - 1; // position of `}`
-    while (nextSource[closeOffset - 1] === ' ') closeOffset--;
+    while (nextSource[closeOffset - 1] === " ") closeOffset--;
     const isEmpty = dest.elements.length === 0;
-    const insertion = (isEmpty ? ' ' : ', ') + toAdd.join(', ') + (isEmpty ? ' ' : '');
-    nextSource = nextSource.slice(0, closeOffset) + insertion + nextSource.slice(closeOffset);
+    const insertion =
+      (isEmpty ? " " : ", ") + toAdd.join(", ") + (isEmpty ? " " : "");
+    nextSource =
+      nextSource.slice(0, closeOffset) +
+      insertion +
+      nextSource.slice(closeOffset);
   }
 
   return { sourceCode: nextSource, value: adjusted };
@@ -503,7 +641,11 @@ function findEnclosingCallDestructure(
   if (!enclosingCall) return null;
 
   const importOk = enclosingCall.import
-    ? sourceFileHasNamedImport(sourceFile, enclosingCall.import.name, enclosingCall.import.from)
+    ? sourceFileHasNamedImport(
+        sourceFile,
+        enclosingCall.import.name,
+        enclosingCall.import.from,
+      )
     : true;
   if (!importOk) return null;
 
@@ -535,13 +677,18 @@ function findEnclosingCallDestructure(
   return found;
 }
 
-function sourceFileHasNamedImport(sourceFile: ts.SourceFile, name: string, from: string): boolean {
+function sourceFileHasNamedImport(
+  sourceFile: ts.SourceFile,
+  name: string,
+  from: string,
+): boolean {
   for (const stmt of sourceFile.statements) {
     if (!ts.isImportDeclaration(stmt)) continue;
     if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
     if (stmt.moduleSpecifier.text !== from) continue;
     const clause = stmt.importClause;
-    if (!clause?.namedBindings || !ts.isNamedImports(clause.namedBindings)) continue;
+    if (!clause?.namedBindings || !ts.isNamedImports(clause.namedBindings))
+      continue;
     for (const el of clause.namedBindings.elements) {
       if (el.name.text === name) return true;
     }
@@ -552,21 +699,27 @@ function sourceFileHasNamedImport(sourceFile: ts.SourceFile, name: string, from:
 /** Walk a ModelPropValue tree, transforming each functionCall via `fn`. */
 function mapFunctionCalls(
   value: ModelPropValue,
-  fn: (fc: Extract<ModelPropValue, { kind: 'functionCall' }>) => Extract<PropValue, { kind: 'functionCall' }>,
+  fn: (
+    fc: Extract<ModelPropValue, { kind: "functionCall" }>,
+  ) => Extract<PropValue, { kind: "functionCall" }>,
 ): PropValue {
   switch (value.kind) {
-    case 'functionCall': {
+    case "functionCall": {
       const mappedArgs = value.args.map(a => mapFunctionCalls(a, fn));
       return fn({ ...value, args: mappedArgs as ModelPropValue[] });
     }
-    case 'object': {
+    case "object": {
       const properties: Record<string, PropValue> = {};
-      for (const [k, v] of Object.entries(value.properties)) properties[k] = mapFunctionCalls(v, fn);
+      for (const [k, v] of Object.entries(value.properties))
+        properties[k] = mapFunctionCalls(v, fn);
       return { ...value, properties };
     }
-    case 'array':
-    case 'tuple':
-      return { ...value, elements: value.elements.map(el => mapFunctionCalls(el, fn)) } as PropValue;
+    case "array":
+    case "tuple":
+      return {
+        ...value,
+        elements: value.elements.map(el => mapFunctionCalls(el, fn)),
+      } as PropValue;
     default:
       return value as PropValue;
   }
@@ -577,14 +730,20 @@ function findReturnObjectInFunctionLike(
 ): ts.ObjectLiteralExpression | null {
   // Arrow functions with expression bodies: `() => ({ ... })` or `() => obj`.
   if (ts.isArrowFunction(fn) && !ts.isBlock(fn.body)) {
-    const body = ts.isParenthesizedExpression(fn.body) ? fn.body.expression : fn.body;
+    const body = ts.isParenthesizedExpression(fn.body)
+      ? fn.body.expression
+      : fn.body;
     return ts.isObjectLiteralExpression(body) ? body : null;
   }
   // Block bodies: find the first `return { ... }`.
   let result: ts.ObjectLiteralExpression | null = null;
   const visit = (n: ts.Node) => {
     if (result) return;
-    if (ts.isReturnStatement(n) && n.expression && ts.isObjectLiteralExpression(n.expression)) {
+    if (
+      ts.isReturnStatement(n) &&
+      n.expression &&
+      ts.isObjectLiteralExpression(n.expression)
+    ) {
       result = n.expression;
       return;
     }
