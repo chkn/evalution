@@ -272,25 +272,9 @@ export class GeminiInteractionsSDK implements SDKAdapter {
     return FALLBACK_GENERATION_CONFIG_PARAMS;
   }
 
-  async executeConfig(
-    config: BaseCreateInteractionParams,
-    stream: boolean,
-  ): Promise<any> {
+  async executeConfig(config: BaseCreateInteractionParams): Promise<void> {
     const client = new GoogleGenAI({});
-    const result = await client.interactions.create({
-      ...config,
-      stream,
-      store: false,
-    });
-
-    if ("id" in result) {
-      const outputs = result.outputs ?? [];
-      const textOutput = outputs.find(o => o.type === "text");
-      const text = textOutput?.text ?? "";
-      return { text, usage: result.usage };
-    } else {
-      return streamTextFromSSE(result);
-    }
+    await client.interactions.create({ ...config, store: false });
   }
 
   normalizePrompt(prompt: ParsedPrompt): NormalizedPrompt {
@@ -497,19 +481,4 @@ function extractMessages(value: PropValue | undefined): NormalizedMessage[] {
     }
   }
   return results;
-}
-
-/**
- * Yields text chunks from the Interactions API SSE stream.
- */
-async function* streamTextFromSSE(
-  stream: AsyncIterable<any>,
-): AsyncIterable<string> {
-  for await (const chunk of stream) {
-    if (chunk.event_type === "content.delta") {
-      if (chunk.delta?.type === "text" && chunk.delta.text) {
-        yield chunk.delta.text;
-      }
-    }
-  }
 }

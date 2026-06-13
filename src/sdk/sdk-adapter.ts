@@ -42,13 +42,12 @@ export interface SDKAdapter {
   getModelParameters(rootDir: string): PropDefinition[];
 
   /**
-   * Executes a prompt config object and returns either a result object (when
-   * `stream` is `false`) or an async text iterable (when `stream` is `true`).
+   * Executes a prompt config object.
    *
    * @param config - The config object returned by the prompt function.
    * @param stream - When `true`, returns a streaming text iterator.
    */
-  executeConfig(config: any, stream: boolean): Promise<any>;
+  executeConfig(config: any): Promise<void>;
 
   /**
    * Convert a low-level {@link ParsedPrompt} produced by a

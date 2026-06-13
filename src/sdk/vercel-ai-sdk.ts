@@ -204,18 +204,8 @@ export class VercelAISDK implements SDKAdapter {
     return extractPropertiesFromDeclaration(decl, sourceFile).definitions;
   }
 
-  async executeConfig(config: any, stream: boolean): Promise<any> {
-    if (stream) {
-      const result = await streamText(config);
-      return result.textStream;
-    } else {
-      const result = await generateText(config);
-      return {
-        text: result.text,
-        usage: result.usage,
-        finishReason: result.finishReason,
-      };
-    }
+  async executeConfig(config: any): Promise<void> {
+    await generateText(config);
   }
 
   normalizePrompt(prompt: ParsedPrompt): NormalizedPrompt {

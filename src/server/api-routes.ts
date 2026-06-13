@@ -248,7 +248,7 @@ export function setupRoutes({
         // when it settles. Child spans emitted via the active context
         // will be parented correctly.
         provider
-          .execute(decodedId, functionParams, false)
+          .execute(decodedId, functionParams)
           .then(
             () => {
               span.setStatus({ code: SpanStatusCode.OK });

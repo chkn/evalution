@@ -60,14 +60,12 @@ export interface PromptProvider<
   ): Promise<TPrompt>;
 
   /**
-   * Executes a prompt and returns either a result object (when `stream` is
-   * `false`) or an async text iterable (when `stream` is `true`).
+   * Executes a prompt.
    *
    * @param promptId - ID of the prompt to run.
    * @param params - Positional arguments forwarded to the prompt function.
-   * @param stream - When `true`, the return value is an async text iterator.
    */
-  execute(promptId: string, params: any[], stream: boolean): Promise<any>;
+  execute(promptId: string, params: any[]): Promise<void>;
 
   /**
    * Returns the model catalog (known providers and popular models) for this

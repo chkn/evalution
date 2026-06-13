@@ -204,14 +204,10 @@ export class FilePromptProvider
     return this.sdkAdapter.getModelParameters(this.rootDir);
   }
 
-  async execute(
-    promptId: string,
-    params: any[],
-    stream: boolean,
-  ): Promise<any> {
+  async execute(promptId: string, params: any[]): Promise<void> {
     const [filePath, promptName] = this.parsePromptId(promptId);
     const config = await this.fileType.loadConfig(filePath, promptName, params);
-    return this.sdkAdapter.executeConfig(config, stream);
+    await this.sdkAdapter.executeConfig(config);
   }
 
   async renamePrompt(
