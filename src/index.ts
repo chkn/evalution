@@ -2,8 +2,6 @@
 // Copyright (c) 2026 Alexander Corrado
 
 /**
- * @packageDocumentation
- *
  * **evalution** — TypeScript AI Prompt Playground.
  *
  * This module exports the public API used to integrate evalution into your
@@ -16,6 +14,7 @@
  * const provider = new FilePromptProvider({ rootDir: './prompts' });
  * const prompts = await provider.getAllPrompts();
  * ```
+ * @module evalution
  */
 export type { EvalutionConfig } from "./config.ts";
 export {
@@ -90,9 +89,15 @@ export type {
 export { MemoryTraceProvider } from "./trace/memory-trace-provider.ts";
 export {
   createTracerForPrompt,
+  getPromptSpanAttributes,
   PROMPT_ID_ATTRIBUTE,
+  PROMPT_INPUTS_ATTRIBUTE,
   PROMPT_NAME_ATTRIBUTE,
   PROMPT_PROVIDER_ID_ATTRIBUTE,
+  type PromptSpanInfo,
+  type PromptsHelperOptions,
+  type PromptsFactory,
+  type PromptsHelper,
   SPAN_KIND_ATTRIBUTE,
 } from "./trace/prompt-tracer.ts";
 export type { TraceProvider } from "./trace/trace-provider.ts";

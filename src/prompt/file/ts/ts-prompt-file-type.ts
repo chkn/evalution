@@ -60,7 +60,7 @@ export class TSPromptFileType implements PromptFileType {
     return `import { prompts } from ${JSON.stringify(importPath)};
 
 export default prompts(
-  ${JSON.stringify(promptsId)},
+  { id: ${JSON.stringify(promptsId)} },
   () => ({
     ${key}: () => ({
     })
@@ -469,10 +469,9 @@ export default prompts(
 // #region Helper-shape parsing
 
 /**
- * If `expr` is a call like `prompts(id, factory)` (or the legacy `prompts(factory)`)
- * whose factory immediately returns an object literal, return that object literal
- * together with the module ID — the first string-literal argument, when present.
- * Otherwise null.
+ * If `expr` is a call like `prompts({ id }, factory)` whose factory immediately
+ * returns an object literal, return that object literal together with the module
+ * ID extracted from the options object. Otherwise null.
  */
 function findPromptsHelperCall(
   expr: ts.Expression,
@@ -489,8 +488,27 @@ function findPromptsHelperCall(
   if (!object) return null;
   const first = expr.arguments[0];
   const moduleId =
-    first && ts.isStringLiteralLike(first) ? first.text : undefined;
+    first && ts.isObjectLiteralExpression(first)
+      ? extractStringProperty(first, "id")
+      : undefined;
   return { object, moduleId };
+}
+
+function extractStringProperty(
+  obj: ts.ObjectLiteralExpression,
+  key: string,
+): string | undefined {
+  for (const prop of obj.properties) {
+    if (
+      ts.isPropertyAssignment(prop) &&
+      ts.isIdentifier(prop.name) &&
+      prop.name.text === key &&
+      ts.isStringLiteralLike(prop.initializer)
+    ) {
+      return prop.initializer.text;
+    }
+  }
+  return undefined;
 }
 
 function getPropertyName(prop: ts.ObjectLiteralElementLike): string | null {

@@ -110,7 +110,7 @@ describe("TSPromptFileType — prompts() helper", () => {
       const filePath = "/virtual/with-id.prompt.ts";
       const source = `
 import { prompts } from '@evalution/vercel-ai-sdk';
-export default prompts('orders', ({ openai }) => ({
+export default prompts({ id: 'orders' }, ({ openai }) => ({
   summarize() { return { model: openai('gpt-4o'), system: 'x', messages: [] }; },
   classify() { return { model: openai('gpt-4o'), system: 'y', messages: [] }; },
 }));
@@ -133,7 +133,7 @@ export default prompts('orders', ({ openai }) => ({
       const source = `
 import { prompts } from "@evalution/vercel-ai-sdk";
 export default prompts(
-  "prompt2",
+  { id: "prompt2" },
   () => ({
     ["newPrompt"]: () => ({
     })
@@ -149,12 +149,13 @@ export default prompts(
       expect(parsed[0].globalId).toBe("prompt2#newPrompt");
     });
 
-    it("omits globalId when the helper has no module id argument", async () => {
-      const filePath = "/virtual/no-id.prompt.ts";
+    it("derives globalId when the id is passed as an object ({ id: '...' })", async () => {
+      const filePath = "/virtual/object-id.prompt.ts";
       const source = `
 import { prompts } from '@evalution/vercel-ai-sdk';
-export default prompts(({ openai }) => ({
+export default prompts({ id: 'orders' }, ({ openai }) => ({
   summarize() { return { model: openai('gpt-4o'), system: 'x', messages: [] }; },
+  classify() { return { model: openai('gpt-4o'), system: 'y', messages: [] }; },
 }));
 `;
       const ft = new TSPromptFileType(
@@ -162,8 +163,34 @@ export default prompts(({ openai }) => ({
       );
       const parsed = await ft.parsePrompts([filePath], "");
 
+      expect(parsed).toHaveLength(2);
+      expect(parsed.find(p => p.name === "summarize")!.globalId).toBe(
+        "orders#summarize",
+      );
+      expect(parsed.find(p => p.name === "classify")!.globalId).toBe(
+        "orders#classify",
+      );
+    });
+
+    it('parses computed string-literal keys with object id form (e.g. ["myPrompt"])', async () => {
+      const filePath = "/virtual/computed-key-obj.prompt.ts";
+      const source = `
+import { prompts } from "@evalution/vercel-ai-sdk";
+export default prompts(
+  { id: "prompt2" },
+  () => ({
+    ["newPrompt"]: () => ({
+    })
+}))
+`;
+      const ft = new TSPromptFileType(
+        new MemoryFileProvider({ [filePath]: source }),
+      );
+      const parsed = await ft.parsePrompts([filePath], "");
+
       expect(parsed).toHaveLength(1);
-      expect(parsed[0].globalId).toBeUndefined();
+      expect(parsed[0].name).toBe("newPrompt");
+      expect(parsed[0].globalId).toBe("prompt2#newPrompt");
     });
   });
 
@@ -171,7 +198,7 @@ export default prompts(({ openai }) => ({
     const sample = `
 import { prompts } from '@evalution/vercel-ai-sdk';
 
-export default prompts('helper', ({ openai }) => ({
+export default prompts({ id: 'helper' }, ({ openai }) => ({
   myPrompt() {
     return {
       model: openai('gpt-4o'),
@@ -246,7 +273,7 @@ export default prompts('helper', ({ openai }) => ({
       const spaced = `
 import { prompts } from '@evalution/vercel-ai-sdk';
 
-export default prompts('helper', ({ openai }) => ({
+export default prompts({ id: 'helper' }, ({ openai }) => ({
   myPrompt() {
     return {
       model: openai('gpt-4o'),
@@ -344,8 +371,8 @@ export default prompts('helper', ({ openai }) => ({
   describe("loadConfig", () => {
     // Inline the prompts() helper to avoid a real module resolution from a data URL.
     const inlined = `
-const prompts = (id, factory) => (providers = {}) => factory(providers);
-export default prompts('load', () => ({
+const prompts = ({ id }, factory) => (providers = {}) => factory(providers);
+export default prompts({ id: 'load' }, () => ({
   myPrompt(name) {
     return { model: 'openai/gpt-4o', system: 'hi ' + name, messages: [] };
   },

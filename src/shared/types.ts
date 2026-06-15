@@ -254,7 +254,7 @@ export interface LLMSpanDetails {
   /** Dollar cost of the call, if known. */
   cost?: number;
   /** Model parameters (temperature, max_tokens, …). */
-  parameters?: Record<string, unknown>;
+  modelParameters?: Record<string, unknown>;
 }
 
 /**

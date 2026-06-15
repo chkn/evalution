@@ -373,12 +373,12 @@ function SpanDetails({ span }: { span: Span }) {
     if (llm.cost !== undefined) {
       rows.push({ label: "Cost", value: `$${llm.cost.toFixed(5)}` });
     }
-    if (llm.parameters) {
+    if (llm.modelParameters) {
       rows.push({
-        label: "Parameters",
+        label: "Model Parameters",
         value: (
           <pre className="span-details-json">
-            {JSON.stringify(llm.parameters, null, 2)}
+            {JSON.stringify(llm.modelParameters, null, 2)}
           </pre>
         ),
       });

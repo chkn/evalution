@@ -4,6 +4,9 @@
   // we deliberately do NOT include src/server or src/cli, which aren't part of
   // the published surface and carry deps (ws, @lydell/node-pty) that needn't be
   // present to generate the API reference.
+  "compilerOptions": {
+    "rootDir": "."
+  },
   "extends": "./tsconfig.json",
-  "include": ["src/index.ts"]
+  "include": ["src/index.ts", "packages/**/index.ts"]
 }

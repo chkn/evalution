@@ -1,7 +1,7 @@
 {
   "name": "@evalution/vercel-ai-sdk",
   "version": "0.1.0",
-  "description": "Type helpers for writing Vercel AI SDK prompts with evalution",
+  "description": "Helpers for integrating Vercel AI SDK prompts with Evalution",
   "type": "module",
   "exports": {
     ".": {

@@ -1,11 +1,22 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Alexander Corrado
 
+/**
+ * Helpers for integrating Vercel AI SDK prompts with Evalution.
+ * @module @evalution/vercel-ai-sdk
+ */
 import { createRequire } from "node:module";
 import type { generateText, streamText } from "ai";
-// Bundled in by tsup; pulls in `createTracerForPrompt` without taking a
+
+// Bundled in by tsup; pulls just these symbols without taking a
 // runtime dependency on the rest of the `evalution` package.
-import { createTracerForPrompt } from "../../../src/trace/prompt-tracer.js";
+import {
+  createTracerForPrompt,
+  getPromptSpanAttributes,
+  type PromptsFactory,
+  type PromptsHelper,
+  type PromptsHelperOptions,
+} from "../../../src/trace/prompt-tracer.js";
 
 const require = createRequire(import.meta.url);
 
@@ -43,7 +54,7 @@ import type { XaiProvider } from "@ai-sdk/xai";
  * Each field matches the name of the singleton exported by the corresponding
  * `@ai-sdk/*` package (e.g. `openai` from `@ai-sdk/openai`).
  *
- * Only fields that are read are imported — destructure only the ones you need.
+ * Only fields that are read are imported, so destructure only the ones you need.
  */
 export interface Providers {
   /** `openai` from `@ai-sdk/openai` */
@@ -212,74 +223,91 @@ class LazilyImportedProviders implements Providers {
  * attributed to a named prompt. Used internally by {@link prompts} and exposed
  * for callers who configure `experimental_telemetry` themselves.
  */
-export { createTracerForPrompt };
+export { createTracerForPrompt, getPromptSpanAttributes };
 
 type GenerateTextConfig = Parameters<typeof generateText>[0];
 type StreamTextConfig = Parameters<typeof streamText>[0];
 type Prompt = GenerateTextConfig | StreamTextConfig; // | Agent<any, any, any>; // (agent not supported yet)
 
 /**
- * Type helper for defining evalution prompt modules using the Vercel AI SDK.
+ * Helper for defining Evalution prompt modules using the Vercel AI SDK.
  *
- * The first argument is a module-level ID that, combined with each prompt's
- * name, forms a globally-unique prompt ID (`${moduleId}#${name}`). This ID is
+ * The first argument is a {@link PromptsHelperOptions} containing an `id` that,
+ * combined with each prompt's name, forms a globally-unique prompt ID. This ID is
  * attached to every span the prompt produces so runtime traces can be resolved
- * back to the prompt. Choose a stable, opaque value — it should survive file
- * renames and moves.
+ * back to the prompt. Choose a stable, unique value for this `id` and do not change it.
+ *
+ * The second argument is a factory function that receives a {@link Providers} object
+ * and returns a record of prompt-building functions. Each key in the returned record
+ * is the prompt name, and each value is a function that returns a Vercel AI SDK config object
+ * (`generateText` / `streamText` parameters) with `experimental_telemetry`
+ * automatically populated. The `Providers` object lazily imports provider singletons
+ * (e.g. `openai` from `@ai-sdk/openai`) on first access, so only the providers you
+ * destructure need to be installed. You can override individual providers by passing
+ * a `Partial<{@link Providers}>` to the function returned by `prompts`.
  *
  * @example
  * ```ts
- * import { prompts } from '@evalution/vercel-ai-sdk';
+ * import { prompts } from "@evalution/vercel-ai-sdk";
  *
- * export default prompts('greeting', ({ openai }) => ({
- *   simplePrompt() {
- *     return {
- *       model: openai('gpt-4o'),
- *       system: 'You are a helpful assistant',
- *       messages: [{ role: 'user', content: 'Hello!' }],
- *     };
- *   },
+ * export default prompts(
+ *   { id: "greeting" }, // <- global, unique ID for this group of prompts
+ *
+ *   // destructure provider functions you need here instead of importing them
+ *   ({ openai }) => ({
+ *
+ *     // "simple" is the prompt name; result is passed to `generateText`
+ *     simple: () => ({
+ *        model: openai('gpt-4o'),
+ *        system: 'You are a helpful assistant',
+ *        messages: [{ role: 'user', content: 'Hello!' }],
+ *     }),
  * }));
  * ```
  */
-export function prompts<T extends Record<string, (...args: any[]) => Prompt>>(
-  id: string,
-  factory: (providers: Providers) => T,
-): (providers?: Partial<Providers>) => T {
-  return provided => {
+export const prompts = (<
+  Prompts extends Record<string, (...args: any[]) => Prompt>,
+>(
+  { id }: PromptsHelperOptions,
+  factory: (providers: Providers) => Prompts,
+) =>
+  (provided?: Partial<Providers>): Prompts => {
     const definitions = factory(new LazilyImportedProviders(provided));
 
-    const wrapped = {} as T;
-    for (const key of Object.keys(definitions) as (keyof T)[]) {
-      const define = definitions[key];
-      wrapped[key] = ((...args: Parameters<T[keyof T]>) => {
+    const wrapped = {} as any;
+    for (const name of Object.keys(definitions)) {
+      const define = definitions[name];
+      wrapped[name] = (...args: any[]) => {
         const config = define(...args);
 
         // Agent instances aren't plain config objects — leave them untouched.
         if (!isPlainConfig(config)) return config;
 
-        const name = String(key);
         const existing = config.experimental_telemetry;
-
         return {
           ...config,
           experimental_telemetry: {
             isEnabled: true,
+
+            // FIXME: Have options to disable these
             recordInputs: true,
             recordOutputs: true,
-            ...existing,
 
-            tracer: createTracerForPrompt(
-              { name, id: `${id}#${name}` },
-              existing?.tracer,
+            ...existing,
+            metadata: getPromptSpanAttributes(
+              {
+                name,
+                id: `${id}#${name}`,
+                functionParameters: args,
+              },
+              existing?.metadata,
             ),
           },
         };
-      }) as T[keyof T];
+      };
     }
     return wrapped;
-  };
-}
+  }) satisfies PromptsHelper;
 
 /** True for plain config objects (i.e. not an `Agent` instance or nullish). */
 function isPlainConfig(value: unknown): value is Record<string, unknown> {

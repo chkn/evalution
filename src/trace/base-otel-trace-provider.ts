@@ -145,7 +145,7 @@ function readLLM(
   const paramEntries = PARAM_ATTRIBUTES.map(
     key => [key.replace("gen_ai.request.", ""), attributes[key]] as const,
   ).filter(([, v]) => v !== undefined);
-  const parameters =
+  const modelParameters =
     paramEntries.length > 0 ? Object.fromEntries(paramEntries) : undefined;
 
   const totalTokens =
@@ -160,7 +160,7 @@ function readLLM(
     !completionTokens &&
     !messages &&
     !output &&
-    !parameters
+    !modelParameters
   ) {
     return undefined;
   }
@@ -173,7 +173,7 @@ function readLLM(
     ...(promptTokens !== undefined && { promptTokens }),
     ...(completionTokens !== undefined && { completionTokens }),
     ...(totalTokens !== undefined && { totalTokens }),
-    ...(parameters && { parameters }),
+    ...(modelParameters && { modelParameters }),
   };
 }
 

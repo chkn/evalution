@@ -18,6 +18,14 @@ import type {
  *
  * Pass an instance of this to {@link FilePromptProvider} via the
  * `sdk` option.
+ *
+ * Each `SDKAdapter` implementation should be paired with a companion package
+ * (named by {@link SDKAdapter.promptsHelperImport}) that exports a `prompts`
+ * function satisfying the {@link PromptsHelper} type. That function is the user-facing entry
+ * point for defining prompts that work with Evalution. It accepts a {@link PromptsHelperOptions}
+ * and a factory that can optionally receive SDK-specific parameters. The factory should return a
+ * record of prompt functions. Prompt functions should return a configuration that enables OpenTelemetry
+ * reporting, if possible, with the attributes returned by {@link getPromptSpanAttributes}.
  */
 export interface SDKAdapter {
   /**
@@ -45,7 +53,6 @@ export interface SDKAdapter {
    * Executes a prompt config object.
    *
    * @param config - The config object returned by the prompt function.
-   * @param stream - When `true`, returns a streaming text iterator.
    */
   executeConfig(config: any): Promise<void>;
 
