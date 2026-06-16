@@ -4,7 +4,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { LocalFileProvider } from "../../../file-provider.ts";
+import { LocalFileProvider } from "../../../file-provider-local.ts";
 import { isEditable } from "../../../shared/helpers.ts";
 import type { PropValue } from "../../../shared/types.ts";
 import { TSPromptFileType } from "./ts-prompt-file-type.ts";

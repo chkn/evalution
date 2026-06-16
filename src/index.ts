@@ -22,9 +22,9 @@ export {
   type FileWatchCallback,
   type FileWatchOptions,
   type GlobOptions,
-  LocalFileProvider,
-  MemoryFileProvider,
 } from "./file-provider.ts";
+export { LocalFileProvider } from "./file-provider-local.ts";
+export { MemoryFileProvider } from "./file-provider-memory.ts";
 export {
   FilePromptProvider,
   type FilePromptProviderOptions,
@@ -40,15 +40,6 @@ export type { PromptProvider } from "./prompt/prompt-provider.ts";
 export { GeminiInteractionsSDK } from "./sdk/gemini-interactions-sdk.ts";
 export type { SDKAdapter } from "./sdk/sdk-adapter.ts";
 export { VercelAISDK } from "./sdk/vercel-ai-sdk.ts";
-export type {
-  SetupCreateConfigStep,
-  SetupInstallPackageStep,
-  SetupRunCommandStep,
-  SetupStep,
-  SetupStepBase,
-  SetupTask,
-} from "./shared/setup-task.ts";
-export { setupStepCommand } from "./shared/setup-task.ts";
 export type {
   AddPromptContext,
   AddPromptField,
@@ -95,9 +86,9 @@ export {
   PROMPT_NAME_ATTRIBUTE,
   PROMPT_PROVIDER_ID_ATTRIBUTE,
   type PromptSpanInfo,
-  type PromptsHelperOptions,
   type PromptsFactory,
   type PromptsHelper,
+  type PromptsHelperOptions,
   SPAN_KIND_ATTRIBUTE,
 } from "./trace/prompt-tracer.ts";
 export type { TraceProvider } from "./trace/trace-provider.ts";

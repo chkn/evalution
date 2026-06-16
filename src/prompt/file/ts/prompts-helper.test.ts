@@ -5,10 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PropDefinition, PropValue } from "ts-proppy";
 import { describe, expect, it } from "vitest";
-import {
-  LocalFileProvider,
-  MemoryFileProvider,
-} from "../../../file-provider.ts";
+import { LocalFileProvider } from "../../../file-provider-local.ts";
+import { MemoryFileProvider } from "../../../file-provider-memory.ts";
 import { isEditable } from "../../../shared/helpers.ts";
 import { TSPromptFileType } from "./ts-prompt-file-type.ts";
 

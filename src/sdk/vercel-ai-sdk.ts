@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import fs from "node:fs";
-import { generateText, streamText } from "ai";
+import { generateText } from "ai";
 import type { PropDefinition, PropValue } from "ts-proppy";
 import {
   extractPropertiesFromDeclaration,
@@ -31,6 +31,80 @@ const MODEL_KEY = "model";
 const SYSTEM_KEY = "system";
 const MESSAGES_KEY = "messages";
 const RESERVED_KEYS = new Set([MODEL_KEY, SYSTEM_KEY, MESSAGES_KEY]);
+
+// Fallback parameter definitions for the Vercel AI SDK's `CallSettings` (from
+// the `ai` package's dist/index.d.ts). Used when the package's .d.ts cannot be
+// found or read at runtime — e.g. in environments without filesystem access
+// such as a browser/service-worker bundle.
+const FALLBACK_CALL_SETTINGS_PARAMS: PropDefinition[] = [
+  {
+    name: "maxOutputTokens",
+    description: "Maximum number of tokens to generate.",
+    type: { kind: "primitive", syntax: "number" },
+    optional: true,
+  },
+  {
+    name: "temperature",
+    description:
+      "Temperature setting. The value is passed through to the provider. " +
+      "The range depends on the provider and model.",
+    type: { kind: "primitive", syntax: "number" },
+    optional: true,
+  },
+  {
+    name: "topP",
+    description:
+      "Nucleus sampling. The value is passed through to the provider. " +
+      "The range depends on the provider and model.",
+    type: { kind: "primitive", syntax: "number" },
+    optional: true,
+  },
+  {
+    name: "topK",
+    description:
+      "Only sample from the top K options for each subsequent token.",
+    type: { kind: "primitive", syntax: "number" },
+    optional: true,
+  },
+  {
+    name: "presencePenalty",
+    description:
+      "Presence penalty setting. It affects the likelihood of the model to " +
+      "repeat information that is already in the prompt.",
+    type: { kind: "primitive", syntax: "number" },
+    optional: true,
+  },
+  {
+    name: "frequencyPenalty",
+    description:
+      "Frequency penalty setting. It affects the likelihood of the model to " +
+      "repeatedly use the same words or phrases.",
+    type: { kind: "primitive", syntax: "number" },
+    optional: true,
+  },
+  {
+    name: "stopSequences",
+    description: "Stop sequences. If set, the model will stop generating text.",
+    type: {
+      kind: "array",
+      syntax: "string[]",
+      elementType: { kind: "primitive", syntax: "string" },
+    },
+    optional: true,
+  },
+  {
+    name: "seed",
+    description: "The seed (integer) to use for random sampling.",
+    type: { kind: "primitive", syntax: "number" },
+    optional: true,
+  },
+  {
+    name: "maxRetries",
+    description: "Maximum number of retries. Set to 0 to disable retries.",
+    type: { kind: "primitive", syntax: "number" },
+    optional: true,
+  },
+];
 
 /** The `prompts()` factory from `@evalution/vercel-ai-sdk`. */
 const PROMPTS_HELPER_CALL = {
@@ -104,7 +178,10 @@ export default {
 export class VercelAISDK implements SDKAdapter {
   readonly promptsHelperImport = PROMPTS_HELPER_CALL.import.from;
 
-  /** Onboarding task: install the SDK package, then drop a starter config. */
+  /**
+   * Onboarding task: install the SDK package, then drop a starter config.
+   * @internal
+   */
   static readonly setupTask: SetupTask = {
     id: "vercel-ai-sdk",
     label: "AI SDK",
@@ -188,20 +265,27 @@ export class VercelAISDK implements SDKAdapter {
   }
 
   getModelParameters(rootDir: string): PropDefinition[] {
-    const dtsPath = findPackageDts("ai", "dist/index.d.ts", rootDir);
-    if (!dtsPath) return [];
-
-    const sourceText = fs.readFileSync(dtsPath, "utf-8");
-    const sourceFile = ts.createSourceFile(
-      dtsPath,
-      sourceText,
-      ts.ScriptTarget.Latest,
-      true,
-    );
-    const decl = findTypeDeclaration(sourceFile, "CallSettings");
-    if (!decl) return [];
-
-    return extractPropertiesFromDeclaration(decl, sourceFile).definitions;
+    // Wrap the whole lookup: in a browser/service-worker bundle there is no
+    // filesystem (and `findPackageDts` itself touches `process`/`node:fs`), so
+    // any failure falls back to the hardcoded defaults below.
+    try {
+      const dtsPath = findPackageDts("ai", "dist/index.d.ts", rootDir);
+      if (dtsPath) {
+        const sourceText = fs.readFileSync(dtsPath, "utf-8");
+        const sourceFile = ts.createSourceFile(
+          dtsPath,
+          sourceText,
+          ts.ScriptTarget.Latest,
+          true,
+        );
+        const decl = findTypeDeclaration(sourceFile, "CallSettings");
+        if (decl)
+          return extractPropertiesFromDeclaration(decl, sourceFile).definitions;
+      }
+    } catch {
+      // fall through to hardcoded defaults
+    }
+    return FALLBACK_CALL_SETTINGS_PARAMS;
   }
 
   async executeConfig(config: any): Promise<void> {

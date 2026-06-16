@@ -2,7 +2,8 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import path from "node:path";
-import { type FileProvider, LocalFileProvider } from "../../file-provider.ts";
+import type { FileProvider } from "../../file-provider.ts";
+import { LocalFileProvider } from "../../file-provider-local.ts";
 import type { SDKAdapter } from "../../sdk/sdk-adapter.ts";
 import { isEditable } from "../../shared/helpers.ts";
 import type {

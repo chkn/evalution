@@ -13,7 +13,6 @@ import type { generateText, streamText } from "ai";
 import {
   createTracerForPrompt,
   getPromptSpanAttributes,
-  type PromptsFactory,
   type PromptsHelper,
   type PromptsHelperOptions,
 } from "../../../src/trace/prompt-tracer.js";

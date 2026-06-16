@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import { MemoryFileProvider } from "./file-provider.ts";
+import { MemoryFileProvider } from "./file-provider-memory.ts";
 
 const cwd = "/virtual";
 

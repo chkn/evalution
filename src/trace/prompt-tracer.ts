@@ -7,8 +7,8 @@
 // self-contained — it must import nothing from the rest of the core, or the
 // MIT bundle would pull AGPL-only code into an MIT artifact. See LICENSING.md.
 import {
-  type AttributeValue,
   type Attributes,
+  type AttributeValue,
   type Context,
   type Span,
   type SpanOptions,

@@ -11,10 +11,8 @@ import {
   extractPropertiesFromParameters,
 } from "ts-proppy";
 import ts from "typescript";
-import {
-  type FileProvider,
-  LocalFileProvider,
-} from "../../../file-provider.ts";
+import type { FileProvider } from "../../../file-provider.ts";
+import { LocalFileProvider } from "../../../file-provider-local.ts";
 import type { CalleeBinding, ModelPropValue } from "../../../shared/types.ts";
 import type { ParsedFilePrompt, PromptFileType } from "../prompt-file-type.ts";
 

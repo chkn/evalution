@@ -3,7 +3,7 @@
 
 import type { PropDefinition, PropValue } from "ts-proppy";
 import { describe, expect, it } from "vitest";
-import { MemoryFileProvider } from "../../../file-provider.ts";
+import { MemoryFileProvider } from "../../../file-provider-memory.ts";
 import { isEditable } from "../../../shared/helpers.ts";
 import { TSPromptFileType } from "./ts-prompt-file-type.ts";
 

@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { valueToSourceText } from "ts-proppy";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryFileProvider } from "../../file-provider.ts";
+import { MemoryFileProvider } from "../../file-provider-memory.ts";
 import { VercelAISDK } from "../../sdk/vercel-ai-sdk.ts";
 import type { NormalizedPrompt, PropValue } from "../../shared/types.ts";
 import { FilePromptProvider } from "./file-prompt-provider.ts";

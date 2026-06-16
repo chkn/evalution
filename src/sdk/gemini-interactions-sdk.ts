@@ -252,9 +252,13 @@ export class GeminiInteractionsSDK implements SDKAdapter {
   }
 
   getModelParameters(rootDir: string): PropDefinition[] {
-    const dtsPath = findPackageDts("@google/genai", "dist/genai.d.ts", rootDir);
-    if (dtsPath) {
-      try {
+    try {
+      const dtsPath = findPackageDts(
+        "@google/genai",
+        "dist/genai.d.ts",
+        rootDir,
+      );
+      if (dtsPath) {
         const sourceText = fs.readFileSync(dtsPath, "utf-8");
         const sourceFile = ts.createSourceFile(
           dtsPath,
@@ -265,9 +269,9 @@ export class GeminiInteractionsSDK implements SDKAdapter {
         const decl = findTypeDeclaration(sourceFile, "GenerationConfig_2");
         if (decl)
           return extractPropertiesFromDeclaration(decl, sourceFile).definitions;
-      } catch {
-        // fall through to hardcoded defaults
       }
+    } catch {
+      // fall through to hardcoded defaults
     }
     return FALLBACK_GENERATION_CONFIG_PARAMS;
   }
