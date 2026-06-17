@@ -7,18 +7,19 @@ labels: enhancement, SDK
 body:
   - type: input
     attributes:
-      label: "I'd like to request support for"
+      label: "I'd like to request support for..."
+      placeholder: Name of SDK
     validations:
       required: true
   - type: textarea
     attributes:
       label: "Resources to support my request"
-      description: "(e.g. documentation, articles, posts, etc)"
+      description: "(e.g. web site, documentation, articles, posts, etc)"
   - type: checkboxes
     attributes:
-      label: ""
+      label: My Involvement
       options:
-        - label: "I couldn't find any [other requests](https://github.com/chkn/evalution/issues?q=state%3Aopen%20label%3ASDK) for this. (If you do, please upvote the existing issue with 👍 instead of opening a new one)"
+        - label: "I couldn't find any [duplicate requests](https://github.com/chkn/evalution/issues?q=state%3Aopen%20label%3ASDK) (required - please upvote an existing issue with 👍 instead of opening a new one)"
           required: true
-        - label: "I'm willing to help implement this."
-        - label: "I'm willing to help test this."
+        - label: "I'm willing to help implement this (optional)"
+        - label: "I'm willing to help test this (optional)"
