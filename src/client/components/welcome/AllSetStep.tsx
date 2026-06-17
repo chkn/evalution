@@ -4,7 +4,7 @@
 import type { WizardStepProps } from "./types";
 
 /** Guide the user is pointed at once their project is configured. */
-const GETTING_STARTED_URL = "https://evalut.io/n/docs/getting-started";
+const GETTING_STARTED_URL = "https://evalut.io/n/docs/prompts";
 
 /**
  * Final onboarding step, shown once a project config is loaded. Confirms the
