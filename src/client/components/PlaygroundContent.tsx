@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 /*
 function TracesIcon() {
   return (
@@ -65,6 +65,48 @@ interface Props {
 
 const EMPTY_MODEL_CATALOG: ModelCatalog = { models: [] };
 
+function stableKey(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableKey).join(",")}]`;
+  }
+
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${JSON.stringify(k)}:${stableKey(v)}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value) ?? "undefined";
+}
+
+function promptKey(prompt: NormalizedPrompt): string {
+  return stableKey(prompt);
+}
+
+function applyOptimisticUpdates(
+  prompt: NormalizedPrompt,
+  updates: NormalizedPromptUpdates,
+): NormalizedPrompt {
+  let next = prompt;
+
+  if ("system" in updates) {
+    next = { ...next };
+    if (updates.system == null) {
+      delete next.system;
+    } else {
+      next.system = updates.system;
+    }
+  }
+
+  if ("messages" in updates) {
+    next = { ...next, messages: updates.messages ?? [] };
+  }
+
+  return next;
+}
+
 function PlaygroundContent({
   prompt,
   onUpdate,
@@ -75,6 +117,11 @@ function PlaygroundContent({
   const [error, setError] = useState<string | null>(null);
   const [modelCatalog, setModelCatalog] =
     useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
+  const promptRef = useRef(prompt);
+
+  useEffect(() => {
+    promptRef.current = prompt;
+  }, [prompt]);
 
   useEffect(() => {
     onDirtyChange(saving);
@@ -88,17 +135,31 @@ function PlaygroundContent({
     }
   }, [prompt.providerId]);
 
-  const handleUpdate = async (updates: NormalizedPromptUpdates) => {
-    setSaving(true);
-    setError(null);
-    try {
-      onUpdate(await updatePromptProperties(prompt, updates));
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
+  const handleUpdate = useCallback(
+    async (updates: NormalizedPromptUpdates) => {
+      const basePrompt = promptRef.current;
+      const optimisticPrompt = applyOptimisticUpdates(basePrompt, updates);
+      if (promptKey(optimisticPrompt) !== promptKey(basePrompt)) {
+        promptRef.current = optimisticPrompt;
+        onUpdate(optimisticPrompt);
+      }
+
+      setSaving(true);
+      setError(null);
+      try {
+        const updatedPrompt = await updatePromptProperties(basePrompt, updates);
+        if (promptKey(updatedPrompt) !== promptKey(promptRef.current)) {
+          promptRef.current = updatedPrompt;
+          onUpdate(updatedPrompt);
+        }
+      } catch (e: any) {
+        setError(e.message);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [onUpdate],
+  );
 
   return (
     <div className="pg-playground-wrapper">

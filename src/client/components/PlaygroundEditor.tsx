@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { FocusEvent } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ItemEditor,
   interpolatablesFromDefinitions,
@@ -34,21 +43,64 @@ interface Props {
  * parent re-render). Without the structural compare, an in-flight edit can be
  * stomped when the parent re-renders with a fresh-but-equal object reference
  * after a debounced save round-trips.
+ *
+ * Local edits are treated as authoritative until an external value arrives with
+ * the same structural key. While sync is paused, matching external values only
+ * acknowledge the local edit; they do not rewrite local state. That avoids
+ * touching a focused contentEditable during save round-trips, including the
+ * narrow timing window before the browser's input event has updated React state.
  */
-function useSyncedExternal<T>(external: T): [T, (v: T) => void] {
+function syncKey(value: unknown): string {
+  return JSON.stringify(value) ?? "undefined";
+}
+
+function useSyncedExternal<T>(
+  external: T,
+  syncVersion = 0,
+  syncPausedRef?: { current: boolean },
+): [T, (v: T) => void] {
   const [local, setLocal] = useState(external);
-  const lastExternalKey = useRef<string | null>(null);
-  if (lastExternalKey.current === null) {
-    lastExternalKey.current = JSON.stringify(external);
-  }
+  const initialKey = syncKey(external);
+  const lastExternalKey = useRef(initialKey);
+  const localKey = useRef(initialKey);
+  const dirty = useRef(false);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: syncVersion intentionally retries the sync after focus leaves.
   useEffect(() => {
-    const key = JSON.stringify(external);
+    const key = syncKey(external);
+    if (key === lastExternalKey.current) return;
+
+    if (syncPausedRef?.current) {
+      if (key === localKey.current) {
+        lastExternalKey.current = key;
+        dirty.current = false;
+      }
+      return;
+    }
+
+    if (dirty.current) {
+      if (key === localKey.current) {
+        lastExternalKey.current = key;
+        dirty.current = false;
+      }
+      return;
+    }
+
     if (key !== lastExternalKey.current) {
       lastExternalKey.current = key;
+      localKey.current = key;
       setLocal(external);
     }
-  }, [external]);
-  return [local, setLocal];
+  }, [external, syncVersion, syncPausedRef]);
+
+  const setLocalValue = useCallback((next: T) => {
+    const key = syncKey(next);
+    localKey.current = key;
+    dirty.current = key !== lastExternalKey.current;
+    setLocal(next);
+  }, []);
+
+  return [local, setLocalValue];
 }
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
@@ -154,19 +206,32 @@ function SystemCard({
   content,
   editable,
   propDef,
+  syncVersion,
+  syncPausedRef,
   onChange,
 }: {
   content: PropValue | undefined;
   editable: boolean;
   propDef: PropDefinition;
+  syncVersion: number;
+  syncPausedRef: { current: boolean };
   onChange: (v: PropValue) => void;
 }) {
-  const [local, setLocal] = useSyncedExternal(content);
+  const [local, setLocal] = useSyncedExternal(
+    content,
+    syncVersion,
+    syncPausedRef,
+  );
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
-  const handleChange = (v: PropValue) => {
-    setLocal(v);
-    onChange(v);
-  };
+  const handleChange = useCallback(
+    (v: PropValue) => {
+      setLocal(v);
+      onChangeRef.current(v);
+    },
+    [setLocal],
+  );
 
   return (
     <div className="pg-panel-card">
@@ -194,26 +259,44 @@ function SystemCard({
   );
 }
 
+const MemoSystemCard = memo(
+  SystemCard,
+  (prev, next) =>
+    next.syncPausedRef.current &&
+    prev.editable === next.editable &&
+    prev.propDef === next.propDef &&
+    prev.syncPausedRef === next.syncPausedRef,
+);
+
 function MessageCard({
   msg,
+  messageIndex,
   propDef,
   onChange,
   onDelete,
 }: {
   msg: NormalizedMessage;
+  messageIndex: number;
   propDef: PropDefinition;
   onChange: (m: NormalizedMessage) => void;
   onDelete: () => void;
 }) {
   const [content, setContent] = useSyncedExternal(msg.content);
+  const msgRef = useRef(msg);
+  const onChangeRef = useRef(onChange);
+  msgRef.current = msg;
+  onChangeRef.current = onChange;
 
-  const handleChange = (v: PropValue) => {
-    setContent(v);
-    onChange({ ...msg, content: v });
-  };
+  const handleChange = useCallback(
+    (v: PropValue) => {
+      setContent(v);
+      onChangeRef.current({ ...msgRef.current, content: v });
+    },
+    [setContent],
+  );
 
   return (
-    <div className="pg-panel-card">
+    <div className="pg-panel-card" data-message-index={messageIndex}>
       <div className="pg-msg-header">
         <div className="pg-role-wrapper">
           <span className="pg-role-label">
@@ -436,9 +519,24 @@ function SettingsModal({
 // ─── PlaygroundEditor ─────────────────────────────────────────────────────────
 
 function PlaygroundEditor({ prompt, onUpdate, modelCatalog }: Props) {
+  const syncPausedRef = useRef(false);
+  const messagePanelRef = useRef<HTMLDivElement>(null);
+  const pendingFocusMessageIndex = useRef<number | null>(null);
+  const [syncVersion, setSyncVersion] = useState(0);
   const [localMessages, setLocalMessages] = useSyncedExternal(prompt.messages);
   const [modelParameters, setModelParameters] = useState<PropDefinition[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const handleEditFocus = () => {
+    syncPausedRef.current = true;
+  };
+
+  const handleEditBlur = (e: FocusEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      syncPausedRef.current = false;
+      setSyncVersion(v => v + 1);
+    }
+  };
 
   useEffect(() => {
     if (prompt.providerId) {
@@ -472,9 +570,22 @@ function PlaygroundEditor({ prompt, onUpdate, modelCatalog }: Props) {
       ...localMessages,
       { role, content: { kind: "primitive", value: "" } },
     ];
+    pendingFocusMessageIndex.current = newMsgs.length - 1;
     setLocalMessages(newMsgs);
     onUpdate({ messages: newMsgs });
   };
+
+  useLayoutEffect(() => {
+    const index = pendingFocusMessageIndex.current;
+    if (index === null || index >= localMessages.length) return;
+
+    pendingFocusMessageIndex.current = null;
+    messagePanelRef.current
+      ?.querySelector<HTMLElement>(
+        `[data-message-index="${index}"] .token-editor`,
+      )
+      ?.focus();
+  }, [localMessages.length]);
 
   const existingParams = new Set(prompt.modelParameters.map(p => p.def.name));
   const addableParams =
@@ -530,17 +641,25 @@ function PlaygroundEditor({ prompt, onUpdate, modelCatalog }: Props) {
       </div>
 
       <div className="pg-panel">
-        <div className="pg-panel-body">
-          <SystemCard
+        <div
+          ref={messagePanelRef}
+          className="pg-panel-body"
+          onFocus={handleEditFocus}
+          onBlur={handleEditBlur}
+        >
+          <MemoSystemCard
             content={prompt.system}
             editable={prompt.systemEditable}
             propDef={contentPropDef}
+            syncVersion={syncVersion}
+            syncPausedRef={syncPausedRef}
             onChange={handleSystemChange}
           />
           {localMessages.map((msg, i) => (
             <MessageCard
               key={i}
               msg={msg}
+              messageIndex={i}
               propDef={contentPropDef}
               onChange={m =>
                 handleMessagesChange(
@@ -567,4 +686,4 @@ function PlaygroundEditor({ prompt, onUpdate, modelCatalog }: Props) {
   );
 }
 
-export default PlaygroundEditor;
+export default memo(PlaygroundEditor);

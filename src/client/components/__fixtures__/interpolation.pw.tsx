@@ -154,6 +154,27 @@ test("drills into object children, then Enter commits the nested token", async (
   await expect(editor.locator(".te-token")).toHaveText("${config.age}");
 });
 
+test("typing after a committed token's } keeps the token highlighted", async ({
+  mount,
+  page,
+}) => {
+  await mockApiRoutes(page);
+  const component = await mount(<InterpolationHarness />);
+  const editor = component.locator(".token-editor").nth(1);
+
+  await editor.click();
+  await page.keyboard.type("${");
+  await page.keyboard.press("Enter"); // accept "name" + close → ${name}
+  await expect(editor.locator(".te-token")).toHaveText("${name}");
+
+  // Typing right after the closing brace must not dissolve the token: the
+  // browser folds the char into the editable span (`${name}.`), and fromHTML
+  // has to split the trailing literal back out instead of losing the highlight.
+  await page.keyboard.type(".");
+  await expect(editor.locator(".te-token")).toHaveText("${name}");
+  await expect(editor).toContainText("${name}.");
+});
+
 test("Escape closes the dropdown", async ({ mount, page }) => {
   await mockApiRoutes(page);
   const component = await mount(<InterpolationHarness />);
