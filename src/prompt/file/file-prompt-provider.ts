@@ -8,7 +8,6 @@ import type { SDKAdapter } from "../../sdk/sdk-adapter.ts";
 import { isEditable } from "../../shared/helpers.ts";
 import type {
   AddPromptContext,
-  ChangeEventType,
   NormalizedPromptUpdates,
   PromptChangeEvent,
 } from "../../shared/types.ts";
@@ -98,10 +97,6 @@ export class FilePromptProvider
   private includePatterns: readonly string[];
   private ignorePatterns: readonly string[];
   private sdkAdapter: SDKAdapter;
-  private suppressedWatchEvents = new Map<
-    string,
-    { remaining: number; expiresAt: number }
-  >();
 
   constructor({
     id = "fs" + (defaultIDCounter++ ? defaultIDCounter : ""),
@@ -147,7 +142,6 @@ export class FilePromptProvider
     const rawUpdates = this.sdkAdapter.denormalizeUpdates(updates, values);
 
     for (const [propertyName, value] of Object.entries(rawUpdates)) {
-      this.suppressNextWatchEvent(filePath, "change");
       const propDef = definitions.find(d => d.name === propertyName);
       const currentValue = values?.[propertyName];
 
@@ -216,7 +210,6 @@ export class FilePromptProvider
     newName: string,
   ): Promise<NormalizedFilePrompt> {
     const [filePath, oldName] = this.parsePromptId(promptId);
-    this.suppressNextWatchEvent(filePath, "change");
     await this.fileType.renamePrompt(filePath, oldName, newName);
 
     const relFilePath = path.relative(this.rootDir, filePath);
@@ -247,7 +240,6 @@ export class FilePromptProvider
         this.sdkAdapter.promptsHelperImport,
       );
 
-      this.suppressNextWatchEvent(absPath, "add");
       await this.fileProvider.writeFile(absPath, content);
       if (this.files && !this.files.includes(absPath)) {
         this.files.push(absPath);
@@ -312,10 +304,9 @@ export class FilePromptProvider
       { cwd: this.rootDir, ignored: this.ignorePatterns },
       async (eventType, filePath) => {
         const absolutePath = this.resolveFilePath(filePath);
-        if (this.consumeSuppressedWatchEvent(absolutePath, eventType)) {
-          return;
-        }
-
+        // Note: events for this provider's own writes are NOT filtered here;
+        // clients dedupe their own edits' echoes (see client/self-edits.ts) so
+        // that multiple clients sharing one workspace all stay in sync.
         if (eventType === "change" || eventType === "add") {
           if (this.files && !this.files.includes(absolutePath)) {
             this.files.push(absolutePath);
@@ -345,41 +336,6 @@ export class FilePromptProvider
     if (!this.files) {
       this.files = await Array.fromAsync(this.findPromptFiles());
     }
-  }
-
-  private suppressNextWatchEvent(
-    filePath: string,
-    eventType: ChangeEventType,
-  ): void {
-    if (eventType !== "change" && eventType !== "add") return;
-    const key = `${eventType}:${filePath}`;
-    const entry = this.suppressedWatchEvents.get(key);
-    this.suppressedWatchEvents.set(key, {
-      remaining: (entry?.remaining ?? 0) + 1,
-      expiresAt: Date.now() + 2000,
-    });
-  }
-
-  private consumeSuppressedWatchEvent(
-    filePath: string,
-    eventType: ChangeEventType,
-  ): boolean {
-    const key = `${eventType}:${filePath}`;
-    const entry = this.suppressedWatchEvents.get(key);
-    if (!entry) return false;
-    if (entry.expiresAt < Date.now()) {
-      this.suppressedWatchEvents.delete(key);
-      return false;
-    }
-    if (entry.remaining <= 1) {
-      this.suppressedWatchEvents.delete(key);
-    } else {
-      this.suppressedWatchEvents.set(key, {
-        remaining: entry.remaining - 1,
-        expiresAt: entry.expiresAt,
-      });
-    }
-    return true;
   }
 
   private async *findPromptFiles(): AsyncIterableIterator<string> {

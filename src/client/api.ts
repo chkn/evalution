@@ -15,6 +15,7 @@ import type {
   TraceSummary,
   TraceWithSpans,
 } from "../shared/types";
+import { markSelfEdit } from "./self-edits.ts";
 import { encodePromptId } from "./utils";
 
 function promptUrl(prompt: NormalizedPrompt, suffix: string): string {
@@ -73,7 +74,10 @@ export async function addPrompt(
     body: JSON.stringify(partial),
   });
   await throwIfError(res);
-  return res.json();
+  const result = await res.json();
+  // Ignore the echo for a prompt we just created (local state is patched).
+  if (result && "id" in result) markSelfEdit("add", providerId, result.id);
+  return result;
 }
 
 export async function getPrompts(): Promise<NormalizedPrompt[]> {
@@ -102,6 +106,10 @@ export async function renamePrompt(
   prompt: NormalizedPrompt,
   newName: string,
 ): Promise<NormalizedPrompt> {
+  // Renaming rewrites the file; ignore the echo for the renamed prompt's new id.
+  const hash = prompt.id.lastIndexOf("#");
+  const newId = hash >= 0 ? `${prompt.id.slice(0, hash + 1)}${newName}` : prompt.id;
+  if (prompt.providerId) markSelfEdit("change", prompt.providerId, newId);
   const res = await fetch(promptUrl(prompt, "rename"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -115,6 +123,8 @@ export async function updatePromptProperties(
   prompt: NormalizedPrompt,
   updates: NormalizedPromptUpdates,
 ): Promise<NormalizedPrompt> {
+  // Updating rewrites the file; ignore the resulting echo for this prompt.
+  if (prompt.providerId) markSelfEdit("change", prompt.providerId, prompt.id);
   const res = await fetch(promptUrl(prompt, "update"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },

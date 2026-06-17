@@ -14,11 +14,30 @@ import type {
   TraceStreamEvent,
 } from "../shared/types.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
-import {
-  executeSetupStep,
-  resolveSetupTasks,
-  SetupStepNotFoundError,
-} from "./setup-tasks.ts";
+import type { SetupTask } from "../shared/setup-task.ts";
+
+/** Decodes a URL-safe base64 prompt id produced by `encodePromptId`. Uses the
+ * Web `atob` (rather than Node's `Buffer`) so it works in browser/worker
+ * bundles too. */
+function decodePromptId(encoded: string): string {
+  const b64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
+  return atob(b64);
+}
+
+/**
+ * Onboarding setup-task handling, injected by the host so the route module
+ * carries no filesystem dependency. The Node CLI passes the fs-backed
+ * implementation from `./setup-tasks.ts`; runtime-neutral hosts (e.g. the
+ * browser/service-worker bundle) omit it and the routes report "no tasks".
+ */
+export interface SetupTaskHandlers {
+  resolve(rootPath: string): SetupTask[];
+  executeStep(
+    rootPath: string,
+    taskId: string,
+    stepId: string,
+  ): Promise<{ path?: string }>;
+}
 
 export interface SetupRoutesOptions {
   app: Hono;
@@ -32,6 +51,17 @@ export interface SetupRoutesOptions {
   hasConfig: boolean;
   tracer: Tracer;
   defaultTraceProviderId: string;
+  /**
+   * Optional onboarding setup-task handlers. When omitted, the setup-task
+   * routes report no tasks / 404 (used by hosts without a filesystem).
+   */
+  setupTasks?: SetupTaskHandlers;
+  /**
+   * When set, `POST /api/prompts/:p/:id/execute` short-circuits and returns this
+   * message as a 400 error instead of running the prompt. Used by the in-browser
+   * demo, where execution happens locally via `npx evalution`.
+   */
+  executeDisabledMessage?: string;
 }
 
 export function setupRoutes({
@@ -44,6 +74,8 @@ export function setupRoutes({
   hasConfig,
   tracer,
   defaultTraceProviderId,
+  setupTasks,
+  executeDisabledMessage,
 }: SetupRoutesOptions) {
   // Resolve a span's prompt reference (which may be a global ID) to a concrete
   // provider-scoped prompt the client can open. Done at read time against the
@@ -65,15 +97,21 @@ export function setupRoutes({
   app.get("/api/config", c => c.json({ rootPath, configured: hasConfig }));
 
   // GET /api/setup-tasks - Onboarding tasks (with per-step completion status)
-  app.get("/api/setup-tasks", c => c.json(resolveSetupTasks(rootPath)));
+  app.get("/api/setup-tasks", c =>
+    c.json(setupTasks ? setupTasks.resolve(rootPath) : []),
+  );
 
   // POST /api/setup-tasks/:taskId/steps/:stepId/execute - Run one onboarding step
   app.post("/api/setup-tasks/:taskId/steps/:stepId/execute", async c => {
+    if (!setupTasks) {
+      return c.json({ error: "Setup tasks are not available" }, 404);
+    }
     const { taskId, stepId } = c.req.param();
     try {
-      return c.json(await executeSetupStep(rootPath, taskId, stepId));
+      return c.json(await setupTasks.executeStep(rootPath, taskId, stepId));
     } catch (error: any) {
-      const status = error instanceof SetupStepNotFoundError ? 404 : 400;
+      // SetupStepNotFoundError sets `.name`; map it to 404, others to 400.
+      const status = error?.name === "SetupStepNotFoundError" ? 404 : 400;
       return c.json({ error: error.message }, status);
     }
   });
@@ -162,7 +200,7 @@ export function setupRoutes({
         return c.json({ error: "Provider not found" }, 404);
       }
 
-      const decodedId = Buffer.from(id, "base64url").toString("utf8");
+      const decodedId = decodePromptId(id);
       const prompt = await provider.getPrompt(decodedId);
       if (!prompt) {
         return c.json({ error: "Prompt not found" }, 404);
@@ -186,7 +224,7 @@ export function setupRoutes({
           { error: "This provider does not support renaming" },
           405,
         );
-      const decodedId = Buffer.from(id, "base64url").toString("utf8");
+      const decodedId = decodePromptId(id);
       const updatedPrompt = await provider.renamePrompt(decodedId, newName);
       return c.json({ ...updatedPrompt, providerId });
     } catch (error: any) {
@@ -207,7 +245,7 @@ export function setupRoutes({
         return c.json({ error: "This provider does not support editing" }, 405);
       }
 
-      const decodedId = Buffer.from(id, "base64url").toString("utf8");
+      const decodedId = decodePromptId(id);
       const updatedPrompt = await provider.updatePromptProperties(
         decodedId,
         await c.req.json(),
@@ -225,13 +263,18 @@ export function setupRoutes({
   // `/api/traces/:providerId/:traceId/events` for span-level updates.
   app.post("/api/prompts/:providerId/:id/execute", async c => {
     try {
+      // Hosts that can't run prompts (e.g. the in-browser demo) disable
+      // execution and surface a message the client renders as an error.
+      if (executeDisabledMessage) {
+        return c.json({ error: executeDisabledMessage }, 400);
+      }
       const { providerId, id } = c.req.param();
       const provider = promptProviders.get(providerId);
       if (!provider) {
         return c.json({ error: "Provider not found" }, 404);
       }
 
-      const decodedId = Buffer.from(id, "base64url").toString("utf8");
+      const decodedId = decodePromptId(id);
       const { functionParams = [] } = (await c.req
         .json()
         .catch(() => ({}))) as ExecuteRequest;

@@ -15,6 +15,7 @@ import type { SSEData } from "../shared/types.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
 import { setupRoutes } from "./api-routes.ts";
+import { executeSetupStep, resolveSetupTasks } from "./setup-tasks.ts";
 import { registerTerminalRoute } from "./terminal.ts";
 
 export interface ServerOptions {
@@ -100,6 +101,7 @@ export async function startServer(
     hasConfig,
     tracer,
     defaultTraceProviderId,
+    setupTasks: { resolve: resolveSetupTasks, executeStep: executeSetupStep },
   });
 
   // Interactive terminal for onboarding `run_command`/`install_package` steps.

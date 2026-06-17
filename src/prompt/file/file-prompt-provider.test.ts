@@ -382,7 +382,10 @@ export function myPrompt() {
     expect(callback).not.toHaveBeenCalled();
   });
 
-  it("should suppress watcher events for provider-originated updates", async () => {
+  it("emits watcher events for provider-originated updates (clients dedupe echoes)", async () => {
+    // Suppression moved to the client (see client/self-edits.ts) so that
+    // multiple clients sharing one workspace stay in sync; the provider now
+    // emits change events for its own writes too.
     const fileProvider = new MemoryFileProvider({
       "/virtual/test.prompt.ts": `
 export function myPrompt() {
@@ -401,8 +404,8 @@ export function myPrompt() {
 
     await watchedProvider.getAllPrompts();
 
-    const callback = vi.fn();
-    const cleanup = watchedProvider.watch!(callback);
+    const events: { type: string; promptId: string }[] = [];
+    const cleanup = watchedProvider.watch!(e => events.push(e));
 
     await watchedProvider.updatePromptProperties(
       "/virtual/test.prompt.ts#myPrompt",
@@ -410,10 +413,16 @@ export function myPrompt() {
         system: { kind: "primitive", value: "Updated locally" },
       },
     );
+    // The watch callback re-parses asynchronously before emitting.
+    await new Promise(resolve => setTimeout(resolve, 50));
 
     cleanup();
 
-    expect(callback).not.toHaveBeenCalled();
+    expect(
+      events.some(
+        e => e.type === "change" && e.promptId === "test.prompt.ts#myPrompt",
+      ),
+    ).toBe(true);
   });
 
   describe("file scanning", () => {

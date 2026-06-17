@@ -12,6 +12,7 @@ import { TerminalView } from "./components/TerminalView";
 import TraceList from "./components/TraceList";
 import TraceView from "./components/TraceView";
 import { WelcomeWizard } from "./components/welcome/WelcomeWizard";
+import { consumeSelfEdit } from "./self-edits";
 import { usePrompts } from "./hooks/usePrompts";
 import { useResizable } from "./hooks/useResizable";
 import { useSSE } from "./hooks/useSSE";
@@ -187,11 +188,17 @@ function App() {
     "prompts",
   );
   const [showAddPrompt, setShowAddPrompt] = useState(false);
-  const [sectionVisible, setSectionVisible] = useState(true);
+  const [sectionVisible, setSectionVisible] = useState(
+    // `?expand=true` opens with the sidebar collapsed — handy when embedding a
+    // single prompt (e.g. evalution running inside an iframe on another page).
+    () => new URLSearchParams(window.location.search).get("expand") !== "true",
+  );
   const [dropPaneId, setDropPaneId] = useState<string | null>(null);
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
   const dirtyTabsRef = useRef<Set<string>>(new Set());
   const prevPromptCount = useRef<number | null>(null);
+  // One-shot deep link: `?prompt=<id>` opens that prompt once it has loaded.
+  const didDeepLink = useRef(false);
 
   const sidebar = useResizable({
     initial: { w: 224 },
@@ -229,6 +236,11 @@ function App() {
     (data: SSEData) => {
       // FIXME: Delay these for a hot second to debounce multiple rapid changes
       if (data.type === "prompt-changed") {
+        // Skip echoes of this client's own edits — local state is already
+        // patched, and re-fetching would reset editor cursor position. Edits
+        // from other clients (e.g. another tab) aren't marked, so they refetch.
+        if (consumeSelfEdit(data.event.type, data.providerId, data.event.promptId))
+          return;
         refetchPrompts();
       } else if (data.type === "trace-changed") {
         refetchTraces();
@@ -358,6 +370,18 @@ function App() {
       ),
     );
   };
+
+  // Open the prompt named by `?prompt=<id>` (its {@link NormalizedPrompt.id})
+  // once prompts have loaded, exactly once. Matches on id alone so callers don't
+  // need to know the provider id.
+  useEffect(() => {
+    if (loading || didDeepLink.current) return;
+    const target = new URLSearchParams(window.location.search).get("prompt");
+    const match = target ? prompts.find(p => p.id === target) : undefined;
+    if (match?.providerId) handleSelectPrompt(match.providerId, match.id);
+    didDeepLink.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, prompts]);
 
   const handleSelectTrace = (
     providerId: string,
