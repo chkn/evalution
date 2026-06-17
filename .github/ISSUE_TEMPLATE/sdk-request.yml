@@ -18,8 +18,7 @@ body:
     attributes:
       label: ""
       options:
-        - label: "I couldn't find any [other requests](https://github.com/chkn/evalution/issues?q=state%3Aopen%20label%3ASDK) for this"
-          description: "(if you do, please upvote the existing issue with 👍 instead of opening a new one)"
+        - label: "I couldn't find any [other requests](https://github.com/chkn/evalution/issues?q=state%3Aopen%20label%3ASDK) for this. (If you do, please upvote the existing issue with 👍 instead of opening a new one)"
           required: true
-        - label: "I'm willing to help implement this"
-        - label: "I'm willing to help test this"
+        - label: "I'm willing to help implement this."
+        - label: "I'm willing to help test this."
