@@ -12,11 +12,11 @@ import { TerminalView } from "./components/TerminalView";
 import TraceList from "./components/TraceList";
 import TraceView from "./components/TraceView";
 import { WelcomeWizard } from "./components/welcome/WelcomeWizard";
-import { consumeSelfEdit } from "./self-edits";
 import { usePrompts } from "./hooks/usePrompts";
 import { useResizable } from "./hooks/useResizable";
 import { useSSE } from "./hooks/useSSE";
 import { useTraces } from "./hooks/useTraces";
+import { consumeSelfEdit } from "./self-edits";
 import { requireProviderId } from "./utils";
 
 // ─── Tab / Pane model ─────────────────────────────────────────────────────────
@@ -239,7 +239,9 @@ function App() {
         // Skip echoes of this client's own edits — local state is already
         // patched, and re-fetching would reset editor cursor position. Edits
         // from other clients (e.g. another tab) aren't marked, so they refetch.
-        if (consumeSelfEdit(data.event.type, data.providerId, data.event.promptId))
+        if (
+          consumeSelfEdit(data.event.type, data.providerId, data.event.promptId)
+        )
           return;
         refetchPrompts();
       } else if (data.type === "trace-changed") {
@@ -374,13 +376,13 @@ function App() {
   // Open the prompt named by `?prompt=<id>` (its {@link NormalizedPrompt.id})
   // once prompts have loaded, exactly once. Matches on id alone so callers don't
   // need to know the provider id.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one shot
   useEffect(() => {
     if (loading || didDeepLink.current) return;
     const target = new URLSearchParams(window.location.search).get("prompt");
     const match = target ? prompts.find(p => p.id === target) : undefined;
     if (match?.providerId) handleSelectPrompt(match.providerId, match.id);
     didDeepLink.current = true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, prompts]);
 
   const handleSelectTrace = (

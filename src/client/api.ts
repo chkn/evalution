@@ -108,7 +108,8 @@ export async function renamePrompt(
 ): Promise<NormalizedPrompt> {
   // Renaming rewrites the file; ignore the echo for the renamed prompt's new id.
   const hash = prompt.id.lastIndexOf("#");
-  const newId = hash >= 0 ? `${prompt.id.slice(0, hash + 1)}${newName}` : prompt.id;
+  const newId =
+    hash >= 0 ? `${prompt.id.slice(0, hash + 1)}${newName}` : prompt.id;
   if (prompt.providerId) markSelfEdit("change", prompt.providerId, newId);
   const res = await fetch(promptUrl(prompt, "rename"), {
     method: "POST",

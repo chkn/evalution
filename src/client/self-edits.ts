@@ -63,6 +63,10 @@ export function consumeSelfEdit(
     return false;
   }
   if (entry.remaining <= 1) pending.delete(k);
-  else pending.set(k, { remaining: entry.remaining - 1, expiresAt: entry.expiresAt });
+  else
+    pending.set(k, {
+      remaining: entry.remaining - 1,
+      expiresAt: entry.expiresAt,
+    });
   return true;
 }

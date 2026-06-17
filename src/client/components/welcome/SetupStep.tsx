@@ -18,7 +18,8 @@ import type { WizardStepProps } from "./types";
 /** Setup instructions URL the coding agent is pointed at. */
 const AGENT_SETUP_URL = "https://evalut.io/n/docs/setup.md";
 /** Placeholder URL for non-Vercel SDK setup guidance. */
-const OTHER_SDK_URL = "https://github.com/chkn/evalution/issues/new?template=sdk-request.yml";
+const OTHER_SDK_URL =
+  "https://github.com/chkn/evalution/issues/new?template=sdk-request.yml";
 
 type SetupStepProps = Pick<WizardStepProps, "onOpenTerminal">;
 

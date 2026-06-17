@@ -17,11 +17,11 @@
  * @module evalution
  */
 export type { EvalutionConfig } from "./config.ts";
-export {
-  type FileProvider,
-  type FileWatchCallback,
-  type FileWatchOptions,
-  type GlobOptions,
+export type {
+  FileProvider,
+  FileWatchCallback,
+  FileWatchOptions,
+  GlobOptions,
 } from "./file-provider.ts";
 export { LocalFileProvider } from "./file-provider-local.ts";
 export { MemoryFileProvider } from "./file-provider-memory.ts";

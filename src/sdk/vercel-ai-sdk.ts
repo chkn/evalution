@@ -381,7 +381,7 @@ function extractMessages(value: PropValue | undefined): NormalizedMessage[] {
 function extractToolCalls(
   value: PropValue | undefined,
 ): NormalizedToolCall[] | undefined {
-  if (!value || value.kind !== "array") return undefined;
+  if (value?.kind !== "array") return undefined;
   const out: NormalizedToolCall[] = [];
   for (const el of value.elements) {
     if (el.kind !== "object") continue;

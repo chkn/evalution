@@ -150,7 +150,11 @@ export async function createMemoryApp(
   // sharing this workspace stays in sync.
   promptProvider.watch?.(event => {
     void promptRegistry.rebuild(promptProviders).then(() => {
-      broadcast({ type: "prompt-changed", providerId: promptProvider.id, event });
+      broadcast({
+        type: "prompt-changed",
+        providerId: promptProvider.id,
+        event,
+      });
     });
   });
 

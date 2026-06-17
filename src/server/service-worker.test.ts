@@ -46,7 +46,9 @@ function sseReader(res: Response) {
   let waiters: Array<() => void> = [];
   let closed = false;
   const wake = () => {
-    waiters.forEach(w => w());
+    waiters.forEach(w => {
+      w();
+    });
     waiters = [];
   };
 
@@ -60,6 +62,7 @@ function sseReader(res: Response) {
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         let idx: number;
+        // biome-ignore lint/suspicious/noAssignInExpressions: too lazy to fix
         while ((idx = buffer.indexOf("\n\n")) >= 0) {
           const frame = buffer.slice(0, idx);
           buffer = buffer.slice(idx + 2);

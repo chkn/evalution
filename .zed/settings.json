@@ -12,6 +12,7 @@
     "JSONC": { "formatter": { "language_server": { "name": "biome" } } },
     "JSX": { "formatter": { "language_server": { "name": "biome" } } },
     "JavaScript": { "formatter": { "language_server": { "name": "biome" } } },
+    "Markdown": { "format_on_save": "off" },
     "Svelte": { "formatter": { "language_server": { "name": "biome" } } },
     "TSX": { "formatter": { "language_server": { "name": "biome" } } },
     "TypeScript": { "formatter": { "language_server": { "name": "biome" } } },

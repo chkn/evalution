@@ -3,13 +3,13 @@
 
 import path from "node:path";
 import { minimatch } from "minimatch";
-import type { ChangeEventType } from "./shared/types.ts";
 import type {
   FileProvider,
   FileWatchCallback,
   FileWatchOptions,
   GlobOptions,
 } from "./file-provider.ts";
+import type { ChangeEventType } from "./shared/types.ts";
 
 interface MemoryWatcher {
   patterns: readonly string[];

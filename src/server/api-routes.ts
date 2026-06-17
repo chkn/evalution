@@ -6,6 +6,7 @@ import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import type { PromptRegistry } from "../prompt/prompt-registry.ts";
+import type { SetupTask } from "../shared/setup-task.ts";
 import type {
   ExecuteRequest,
   ExecuteResponse,
@@ -14,7 +15,6 @@ import type {
   TraceStreamEvent,
 } from "../shared/types.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
-import type { SetupTask } from "../shared/setup-task.ts";
 
 /** Decodes a URL-safe base64 prompt id produced by `encodePromptId`. Uses the
  * Web `atob` (rather than Node's `Buffer`) so it works in browser/worker
