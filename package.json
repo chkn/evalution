@@ -1,6 +1,6 @@
 {
   "name": "evalution",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "TypeScript AI Prompt Playground - Edit and execute AI prompts with live preview",
   "type": "module",
   "exports": {
