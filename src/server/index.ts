@@ -16,7 +16,10 @@ import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
 import { setupRoutes } from "./api-routes.ts";
 import { executeSetupStep, resolveSetupTasks } from "./setup-tasks.ts";
-import { registerTerminalRoute } from "./terminal.ts";
+import {
+  registerTerminalRoute,
+  type TerminalSessionRegistry,
+} from "./terminal.ts";
 
 export interface ServerOptions {
   promptProviders: PromptProvider[];
@@ -25,6 +28,12 @@ export interface ServerOptions {
   rootPath: string;
   /** Whether the server was started with a project config file loaded. */
   hasConfig: boolean;
+  /**
+   * Live onboarding-terminal sessions. Owned by the caller (the CLI) rather
+   * than created here, so PTYs survive the restart this server performs once a
+   * config file appears.
+   */
+  terminalSessions: TerminalSessionRegistry;
 }
 
 /** A running server, returned by {@link startServer}. */
@@ -42,8 +51,14 @@ export interface ServerHandle {
 export async function startServer(
   options: ServerOptions,
 ): Promise<ServerHandle> {
-  const { promptProviders, traceProviders, port, rootPath, hasConfig } =
-    options;
+  const {
+    promptProviders,
+    traceProviders,
+    port,
+    rootPath,
+    hasConfig,
+    terminalSessions,
+  } = options;
 
   const promptProviderMap = new Map(promptProviders.map(p => [p.id, p]));
   const traceProviderMap = new Map(traceProviders.map(p => [p.id, p]));
@@ -106,7 +121,7 @@ export async function startServer(
 
   // Interactive terminal for onboarding `run_command`/`install_package` steps.
   // Registered before the static catch-all so the upgrade request is routed.
-  registerTerminalRoute(app, upgradeWebSocket, rootPath);
+  registerTerminalRoute(app, upgradeWebSocket, rootPath, terminalSessions);
 
   // Serve the built client. `serveStatic`'s root is resolved against
   // `process.cwd()`, which the CLI changes to the user's project, so anchor it
@@ -167,9 +182,15 @@ export async function startServer(
 
   const close = (): Promise<void> =>
     new Promise<void>((resolve, reject) => {
-      // Drop open connections (notably long-lived SSE streams) up front, or
-      // `close` would wait on them forever. (`closeAllConnections` exists on
-      // the Node HTTP server but isn't in the union's Http2 arm.)
+      // Drop open connections up front, or `close` would wait on them forever.
+      // `closeAllConnections` handles plain HTTP connections (notably long-lived
+      // SSE streams) but NOT upgraded WebSockets — once a socket is handed to
+      // `ws` via `handleUpgrade` the HTTP server no longer tracks it — so those
+      // must be closed explicitly via `wss.clients`. Closing them gracefully
+      // fires each session's `onClose`, which starts the reconnect grace window
+      // instead of killing the PTY, so a running coding agent survives the
+      // restart and the reconnecting client resumes it.
+      for (const ws of wss.clients) ws.close();
       if ("closeAllConnections" in server) {
         server.closeAllConnections();
       }

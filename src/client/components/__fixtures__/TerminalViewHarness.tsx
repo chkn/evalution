@@ -25,6 +25,12 @@ class CapturingWebSocket {
 
   constructor(url: string) {
     this.url = url;
+    // Expose the latest instance so a test can simulate the server pushing
+    // `data`/`exit` frames down to the client (drives `onmessage`).
+    (window as any).__terminalWs = this;
+    // Record every URL opened so a test can assert the client reconnects after
+    // a drop and reuses the same `sessionId`.
+    (window as any).__wsUrls.push(url);
     setTimeout(() => {
       this.readyState = CapturingWebSocket.OPEN;
       this.onopen?.({});
@@ -48,6 +54,7 @@ class CapturingWebSocket {
 if (typeof window !== "undefined" && !(window as any).__wsStubbed) {
   (window as any).__wsStubbed = true;
   (window as any).__terminalSent = [];
+  (window as any).__wsUrls = [];
   (window as any).WebSocket = CapturingWebSocket;
 }
 

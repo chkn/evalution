@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useEffect, useState } from "react";
+import { type ReactElement, useEffect, useState } from "react";
 import {
   CONFIG_DOCS_URL,
   SETUP_STEP_DONE_EVENT,
@@ -15,11 +15,16 @@ import ProviderIcon from "../ProviderIcon";
 import { CopyBox } from "./CopyBox";
 import type { WizardStepProps } from "./types";
 
-/** Setup instructions URL the coding agent is pointed at. */
-const AGENT_SETUP_URL = "https://evalut.io/n/docs/setup.md";
-/** Placeholder URL for non-Vercel SDK setup guidance. */
+/** URL for requesting support for an AI SDK we don't list. */
 const OTHER_SDK_URL =
   "https://github.com/chkn/evalution/issues/new?template=sdk-request.yml";
+
+/** URL for requesting support for a coding agent we don't list. */
+const OTHER_AGENT_URL =
+  "https://github.com/chkn/evalution/issues/new?template=agent-request.yml";
+
+/** Guide the user is pointed at once their project is configured. */
+const MANUAL_SETUP_URL = "https://evalut.io/n/docs/setup";
 
 type SetupStepProps = Pick<WizardStepProps, "onOpenTerminal">;
 
@@ -30,6 +35,7 @@ type SetupStepProps = Pick<WizardStepProps, "onOpenTerminal">;
  * config file is detected and loaded by the server.
  */
 export function SetupStep({ onOpenTerminal }: SetupStepProps) {
+  const [agentTasks, setAgentTasks] = useState<SetupTask[]>([]);
   const [tasks, setTasks] = useState<SetupTask[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -40,10 +46,11 @@ export function SetupStep({ onOpenTerminal }: SetupStepProps) {
   useEffect(() => {
     let cancelled = false;
     getSetupTasks()
-      .then(loaded => {
+      .then(({ agent, sdk }) => {
         if (cancelled) return;
-        setTasks(loaded);
-        setSelectedId(prev => prev ?? loaded[0]?.id ?? null);
+        setAgentTasks(agent);
+        setTasks(sdk);
+        setSelectedId(prev => prev ?? sdk[0]?.id ?? null);
       })
       .catch(() => {
         /* leave the picker empty; the agent path still works */
@@ -110,21 +117,56 @@ export function SetupStep({ onOpenTerminal }: SetupStepProps) {
       {/* ── Top: let a coding agent do it ── */}
       <section className="setup-pane">
         <h3>Set up with a coding agent</h3>
-        <p className="welcome-subtitle">
-          Paste this prompt into your coding agent and let it wire up Evalution
-          for you:
-        </p>
-        <CopyBox text={`Fetch ${AGENT_SETUP_URL}`}>
-          Fetch{" "}
+        <div
+          className="setup-sdk-options"
+          role="group"
+          aria-label="Coding agent"
+        >
+          {agentTasks.map(task => {
+            // Each agent task is a single run_command step that launches its CLI.
+            const step = task.steps[0];
+            const disabledReason = step?.disabledReason;
+            const taskTitle = disabledReason ?? `Run ${task.label}`;
+            // A disabled <button> doesn't surface a hover tooltip, so the
+            // reason lives on the wrapping span instead.
+            return (
+              <span
+                key={task.id}
+                className="setup-agent-option-wrap"
+                title={taskTitle}
+              >
+                <button
+                  type="button"
+                  className="setup-sdk-option"
+                  disabled={!!disabledReason}
+                  title={taskTitle}
+                  onClick={() => {
+                    if (!step || step.kind === "create_config") return;
+                    onOpenTerminal?.(
+                      task.id,
+                      step.id,
+                      setupStepCommand(step),
+                      task.label,
+                    );
+                  }}
+                >
+                  <span className="setup-sdk-icon" aria-hidden="true">
+                    <ProviderIcon provider={task.icon} size={20} />
+                  </span>
+                  <span>{task.label}</span>
+                </button>
+              </span>
+            );
+          })}
           <a
-            className="welcome-link"
-            href={AGENT_SETUP_URL}
+            className="setup-sdk-option setup-sdk-option-link"
+            href={OTHER_AGENT_URL}
             target="_blank"
             rel="noopener"
           >
-            {AGENT_SETUP_URL}
+            Other
           </a>
-        </CopyBox>
+        </div>
       </section>
 
       <div className="setup-divider">
@@ -133,7 +175,17 @@ export function SetupStep({ onOpenTerminal }: SetupStepProps) {
 
       {/* ── Bottom: manual setup ── */}
       <section className="setup-pane">
-        <h3>Manual setup</h3>
+        <h3>
+          Manual setup —{" "}
+          <a
+            className="welcome-link"
+            href={MANUAL_SETUP_URL}
+            target="_blank"
+            rel="noopener"
+          >
+            full docs ↗
+          </a>
+        </h3>
 
         <div className="welcome-field">
           <div className="setup-sdk-options" role="group" aria-label="AI SDK">
@@ -172,12 +224,20 @@ export function SetupStep({ onOpenTerminal }: SetupStepProps) {
                 <div className="setup-step-row">
                   <span className="setup-step-label">
                     {renderStepLabel(step)}
+                    {step.kind === "create_config" && (
+                      <button
+                        type="button"
+                        className="setup-step-expand welcome-link"
+                        onClick={() => toggleExpanded(step.id)}
+                      >
+                        {expanded.has(step.id) ? "Hide" : "Show"}
+                      </button>
+                    )}
                   </span>
                   <span className="setup-step-action">
                     {renderStepAction(step, {
                       done: isDone(step, i),
                       running: isRunning(step, i),
-                      expanded: expanded.has(step.id),
                       onCreate: () => handleCreate(step),
                       onRun: () => {
                         if (step.kind === "create_config" || !selected) return;
@@ -192,7 +252,6 @@ export function SetupStep({ onOpenTerminal }: SetupStepProps) {
                           label,
                         );
                       },
-                      onToggleExpand: () => toggleExpanded(step.id),
                     })}
                   </span>
                 </div>
@@ -250,37 +309,88 @@ function renderStepLabel(step: SetupStepDef) {
 interface StepActionState {
   done: boolean;
   running: boolean;
-  expanded: boolean;
   onCreate: () => void;
   onRun: () => void;
-  onToggleExpand: () => void;
 }
 
-/** The right-hand action(s) for a step: create/run link, done indicator, expander. */
+/**
+ * Wraps a disabled action button in a titled span so its `disabledReason`
+ * surfaces on hover — a disabled `<button>` swallows pointer events and won't
+ * show its own `title`. Returns the button untouched when there's no reason.
+ */
+function withDisabledReason(reason: string | undefined, button: ReactElement) {
+  return reason ? (
+    <span className="setup-step-action-wrap" title={reason}>
+      {button}
+    </span>
+  ) : (
+    button
+  );
+}
+
+/** Small blue glyph shown to the left of an action button's label. */
+function StepActionIcon({ kind }: { kind: SetupStepDef["kind"] }) {
+  const props = {
+    className: "setup-step-btn-icon",
+    width: 14,
+    height: 14,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  switch (kind) {
+    case "create_config":
+      // A document with a plus — creating the config file.
+      return (
+        <svg {...props}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+          <path d="M12 12v6M9 15h6" />
+        </svg>
+      );
+    case "install_package":
+      // A download arrow into a tray — installing the package.
+      return (
+        <svg {...props}>
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <path d="M7 10l5 5 5-5" />
+          <path d="M12 15V3" />
+        </svg>
+      );
+    case "run_command":
+      // A play triangle — running the command.
+      return (
+        <svg {...props}>
+          <path d="M6 4l14 8-14 8z" fill="currentColor" stroke="none" />
+        </svg>
+      );
+  }
+}
+
+/** The right-hand action for a step: create/run button or a done indicator. */
 function renderStepAction(step: SetupStepDef, s: StepActionState) {
   if (step.kind === "create_config") {
-    return (
-      <>
-        <button
-          type="button"
-          className="setup-step-expand welcome-link"
-          onClick={s.onToggleExpand}
-        >
-          {s.expanded ? "Hide" : "Show"}
-        </button>
-        {s.done ? (
-          <span className="setup-step-status setup-file-created">Created</span>
-        ) : (
-          <button
-            type="button"
-            className="welcome-link"
-            onClick={s.onCreate}
-            disabled={s.running}
-          >
-            {s.running ? "Creating…" : "Create"}
-          </button>
-        )}
-      </>
+    if (s.done) {
+      return (
+        <span className="setup-step-status setup-file-created">Created</span>
+      );
+    }
+    return withDisabledReason(
+      step.disabledReason,
+      <button
+        type="button"
+        className="setup-step-btn"
+        onClick={s.onCreate}
+        disabled={s.running || !!step.disabledReason}
+        title={step.disabledReason}
+      >
+        <StepActionIcon kind={step.kind} />
+        {s.running ? "Creating…" : "Create"}
+      </button>,
     );
   }
 
@@ -290,9 +400,18 @@ function renderStepAction(step: SetupStepDef, s: StepActionState) {
       <span className="setup-step-status setup-file-created">Installed</span>
     );
   }
-  return (
-    <button type="button" className="welcome-link" onClick={s.onRun}>
+  const taskTitle = step.disabledReason ?? setupStepCommand(step);
+  return withDisabledReason(
+    step.disabledReason,
+    <button
+      type="button"
+      className="setup-step-btn"
+      onClick={s.onRun}
+      disabled={!!step.disabledReason}
+      title={taskTitle}
+    >
+      <StepActionIcon kind={step.kind} />
       {step.kind === "install_package" ? "Install" : "Run"}
-    </button>
+    </button>,
   );
 }

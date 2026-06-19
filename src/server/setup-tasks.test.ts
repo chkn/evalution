@@ -9,6 +9,7 @@ import { VercelAISDK } from "../sdk/vercel-ai-sdk.ts";
 import { CONFIG_FILE_RELATIVE_PATH } from "../shared/setup-task.ts";
 import {
   executeSetupStep,
+  isBinaryOnPath,
   isPackageInstalled,
   resolveSetupTasks,
   SetupStepNotFoundError,
@@ -137,21 +138,21 @@ describe("resolveSetupTasks", () => {
   });
 
   it("marks the config step completed once the file exists", async () => {
-    const before = resolveSetupTasks(root).find(t => t.id === TASK_ID)!;
+    const before = resolveSetupTasks(root).sdk.find(t => t.id === TASK_ID)!;
     expect(before.steps.find(s => s.kind === "create_config")!.completed).toBe(
       false,
     );
 
     await executeSetupStep(root, TASK_ID, STEP_ID);
 
-    const after = resolveSetupTasks(root).find(t => t.id === TASK_ID)!;
+    const after = resolveSetupTasks(root).sdk.find(t => t.id === TASK_ID)!;
     expect(after.steps.find(s => s.kind === "create_config")!.completed).toBe(
       true,
     );
   });
 
   it("marks the install step completed once the package is present", async () => {
-    const before = resolveSetupTasks(root).find(t => t.id === TASK_ID)!;
+    const before = resolveSetupTasks(root).sdk.find(t => t.id === TASK_ID)!;
     const install = before.steps.find(s => s.kind === "install_package")!;
     expect(install.completed).toBe(false);
 
@@ -163,9 +164,40 @@ describe("resolveSetupTasks", () => {
     await fs.mkdir(pkgDir, { recursive: true });
     await fs.writeFile(path.join(pkgDir, "package.json"), "{}");
 
-    const after = resolveSetupTasks(root).find(t => t.id === TASK_ID)!;
+    const after = resolveSetupTasks(root).sdk.find(t => t.id === TASK_ID)!;
     expect(after.steps.find(s => s.kind === "install_package")!.completed).toBe(
       true,
     );
+  });
+
+  it("includes the coding-agent tasks alongside the SDKs", () => {
+    const { agent } = resolveSetupTasks(root);
+    expect(agent.map(t => t.id)).toContain("claude-code");
+    expect(agent.map(t => t.id)).toContain("codex");
+  });
+
+  it("disables a coding agent exactly when its CLI is not on PATH", () => {
+    const { agent } = resolveSetupTasks(root);
+    for (const task of agent) {
+      const step = task.steps[0];
+      const bin =
+        step.kind === "run_command" ? step.command.split(/\s+/)[0] : "";
+      if (isBinaryOnPath(bin)) {
+        expect(step.disabledReason).toBeUndefined();
+      } else {
+        expect(step.disabledReason).toBe(`${bin} not found in PATH`);
+      }
+    }
+  });
+});
+
+describe("isBinaryOnPath", () => {
+  it("finds an executable present on PATH", () => {
+    // `node` is on PATH whenever this test suite runs.
+    expect(isBinaryOnPath("node")).toBe(true);
+  });
+
+  it("is false for an executable that doesn't exist", () => {
+    expect(isBinaryOnPath("evalution-no-such-binary-xyzzy")).toBe(false);
   });
 });

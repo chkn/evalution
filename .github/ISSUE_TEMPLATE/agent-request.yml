@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Alexander Corrado
+name: Coding Agent CLI Request
+description: Request support for another coding agent CLI
+title: "Coding Agent CLI Request: "
+labels: enhancement, coding-agent-cli
+body:
+  - type: input
+    attributes:
+      label: "I'd like to request support for..."
+      placeholder: Name of coding agent CLI
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: "Resources to support my request"
+      description: "(e.g. web site, documentation, CLI invocation, articles, posts, etc)"
+  - type: checkboxes
+    attributes:
+      label: My Involvement
+      options:
+        - label: "I couldn't find any [duplicate requests](https://github.com/chkn/evalution/issues?q=state%3Aopen%20label%3Acoding-agent-cli) (required - please upvote an existing issue with 👍 instead of opening a new one)"
+          required: true
+        - label: "I'm willing to help implement this (optional)"
+        - label: "I'm willing to help test this (optional)"

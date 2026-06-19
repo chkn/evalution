@@ -4,7 +4,38 @@
 import { expect, test } from "@playwright/experimental-ct-react";
 import { WelcomeWizardHarness } from "./WelcomeWizardHarness";
 
-const SETUP_TASKS = [
+const AGENT_TASKS = [
+  {
+    id: "claude-code",
+    label: "Claude Code",
+    icon: "Anthropic",
+    steps: [
+      {
+        kind: "run_command",
+        id: "launch",
+        command: 'claude "Fetch https://evalut.io/n/docs/setup.md"',
+        label: "Claude Code",
+        // Stubbed as unavailable so the disabled-launcher behaviour is testable.
+        disabledReason: "claude not found in PATH",
+      },
+    ],
+  },
+  {
+    id: "codex",
+    label: "Codex",
+    icon: "OpenAI",
+    steps: [
+      {
+        kind: "run_command",
+        id: "launch",
+        command: 'codex "Fetch https://evalut.io/n/docs/setup.md"',
+        label: "Codex",
+      },
+    ],
+  },
+];
+
+const SDK_TASKS = [
   {
     id: "vercel-ai-sdk",
     label: "AI SDK",
@@ -28,10 +59,10 @@ const SETUP_TASKS = [
   },
 ];
 
-// The manual-setup picker fetches its options from the server; stub them.
+// The setup step fetches its agent + SDK options from the server; stub them.
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/setup-tasks", route =>
-    route.fulfill({ json: SETUP_TASKS }),
+    route.fulfill({ json: { agent: AGENT_TASKS, sdk: SDK_TASKS } }),
   );
 });
 
@@ -55,6 +86,60 @@ test("starts on the setup step with no next/create-prompt action", async ({
   await expect(component.getByRole("button", { name: /Next/ })).toHaveCount(0);
 });
 
+test("a coding-agent button opens a terminal queued with its command", async ({
+  mount,
+}) => {
+  const component = await mount(<WelcomeWizardHarness />);
+
+  const agents = component.getByRole("group", { name: "Coding agent" });
+  await expect(
+    agents.getByRole("button", { name: "Claude Code" }),
+  ).toBeVisible();
+  await expect(agents.getByRole("button", { name: "Codex" })).toBeVisible();
+
+  await expect(component.getByTestId("last-terminal")).toHaveText("");
+  await agents.getByRole("button", { name: "Codex" }).click();
+
+  // taskId | stepId | command | label — see WelcomeWizardHarness. The command
+  // is the run_command step resolved from the fetched agent task.
+  await expect(component.getByTestId("last-terminal")).toHaveText(
+    'codex|launch|codex "Fetch https://evalut.io/n/docs/setup.md"|Codex',
+  );
+});
+
+test("a coding agent whose CLI is missing is disabled with the reason on hover", async ({
+  mount,
+}) => {
+  const component = await mount(<WelcomeWizardHarness />);
+
+  const agents = component.getByRole("group", { name: "Coding agent" });
+  // Claude Code is stubbed as unavailable.
+  await expect(
+    agents.getByRole("button", { name: "Claude Code" }),
+  ).toBeDisabled();
+  await expect(
+    component.locator(".setup-agent-option-wrap", { hasText: "Claude Code" }),
+  ).toHaveAttribute("title", "claude not found in PATH");
+
+  // Codex is available, so it stays enabled.
+  await expect(agents.getByRole("button", { name: "Codex" })).toBeEnabled();
+});
+
+test("the coding-agent Other button links to the agent issue template", async ({
+  mount,
+}) => {
+  const component = await mount(<WelcomeWizardHarness />);
+
+  const other = component
+    .getByRole("group", { name: "Coding agent" })
+    .getByRole("link", { name: "Other" });
+  await expect(other).toHaveAttribute(
+    "href",
+    "https://github.com/chkn/evalution/issues/new?template=agent-request.yml",
+  );
+  await expect(other).toHaveAttribute("target", "_blank");
+});
+
 test("manual setup lists the SDK steps and links other SDKs externally", async ({
   mount,
 }) => {
@@ -73,8 +158,52 @@ test("manual setup lists the SDK steps and links other SDKs externally", async (
   await expect(
     component.getByRole("button", { name: /AI SDK/ }),
   ).toHaveAttribute("aria-pressed", "true");
-  const other = component.getByRole("link", { name: "Other" });
+  const other = component
+    .getByRole("group", { name: "AI SDK" })
+    .getByRole("link", { name: "Other" });
+  await expect(other).toHaveAttribute(
+    "href",
+    "https://github.com/chkn/evalution/issues/new?template=sdk-request.yml",
+  );
   await expect(other).toHaveAttribute("target", "_blank");
+});
+
+test("a manual step with a disabledReason is disabled with the reason on hover", async ({
+  mount,
+  page,
+}) => {
+  await page.route("**/api/setup-tasks", route =>
+    route.fulfill({
+      json: {
+        agent: AGENT_TASKS,
+        sdk: [
+          {
+            id: "vercel-ai-sdk",
+            label: "AI SDK",
+            icon: "vercel",
+            steps: [
+              {
+                kind: "run_command",
+                id: "build",
+                command: "foo build",
+                label: "Build",
+                disabledReason: "foo not found in PATH",
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  const component = await mount(<WelcomeWizardHarness />);
+
+  const run = component.getByRole("button", { name: "Run" });
+  await expect(run).toBeDisabled();
+  // The reason lives on the wrapping span so it surfaces on hover.
+  await expect(component.locator(".setup-step-action-wrap")).toHaveAttribute(
+    "title",
+    "foo not found in PATH",
+  );
 });
 
 test("an already-installed package shows as installed, not runnable", async ({
@@ -83,15 +212,18 @@ test("an already-installed package shows as installed, not runnable", async ({
 }) => {
   await page.route("**/api/setup-tasks", route =>
     route.fulfill({
-      json: [
-        {
-          ...SETUP_TASKS[0],
-          steps: [
-            { ...SETUP_TASKS[0].steps[0], completed: true },
-            SETUP_TASKS[0].steps[1],
-          ],
-        },
-      ],
+      json: {
+        agent: AGENT_TASKS,
+        sdk: [
+          {
+            ...SDK_TASKS[0],
+            steps: [
+              { ...SDK_TASKS[0].steps[0], completed: true },
+              SDK_TASKS[0].steps[1],
+            ],
+          },
+        ],
+      },
     }),
   );
   const component = await mount(<WelcomeWizardHarness />);
@@ -143,7 +275,7 @@ test("all-set step links to the docs in a new tab", async ({ mount }) => {
   const docs = component.getByRole("link", { name: /Read the docs/ });
   await expect(docs).toHaveAttribute(
     "href",
-    "https://evalut.io/n/docs/getting-started",
+    "https://evalut.io/n/docs/prompts",
   );
   await expect(docs).toHaveAttribute("target", "_blank");
 });

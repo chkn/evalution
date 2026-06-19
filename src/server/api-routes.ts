@@ -31,7 +31,7 @@ function decodePromptId(encoded: string): string {
  * browser/service-worker bundle) omit it and the routes report "no tasks".
  */
 export interface SetupTaskHandlers {
-  resolve(rootPath: string): SetupTask[];
+  resolve(rootPath: string): { agent: SetupTask[]; sdk: SetupTask[] };
   executeStep(
     rootPath: string,
     taskId: string,
@@ -98,7 +98,7 @@ export function setupRoutes({
 
   // GET /api/setup-tasks - Onboarding tasks (with per-step completion status)
   app.get("/api/setup-tasks", c =>
-    c.json(setupTasks ? setupTasks.resolve(rootPath) : []),
+    c.json(setupTasks ? setupTasks.resolve(rootPath) : { agent: [], sdk: [] }),
   );
 
   // POST /api/setup-tasks/:taskId/steps/:stepId/execute - Run one onboarding step

@@ -90,10 +90,11 @@ export interface SetupInstallPackageStep extends SetupStepBase {
  * step's `id`; the client references a step only by those ids when asking the
  * server to run it.
  */
-export type SetupStep =
+export type SetupStep = { disabledReason?: string } & (
   | SetupCreateConfigStep
   | SetupRunCommandStep
-  | SetupInstallPackageStep;
+  | SetupInstallPackageStep
+);
 
 /**
  * The shell command a run-style step executes. `install_package` steps map to

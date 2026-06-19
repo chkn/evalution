@@ -4,12 +4,39 @@
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { AI_SDK_REGISTRY, findSetupStep } from "../sdk/registry.ts";
-import type {
-  SetupCreateConfigStep,
-  SetupStep,
-  SetupTask,
+import {
+  AGENT_REGISTRY,
+  findSetupStep as findAgentSetupStep,
+} from "../agent/registry.ts";
+import {
+  AI_SDK_REGISTRY,
+  findSetupStep as findSdkSetupStep,
+} from "../sdk/registry.ts";
+import {
+  type SetupCreateConfigStep,
+  type SetupStep,
+  type SetupTask,
+  setupStepCommand,
 } from "../shared/setup-task.ts";
+
+/** Onboarding tasks split by source, as returned to the client. */
+export interface ResolvedSetupTasks {
+  /** Coding-agent launchers (see `../agent/registry.ts`). */
+  agent: SetupTask[];
+  /** Manual AI-SDK setups (see `../sdk/registry.ts`). */
+  sdk: SetupTask[];
+}
+
+/**
+ * Resolves a setup step across both the agent and SDK registries by its
+ * `taskId`/`stepId`, or `undefined` if neither knows it.
+ */
+export function findSetupStep(
+  taskId: string,
+  stepId: string,
+): SetupStep | undefined {
+  return findSdkSetupStep(taskId, stepId) ?? findAgentSetupStep(taskId, stepId);
+}
 
 /**
  * Thrown when a requested task or step id does not exist in the registry. The
@@ -62,37 +89,84 @@ export async function executeSetupStep(
       // Command steps run in an interactive terminal over WebSocket; execution
       // lands in a later pass.
       throw new Error(`${step.kind} steps are not yet supported`);
+    default: {
+      // Ensures compile fails if we didn't handle all cases
+      const _never: never = step;
+      throw new Error();
+    }
   }
 }
 
 /**
- * Returns the onboarding tasks with each step's runtime
- * {@link SetupStepBase.completed | completion status} resolved against the
- * project at `rootPath` (config file present, package installed).
+ * Returns the onboarding tasks — coding agents and AI SDKs — with each step's
+ * runtime {@link SetupStepBase.completed | completion status} resolved against
+ * the project at `rootPath` (config file present, package installed).
  *
  * @param rootPath - Absolute path to the project root.
  */
-export function resolveSetupTasks(rootPath: string): SetupTask[] {
-  return AI_SDK_REGISTRY.map(cls => ({
-    ...cls.setupTask,
-    steps: cls.setupTask.steps.map(step => resolveStepStatus(rootPath, step)),
-  }));
+export function resolveSetupTasks(rootPath: string): ResolvedSetupTasks {
+  const resolve = (task: SetupTask): SetupTask => ({
+    ...task,
+    steps: task.steps.map(step => resolveStepStatus(rootPath, step)),
+  });
+  return {
+    agent: AGENT_REGISTRY.map(resolve),
+    sdk: AI_SDK_REGISTRY.map(cls => resolve(cls.setupTask)),
+  };
 }
 
 /** Adds the runtime `completed` flag to a single step where determinable. */
 function resolveStepStatus(rootPath: string, step: SetupStep): SetupStep {
   switch (step.kind) {
-    case "install_package":
-      return { ...step, completed: isPackageInstalled(rootPath, step.package) };
     case "create_config":
       return {
         ...step,
         completed: fsSync.existsSync(path.join(rootPath, step.path)),
       };
-    case "run_command":
-      // No reliable way to know whether an arbitrary command has been run.
-      return step;
+    case "install_package":
+    case "run_command": {
+      const result = { ...step };
+      if (step.kind === "install_package") {
+        result.completed = isPackageInstalled(rootPath, step.package);
+      }
+      const bin = setupStepCommand(step).split(/\s+/)[0];
+      if (bin && !isBinaryOnPath(bin)) {
+        result.disabledReason = `${bin} not found in PATH`;
+      }
+      return result;
+    }
+    default: {
+      // Ensures compile fails if we didn't handle all cases
+      const _never: never = step;
+      throw new Error();
+    }
   }
+}
+
+/**
+ * Whether an executable named `bin` is resolvable on the current `PATH`. Used
+ * to disable coding-agent launchers whose CLI isn't installed. Honours
+ * `PATHEXT` on Windows; elsewhere it requires the file to be executable.
+ *
+ * @param bin - The bare executable name to look for, e.g. `claude`.
+ */
+export function isBinaryOnPath(bin: string): boolean {
+  const dirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  const exts =
+    process.platform === "win32"
+      ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";")
+      : [""];
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      try {
+        fsSync.accessSync(path.join(dir, bin + ext), fsSync.constants.X_OK);
+        return true;
+      } catch {
+        // Not in this directory, or not executable; keep looking.
+      }
+    }
+  }
+  return false;
 }
 
 /**

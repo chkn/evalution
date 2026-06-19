@@ -23,7 +23,7 @@ export function AllSetStep({ onCreatePrompt }: WizardStepProps) {
         className="welcome-link"
         href={GETTING_STARTED_URL}
         target="_blank"
-        rel="noreferrer"
+        rel="noopener"
       >
         Read the docs ↗
       </a>

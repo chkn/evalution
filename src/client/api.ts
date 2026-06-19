@@ -29,8 +29,16 @@ async function throwIfError(res: Response): Promise<void> {
   }
 }
 
-/** Fetches the onboarding setup tasks shown in the manual-setup picker. */
-export async function getSetupTasks(): Promise<SetupTask[]> {
+/** Onboarding setup tasks, split into coding-agent launchers and AI SDKs. */
+export interface SetupTasks {
+  /** Coding-agent launchers shown as one-click buttons. */
+  agent: SetupTask[];
+  /** AI SDKs shown in the manual-setup picker. */
+  sdk: SetupTask[];
+}
+
+/** Fetches the onboarding setup tasks (coding agents and AI SDKs). */
+export async function getSetupTasks(): Promise<SetupTasks> {
   const res = await fetch("/api/setup-tasks");
   await throwIfError(res);
   return res.json();

@@ -3335,6 +3335,29 @@ pre {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  margin-top: 12px;
+}
+
+/* Wraps a disabled button so it can still show its reason on hover (disabled
+   buttons don't fire pointer events / surface a title). */
+.setup-agent-option-wrap,
+.setup-step-action-wrap {
+  display: inline-flex;
+}
+
+/* The wrapper only ever holds a disabled action button, so the "blocked"
+   cursor belongs here — a disabled <button> won't show its own `cursor`. */
+.setup-step-action-wrap {
+  cursor: not-allowed;
+}
+
+.setup-sdk-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.setup-sdk-option:disabled:hover {
+  background: var(--content-card-bg);
 }
 
 .setup-sdk-option {
@@ -3534,7 +3557,7 @@ pre {
 }
 
 .setup-step {
-  padding: 10px 0;
+  padding: 6px 0;
   border-bottom: 1px solid var(--panel-border);
 }
 .setup-step:last-child {
@@ -3603,10 +3626,37 @@ pre {
   gap: 12px;
   flex-shrink: 0;
 }
-/* Light separator between adjacent action links (e.g. View | Create). */
-.setup-step-action > * + * {
-  border-left: 1px solid var(--panel-border);
-  padding-left: 12px;
+
+/* The actionable step buttons ("Create"/"Install"/"Run"): styled as real
+   buttons (not text links) so their disabled state reads clearly. The
+   "Show/Hide" expander stays a plain link. A shared min-width keeps them the
+   same size across rows (so "Install" lines up with "Create"). */
+.setup-step-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 85px;
+  background: var(--content-card-bg);
+  color: var(--panel-text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.setup-step-btn:hover:not(:disabled) {
+  background: var(--pill-hover-bg);
+}
+.setup-step-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* Tints the leading glyph blue while the label keeps the button text colour. */
+.setup-step-btn-icon {
+  flex-shrink: 0;
+  color: var(--link);
 }
 
 .setup-step-status {

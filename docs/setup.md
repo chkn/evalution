@@ -92,7 +92,7 @@ Locate every model call in the codebase (e.g. `generateText`/`streamText` calls)
 import { prompts } from "@evalution/vercel-ai-sdk";
 
 export default prompts(
-  "greetings", // <- this is an ID that should be unique and not change
+  { id: "greetings" }, // <- this is an ID that should be unique and not change
 
   // Destructure model providers here instead of importing them directly.
   // e.g. this instead of `import { openai } from "@ai-sdk/openai"`

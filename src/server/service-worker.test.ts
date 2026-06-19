@@ -157,7 +157,7 @@ describe("createMemoryApp", () => {
     const { app } = await makeApp();
     const res = await app.request("/api/setup-tasks");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual([]);
+    expect(await res.json()).toEqual({ agent: [], sdk: [] });
   });
 
   it("broadcasts prompt-changed over /api/events when a file is written", async () => {

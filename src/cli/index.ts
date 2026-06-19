@@ -6,6 +6,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { EvalutionConfig } from "../config.ts";
 import { startServer } from "../server/index.ts";
+import { TerminalSessionRegistry } from "../server/terminal.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { registerEvalutionResolver } from "./config-loader-hooks.ts";
 import { watchForConfigCreation } from "./config-watcher.ts";
@@ -65,6 +66,7 @@ function startConfiguredServer(
   config: EvalutionConfig,
   hasConfig: boolean,
   port: number,
+  terminalSessions: TerminalSessionRegistry,
 ) {
   if (config.useDotenv !== false) {
     applyDotenv(rootDir);
@@ -79,6 +81,7 @@ function startConfiguredServer(
     port,
     rootPath: rootDir,
     hasConfig,
+    terminalSessions,
   });
 }
 
@@ -113,12 +116,17 @@ async function main() {
     if (!process.env.EVALUTION_NO_OPEN) openBrowser(url);
   };
 
+  // Lives across the onboarding restart below so a coding agent's PTY survives
+  // being temporarily disconnected and the reconnecting client resumes it.
+  const terminalSessions = new TerminalSessionRegistry();
+
   if (hasConfig) {
     const handle = await startConfiguredServer(
       rootDir,
       await loadConfig(rootDir),
       true,
       port,
+      terminalSessions,
     );
     maybeOpen(handle.url);
     return;
@@ -127,7 +135,13 @@ async function main() {
   // No config yet: start in onboarding mode with defaults so the UI (and its
   // `POST /api/config/create` route) is reachable, then watch for the config
   // file to appear and restart the server with the real config once it does.
-  let server = await startConfiguredServer(rootDir, {}, false, port);
+  let server = await startConfiguredServer(
+    rootDir,
+    {},
+    false,
+    port,
+    terminalSessions,
+  );
   maybeOpen(server.url);
   console.log(
     `👀 No config found; watching ${path.join(rootDir, ".evalution", "config.ts")} for creation...`,
@@ -141,7 +155,13 @@ async function main() {
     console.log("⚙️ Config loaded; restarting server...");
     stopWatching();
     await server.close();
-    server = await startConfiguredServer(rootDir, config, true, port);
+    server = await startConfiguredServer(
+      rootDir,
+      config,
+      true,
+      port,
+      terminalSessions,
+    );
   });
 }
 

@@ -20,9 +20,11 @@ export function WelcomeWizardHarness({
 }: WelcomeWizardHarnessProps) {
   const [createPromptCalls, setCreatePromptCalls] = useState(0);
   const [configured, setConfigured] = useState(initialConfigured);
+  const [lastTerminal, setLastTerminal] = useState("");
   return (
     <div className="main-content" style={{ width: 700, height: 700 }}>
       <div data-testid="create-prompt-calls">{createPromptCalls}</div>
+      <div data-testid="last-terminal">{lastTerminal}</div>
       <button
         type="button"
         data-testid="load-config"
@@ -33,6 +35,9 @@ export function WelcomeWizardHarness({
       <WelcomeWizard
         configured={configured}
         onCreatePrompt={() => setCreatePromptCalls(c => c + 1)}
+        onOpenTerminal={(taskId, stepId, command, label) =>
+          setLastTerminal(`${taskId}|${stepId}|${command}|${label ?? ""}`)
+        }
       />
     </div>
   );
