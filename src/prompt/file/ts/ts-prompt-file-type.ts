@@ -570,13 +570,15 @@ function resolveBindingsAndAugment(
     true,
   );
 
-  // Per-destructure list of names to add (deduped, position-sorted later).
-  const destructureAdditions = new Map<ts.ObjectBindingPattern, Set<string>>();
+  // Per-target list of callee names to introduce (deduped, position-sorted
+  // later). A target is either an existing destructure to augment or a factory
+  // whose (empty) parameter list needs a fresh destructure created.
+  const targetAdditions = new Map<DestructureTarget, Set<string>>();
 
   const resolveCandidate = (
     _fc: Extract<ModelPropValue, { kind: "functionCall" }>,
     candidates: CalleeBinding[],
-  ): { binding?: CalleeBinding; viaDestructure?: ts.ObjectBindingPattern } => {
+  ): { binding?: CalleeBinding; viaDestructure?: DestructureTarget } => {
     for (const c of candidates) {
       if (c.kind === "parameter") {
         const dest = findEnclosingCallDestructure(sourceFile, c.enclosingCall);
@@ -596,9 +598,9 @@ function resolveBindingsAndAugment(
     const result = resolveCandidate(fc, candidates);
     if (result.viaDestructure) {
       const set =
-        destructureAdditions.get(result.viaDestructure) ?? new Set<string>();
+        targetAdditions.get(result.viaDestructure) ?? new Set<string>();
       set.add(fc.callee);
-      destructureAdditions.set(result.viaDestructure, set);
+      targetAdditions.set(result.viaDestructure, set);
       const { binding: _drop, ...rest } = fc;
       return rest as Extract<PropValue, { kind: "functionCall" }>;
     }
@@ -612,40 +614,71 @@ function resolveBindingsAndAugment(
     return rest as Extract<PropValue, { kind: "functionCall" }>;
   });
 
-  // Apply destructure augmentations from latest position to earliest so earlier
-  // spans remain valid through the textual edits.
-  const augmentations = [...destructureAdditions.entries()]
-    .map(([dest, names]) => {
+  // Build the textual edits, then apply them from latest position to earliest so
+  // earlier spans remain valid through the edits.
+  const edits = [...targetAdditions.entries()]
+    .map(([target, names]) => {
       const existing = new Set<string>();
-      for (const el of dest.elements) {
+      for (const el of target.pattern?.elements ?? []) {
         if (ts.isIdentifier(el.name)) existing.add(el.name.text);
       }
       const toAdd = [...names].filter(n => !existing.has(n));
-      return { dest, toAdd };
+      if (toAdd.length === 0) return null;
+
+      if (target.pattern) {
+        // Augment an existing destructure: insert before the `}`.
+        const isEmpty = target.pattern.elements.length === 0;
+        return {
+          end: target.pattern.getEnd(),
+          apply: (src: string) => {
+            let offset = target.pattern!.getEnd() - 1; // position of `}`
+            while (src[offset - 1] === " ") offset--;
+            const insertion =
+              (isEmpty ? " " : ", ") + toAdd.join(", ") + (isEmpty ? " " : "");
+            return src.slice(0, offset) + insertion + src.slice(offset);
+          },
+        };
+      }
+
+      // Create a destructure in the factory's empty parameter list: turn
+      // `() => …` into `({ a, b }) => …`.
+      const openParen = target.paramOpenParen;
+      return {
+        end: openParen + 1,
+        apply: (src: string) =>
+          src.slice(0, openParen + 1) +
+          `{ ${toAdd.join(", ")} }` +
+          src.slice(openParen + 1),
+      };
     })
-    .filter(a => a.toAdd.length > 0)
-    .sort((a, b) => b.dest.getEnd() - a.dest.getEnd());
+    .filter((e): e is NonNullable<typeof e> => e !== null)
+    .sort((a, b) => b.end - a.end);
 
   let nextSource = sourceCode;
-  for (const { dest, toAdd } of augmentations) {
-    let closeOffset = dest.getEnd() - 1; // position of `}`
-    while (nextSource[closeOffset - 1] === " ") closeOffset--;
-    const isEmpty = dest.elements.length === 0;
-    const insertion =
-      (isEmpty ? " " : ", ") + toAdd.join(", ") + (isEmpty ? " " : "");
-    nextSource =
-      nextSource.slice(0, closeOffset) +
-      insertion +
-      nextSource.slice(closeOffset);
-  }
+  for (const edit of edits) nextSource = edit.apply(nextSource);
 
   return { sourceCode: nextSource, value: adjusted };
 }
 
 /**
- * Find the destructured first parameter of a call matching `enclosingCall` at
- * the top level of `sourceFile`. Returns null when no such call exists or when
- * its first parameter is not an object binding pattern.
+ * A place to introduce a destructured callee for a `parameter` binding: either
+ * an existing object binding pattern to augment, or a factory whose empty
+ * parameter list needs a destructure created at `paramOpenParen` (the offset of
+ * its `(`).
+ */
+type DestructureTarget =
+  | { pattern: ts.ObjectBindingPattern; paramOpenParen?: undefined }
+  | { pattern?: undefined; paramOpenParen: number };
+
+/**
+ * Find where to bind a callee against the destructured first parameter of a
+ * call matching `enclosingCall` at the top level of `sourceFile`.
+ *
+ * Returns the existing object binding pattern when the factory already
+ * destructures its first parameter, or — when the factory takes no parameters
+ * yet (e.g. a freshly-created `() => …` skeleton) — a target describing where to
+ * create one. Returns null when no matching call exists or when its first
+ * parameter is present but is not an object binding pattern.
  *
  * When `enclosingCall.import` is provided, the callee identifier must resolve
  * to a named import matching that spec.
@@ -653,7 +686,7 @@ function resolveBindingsAndAugment(
 function findEnclosingCallDestructure(
   sourceFile: ts.SourceFile,
   enclosingCall?: { callee: string; import?: { name: string; from: string } },
-): ts.ObjectBindingPattern | null {
+): DestructureTarget | null {
   if (!enclosingCall) return null;
 
   const importOk = enclosingCall.import
@@ -665,7 +698,7 @@ function findEnclosingCallDestructure(
     : true;
   if (!importOk) return null;
 
-  let found: ts.ObjectBindingPattern | null = null;
+  let found: DestructureTarget | null = null;
   const visit = (node: ts.Node): void => {
     if (found) return;
     if (
@@ -682,9 +715,22 @@ function findEnclosingCallDestructure(
       if (factory) {
         const param = factory.parameters[0];
         if (param?.name && ts.isObjectBindingPattern(param.name)) {
-          found = param.name;
+          found = { pattern: param.name };
           return;
         }
+        if (!param) {
+          // No parameter yet: create a destructure inside the empty `()`.
+          const openParen = sourceFile.text.indexOf(
+            "(",
+            factory.getStart(sourceFile),
+          );
+          if (openParen >= 0) {
+            found = { paramOpenParen: openParen };
+            return;
+          }
+        }
+        // A non-destructure parameter (e.g. `(providers) => …`) isn't a target —
+        // fall through so an `import` candidate can match instead.
       }
     }
     ts.forEachChild(node, visit);

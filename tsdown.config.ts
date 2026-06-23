@@ -9,7 +9,7 @@ export default defineConfig({
   outDir: "dist",
   dts: true,
   deps: {
-    neverBundle: ["typescript", "ai", "chokidar", "minimatch"],
+    neverBundle: ["typescript", "ai", "@google/genai", "chokidar", "minimatch"],
   },
   // Emit `.js`/`.d.ts` rather than tsdown's default `.mjs`/`.d.mts`.
   // The package is `"type": "module"`, so `.js` is already ESM, which keeps the

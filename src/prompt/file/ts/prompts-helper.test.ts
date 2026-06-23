@@ -341,6 +341,43 @@ export default prompts({ id: 'helper' }, ({ openai }) => ({
       );
     });
 
+    it("creates a destructure parameter when a blank skeleton's factory has no params", async () => {
+      const filePath = "/virtual/blank.prompt.ts";
+      const fp = new MemoryFileProvider({});
+      const ft = new TSPromptFileType(fp);
+      const skeleton = ft.newPromptSkeleton(
+        "prompt2",
+        "newPrompt",
+        "@evalution/vercel-ai-sdk",
+      );
+      await fp.writeFile(filePath, skeleton);
+
+      await ft.addProperty(filePath, "newPrompt", "model", {
+        kind: "functionCall",
+        callee: "anthropic",
+        args: [{ kind: "primitive", value: "claude-opus-4-7" }],
+        binding: [
+          {
+            kind: "parameter",
+            enclosingCall: {
+              callee: "prompts",
+              import: { name: "prompts", from: "@evalution/vercel-ai-sdk" },
+            },
+          },
+          {
+            kind: "import",
+            spec: { name: "anthropic", from: "@ai-sdk/anthropic" },
+          },
+        ],
+      });
+
+      const after = await fp.readFile(filePath);
+      expect(after).toContain('anthropic("claude-opus-4-7")');
+      // The factory's empty `()` becomes a destructure, not a top-level import.
+      expect(after).toContain("({ anthropic }) => ({");
+      expect(after).not.toContain("@ai-sdk/anthropic");
+    });
+
     it("renames a helper-defined prompt", async () => {
       const filePath = "/virtual/helper.prompt.ts";
       const fp = new MemoryFileProvider({ [filePath]: sample });

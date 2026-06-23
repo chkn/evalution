@@ -3,7 +3,7 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalFileProvider } from "../file-provider-local.ts";
 import { TSPromptFileType } from "../prompt/file/ts/ts-prompt-file-type.ts";
 import type {
@@ -12,6 +12,18 @@ import type {
   PropValue,
 } from "../shared/types.ts";
 import { GeminiInteractionsSDK } from "./gemini-interactions-sdk.ts";
+
+// `@google/genai` is an optional peer dependency that the adapter imports
+// lazily inside `executeConfig`. Mock it so the test exercises that
+// dynamic-import path without depending on the real package.
+const { createMock, GoogleGenAIMock } = vi.hoisted(() => {
+  const createMock = vi.fn();
+  return {
+    createMock,
+    GoogleGenAIMock: vi.fn(() => ({ interactions: { create: createMock } })),
+  };
+});
+vi.mock("@google/genai", () => ({ GoogleGenAI: GoogleGenAIMock }));
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -385,6 +397,23 @@ describe("GeminiInteractionsSDK", () => {
         {},
       );
       expect(Object.keys(raw)).toEqual(["model"]);
+    });
+  });
+
+  describe("executeConfig", () => {
+    beforeEach(() => {
+      createMock.mockReset();
+      GoogleGenAIMock.mockClear();
+    });
+
+    it("lazily imports `@google/genai` and creates a non-persisted interaction", async () => {
+      const config = {
+        model: "gemini-3-flash-preview",
+        input: "hi",
+      } as Parameters<typeof sdk.executeConfig>[0];
+      await sdk.executeConfig(config);
+      expect(GoogleGenAIMock).toHaveBeenCalledTimes(1);
+      expect(createMock).toHaveBeenCalledWith({ ...config, store: false });
     });
   });
 

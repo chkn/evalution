@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import fs from "node:fs";
-import { GoogleGenAI } from "@google/genai";
 import type { PropDefinition, PropValue } from "ts-proppy";
 import {
   extractPropertiesFromDeclaration,
@@ -21,8 +20,11 @@ import type {
 } from "../shared/types.ts";
 import { findPackageDts, type SDKAdapter } from "./sdk-adapter.ts";
 
+// Use an `import(...)` type query so the type is derived from `@google/genai`
+// without emitting a runtime import — the package is an optional peer
+// dependency, imported lazily in `executeConfig`.
 type BaseCreateInteractionParams = Parameters<
-  typeof GoogleGenAI.prototype.interactions.create
+  typeof import("@google/genai").GoogleGenAI.prototype.interactions.create
 >[0];
 
 const MODEL_KEY = "model";
@@ -277,6 +279,9 @@ export class GeminiInteractionsSDK implements SDKAdapter {
   }
 
   async executeConfig(config: BaseCreateInteractionParams): Promise<void> {
+    // Import `@google/genai` lazily so it stays an optional peer dependency:
+    // only users who execute a Gemini Interactions prompt need it installed.
+    const { GoogleGenAI } = await import("@google/genai");
     const client = new GoogleGenAI({});
     await client.interactions.create({ ...config, store: false });
   }

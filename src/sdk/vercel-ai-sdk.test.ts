@@ -1,11 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VercelAISDK } from "./vercel-ai-sdk.ts";
+
+// `ai` is an optional peer dependency that the adapter imports lazily inside
+// `executeConfig`. Mock it so the test exercises that dynamic-import path
+// without depending on the real package being resolvable.
+const { generateTextMock } = vi.hoisted(() => ({ generateTextMock: vi.fn() }));
+vi.mock("ai", () => ({ generateText: generateTextMock }));
 
 describe("VercelAISDK", () => {
   const sdk = new VercelAISDK();
+
+  describe("executeConfig", () => {
+    beforeEach(() => generateTextMock.mockReset());
+
+    it("lazily imports `ai` and delegates to generateText with the config", async () => {
+      const config = { model: "anthropic/claude-opus-4-8", prompt: "hi" };
+      await sdk.executeConfig(config);
+      expect(generateTextMock).toHaveBeenCalledTimes(1);
+      expect(generateTextMock).toHaveBeenCalledWith(config);
+    });
+  });
 
   describe("getModelCatalog", () => {
     it("exposes both OpenAI and Anthropic provider groups", async () => {

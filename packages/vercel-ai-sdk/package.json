@@ -19,7 +19,7 @@
   },
   "peerDependencies": {
     "@opentelemetry/api": "^1.9.0",
-    "ai": ">=3.4.0",
+    "ai": ">=3.4.0-0",
     "@ai-sdk/amazon-bedrock": "*",
     "@ai-sdk/anthropic": "*",
     "@ai-sdk/assemblyai": "*",

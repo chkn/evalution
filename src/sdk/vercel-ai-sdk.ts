@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import fs from "node:fs";
-import { generateText } from "ai";
 import type { PropDefinition, PropValue } from "ts-proppy";
 import {
   extractPropertiesFromDeclaration,
@@ -289,6 +288,11 @@ export class VercelAISDK implements SDKAdapter {
   }
 
   async executeConfig(config: any): Promise<void> {
+    // Import `ai` lazily so it stays an optional peer dependency: only users
+    // who actually execute a Vercel AI SDK prompt need the package installed,
+    // and execution runs against the consumer's own copy of `ai` (the same
+    // instance their provider/model objects were built with).
+    const { generateText } = await import("ai");
     await generateText(config);
   }
 
