@@ -112,8 +112,10 @@ async function main() {
   // Open the browser once the first server is listening. Subsequent restarts
   // (after a config file appears) reuse the same URL, so we don't reopen.
   // `EVALUTION_NO_OPEN` opts out (CI, remote/headless hosts).
-  const maybeOpen = (url: string) => {
-    if (!process.env.EVALUTION_NO_OPEN) openBrowser(url);
+  const maybeOpen = async (url: string) => {
+    if (process.env.EVALUTION_NO_OPEN) return;
+    await new Promise(r => setTimeout(r, 250));
+    openBrowser(url);
   };
 
   // Lives across the onboarding restart below so a coding agent's PTY survives
@@ -128,7 +130,7 @@ async function main() {
       port,
       terminalSessions,
     );
-    maybeOpen(handle.url);
+    await maybeOpen(handle.url);
     return;
   }
 
@@ -142,7 +144,7 @@ async function main() {
     port,
     terminalSessions,
   );
-  maybeOpen(server.url);
+  await maybeOpen(server.url);
   console.log(
     `👀 No config found; watching ${path.join(rootDir, ".evalution", "config.ts")} for creation...`,
   );
