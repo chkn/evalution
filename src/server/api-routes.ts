@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { SpanStatusCode, type Tracer } from "@opentelemetry/api";
+import {
+  isSpanContextValid,
+  SpanStatusCode,
+  type Tracer,
+} from "@opentelemetry/api";
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
@@ -284,37 +288,44 @@ export function setupRoutes({
         return c.json({ error: "Prompt not found" }, 404);
       }
 
-      const response = tracer.startActiveSpan(prompt.name, span => {
-        const { traceId } = span.spanContext();
+      const response = await tracer.startActiveSpan(prompt.name, async span => {
+        const ctx = span.spanContext();
+        // On the native (v7) path no OTel tracer provider is registered, so the
+        // no-op tracer hands back the all-zero *invalid* span context — the same
+        // value for every call. Mint our own unique id then, and name the root
+        // span the way the native ingestor does (`${traceId}:root`) so the
+        // client's initial span selection resolves. On the OTel/v6 path the span
+        // context is real and must be reused: the OTel ingestor records its
+        // spans under that same trace id.
+        const native = !isSpanContextValid(ctx);
+        const traceId = native ? crypto.randomUUID() : ctx.traceId;
+        const rootSpanId = native ? `${traceId}:root` : ctx.spanId;
 
-        // Fire-and-forget the real execution; the root span is closed
-        // when it settles. Child spans emitted via the active context
-        // will be parented correctly.
-        provider
-          .execute(decodedId, functionParams)
-          .then(
-            () => {
-              span.setStatus({ code: SpanStatusCode.OK });
-            },
-            (err: any) => {
-              console.error("prompt execution failed:", err);
-              span.recordException(err);
-              span.setStatus({
-                code: SpanStatusCode.ERROR,
-                message: err?.error
-                  ? JSON.stringify(err.error, null, 2)
-                  : (err?.message ?? String(err)),
-              });
-            },
-          )
-          .finally(() => {
-            span.end();
+        // The trace is created lazily by the telemetry ingestor when the root
+        // span starts. A client that opens the returned trace id before then
+        // polls `GET /api/traces/:p/:id` until it appears (see the client's
+        // `getTrace`), so no server-side pre-creation is needed.
+        try {
+          await provider.execute(decodedId, functionParams, { traceId });
+        } catch (err: any) {
+          console.error("prompt execution failed:", err);
+          span.recordException(err);
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: err?.error
+              ? JSON.stringify(err.error, null, 2)
+              : (err?.message ?? String(err)),
           });
+          span.end();
+          throw err;
+        }
 
+        span.setStatus({ code: SpanStatusCode.OK });
+        span.end();
         return {
           traceId,
+          rootSpanId,
           tracerProviderId: defaultTraceProviderId,
-          rootSpanId: span.spanContext().spanId,
         } satisfies ExecuteResponse;
       });
 
@@ -392,13 +403,13 @@ export function setupRoutes({
         }
       }
 
-      const unsubscribe = provider.subscribeTrace(id, event => {
+      const unsubscribe = provider.subscribeTrace?.(id, event => {
         void stream.writeSSE({ data: JSON.stringify(resolveEvent(event)) });
       });
 
       await new Promise<void>(resolve => {
         stream.onAbort(() => {
-          unsubscribe();
+          unsubscribe?.();
           resolve();
         });
       });

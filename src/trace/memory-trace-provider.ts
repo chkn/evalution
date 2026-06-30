@@ -2,31 +2,32 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type { Span, Trace, TraceSummary } from "../shared/types.ts";
-import {
-  BaseOTelTraceProvider,
-  mergeSpans,
-} from "./base-otel-trace-provider.ts";
+import { mergeSpans } from "./span-merge.ts";
+import type { TraceIngestor } from "./trace-ingestor.ts";
+import { BaseTraceProvider } from "./trace-sink.ts";
 
 /**
- * In-memory {@link TraceProvider} populated by OpenTelemetry spans.
- *
- * Register the processor returned by {@link getSpanProcessor} on a
- * `BasicTracerProvider` (from `@opentelemetry/sdk-trace-base`).
+ * In-memory {@link TraceProvider}, populated by one or more
+ * {@link TraceIngestor}s connected at construction time.
  */
-export class MemoryTraceProvider extends BaseOTelTraceProvider {
+export class MemoryTraceProvider extends BaseTraceProvider {
   private traces = new Map<string, Trace>();
   private spansByTrace = new Map<string, Span[]>();
 
   constructor({
     id = "memory",
     displayName = "In-Memory Traces",
-    description = "Stores OpenTelemetry spans in memory for the current process.",
-  }: { id?: string; displayName?: string; description?: string } = {}) {
-    super({
-      id,
-      displayName,
-      description,
-    });
+    description = "Stores traces in memory for the current process.",
+    ingestors = [],
+  }: {
+    id?: string;
+    displayName?: string;
+    description?: string;
+    /** Ingestors to connect to this provider as a sink. */
+    ingestors?: TraceIngestor[];
+  } = {}) {
+    super({ id, displayName, description });
+    for (const ingestor of ingestors) ingestor.addSink(this);
   }
 
   async getAllTraces(): Promise<TraceSummary[]> {

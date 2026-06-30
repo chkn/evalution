@@ -1,15 +1,38 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { valueToSourceText } from "ts-proppy";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemoryFileProvider } from "../../file-provider-memory.ts";
-import { VercelAISDK } from "../../sdk/vercel-ai-sdk.ts";
+import { VercelAISDK } from "../../sdk/vercel-ai-sdk/index.ts";
 import type { NormalizedPrompt, PropValue } from "../../shared/types.ts";
 import { FilePromptProvider } from "./file-prompt-provider.ts";
+
+/** Virtual root all in-memory prompt files live under. */
+const ROOT = "/virtual";
+
+/** Builds an absolute path inside the virtual root. */
+function p(relPath: string): string {
+  return `${ROOT}/${relPath}`;
+}
+
+/**
+ * Spins up a {@link FilePromptProvider} backed by a {@link MemoryFileProvider}
+ * — no disk access. Returns the provider plus the file provider so tests can
+ * drive writes/deletes (which fire watch callbacks synchronously).
+ */
+function setup(files: Record<string, string> = {}) {
+  const fileProvider = new MemoryFileProvider(files);
+  const provider = new FilePromptProvider({
+    rootDir: ROOT,
+    fileProvider,
+    sdk: new VercelAISDK(),
+  });
+  return { provider, fileProvider };
+}
+
+/** Flushes pending microtasks/timers so async watch callbacks can run. */
+const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
 /** Look up a parameter value by name on a normalized prompt. */
 function getParameter(
@@ -20,27 +43,9 @@ function getParameter(
 }
 
 describe("FilePromptProvider", () => {
-  let tempDir: string;
-  let provider: FilePromptProvider;
-
-  beforeEach(async () => {
-    tempDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), "evalution-provider-test-"),
-    );
-    provider = new FilePromptProvider({
-      rootDir: tempDir,
-      sdk: new VercelAISDK(),
-    });
-  });
-
-  afterEach(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
   it("should return all prompts from all files", async () => {
-    await fs.writeFile(
-      path.join(tempDir, "test1.prompt.ts"),
-      `
+    const { provider } = setup({
+      [p("test1.prompt.ts")]: `
 export function prompt1() {
   return {
     model: 'openai/gpt-4o',
@@ -48,11 +53,7 @@ export function prompt1() {
   };
 }
 `,
-    );
-
-    await fs.writeFile(
-      path.join(tempDir, "test2.prompt.ts"),
-      `
+      [p("test2.prompt.ts")]: `
 export function prompt2() {
   return {
     model: 'openai/gpt-4o',
@@ -60,7 +61,7 @@ export function prompt2() {
   };
 }
 `,
-    );
+    });
 
     const prompts = await provider.getAllPrompts();
 
@@ -70,10 +71,8 @@ export function prompt2() {
   });
 
   it("should return specific prompt by ID", async () => {
-    const filePath = path.join(tempDir, "test.prompt.ts");
-    await fs.writeFile(
-      filePath,
-      `
+    const { provider } = setup({
+      [p("test.prompt.ts")]: `
 export function myPrompt() {
   return {
     model: 'openai/gpt-4o',
@@ -81,7 +80,7 @@ export function myPrompt() {
   };
 }
 `,
-    );
+    });
 
     const promptId = `test.prompt.ts#myPrompt`;
     const prompt = await provider.getPrompt(promptId);
@@ -92,16 +91,43 @@ export function myPrompt() {
   });
 
   it("should return null for non-existent ID", async () => {
+    const { provider } = setup();
     const prompt = await provider.getPrompt("/fake/path.ts#nonexistent");
 
     expect(prompt).toBeNull();
   });
 
+  it("execute forwards the trace id and prompt identity to the SDK adapter", async () => {
+    const fileProvider = new MemoryFileProvider({
+      [p("id.prompt.ts")]:
+        `export function greet() { return { model: 'openai/gpt-4o', system: 'hi' }; }`,
+    });
+    const sdk = new VercelAISDK();
+    const spy = vi.spyOn(sdk, "executeConfig").mockResolvedValue(undefined);
+    const provider = new FilePromptProvider({
+      rootDir: ROOT,
+      fileProvider,
+      sdk,
+    });
+
+    await provider.execute("id.prompt.ts#greet", ["Ada"], {
+      traceId: "trace-x",
+    });
+
+    expect(spy).toHaveBeenCalledWith(expect.anything(), {
+      traceId: "trace-x",
+      identity: {
+        id: "id.prompt.ts#greet",
+        name: "greet",
+        functionParameters: ["Ada"],
+      },
+    });
+  });
+
   it("should update editable property", async () => {
-    const filePath = path.join(tempDir, "test.prompt.ts");
-    await fs.writeFile(
-      filePath,
-      `
+    const filePath = p("test.prompt.ts");
+    const { provider, fileProvider } = setup({
+      [filePath]: `
 export function myPrompt() {
   return {
     model: 'openai/gpt-4o',
@@ -109,7 +135,7 @@ export function myPrompt() {
   };
 }
 `,
-    );
+    });
 
     const promptId = `${filePath}#myPrompt`;
     const updatedPrompt = await provider.updatePromptProperties(promptId, {
@@ -121,15 +147,14 @@ export function myPrompt() {
       value: "New value",
     });
 
-    const fileContent = await fs.readFile(filePath, "utf-8");
+    const fileContent = await fileProvider.readFile(filePath);
     expect(fileContent).toContain('"New value"');
   });
 
   it("should return updated sourceText on model property after mode switch", async () => {
-    const filePath = path.join(tempDir, "test.prompt.ts");
-    await fs.writeFile(
-      filePath,
-      `
+    const filePath = p("test.prompt.ts");
+    const { provider } = setup({
+      [filePath]: `
 import { openai } from '@ai-sdk/openai';
 
 export function myPrompt() {
@@ -139,7 +164,7 @@ export function myPrompt() {
   };
 }
 `,
-    );
+    });
 
     const promptId = `${filePath}#myPrompt`;
     const updatedPrompt = await provider.updatePromptProperties(promptId, {
@@ -150,10 +175,9 @@ export function myPrompt() {
   });
 
   it("should throw error for read-only property", async () => {
-    const filePath = path.join(tempDir, "test.prompt.ts");
-    await fs.writeFile(
-      filePath,
-      `
+    const filePath = p("test.prompt.ts");
+    const { provider } = setup({
+      [filePath]: `
 function getDynamic() {
   return 'dynamic';
 }
@@ -165,7 +189,7 @@ export function myPrompt() {
   };
 }
 `,
-    );
+    });
 
     const promptId = `${filePath}#myPrompt`;
 
@@ -177,6 +201,7 @@ export function myPrompt() {
   });
 
   it("should throw error for non-existent prompt", async () => {
+    const { provider } = setup();
     await expect(
       provider.updatePromptProperties("/fake/path.ts#fake", {
         system: { kind: "primitive", value: "New" },
@@ -185,10 +210,9 @@ export function myPrompt() {
   });
 
   it("should add a new property when key does not exist", async () => {
-    const filePath = path.join(tempDir, "test.prompt.ts");
-    await fs.writeFile(
-      filePath,
-      `
+    const filePath = p("test.prompt.ts");
+    const { provider } = setup({
+      [filePath]: `
 export function myPrompt() {
   return {
     model: 'openai/gpt-4o',
@@ -196,7 +220,7 @@ export function myPrompt() {
   };
 }
 `,
-    );
+    });
 
     const promptId = `${filePath}#myPrompt`;
 
@@ -209,18 +233,18 @@ export function myPrompt() {
   });
 
   it("should support watching", () => {
+    const { provider } = setup();
     expect(provider.watch).toBeDefined();
   });
 
   it("should support editing", () => {
+    const { provider } = setup();
     expect(provider.updatePromptProperties).toBeDefined();
   });
 
   it("should handle files with multiple exported functions correctly", async () => {
-    const filePath = path.join(tempDir, "test.prompt.ts");
-    await fs.writeFile(
-      filePath,
-      `
+    const { provider } = setup({
+      [p("test.prompt.ts")]: `
 export function prompt1() {
   return {
     model: 'openai/gpt-4o',
@@ -235,7 +259,7 @@ export function prompt2() {
   };
 }
 `,
-    );
+    });
 
     const prompts = await provider.getAllPrompts();
 
@@ -245,10 +269,9 @@ export function prompt2() {
   });
 
   it("should re-parse file after update to return fresh data", async () => {
-    const filePath = path.join(tempDir, "test.prompt.ts");
-    await fs.writeFile(
-      filePath,
-      `
+    const filePath = p("test.prompt.ts");
+    const { provider } = setup({
+      [filePath]: `
 export function myPrompt() {
   return {
     model: 'openai/gpt-4o',
@@ -256,7 +279,7 @@ export function myPrompt() {
   };
 }
 `,
-    );
+    });
 
     const promptId = `${filePath}#myPrompt`;
 
@@ -271,10 +294,9 @@ export function myPrompt() {
   });
 
   it("should call callback on file changes", async () => {
-    const filePath = path.join(tempDir, "test.prompt.ts");
-    await fs.writeFile(
-      filePath,
-      `
+    const filePath = p("test.prompt.ts");
+    const { provider, fileProvider } = setup({
+      [filePath]: `
 export function myPrompt() {
   return {
     model: 'openai/gpt-4o',
@@ -282,7 +304,7 @@ export function myPrompt() {
   };
 }
 `,
-    );
+    });
 
     // Initialize provider by loading prompts
     await provider.getAllPrompts();
@@ -292,11 +314,8 @@ export function myPrompt() {
       events.push(event);
     });
 
-    // Wait a bit for watcher to initialize
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    // Modify file
-    await fs.writeFile(
+    // Modify the file — MemoryFileProvider fires the watch callback.
+    await fileProvider.writeFile(
       filePath,
       `
 export function myPrompt() {
@@ -307,9 +326,7 @@ export function myPrompt() {
 }
 `,
     );
-
-    // Wait for event
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await tick();
 
     cleanup();
 
@@ -318,33 +335,28 @@ export function myPrompt() {
   });
 
   it("getAllPrompts does not throw after a watched file is deleted", async () => {
-    const fileProvider = new MemoryFileProvider({
-      "/virtual/test.prompt.ts": `
+    const filePath = p("test.prompt.ts");
+    const { provider, fileProvider } = setup({
+      [filePath]: `
 export function myPrompt() {
   return { model: 'openai/gpt-4o', system: 'Test' };
 }
 `,
     });
-    const watchedProvider = new FilePromptProvider({
-      rootDir: "/virtual",
-      fileProvider,
-      sdk: new VercelAISDK(),
-    });
 
-    expect(await watchedProvider.getAllPrompts()).toHaveLength(1);
+    expect(await provider.getAllPrompts()).toHaveLength(1);
 
-    const cleanup = watchedProvider.watch!(() => {});
-    await fileProvider.deleteFile("/virtual/test.prompt.ts");
+    const cleanup = provider.watch!(() => {});
+    await fileProvider.deleteFile(filePath);
     cleanup();
 
-    await expect(watchedProvider.getAllPrompts()).resolves.toHaveLength(0);
+    await expect(provider.getAllPrompts()).resolves.toHaveLength(0);
   });
 
   it("should cleanup watcher when cleanup function is called", async () => {
-    const filePath = path.join(tempDir, "test.prompt.ts");
-    await fs.writeFile(
-      filePath,
-      `
+    const filePath = p("test.prompt.ts");
+    const { provider, fileProvider } = setup({
+      [filePath]: `
 export function myPrompt() {
   return {
     model: 'openai/gpt-4o',
@@ -352,19 +364,16 @@ export function myPrompt() {
   };
 }
 `,
-    );
+    });
 
     await provider.getAllPrompts();
 
     const callback = vi.fn();
     const cleanup = provider.watch!(callback);
-
-    await new Promise(resolve => setTimeout(resolve, 100));
-
     cleanup();
 
     // Modify file after cleanup
-    await fs.writeFile(
+    await fileProvider.writeFile(
       filePath,
       `
 export function myPrompt() {
@@ -375,8 +384,7 @@ export function myPrompt() {
 }
 `,
     );
-
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await tick();
 
     // Callback should not be called after cleanup
     expect(callback).not.toHaveBeenCalled();
@@ -386,8 +394,8 @@ export function myPrompt() {
     // Suppression moved to the client (see client/self-edits.ts) so that
     // multiple clients sharing one workspace stay in sync; the provider now
     // emits change events for its own writes too.
-    const fileProvider = new MemoryFileProvider({
-      "/virtual/test.prompt.ts": `
+    const { provider } = setup({
+      [p("test.prompt.ts")]: `
 export function myPrompt() {
   return {
     model: 'openai/gpt-4o',
@@ -396,25 +404,17 @@ export function myPrompt() {
 }
 `,
     });
-    const watchedProvider = new FilePromptProvider({
-      rootDir: "/virtual",
-      fileProvider,
-      sdk: new VercelAISDK(),
-    });
 
-    await watchedProvider.getAllPrompts();
+    await provider.getAllPrompts();
 
     const events: { type: string; promptId: string }[] = [];
-    const cleanup = watchedProvider.watch!(e => events.push(e));
+    const cleanup = provider.watch!(e => events.push(e));
 
-    await watchedProvider.updatePromptProperties(
-      "/virtual/test.prompt.ts#myPrompt",
-      {
-        system: { kind: "primitive", value: "Updated locally" },
-      },
-    );
+    await provider.updatePromptProperties(`${p("test.prompt.ts")}#myPrompt`, {
+      system: { kind: "primitive", value: "Updated locally" },
+    });
     // The watch callback re-parses asynchronously before emitting.
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await tick();
 
     cleanup();
 
@@ -427,23 +427,18 @@ export function myPrompt() {
 
   describe("file scanning", () => {
     it("should find .prompt.ts files recursively", async () => {
-      await fs.mkdir(path.join(tempDir, "subdir"), { recursive: true });
-      await fs.writeFile(
-        path.join(tempDir, "test.prompt.ts"),
-        `
+      const { provider } = setup({
+        [p("test.prompt.ts")]: `
 export function testPrompt() {
   return { model: 'openai/gpt-4o', system: 'Test' };
 }
 `,
-      );
-      await fs.writeFile(
-        path.join(tempDir, "subdir", "nested.prompt.ts"),
-        `
+        [p("subdir/nested.prompt.ts")]: `
 export function nestedPrompt() {
   return { model: 'openai/gpt-4o', system: 'Nested' };
 }
 `,
-      );
+      });
 
       const prompts = await provider.getAllPrompts();
       expect(prompts).toHaveLength(2);
@@ -452,33 +447,27 @@ export function nestedPrompt() {
     });
 
     it("should find .promp.ts files (typo pattern)", async () => {
-      await fs.writeFile(
-        path.join(tempDir, "typo.promp.ts"),
-        `
+      const { provider } = setup({
+        [p("typo.promp.ts")]: `
 export function typoPrompt() {
   return { model: 'openai/gpt-4o', system: 'Typo' };
 }
 `,
-      );
+      });
 
       const prompts = await provider.getAllPrompts();
       expect(prompts.some(p => p.name === "typoPrompt")).toBe(true);
     });
 
     it("should ignore node_modules directory", async () => {
-      await fs.mkdir(path.join(tempDir, "node_modules"), { recursive: true });
-      await fs.writeFile(
-        path.join(tempDir, "node_modules", "test.prompt.ts"),
-        `
+      const { provider } = setup({
+        [p("node_modules/test.prompt.ts")]: `
 export function ignored() { return { model: 'openai/gpt-4o', system: 'Ignored' }; }
 `,
-      );
-      await fs.writeFile(
-        path.join(tempDir, "valid.prompt.ts"),
-        `
+        [p("valid.prompt.ts")]: `
 export function valid() { return { model: 'openai/gpt-4o', system: 'Valid' }; }
 `,
-      );
+      });
 
       const prompts = await provider.getAllPrompts();
       expect(prompts).toHaveLength(1);
@@ -486,29 +475,25 @@ export function valid() { return { model: 'openai/gpt-4o', system: 'Valid' }; }
     });
 
     it("should use custom includePatterns and ignorePatterns", async () => {
-      const customProvider = new FilePromptProvider({
-        rootDir: tempDir,
-        includePatterns: ["**/*.custom.ts"],
-        ignorePatterns: [],
-        sdk: new VercelAISDK(),
-      });
-
-      await fs.writeFile(
-        path.join(tempDir, "test.custom.ts"),
-        `
+      const fileProvider = new MemoryFileProvider({
+        [p("test.custom.ts")]: `
 export function customPrompt() {
   return { model: 'openai/gpt-4o', system: 'Custom' };
 }
 `,
-      );
-      await fs.writeFile(
-        path.join(tempDir, "test.prompt.ts"),
-        `
+        [p("test.prompt.ts")]: `
 export function regularPrompt() {
   return { model: 'openai/gpt-4o', system: 'Regular' };
 }
 `,
-      );
+      });
+      const customProvider = new FilePromptProvider({
+        rootDir: ROOT,
+        fileProvider,
+        includePatterns: ["**/*.custom.ts"],
+        ignorePatterns: [],
+        sdk: new VercelAISDK(),
+      });
 
       const prompts = await customProvider.getAllPrompts();
       expect(prompts).toHaveLength(1);

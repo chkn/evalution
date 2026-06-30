@@ -36,10 +36,22 @@ export type {
   PromptFileType,
 } from "./prompt/file/prompt-file-type.ts";
 export { TSPromptFileType } from "./prompt/file/ts/ts-prompt-file-type.ts";
-export type { PromptProvider } from "./prompt/prompt-provider.ts";
+export type {
+  ExecuteOptions,
+  PromptProvider,
+} from "./prompt/prompt-provider.ts";
 export { GeminiInteractionsSDK } from "./sdk/gemini-interactions-sdk.ts";
-export type { SDKAdapter } from "./sdk/sdk-adapter.ts";
-export { VercelAISDK } from "./sdk/vercel-ai-sdk.ts";
+export type {
+  ExecuteConfigOptions,
+  SDKAdapter,
+} from "./sdk/sdk-adapter.ts";
+export { VercelAISDK } from "./sdk/vercel-ai-sdk/index.ts";
+export {
+  type PerPromptTelemetry,
+  type PerTraceTelemetry,
+  VercelAISDKTelemetry,
+  type VercelAISDKTelemetryOptions,
+} from "./sdk/vercel-ai-sdk/telemetry.ts";
 export type {
   AddPromptContext,
   AddPromptField,
@@ -69,6 +81,7 @@ export type {
   Span,
   SpanKind,
   SpanMessage,
+  ToolSpanDetails,
   Trace,
   TraceChangeEvent,
   TraceChangeType,
@@ -78,6 +91,7 @@ export type {
   TraceWithSpans,
 } from "./shared/types.ts";
 export { MemoryTraceProvider } from "./trace/memory-trace-provider.ts";
+export { OTelTraceIngestor } from "./trace/otel-trace-ingestor.ts";
 export {
   createTracerForPrompt,
   getPromptSpanAttributes,
@@ -91,4 +105,10 @@ export {
   type PromptsHelperOptions,
   SPAN_KIND_ATTRIBUTE,
 } from "./trace/prompt-tracer.ts";
+export { mergeSpans } from "./trace/span-merge.ts";
+export {
+  BaseTraceIngestor,
+  type TraceIngestor,
+} from "./trace/trace-ingestor.ts";
 export type { TraceProvider } from "./trace/trace-provider.ts";
+export { BaseTraceProvider, type TraceSink } from "./trace/trace-sink.ts";

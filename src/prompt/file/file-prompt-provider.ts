@@ -11,7 +11,7 @@ import type {
   NormalizedPromptUpdates,
   PromptChangeEvent,
 } from "../../shared/types.ts";
-import type { PromptProvider } from "../prompt-provider.ts";
+import type { ExecuteOptions, PromptProvider } from "../prompt-provider.ts";
 import type {
   FilePromptMetadata,
   NormalizedFilePrompt,
@@ -199,10 +199,24 @@ export class FilePromptProvider
     return this.sdkAdapter.getModelParameters(this.rootDir);
   }
 
-  async execute(promptId: string, params: any[]): Promise<void> {
+  async execute(
+    promptId: string,
+    params: any[],
+    { traceId }: ExecuteOptions = {},
+  ): Promise<void> {
     const [filePath, promptName] = this.parsePromptId(promptId);
     const config = await this.fileType.loadConfig(filePath, promptName, params);
-    await this.sdkAdapter.executeConfig(config);
+    // Pass the prompt identity so a config that didn't go through the
+    // `prompts()` helper still produces a named trace linked back to the
+    // prompt. `promptId` is the provider-scoped id the registry resolves on.
+    return this.sdkAdapter.executeConfig(config, {
+      traceId,
+      identity: { id: promptId, name: promptName, functionParameters: params },
+    });
+  }
+
+  async setupTraceIngestion() {
+    return this.sdkAdapter.setupTraceIngestion?.();
   }
 
   async renamePrompt(

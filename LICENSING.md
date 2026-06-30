@@ -52,13 +52,23 @@ permissively licensed code:
 
 - The package takes **no runtime dependency** on the AGPL core — only
   `peerDependencies` on `ai` and the `@ai-sdk/*` packages.
-- It does bundle one file from the core,
-  [`src/trace/prompt-tracer.ts`](./src/trace/prompt-tracer.ts), via the build.
-  That file is **dual-licensed `MIT OR AGPL-3.0-only`** (see its SPDX header),
+- It does bundle a handful of files from the core, via the build:
+  [`src/trace/prompt-tracer.ts`](./src/trace/prompt-tracer.ts),
+  [`src/trace/trace-types.ts`](./src/trace/trace-types.ts),
+  [`src/trace/trace-sink.ts`](./src/trace/trace-sink.ts),
+  [`src/trace/trace-ingestor.ts`](./src/trace/trace-ingestor.ts), and
+  [`src/sdk/vercel-ai-sdk/telemetry.ts`](./src/sdk/vercel-ai-sdk/telemetry.ts).
+  Each is **dual-licensed `MIT OR AGPL-3.0-only`** (see its SPDX header),
   so the bytes that land in the MIT package are genuinely MIT.
-- `prompt-tracer.ts` must stay **self-contained** (only `@opentelemetry/api`).
-  If it ever imports from elsewhere in the core, the bundler would pull
-  AGPL-only code into the MIT artifact and break this guarantee.
+- Those files must stay **self-contained** — only `@opentelemetry/api`, a
+  type-only `ai` import, and each other. If any of them ever imports from
+  elsewhere in the core, the bundler would pull AGPL-only code into the MIT
+  artifact and break this guarantee. (The AGPL-only `BaseTraceProvider`,
+  `OTelTraceIngestor`, `MemoryTraceProvider`, and `span-merge.ts` stay on the
+  core side of that boundary, even though `BaseTraceProvider` lives in the
+  same dual-licensed `trace-sink.ts` file as the `TraceSink` interface — it
+  has no AGPL-only dependencies of its own, so this holds without further
+  bookkeeping.)
 
 ## Contributing
 

@@ -281,6 +281,8 @@ export class GeminiInteractionsSDK implements SDKAdapter {
   async executeConfig(config: BaseCreateInteractionParams): Promise<void> {
     // Import `@google/genai` lazily so it stays an optional peer dependency:
     // only users who execute a Gemini Interactions prompt need it installed.
+    // This adapter has no tracing support, so it ignores the route's `traceId`
+    // and produces no spans.
     const { GoogleGenAI } = await import("@google/genai");
     const client = new GoogleGenAI({});
     await client.interactions.create({ ...config, store: false });

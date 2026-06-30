@@ -8,11 +8,11 @@ import {
   findTypeDeclaration,
 } from "ts-proppy";
 import ts from "typescript";
-import { isEditable } from "../shared/helpers.ts";
+import { isEditable } from "../../shared/helpers.ts";
 import {
   CONFIG_FILE_RELATIVE_PATH,
   type SetupTask,
-} from "../shared/setup-task.ts";
+} from "../../shared/setup-task.ts";
 import type {
   CalleeBinding,
   ModelInfo,
@@ -23,8 +23,22 @@ import type {
   NormalizedPromptUpdates,
   NormalizedToolCall,
   ParsedPrompt,
-} from "../shared/types.ts";
-import { findPackageDts, type SDKAdapter } from "./sdk-adapter.ts";
+} from "../../shared/types.ts";
+import { OTelTraceIngestor } from "../../trace/otel-trace-ingestor.ts";
+import type { TraceIngestor } from "../../trace/trace-ingestor.ts";
+import {
+  type ExecuteConfigOptions,
+  findPackageDts,
+  type SDKAdapter,
+} from "../sdk-adapter.ts";
+import {
+  isPerPromptTelemetry,
+  isVercelAISDKTelemetry,
+  type PerPromptTelemetry,
+  type PerTraceTelemetry,
+  toArray,
+  VercelAISDKTelemetry,
+} from "./telemetry.ts";
 
 const MODEL_KEY = "model";
 const SYSTEM_KEY = "system";
@@ -166,6 +180,14 @@ export default {
 } satisfies EvalutionConfig;
 `;
 
+// Module-level (not instance-level) cache: the global telemetry pipeline
+// (`registerTelemetry` for v7, or the OTel tracer provider + context manager
+// for v6) is process-global state, so it must be set up at most once even if
+// multiple `VercelAISDK` adapters are configured.
+// FIXME: Some of the OTel stuff could conflict if another SDK that uses OTel
+// is also configured in this process.
+let globalIngestionSetup: Promise<TraceIngestor | undefined> | undefined;
+
 /**
  * {@link SDKAdapter} implementation for the
  * [Vercel AI SDK](https://sdk.vercel.ai/).
@@ -287,13 +309,111 @@ export class VercelAISDK implements SDKAdapter {
     return FALLBACK_CALL_SETTINGS_PARAMS;
   }
 
-  async executeConfig(config: any): Promise<void> {
+  async executeConfig(
+    config: any,
+    { traceId, identity }: ExecuteConfigOptions = {},
+  ): Promise<void> {
     // Import `ai` lazily so it stays an optional peer dependency: only users
     // who actually execute a Vercel AI SDK prompt need the package installed,
     // and execution runs against the consumer's own copy of `ai` (the same
     // instance their provider/model objects were built with).
     const { generateText } = await import("ai");
-    await generateText(config);
+
+    let integration: PerTraceTelemetry | undefined;
+    if (traceId) {
+      // On v7, the `prompts()` helper may have swapped a per-call integration
+      // (from `VercelAISDKTelemetry.createTelemetryForPrompt`) into `config.telemetry`.
+      const integrations = toArray(config?.telemetry?.integrations);
+      const i = integrations.findIndex(isPerPromptTelemetry);
+      if (i >= 0) {
+        integration = (integrations[i] as PerPromptTelemetry).withTraceId(
+          traceId,
+        );
+        config = {
+          ...config,
+          telemetry: {
+            ...config.telemetry,
+            integrations: integrations.with(i, integration),
+          },
+        };
+      } else {
+        // No helper-provided integration (a raw config executed in the
+        // playground). Bind the registered native telemetry to the route's
+        // traceId so its spans land in the trace the route pre-created. Without
+        // this the global fallback would record under its own freshly-minted id
+        // — producing a *second*, anonymous trace alongside the empty one the
+        // route created. The prompt provider passes the prompt `identity` so the
+        // trace is still named and linked back to the prompt, even though this
+        // config didn't go through the `prompts()` helper.
+        const ingestor = await globalIngestionSetup;
+        if (isVercelAISDKTelemetry(ingestor)) {
+          integration = ingestor
+            .createTelemetryForPrompt(identity)
+            .withTraceId(traceId);
+          config = {
+            ...config,
+            telemetry: {
+              ...config.telemetry,
+              // Drop the global instance from the per-call list (it would
+              // double-record) and add the route-bound one.
+              integrations: [
+                ...integrations.filter(t => !isVercelAISDKTelemetry(t)),
+                integration,
+              ],
+            },
+          };
+        }
+      }
+    }
+
+    // Fire-and-forget: the route only needs the (already-known) traceId to
+    // respond; the actual generation continues in the background and is
+    // recorded via the attached telemetry integration's lifecycle events. A
+    // rejection before any event fires (e.g. a bad model id) would otherwise
+    // leave the pre-created trace hanging in `running` forever.
+    generateText(config).catch((err: any) => {
+      void integration?.fail(err?.message ?? String(err));
+      console.error("prompt execution failed:", err);
+    });
+  }
+
+  setupTraceIngestion(): Promise<TraceIngestor | undefined> {
+    globalIngestionSetup ??= this.doSetupTraceIngestion();
+    return globalIngestionSetup;
+  }
+
+  private async doSetupTraceIngestion(): Promise<TraceIngestor | undefined> {
+    const ai = await import("ai");
+
+    if (typeof ai.registerTelemetry === "function") {
+      // v7+: native telemetry, no OTel detour needed.
+      const telemetry = new VercelAISDKTelemetry();
+      ai.registerTelemetry(telemetry);
+      return telemetry;
+    }
+
+    // v6: stand up the global OTel pipeline so `experimental_telemetry`
+    // spans land somewhere, and so async-context-propagated child spans
+    // (e.g. from a wrapped tracer) are parented correctly.
+    const { context, trace } = await import("@opentelemetry/api");
+    const { AsyncLocalStorageContextManager } = await import(
+      "@opentelemetry/context-async-hooks"
+    );
+    const { BasicTracerProvider } = await import(
+      "@opentelemetry/sdk-trace-base"
+    );
+
+    const ingestor = new OTelTraceIngestor();
+    const tracerProvider = new BasicTracerProvider({
+      spanProcessors: [ingestor.getSpanProcessor()],
+    });
+    trace.setGlobalTracerProvider(tracerProvider);
+
+    const contextManager = new AsyncLocalStorageContextManager();
+    contextManager.enable();
+    context.setGlobalContextManager(contextManager);
+
+    return ingestor;
   }
 
   normalizePrompt(prompt: ParsedPrompt): NormalizedPrompt {

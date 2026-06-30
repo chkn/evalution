@@ -3,7 +3,7 @@
 
 import type { SetupStep, SetupTask } from "../shared/setup-task.ts";
 import type { SDKAdapter } from "./sdk-adapter.ts";
-import { VercelAISDK } from "./vercel-ai-sdk.ts";
+import { VercelAISDK } from "./vercel-ai-sdk/index.ts";
 
 /**
  * The static side of an {@link SDKAdapter} class: it must be constructible and

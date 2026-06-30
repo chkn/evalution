@@ -8,6 +8,7 @@ import type { EvalutionConfig } from "../config.ts";
 import { startServer } from "../server/index.ts";
 import { TerminalSessionRegistry } from "../server/terminal.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
+import type { TraceIngestor } from "../trace/trace-ingestor.ts";
 import { registerEvalutionResolver } from "./config-loader-hooks.ts";
 import { watchForConfigCreation } from "./config-watcher.ts";
 import { findAvailablePort } from "./find-port.ts";
@@ -61,7 +62,7 @@ function applyDotenv(rootDir: string): void {
   }
 }
 
-function startConfiguredServer(
+async function startConfiguredServer(
   rootDir: string,
   config: EvalutionConfig,
   hasConfig: boolean,
@@ -73,7 +74,22 @@ function startConfiguredServer(
   }
 
   const promptProviders = config.promptProviders ?? [];
-  const traceProviders = config.traceProviders ?? [new MemoryTraceProvider()];
+  let traceProviders = config.traceProviders;
+  if (!traceProviders) {
+    // Each adapter runs its own SDK-specific setup and returns the resulting
+    // ingestor — we stand up nothing here beyond the default provider.
+    const collected = (
+      await Promise.all(promptProviders.map(p => p.setupTraceIngestion?.()))
+    ).filter((i): i is TraceIngestor => !!i);
+
+    // Drop ingestors a kept one reports redundant (e.g. a 2nd OTelTraceIngestor
+    // — OTel is one process-global pipeline).
+    const ingestors: TraceIngestor[] = [];
+    for (const ing of collected) {
+      if (!ingestors.some(kept => kept.isRedundant?.(ing))) ingestors.push(ing);
+    }
+    traceProviders = [new MemoryTraceProvider({ ingestors })];
+  }
 
   return startServer({
     promptProviders,

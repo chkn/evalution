@@ -68,9 +68,12 @@ export const PROMPT_PROVIDER_ID_ATTRIBUTE = "evalution.prompt.provider.id";
 export const PROMPT_INPUTS_ATTRIBUTE = "evalution.prompt.inputs";
 
 export interface PromptSpanInfo {
-  name: string;
+  /** Globally-unique prompt id (e.g. `${groupId}#${name}`). */
   id?: string;
-  functionParameters?: any[];
+  /** Human-readable prompt name. */
+  name: string;
+  /** Positional arguments the prompt function was called with. */
+  functionParameters?: unknown[];
 }
 
 export function getPromptSpanAttributes(

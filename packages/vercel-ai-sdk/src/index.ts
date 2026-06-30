@@ -8,11 +8,19 @@
 import { createRequire } from "node:module";
 import type { generateText, streamText } from "ai";
 
-// Bundled in by tsup; pulls just these symbols without taking a
-// runtime dependency on the rest of the `evalution` package.
+// The following are bundled in by tsdown to pull in just these
+// symbols without taking a runtime dependency on the rest of the
+// `evalution` package.
+import {
+  VercelAISDKTelemetry as Evalution,
+  type VercelAISDKTelemetryOptions as EvalutionOptions,
+  isVercelAISDKTelemetry,
+  toArray,
+} from "../../../src/sdk/vercel-ai-sdk/telemetry.js";
 import {
   createTracerForPrompt,
   getPromptSpanAttributes,
+  type PromptSpanInfo,
   type PromptsHelper,
   type PromptsHelperOptions,
 } from "../../../src/trace/prompt-tracer.js";
@@ -217,16 +225,73 @@ class LazilyImportedProviders implements Providers {
   }
 }
 
+export {
+  createTracerForPrompt,
+  Evalution,
+  type EvalutionOptions,
+  getPromptSpanAttributes,
+  type PromptSpanInfo,
+};
+
 /**
- * Re-exported from evalution: wraps a tracer so the spans it produces are
- * attributed to a named prompt. Used internally by {@link prompts} and exposed
- * for callers who configure `experimental_telemetry` themselves.
+ * Wraps an `@ai-sdk/otel` `OpenTelemetry` integration so its (TS-private,
+ * runtime-accessible) `enrichSpan` also carries prompt attributes — v7
+ * dropped `telemetry.metadata`, so this is how identity reaches OTel spans
+ * when `Evalution` defers to OTel. Best-effort: a `Proxy` is fine as long as
+ * the target has no real `#private` state.
  */
-export { createTracerForPrompt, getPromptSpanAttributes };
+function withEnrichedSpan<T extends object>(
+  otel: T,
+  identity: PromptSpanInfo,
+): T {
+  return new Proxy(otel, {
+    get(target: any, prop, receiver) {
+      if (
+        prop === "enrichSpan" &&
+        (typeof target.enrichSpan === "function" ||
+          target.enrichSpan === undefined)
+      ) {
+        return (...args: any[]) => {
+          const base = target.enrichSpan?.(...args) ?? {};
+          return getPromptSpanAttributes(identity, base);
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
+
+function buildNativeTelemetry(
+  config: Prompt,
+  identity: PromptSpanInfo,
+): Prompt["telemetry"] {
+  const telemetry = config.telemetry;
+  const baseList =
+    telemetry?.integrations !== undefined
+      ? toArray(telemetry.integrations)
+      : toArray(globalThis.AI_SDK_TELEMETRY_INTEGRATIONS);
+
+  const evalution = baseList.find(isVercelAISDKTelemetry);
+  const otel = baseList.find(i => i?.constructor?.name === "OpenTelemetry");
+
+  const nativeTelemetry = evalution?.nativeTelemetry ?? "auto";
+  const defer =
+    nativeTelemetry === "never" || (nativeTelemetry === "auto" && !!otel);
+
+  const integrations = baseList.filter(i => i !== evalution && i !== otel);
+  if (evalution && !defer) {
+    integrations.push(evalution.createTelemetryForPrompt(identity));
+  }
+  if (otel) {
+    integrations.push(withEnrichedSpan(otel, identity));
+  }
+
+  return { ...telemetry, integrations };
+}
 
 type GenerateTextConfig = Parameters<typeof generateText>[0];
 type StreamTextConfig = Parameters<typeof streamText>[0];
-type Prompt = GenerateTextConfig | StreamTextConfig; // | Agent<any, any, any>; // (agent not supported yet)
+export type Prompt = GenerateTextConfig | StreamTextConfig; // | Agent<any, any, any>; // (agent not supported yet)
 
 /**
  * Helper for defining Evalution prompt modules using the Vercel AI SDK.
@@ -282,24 +347,27 @@ export const prompts = (<
         // Agent instances aren't plain config objects — leave them untouched.
         if (!isPlainConfig(config)) return config;
 
-        const existing = config.experimental_telemetry;
+        const identity: PromptSpanInfo = {
+          name,
+          id: `${id}#${name}`,
+          functionParameters: args,
+        };
+
+        const experimental_telemetry = config.experimental_telemetry as any;
         return {
           ...config,
+
+          // >= v7
+          telemetry: buildNativeTelemetry(config, identity),
+
+          // < v7
           experimental_telemetry: {
             isEnabled: true,
 
-            // FIXME: Have options to disable these
-            recordInputs: true,
-            recordOutputs: true,
-
-            ...existing,
+            ...experimental_telemetry,
             metadata: getPromptSpanAttributes(
-              {
-                name,
-                id: `${id}#${name}`,
-                functionParameters: args,
-              },
-              existing?.metadata,
+              identity,
+              experimental_telemetry?.metadata,
             ),
           },
         };

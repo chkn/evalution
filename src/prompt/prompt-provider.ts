@@ -9,7 +9,16 @@ import type {
   PromptChangeEvent,
   PropDefinition,
 } from "../shared/types.ts";
+import type { TraceIngestor } from "../trace/trace-ingestor.ts";
 import type { PromptFileType } from "./file/prompt-file-type.ts";
+
+/**
+ * Optional settings for {@link PromptProvider.execute}.
+ */
+export interface ExecuteOptions {
+  /** The ID to use for the trace created by this execution, if any. */
+  traceId?: string;
+}
 
 /**
  * A source of prompts that the playground can display and execute.
@@ -64,8 +73,21 @@ export interface PromptProvider<
    *
    * @param promptId - ID of the prompt to run.
    * @param params - Positional arguments forwarded to the prompt function.
+   * @param options - Optional execution settings; see {@link ExecuteOptions}.
    */
-  execute(promptId: string, params: any[]): Promise<void>;
+  execute(
+    promptId: string,
+    params: any[],
+    options?: ExecuteOptions,
+  ): Promise<void>;
+
+  /**
+   * Performs whatever process-global setup this provider's tracing mechanism
+   * needs and returns the resulting {@link TraceIngestor}.
+   *
+   * Optional — providers with no tracing support may omit it.
+   */
+  setupTraceIngestion?(): Promise<TraceIngestor | undefined>;
 
   /**
    * Returns the model catalog (known providers and popular models) for this

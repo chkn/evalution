@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { Context, HrTime, SpanStatus } from "@opentelemetry/api";
+import type { HrTime, SpanStatus } from "@opentelemetry/api";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type {
   Span as OTelSpan,
@@ -9,19 +9,15 @@ import type {
   SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import { otelOperationToSpanKind } from "../shared/helpers.ts";
+import { SPAN_KIND_ATTRIBUTE } from "./prompt-tracer.ts";
+import { BaseTraceIngestor, type TraceIngestor } from "./trace-ingestor.ts";
 import type {
   LLMSpanDetails,
   PromptID,
   Span,
   SpanKind,
   SpanMessage,
-  Trace,
-  TraceChangeEvent,
-  TraceStreamEvent,
-  TraceSummary,
-  TraceWithSpans,
-} from "../shared/types.ts";
-import { SPAN_KIND_ATTRIBUTE, type TraceProvider } from "./trace-provider.ts";
+} from "./trace-types.ts";
 
 const KNOWN_KINDS: readonly SpanKind[] = [
   "LLM",
@@ -200,111 +196,28 @@ function mapStatus(status: SpanStatus): "ok" | "error" | undefined {
 }
 
 /**
- * Merges a later snapshot of a span into an earlier one.
+ * {@link TraceIngestor} populated by OpenTelemetry spans. Register the
+ * processor returned by {@link getSpanProcessor} on a `BasicTracerProvider`
+ * (from `@opentelemetry/sdk-trace-base`).
  *
- * OpenTelemetry reports each span twice — at `onStart` (creation-time
- * attributes only) and at `onEnd` (the full set) — and the two snapshots can
- * carry complementary data. This unions their `attributes` and lets any
- * *defined* field on `incoming` update `existing`, so nothing recorded at start
- * is lost when the span ends, and end-only fields (status, timings, token
- * usage, …) are filled in.
+ * Because OpenTelemetry is a single process-global pipeline, at most one
+ * `OTelTraceIngestor` should be active per server — {@link isRedundant}
+ * reports any other instance redundant so server wiring can consolidate.
  */
-export function mergeSpans(existing: Span, incoming: Span): Span {
-  const merged = { ...existing } as Record<string, unknown>;
-  for (const [key, value] of Object.entries(incoming)) {
-    if (value !== undefined) merged[key] = value;
-  }
-  const result = merged as unknown as Span;
-  if (existing.attributes || incoming.attributes) {
-    result.attributes = { ...existing.attributes, ...incoming.attributes };
-  }
-  return result;
-}
-
-/**
- * Base class for a {@link TraceProvider} populated by OpenTelemetry spans.
- *
- * Register the processor returned by {@link getSpanProcessor} on a
- * `BasicTracerProvider` (from `@opentelemetry/sdk-trace-base`).
- */
-export abstract class BaseOTelTraceProvider implements TraceProvider {
-  readonly id: string;
-  readonly displayName?: string;
-  readonly description?: string;
-
-  private subscribers = new Map<
-    string,
-    Set<(event: TraceStreamEvent) => void>
-  >();
-  private watchers = new Set<(event: TraceChangeEvent) => void>();
+export class OTelTraceIngestor extends BaseTraceIngestor {
   private spanPromises = new Map<string, Promise<void>>();
 
-  constructor(options: {
-    id: string;
-    displayName: string;
-    description: string;
-  }) {
-    this.id = options.id;
-    this.displayName = options.displayName;
-    this.description = options.description;
-  }
-
-  abstract getAllTraces(): Promise<TraceSummary[]>;
-
-  abstract hasTrace(traceId: string): Promise<boolean>;
-
-  protected abstract getTraceWithoutSpans(
-    traceId: string,
-  ): Promise<Trace | undefined>;
-
-  protected abstract getTraceSpans(traceId: string): Promise<Span[]>;
-
-  protected abstract addOrUpdateTrace(trace: Trace): Promise<void>;
-
-  /**
-   * Stores a span, merging it into any existing span with the same ID (via the
-   * internal `mergeSpans` helper). Returns the resulting stored span so callers can
-   * stream the merged view rather than the partial snapshot they passed in.
-   */
-  protected abstract addOrUpdateSpan(span: Span): Promise<Span>;
-
-  async getTrace(traceId: string): Promise<TraceWithSpans | undefined> {
-    const trace = await this.getTraceWithoutSpans(traceId);
-    if (!trace) return undefined;
-    const spans = await this.getTraceSpans(traceId);
-    return { trace, spans };
-  }
-
-  subscribeTrace(
-    traceId: string,
-    callback: (event: TraceStreamEvent) => void,
-  ): () => void {
-    let set = this.subscribers.get(traceId);
-    if (!set) {
-      set = new Set();
-      this.subscribers.set(traceId, set);
-    }
-    set.add(callback);
-    return () => {
-      set!.delete(callback);
-      if (set!.size === 0) this.subscribers.delete(traceId);
-    };
-  }
-
-  watch(callback: (event: TraceChangeEvent) => void): () => void {
-    this.watchers.add(callback);
-    return () => {
-      this.watchers.delete(callback);
-    };
+  isRedundant(other: TraceIngestor): boolean {
+    return other instanceof OTelTraceIngestor;
   }
 
   /**
    * Returns a `SpanProcessor` that funnels every OpenTelemetry span the
-   * caller's tracer produces into this provider's in-memory store.
+   * caller's tracer produces into this ingestor's sinks.
    */
   getSpanProcessor(): SpanProcessor {
     return {
-      onStart: (span: OTelSpan, _parentContext: Context) => {
+      onStart: (span: OTelSpan) => {
         const spanId = span.spanContext().spanId;
         const p = this.handleStart(span).catch(console.error);
         this.spanPromises.set(spanId, p);
@@ -327,37 +240,22 @@ export abstract class BaseOTelTraceProvider implements TraceProvider {
     const traceId = ctx.traceId;
     const spanId = ctx.spanId;
     const parentCtx = span.parentSpanContext;
-    const isRoot = !parentCtx || parentCtx.traceId !== traceId;
+    const parentId =
+      parentCtx && parentCtx.traceId === traceId ? parentCtx.spanId : undefined;
 
-    if (isRoot && !(await this.hasTrace(traceId))) {
-      const startTime = hrTimeToMs(span.startTime);
-      const trace: Trace = {
-        id: traceId,
-        providerId: this.id,
-        name: span.name,
-        startTime,
-        status: "running",
-        attributes: { ...span.attributes },
-      };
-      await this.addOrUpdateTrace(trace);
-      this.emitChange({ type: "add", traceId });
-    }
-
+    // A root span (no parent) implicitly creates its `running` trace via
+    // `recordSpanStart`, so no separate pre-creation step is needed here.
     const ourSpan: Span = {
       id: spanId,
       traceId,
-      parentId:
-        parentCtx && parentCtx.traceId === traceId
-          ? parentCtx.spanId
-          : undefined,
+      parentId,
       name: span.name,
       kind: readKind(span.attributes),
       startTime: hrTimeToMs(span.startTime),
       attributes: { ...span.attributes },
       ...llmAndPrompt(span.attributes),
     };
-    const stored = await this.addOrUpdateSpan(ourSpan);
-    this.emitStream(traceId, { type: "span-start", span: stored });
+    await this.recordSpanStart(ourSpan);
   }
 
   private async handleEnd(span: ReadableSpan): Promise<void> {
@@ -384,50 +282,13 @@ export abstract class BaseOTelTraceProvider implements TraceProvider {
       attributes: { ...span.attributes },
       ...llmAndPrompt(span.attributes),
     };
-    const stored = await this.addOrUpdateSpan(ended);
-    this.emitStream(traceId, { type: "span-end", span: stored });
-
-    // If span is root span, update trace as well
-    if (!stored.parentId) {
-      const existing = await this.getTraceWithoutSpans(traceId);
-      if (existing) {
-        const endedTrace: Trace = {
-          ...existing,
-          endTime: stored.endTime,
-          status: stored.status === "error" ? "error" : "ok",
-          // Refresh trace attributes from the root span's final (merged) set —
-          // the root may have accrued attributes after the trace was created.
-          attributes: { ...existing.attributes, ...stored.attributes },
-        };
-        await this.addOrUpdateTrace(endedTrace);
-        this.emitStream(traceId, { type: "trace-end", trace: endedTrace });
-        this.emitChange({ type: "update", traceId });
-      }
-    }
+    await this.recordSpanEnd(ended);
   }
 
-  private emitStream(traceId: string, event: TraceStreamEvent): void {
-    const set = this.subscribers.get(traceId);
-    if (!set) return;
-    for (const cb of set) {
-      try {
-        cb(event);
-      } catch (err) {
-        console.error("Trace subscriber threw:", err);
-      }
-    }
-  }
-
-  private emitChange(event: TraceChangeEvent): void {
-    for (const cb of this.watchers) {
-      try {
-        cb(event);
-      } catch (err) {
-        console.error("Trace watcher threw:", err);
-      }
-    }
-  }
-
+  /**
+   * Waits for every in-flight `onStart`/`onEnd` handler to settle. Used by
+   * tests to deterministically assert on the resulting trace store.
+   */
   async drainPendingHandlers(): Promise<void> {
     while (this.spanPromises.size > 0) {
       await Promise.all([...this.spanPromises.values()]);

@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { VercelAISDK } from "../sdk/vercel-ai-sdk.ts";
+import { VercelAISDK } from "../sdk/vercel-ai-sdk/index.ts";
 import { CONFIG_FILE_RELATIVE_PATH } from "../shared/setup-task.ts";
 import {
   executeSetupStep,

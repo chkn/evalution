@@ -4,9 +4,7 @@
 import { fileURLToPath } from "node:url";
 import { serve, upgradeWebSocket } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { context, type Tracer, trace } from "@opentelemetry/api";
-import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
-import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
+import { trace } from "@opentelemetry/api";
 import { Hono } from "hono";
 import { WebSocketServer } from "ws";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
@@ -68,33 +66,24 @@ export async function startServer(
   const promptRegistry = new PromptRegistry();
   await promptRegistry.rebuild(promptProviderMap);
 
-  // Wire every trace provider that exposes a SpanProcessor into a shared
-  // OpenTelemetry tracer so prompt executions can produce real spans.
-  const spanProcessors = traceProviders
-    .filter(p => !!p.getSpanProcessor)
-    .map(p => p.getSpanProcessor!());
-  const tracerProvider = new BasicTracerProvider({ spanProcessors });
-  trace.setGlobalTracerProvider(tracerProvider);
-
-  // Register an async context manager so the active span set by
-  // `startActiveSpan` propagates across `await` boundaries. Without this,
-  // `context.active()` always returns ROOT_CONTEXT and spans emitted by the
-  // AI SDK's `experimental_telemetry` become detached root spans in their own
-  // traces instead of children of the prompt-execution span.
-  const contextManager = new AsyncLocalStorageContextManager();
-  contextManager.enable();
-  context.setGlobalContextManager(contextManager);
-
-  const tracer: Tracer = tracerProvider.getTracer("evalution");
+  // Each prompt provider's SDK adapter already ran its own `setupTraceIngestion`
+  // (registering a native v7 integration, or standing up the global OTel
+  // tracer provider + context manager for v6) during `startConfiguredServer`,
+  // before this function was called — so the global tracer provider, if any,
+  // is already in place. Grab a tracer from whatever's registered; OTel spans
+  // produced via the v6/`experimental_telemetry` fallback path land on it.
+  // With no adapter registering one, this is a no-op tracer.
+  const tracer = trace.getTracer("evalution");
 
   // For the UI to render new traces, prefer pulling them from
   // a memory provider if we're using one, otherwise just use the first.
-  const defaultTraceProviderId =
-    traceProviders.find(p => p instanceof MemoryTraceProvider)?.id ??
-    traceProviders[0]?.id;
-  if (!defaultTraceProviderId) {
+  const defaultTraceProvider =
+    traceProviders.find(p => p instanceof MemoryTraceProvider) ??
+    traceProviders[0];
+  if (!defaultTraceProvider) {
     throw new Error("At least one trace provider must be configured");
   }
+  const defaultTraceProviderId = defaultTraceProvider.id;
 
   const app = new Hono();
 

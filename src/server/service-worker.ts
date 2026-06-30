@@ -13,13 +13,12 @@
  * @module
  */
 
-import type { Tracer } from "@opentelemetry/api";
-import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
+import { trace } from "@opentelemetry/api";
 import { Hono } from "hono";
 import { MemoryFileProvider } from "../file-provider-memory.ts";
 import { FilePromptProvider } from "../prompt/file/file-prompt-provider.ts";
 import { PromptRegistry } from "../prompt/prompt-registry.ts";
-import { VercelAISDK } from "../sdk/vercel-ai-sdk.ts";
+import { VercelAISDK } from "../sdk/vercel-ai-sdk/index.ts";
 import type { SSEData } from "../shared/types.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { setupRoutes } from "./api-routes.ts";
@@ -86,13 +85,10 @@ export async function createMemoryApp(
   const promptRegistry = new PromptRegistry();
   await promptRegistry.rebuild(promptProviders);
 
-  // setupRoutes requires a Tracer. No real spans are produced (execution is
-  // disabled), so we skip the async context manager the Node server installs.
-  const spanProcessor = traceProvider.getSpanProcessor();
-  const tracerProvider = new BasicTracerProvider({
-    spanProcessors: [spanProcessor],
-  });
-  const tracer: Tracer = tracerProvider.getTracer("evalution");
+  // setupRoutes requires a Tracer for the OTel/v6 execute fallback path. No
+  // real spans are produced here (execution is disabled), so a no-op tracer
+  // (no global provider registered) is fine.
+  const tracer = trace.getTracer("evalution");
 
   const app = new Hono();
 

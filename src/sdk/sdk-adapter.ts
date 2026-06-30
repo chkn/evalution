@@ -12,6 +12,20 @@ import type {
   NormalizedPromptUpdates,
   ParsedPrompt,
 } from "../shared/types.ts";
+import type { PromptSpanInfo } from "../trace/prompt-tracer.ts";
+import type { TraceIngestor } from "../trace/trace-ingestor.ts";
+
+/** Options for {@link SDKAdapter.executeConfig}. */
+export interface ExecuteConfigOptions {
+  /** The ID to use for the trace created by this execution, if any. */
+  traceId?: string;
+  /**
+   * The prompt's identity (id, name, parameters). Used to name and link the
+   * trace when the config wasn't built by the `prompts()` helper (which would
+   * otherwise carry that identity itself).
+   */
+  identity?: PromptSpanInfo;
+}
 
 /**
  * Adapter that provides values and execution for a particular AI SDK.
@@ -53,8 +67,24 @@ export interface SDKAdapter {
    * Executes a prompt config object.
    *
    * @param config - The config object returned by the prompt function.
+   * @param options - Optional execution options (trace id, prompt identity).
    */
-  executeConfig(config: any): Promise<void>;
+  executeConfig(config: any, options?: ExecuteConfigOptions): Promise<void>;
+
+  /**
+   * Performs whatever process-global setup this SDK's tracing mechanism
+   * needs (e.g. registering a native telemetry integration, or standing up an
+   * OpenTelemetry pipeline) and returns the resulting {@link TraceIngestor}.
+   *
+   * Called once during server startup, before any prompt config is built, so
+   * registration is guaranteed to happen before the first call.
+   *
+   * Optional — adapters with no tracing support may omit it.
+   *
+   * @returns The ingestor to feed into the default trace provider, or
+   *   `undefined` if this SDK has no tracing support.
+   */
+  setupTraceIngestion?(): Promise<TraceIngestor | undefined>;
 
   /**
    * Convert a low-level {@link ParsedPrompt} produced by a

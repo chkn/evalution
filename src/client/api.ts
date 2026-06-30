@@ -168,15 +168,61 @@ export async function getTraces(): Promise<TraceSummary[]> {
   return res.json();
 }
 
+/** Options for {@link getTrace}'s "wait for a freshly-started trace" polling. */
+export interface GetTraceOptions {
+  /** Aborts the in-flight request and stops polling. */
+  signal?: AbortSignal;
+  /** How long to keep retrying a 404 before giving up. Default 10s. */
+  timeoutMs?: number;
+  /** Delay between 404 retries. Default 150ms. */
+  intervalMs?: number;
+}
+
+/**
+ * Fetches a trace together with its spans.
+ *
+ * A just-executed trace may not exist on the server yet: the execute route
+ * returns a trace id before the telemetry ingestor records the first span and
+ * creates the trace. So a `404` is treated as "not started yet" and retried —
+ * polling every `intervalMs` up to `timeoutMs` — rather than surfaced
+ * immediately. Any other error (or a 404 that outlasts the timeout) throws.
+ */
 export async function getTrace(
   providerId: string,
   traceId: string,
+  { signal, timeoutMs = 10_000, intervalMs = 150 }: GetTraceOptions = {},
 ): Promise<TraceWithSpans> {
-  const res = await fetch(
-    `/api/traces/${encodeURIComponent(providerId)}/${encodeURIComponent(traceId)}`,
-  );
-  await throwIfError(res);
-  return res.json();
+  const url = `/api/traces/${encodeURIComponent(providerId)}/${encodeURIComponent(traceId)}`;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const res = await fetch(url, { signal });
+    if (res.ok) return res.json();
+    // Only a 404 (trace not created yet) is retryable, and only until the
+    // deadline; everything else throws right away.
+    if (res.status !== 404 || Date.now() >= deadline) {
+      await throwIfError(res);
+    }
+    await delay(intervalMs, signal);
+  }
+}
+
+/** Resolves after `ms`, or rejects if `signal` aborts first. */
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(new DOMException("Aborted", "AbortError"));
+      },
+      { once: true },
+    );
+  });
 }
 
 /**

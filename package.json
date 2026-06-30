@@ -58,8 +58,8 @@
     "ws": "^8.21.0"
   },
   "peerDependencies": {
-    "ai": ">=3.4.0-0",
     "@google/genai": ">=2.0.0-0",
+    "ai": ">=3.4.0-0",
     "typescript": ">=5.3.3-0 <7.0.0-0"
   },
   "peerDependenciesMeta": {
@@ -81,7 +81,7 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.2.1",
     "@vitest/coverage-v8": "^1.1.0",
-    "ai": "^6.0.193",
+    "ai": "^7.0.4",
     "concurrently": "^9.2.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

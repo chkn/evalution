@@ -16,14 +16,12 @@
     "rootDir": "./src",
     "types": ["node", "vitest/globals"]
   },
-  "include": [
-    "src/cli/**/*",
-    "src/server/**/*",
-    "src/parser/**/*",
-    "src/prompt/**/*",
-    "src/shared/**/*",
-    "src/sdk/sdk-adapter.ts"
-  ],
+  // Typecheck everything under src/ except the client (which has its own
+  // tsconfig.client.json) and test fixtures. The build emits via tsdown, not
+  // this config, so a broad include here only affects `tsc --noEmit`; keeping
+  // it broad means files reachable only from the package entry (src/index.ts) —
+  // e.g. the SDK adapters — are checked rather than silently skipped.
+  "include": ["src/**/*"],
   "exclude": [
     "node_modules",
     "dist",

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type {
   TraceChangeEvent,
   TraceStreamEvent,
@@ -22,14 +21,15 @@ export {
  * subscribe to in real time. Implement this interface to integrate a tracing
  * backend.
  *
- * Traces and spans are created via the OpenTelemetry API
- * (`@opentelemetry/api`). A `TraceProvider` implementation's job is to expose
- * the traces a backend knows about; populating the store from OTel spans is
- * an implementation detail (e.g. by registering a
- * `@opentelemetry/sdk-trace-base` `SpanProcessor`).
+ * `TraceProvider` is a pure read interface — populating the store is the job
+ * of a `TraceIngestor`, which feeds normalized spans into the provider's
+ * write side (`TraceSink`, implemented by `BaseTraceProvider`).
  */
 export interface TraceProvider {
-  /** Uniquely identifies this provider when multiple providers are used. */
+  /**
+   * Uniquely identifies this instance, even when multiple providers of the
+   * same type are used.
+   */
   readonly id: string;
 
   /** Human-readable name shown when choosing between providers. */
@@ -55,9 +55,11 @@ export interface TraceProvider {
    * invoked for every {@link Span} change on this trace, for as long as the
    * returned cleanup function has not been called.
    *
+   * Optional — providers that cannot track live changes may omit it.
+   *
    * @returns A no-argument function that cancels the subscription.
    */
-  subscribeTrace(
+  subscribeTrace?(
     traceId: string,
     callback: (event: TraceStreamEvent) => void,
   ): () => void;
@@ -71,15 +73,4 @@ export interface TraceProvider {
    * @returns A no-argument function that unregisters the watcher.
    */
   watch?(callback: (event: TraceChangeEvent) => void): () => void;
-
-  /**
-   * Returns a `SpanProcessor` (from `@opentelemetry/sdk-trace-base`) that
-   * feeds OpenTelemetry spans into this provider's store. The playground
-   * registers it on a shared `BasicTracerProvider` so spans produced by the
-   * server's tracer land here.
-   *
-   * Optional — providers backed by an external backend (LangSmith, a
-   * collector, …) typically receive spans out-of-band and can omit this.
-   */
-  getSpanProcessor?(): SpanProcessor;
 }

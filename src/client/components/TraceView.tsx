@@ -37,15 +37,16 @@ function TraceView({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
 
-    getTrace(providerId, traceId)
+    // `getTrace` polls while the trace is still being created on the server, so
+    // this may stay pending for a while; an `AbortError` on unmount is expected.
+    getTrace(providerId, traceId, { signal: controller.signal })
       .then(data => {
-        if (cancelled) return;
         setState({ trace: data.trace, spans: data.spans });
       })
       .catch(err => {
-        if (!cancelled) setError(err.message);
+        if (err.name !== "AbortError") setError(err.message);
       });
 
     const unsubscribe = subscribeTraceEvents(
@@ -57,7 +58,7 @@ function TraceView({
     );
 
     return () => {
-      cancelled = true;
+      controller.abort();
       unsubscribe();
     };
   }, [providerId, traceId]);

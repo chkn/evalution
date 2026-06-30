@@ -4,22 +4,25 @@
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import type { SDKAdapter } from "../sdk/sdk-adapter.ts";
 
-// #region Prompt
+import type { TraceChangeEvent } from "../trace/trace-types.ts";
 
-/**
- * A reference to a prompt.
- *
- * `id` is interpreted as a globally-unique prompt ID unless `providerId` is
- * present, in which case `id` is scoped to that specific prompt provider. This
- * mirrors the OpenTelemetry attributes `evalution.prompt.id` (always present)
- * and `evalution.prompt.provider.id` (optional, scoping).
- */
-export interface PromptID {
-  /** The prompt ID — global unless {@link providerId} scopes it. */
-  id: string;
-  /** When set, {@link id} is scoped to this prompt provider. */
-  providerId?: string;
-}
+export type {
+  LLMSpanDetails,
+  PromptID,
+  Span,
+  SpanKind,
+  SpanMessage,
+  ToolSpanDetails,
+  Trace,
+  TraceChangeEvent,
+  TraceChangeType,
+  TraceProviderInfo,
+  TraceStreamEvent,
+  TraceSummary,
+  TraceWithSpans,
+} from "../trace/trace-types.ts";
+
+// #region Prompt
 
 /**
  * Low-level prompt representation produced by a
@@ -221,132 +224,6 @@ export interface ExecuteResponse {
   tracerProviderId: string;
   /** Span ID of the root span for this execution. */
   rootSpanId: string;
-}
-
-// #endregion
-
-// #region Trace
-
-/**
- * Classification of a {@link Span}. See also:
- * - `lmnr.span.type` from https://laminar.sh/docs/tracing/otel
- * - `mlflow.spanType` from https://mlflow.org/docs/latest/genai/tracing/opentelemetry/attribute-mapping/#translated-span-attributes
- *
- * Mapped from `gen_ai.operation.name`.
- */
-export type SpanKind = "LLM" | "TOOL" | "AGENT" | "EMBEDDING" | "DEFAULT";
-
-/** A single message within an LLM span's input/output. */
-export interface SpanMessage {
-  role: string;
-  content: string;
-}
-
-/** LLM-specific attributes attached to `LLM` spans. */
-export interface LLMSpanDetails {
-  provider?: string;
-  model?: string;
-  messages?: SpanMessage[];
-  output?: string;
-  promptTokens?: number;
-  completionTokens?: number;
-  totalTokens?: number;
-  /** Dollar cost of the call, if known. */
-  cost?: number;
-  /** Model parameters (temperature, max_tokens, …). */
-  modelParameters?: Record<string, unknown>;
-}
-
-/**
- * A span in a {@link Trace}. Spans form a tree via {@link parentId}.
- * Durations are derived from `startTime` and `endTime`; an in-progress span has
- * no `endTime` yet.
- */
-export interface Span {
-  id: string;
-  traceId: string;
-  /** `undefined` for the root span of the trace. */
-  parentId?: string;
-  name: string;
-  kind: SpanKind;
-  /** Start timestamp in milliseconds since epoch. */
-  startTime: number;
-  /** End timestamp in milliseconds since epoch, or `undefined` while running. */
-  endTime?: number;
-  status?: "ok" | "error";
-  /** Error message if `status` is `'error'`. */
-  errorMessage?: string;
-  /** Free-form attributes to show in the span's details pane. */
-  attributes?: Record<string, unknown>;
-  /** LLM-specific details (present for `chat`/`completion`/`embedding` spans). */
-  llm?: LLMSpanDetails;
-  /**
-   * The prompt this span is attributed to, if any.
-   *
-   * Stored as emitted (`evalution.prompt.id` plus optional
-   * `evalution.prompt.provider.id`): a {@link PromptID} whose `id` is global
-   * unless `providerId` is set. The server resolves it against the prompt
-   * registry to a provider-scoped reference when a trace is served.
-   */
-  prompt?: PromptID;
-}
-
-/**
- * Top-level trace for a single invocation (e.g. one prompt execution).
- */
-export interface Trace {
-  id: string;
-  providerId?: string;
-  name: string;
-  /** Start timestamp (ms). */
-  startTime: number;
-  /** End timestamp (ms), or `undefined` while the trace is still running. */
-  endTime?: number;
-  status: "running" | "ok" | "error";
-  /** Free-form attributes (e.g. prompt ID, function params). */
-  attributes?: Record<string, unknown>;
-}
-
-/** Compact trace entry for listings (sidebar / `GET /api/traces`). */
-export interface TraceSummary {
-  id: string;
-  providerId: string;
-  name: string;
-  startTime: number;
-  endTime?: number;
-  status: "running" | "ok" | "error";
-  /** Number of spans currently associated with the trace. */
-  spanCount: number;
-}
-
-/** A trace together with all of its spans. */
-export interface TraceWithSpans {
-  trace: Trace;
-  spans: Span[];
-}
-
-/** The kind of change that occurred to a trace. */
-export type TraceChangeType = "add" | "update" | "remove";
-
-/** Describes a single change emitted by `TraceProvider.watch`. */
-export interface TraceChangeEvent {
-  type: TraceChangeType;
-  traceId: string;
-}
-
-/** Real-time event pushed over the per-trace SSE subscription. */
-export type TraceStreamEvent =
-  | { type: "span-start"; span: Span }
-  | { type: "span-end"; span: Span }
-  | { type: "span-update"; span: Span }
-  | { type: "trace-update"; trace: Trace }
-  | { type: "trace-end"; trace: Trace };
-
-/** Information about a registered trace provider, returned by `GET /api/trace-providers`. */
-export interface TraceProviderInfo {
-  id: string;
-  displayName?: string;
-  description?: string;
 }
 
 // #endregion
