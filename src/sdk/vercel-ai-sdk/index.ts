@@ -258,13 +258,9 @@ export class VercelAISDK implements SDKAdapter {
         model("OpenAI", "GPT-5.4 mini", "openai", "gpt-5.4-mini"),
         model("OpenAI", "GPT-5.4 nano", "openai", "gpt-5.4-nano"),
 
+        model("Anthropic", "Claude Fable 5", "anthropic", "claude-fable-5"),
         model("Anthropic", "Claude Opus 4.8", "anthropic", "claude-opus-4-8"),
-        model(
-          "Anthropic",
-          "Claude Sonnet 4.6",
-          "anthropic",
-          "claude-sonnet-4-6",
-        ),
+        model("Anthropic", "Claude Sonnet 5", "anthropic", "claude-sonnet-5"),
         model("Anthropic", "Claude Haiku 4.5", "anthropic", "claude-haiku-4-5"),
 
         model("Google", "Gemini 3.5 Flash", "google", "gemini-3.5-flash"),
