@@ -24,7 +24,7 @@ import type {
   NormalizedToolCall,
   ParsedPrompt,
 } from "../../shared/types.ts";
-import { OTelTraceIngestor } from "../../trace/otel-trace-ingestor.ts";
+import { setupGlobalOTelPipeline } from "../../trace/otel-global-pipeline.ts";
 import type { TraceIngestor } from "../../trace/trace-ingestor.ts";
 import {
   type ExecuteConfigOptions,
@@ -180,12 +180,11 @@ export default {
 } satisfies EvalutionConfig;
 `;
 
-// Module-level (not instance-level) cache: the global telemetry pipeline
-// (`registerTelemetry` for v7, or the OTel tracer provider + context manager
-// for v6) is process-global state, so it must be set up at most once even if
-// multiple `VercelAISDK` adapters are configured.
-// FIXME: Some of the OTel stuff could conflict if another SDK that uses OTel
-// is also configured in this process.
+// Module-level (not instance-level) cache: the v7 native `registerTelemetry`
+// call is process-global state, so it must happen at most once even if
+// multiple `VercelAISDK` adapters are configured. (The v6 OTel path is
+// further deduplicated across *other* SDKs too — see
+// `setupGlobalOTelPipeline`.)
 let globalIngestionSetup: Promise<TraceIngestor | undefined> | undefined;
 
 /**
@@ -394,26 +393,10 @@ export class VercelAISDK implements SDKAdapter {
 
     // v6: stand up the global OTel pipeline so `experimental_telemetry`
     // spans land somewhere, and so async-context-propagated child spans
-    // (e.g. from a wrapped tracer) are parented correctly.
-    const { context, trace } = await import("@opentelemetry/api");
-    const { AsyncLocalStorageContextManager } = await import(
-      "@opentelemetry/context-async-hooks"
-    );
-    const { BasicTracerProvider } = await import(
-      "@opentelemetry/sdk-trace-base"
-    );
-
-    const ingestor = new OTelTraceIngestor();
-    const tracerProvider = new BasicTracerProvider({
-      spanProcessors: [ingestor.getSpanProcessor()],
-    });
-    trace.setGlobalTracerProvider(tracerProvider);
-
-    const contextManager = new AsyncLocalStorageContextManager();
-    contextManager.enable();
-    context.setGlobalContextManager(contextManager);
-
-    return ingestor;
+    // (e.g. from a wrapped tracer) are parented correctly. Shared with any
+    // other SDK adapter that also needs OTel — it's set up at most once per
+    // process.
+    return setupGlobalOTelPipeline();
   }
 
   normalizePrompt(prompt: ParsedPrompt): NormalizedPrompt {

@@ -12,8 +12,10 @@ import type {
   NormalizedPromptUpdates,
   ParsedPrompt,
 } from "../shared/types.ts";
+import type { setupGlobalOTelPipeline } from "../trace/otel-global-pipeline.ts";
 import type { PromptSpanInfo } from "../trace/prompt-tracer.ts";
 import type { TraceIngestor } from "../trace/trace-ingestor.ts";
+import type { TraceSink } from "../trace/trace-sink.ts";
 
 /** Options for {@link SDKAdapter.executeConfig}. */
 export interface ExecuteConfigOptions {
@@ -72,17 +74,20 @@ export interface SDKAdapter {
   executeConfig(config: any, options?: ExecuteConfigOptions): Promise<void>;
 
   /**
-   * Performs whatever process-global setup this SDK's tracing mechanism
-   * needs (e.g. registering a native telemetry integration, or standing up an
-   * OpenTelemetry pipeline) and returns the resulting {@link TraceIngestor}.
+   * Called once, during server startup, before any prompt config is built,
+   * to perform whatever setup this SDK's tracing mechanism needs
+   * (e.g. registering a native telemetry integration, or standing up an
+   * OpenTelemetry pipeline).
    *
-   * Called once during server startup, before any prompt config is built, so
-   * registration is guaranteed to happen before the first call.
+   * If this SDK's tracing is built on OpenTelemetry, its implementation of
+   * this method should call {@link setupGlobalOTelPipeline}, which
+   * ensures the global pipeline is only set up once, even if other SDK adapters
+   * also call it.
    *
    * Optional — adapters with no tracing support may omit it.
    *
-   * @returns The ingestor to feed into the default trace provider, or
-   *   `undefined` if this SDK has no tracing support.
+   * @returns An ingestor to which {@link TraceSink}s should be added, or
+   *   `undefined` if tracing cannot be set up.
    */
   setupTraceIngestion?(): Promise<TraceIngestor | undefined>;
 

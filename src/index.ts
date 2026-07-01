@@ -91,6 +91,7 @@ export type {
   TraceWithSpans,
 } from "./shared/types.ts";
 export { MemoryTraceProvider } from "./trace/memory-trace-provider.ts";
+export { setupGlobalOTelPipeline } from "./trace/otel-global-pipeline.ts";
 export { OTelTraceIngestor } from "./trace/otel-trace-ingestor.ts";
 export {
   createTracerForPrompt,
