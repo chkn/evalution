@@ -251,6 +251,10 @@ export class VercelAISDK implements SDKAdapter {
         },
       },
       models: [
+        model("OpenAI", "GPT-5.6 Sol", "openai", "gpt-5.6-sol"),
+        model("OpenAI", "GPT-5.6 Terra", "openai", "gpt-5.6-terra"),
+        model("OpenAI", "GPT-5.6 Luna", "openai", "gpt-5.6-luna"),
+        model("OpenAI", "GPT-5.3 Codex", "openai", "gpt-5.3-codex"),
         model("OpenAI", "GPT-5.5 Pro", "openai", "gpt-5.5-pro"),
         model("OpenAI", "GPT-5.5", "openai", "gpt-5.5"),
         model("OpenAI", "GPT-5.4 Pro", "openai", "gpt-5.4-pro"),
@@ -259,11 +263,20 @@ export class VercelAISDK implements SDKAdapter {
         model("OpenAI", "GPT-5.4 nano", "openai", "gpt-5.4-nano"),
 
         model("Anthropic", "Claude Fable 5", "anthropic", "claude-fable-5"),
-        model("Anthropic", "Claude Opus 4.8", "anthropic", "claude-opus-4-8"),
+        model("Anthropic", "Claude Opus 5", "anthropic", "claude-opus-5"),
         model("Anthropic", "Claude Sonnet 5", "anthropic", "claude-sonnet-5"),
+        model("Anthropic", "Claude Opus 4.8", "anthropic", "claude-opus-4-8"),
         model("Anthropic", "Claude Haiku 4.5", "anthropic", "claude-haiku-4-5"),
 
+        model("Google", "Gemini 3.7 Flash", "google", "gemini-3.7-flash"),
+        model("Google", "Gemini 3.6 Flash", "google", "gemini-3.6-flash"),
         model("Google", "Gemini 3.5 Flash", "google", "gemini-3.5-flash"),
+        model(
+          "Google",
+          "Gemini 3.5 Flash-Lite",
+          "google",
+          "gemini-3.5-flash-lite",
+        ),
         model(
           "Google",
           "Gemini 3.1 Pro Preview",

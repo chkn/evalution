@@ -11,6 +11,7 @@ import {
 import ts from "typescript";
 import { isEditable } from "../shared/helpers.ts";
 import type {
+  ModelInfo,
   ModelPropValue,
   NormalizedMessage,
   NormalizedParameter,
@@ -104,6 +105,49 @@ const FALLBACK_GENERATION_CONFIG_PARAMS: PropDefinition[] = [
 ];
 
 /**
+ * Build a {@link ModelInfo} entry from the key it sets, a label, and an ID.
+ *
+ * `interactions.create` is driven by either a `model:` or an `agent:` ID, so
+ * each catalog entry carries the key it writes alongside the ID itself —
+ * {@link GeminiInteractionsSDK.denormalizeUpdates} reads that key back out to
+ * decide which property to set on the config.
+ */
+function catalogEntry(
+  key: typeof MODEL_KEY | typeof AGENT_KEY,
+  label: string,
+  id: string,
+): ModelInfo {
+  return {
+    id,
+    label,
+    group: "Google",
+    values: {
+      [key]: {
+        kind: "object",
+        properties: {
+          key: { kind: "primitive", value: key },
+          value: { kind: "primitive", value: id },
+        },
+        displayValue: id,
+      },
+    },
+  };
+}
+
+/** Build a custom-value template entry for `groups.Google.customValueTemplates`. */
+function customValueTemplate(
+  key: typeof MODEL_KEY | typeof AGENT_KEY,
+): ModelPropValue {
+  return {
+    kind: "object",
+    properties: {
+      key: { kind: "primitive", value: key },
+      value: { kind: "primitive", value: "$input" },
+    },
+  };
+}
+
+/**
  * {@link SDKAdapter} implementation for the Google GenAI
  * [Interactions API](https://ai.google.dev/gemini-api/docs/interactions)
  * (`@google/genai` package). Currently experimental and untested.
@@ -120,137 +164,58 @@ export class GeminiInteractionsSDK implements SDKAdapter {
       groups: {
         Google: {
           customValueTemplates: {
-            model: {
-              kind: "object",
-              properties: {
-                key: { kind: "primitive", value: "model" },
-                value: { kind: "primitive", value: "$input" },
-              },
-            },
-            agent: {
-              kind: "object",
-              properties: {
-                key: { kind: "primitive", value: "agent" },
-                value: { kind: "primitive", value: "$input" },
-              },
-            },
+            model: customValueTemplate(MODEL_KEY),
+            agent: customValueTemplate(AGENT_KEY),
           },
         },
       },
+      // Only the models and agents `interactions.create` actually accepts —
+      // a subset of the full Gemini lineup. See
+      // https://ai.google.dev/gemini-api/docs/interactions
       models: [
-        {
-          id: "gemini-3.1-pro-preview",
-          label: "Gemini 3.1 Pro Preview",
-          values: {
-            model: {
-              kind: "object",
-              properties: {
-                key: { kind: "primitive", value: "model" },
-                value: { kind: "primitive", value: "gemini-3.1-pro-preview" },
-              },
-              displayValue: "gemini-3.1-pro-preview",
-            },
-          },
-          group: "Google",
-        },
-        {
-          id: "gemini-3-flash-preview",
-          label: "Gemini 3 Flash Preview",
-          values: {
-            model: {
-              kind: "object",
-              properties: {
-                key: { kind: "primitive", value: "model" },
-                value: { kind: "primitive", value: "gemini-3-flash-preview" },
-              },
-              displayValue: "gemini-3-flash-preview",
-            },
-          },
-          group: "Google",
-        },
-        {
-          id: "gemini-3.1-flash-lite-preview",
-          label: "Gemini 3.1 Flash-Lite Preview",
-          values: {
-            model: {
-              kind: "object",
-              properties: {
-                key: { kind: "primitive", value: "model" },
-                value: {
-                  kind: "primitive",
-                  value: "gemini-3.1-flash-lite-preview",
-                },
-              },
-              displayValue: "gemini-3.1-flash-lite-preview",
-            },
-          },
-          group: "Google",
-        },
-        {
-          id: "gemini-2.5-pro",
-          label: "Gemini 2.5 Pro",
-          values: {
-            model: {
-              kind: "object",
-              properties: {
-                key: { kind: "primitive", value: "model" },
-                value: { kind: "primitive", value: "gemini-2.5-pro" },
-              },
-              displayValue: "gemini-2.5-pro",
-            },
-          },
-          group: "Google",
-        },
-        {
-          id: "gemini-2.5-flash",
-          label: "Gemini 2.5 Flash",
-          values: {
-            model: {
-              kind: "object",
-              properties: {
-                key: { kind: "primitive", value: "model" },
-                value: { kind: "primitive", value: "gemini-2.5-flash" },
-              },
-              displayValue: "gemini-2.5-flash",
-            },
-          },
-          group: "Google",
-        },
-        {
-          id: "gemini-2.5-flash-lite",
-          label: "Gemini 2.5 Flash-lite",
-          values: {
-            model: {
-              kind: "object",
-              properties: {
-                key: { kind: "primitive", value: "model" },
-                value: { kind: "primitive", value: "gemini-2.5-flash-lite" },
-              },
-              displayValue: "gemini-2.5-flash-lite",
-            },
-          },
-          group: "Google",
-        },
-        {
-          id: "deep-research-pro-preview-12-2025",
-          label: "Deep Research Preview",
-          values: {
-            agent: {
-              kind: "object",
-              properties: {
-                key: { kind: "primitive", value: "agent" },
-                value: {
-                  kind: "primitive",
-                  value: "deep-research-pro-preview-12-2025",
-                },
-              },
-              displayValue: "deep-research-pro-preview-12-2025",
-            },
-          },
-          group: "Google",
-        },
+        catalogEntry(MODEL_KEY, "Gemini 3.7 Flash", "gemini-3.7-flash"),
+        catalogEntry(MODEL_KEY, "Gemini 3.6 Flash", "gemini-3.6-flash"),
+        catalogEntry(MODEL_KEY, "Gemini 3.5 Flash", "gemini-3.5-flash"),
+        catalogEntry(
+          MODEL_KEY,
+          "Gemini 3.5 Flash-Lite",
+          "gemini-3.5-flash-lite",
+        ),
+        catalogEntry(
+          MODEL_KEY,
+          "Gemini 3.1 Pro Preview",
+          "gemini-3.1-pro-preview",
+        ),
+        catalogEntry(
+          MODEL_KEY,
+          "Gemini 3.1 Flash-Lite",
+          "gemini-3.1-flash-lite",
+        ),
+        catalogEntry(
+          MODEL_KEY,
+          "Gemini 3 Flash Preview",
+          "gemini-3-flash-preview",
+        ),
+        catalogEntry(MODEL_KEY, "Gemini 2.5 Pro", "gemini-2.5-pro"),
+        catalogEntry(MODEL_KEY, "Gemini 2.5 Flash", "gemini-2.5-flash"),
+        catalogEntry(
+          MODEL_KEY,
+          "Gemini 2.5 Flash-Lite",
+          "gemini-2.5-flash-lite",
+        ),
+
+        catalogEntry(
+          AGENT_KEY,
+          "Deep Research Preview",
+          "deep-research-preview-04-2026",
+        ),
+        catalogEntry(
+          AGENT_KEY,
+          "Deep Research Max Preview",
+          "deep-research-max-preview-04-2026",
+        ),
       ],
-    } as const);
+    });
   }
 
   getModelParameters(rootDir: string): PropDefinition[] {

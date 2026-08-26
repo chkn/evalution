@@ -424,6 +424,33 @@ describe("GeminiInteractionsSDK", () => {
       expect(catalog.models[0].id).toContain("gemini");
       expect(catalog.models[0].values.model).toBeDefined();
     });
+
+    it("shapes model and agent entries with their own config key", async () => {
+      const catalog = await sdk.getModelCatalog();
+      const entryFor = (id: string) => catalog.models.find(m => m.id === id);
+
+      // A model entry writes `model:`; an agent entry writes `agent:`. The key
+      // is what denormalizeUpdates reads back out to pick the config property.
+      expect(entryFor("gemini-3.7-flash")?.values.model).toEqual({
+        kind: "object",
+        properties: {
+          key: { kind: "primitive", value: "model" },
+          value: { kind: "primitive", value: "gemini-3.7-flash" },
+        },
+        displayValue: "gemini-3.7-flash",
+      });
+
+      const agent = entryFor("deep-research-preview-04-2026");
+      expect(agent?.values.model).toBeUndefined();
+      expect(agent?.values.agent).toEqual({
+        kind: "object",
+        properties: {
+          key: { kind: "primitive", value: "agent" },
+          value: { kind: "primitive", value: "deep-research-preview-04-2026" },
+        },
+        displayValue: "deep-research-preview-04-2026",
+      });
+    });
   });
 
   describe("file parsing integration", () => {
