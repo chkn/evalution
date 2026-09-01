@@ -308,14 +308,7 @@ function PromptRow({
           onCancel={onCancelRename}
         />
       ) : (
-        <>
-          <span className="tree-row-label">{prompt.name}</span>
-          {prompt.functionParameters.length > 0 && (
-            <span className="tree-row-params">
-              ({prompt.functionParameters.map(p => p.name).join(", ")})
-            </span>
-          )}
-        </>
+        <span className="tree-row-label">{prompt.name}</span>
       )}
     </div>
   );

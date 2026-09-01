@@ -504,10 +504,6 @@ pre {
   background: var(--tree-selected-bg);
 }
 
-.tree-row-selected .tree-row-params {
-  color: var(--tree-text-secondary);
-}
-
 /* Disclosure triangle */
 .tree-disclosure {
   flex-shrink: 0;
@@ -550,13 +546,6 @@ pre {
   font-size: 13px;
   line-height: 26px;
   color: var(--tree-text);
-}
-
-.tree-row-params {
-  font-size: 10px;
-  color: var(--tree-text-secondary);
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
 /* Status / empty state */
