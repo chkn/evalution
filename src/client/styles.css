@@ -87,6 +87,7 @@
 
   /* Template tokens */
   --token-text: #2563eb;
+  --code-text: #7c3aed;
 
   /* Error */
   --error-bg: #fff0f0;
@@ -180,6 +181,7 @@
 
     /* Template tokens */
     --token-text: #58a6ff;
+    --code-text: #c792ea;
 
     /* Error */
     --error-bg: rgba(220, 38, 38, 0.1);
@@ -2515,6 +2517,11 @@ pre {
 .te-token {
   color: var(--token-text);
   font-weight: 600;
+}
+
+.te-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--code-text);
 }
 
 /* Interpolatable autocomplete dropdown (rendered by ts-proppy's TemplateEditor).
