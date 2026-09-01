@@ -6,6 +6,7 @@ import type {
   NormalizedPrompt,
   NormalizedPromptUpdates,
   PropDefinition,
+  PropValue,
 } from "../../../shared/types";
 import PlaygroundEditor from "../PlaygroundEditor";
 
@@ -39,7 +40,10 @@ const FUNCTION_PARAMETERS: PropDefinition[] = [
   },
 ];
 
-function makePrompt(functionParameters: PropDefinition[]): NormalizedPrompt {
+function makePrompt(
+  functionParameters: PropDefinition[],
+  messageContent: PropValue,
+): NormalizedPrompt {
   return {
     id: "test",
     providerId: "test",
@@ -48,7 +52,7 @@ function makePrompt(functionParameters: PropDefinition[]): NormalizedPrompt {
     modelEditable: true,
     system: { kind: "primitive", value: "" },
     systemEditable: true,
-    messages: [{ role: "user", content: { kind: "primitive", value: "" } }],
+    messages: [{ role: "user", content: messageContent }],
     messagesEditable: true,
     modelParameters: [],
   };
@@ -57,15 +61,18 @@ function makePrompt(functionParameters: PropDefinition[]): NormalizedPrompt {
 /**
  * Renders PlaygroundEditor for exercising `${…}` tokenization and the
  * interpolatable autocomplete. Set `withParams={false}` to drive the
- * no-interpolatables behaviour.
+ * no-interpolatables behaviour. Set `messageContent` to seed the first
+ * message with a specific `PropValue` (defaults to an empty string).
  */
 export function InterpolationHarness({
   withParams = true,
+  messageContent = { kind: "primitive", value: "" },
 }: {
   withParams?: boolean;
+  messageContent?: PropValue;
 }) {
   const [prompt, setPrompt] = useState<NormalizedPrompt>(
-    makePrompt(withParams ? FUNCTION_PARAMETERS : []),
+    makePrompt(withParams ? FUNCTION_PARAMETERS : [], messageContent),
   );
   const handleUpdate = (updates: NormalizedPromptUpdates) =>
     setPrompt(prev => ({ ...prev, ...updates }) as NormalizedPrompt);

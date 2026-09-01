@@ -77,3 +77,45 @@ test("backticks survive further edits after the span (round-trips through fromHT
   await expect(editor.locator(".te-code")).toHaveText("`code`");
   await expect(editor).toContainText("`code` more");
 });
+
+test("a function-call message content renders as a single interpolation token instead of blank", async ({
+  mount,
+  page,
+}) => {
+  await mockApiRoutes(page);
+  const component = await mount(
+    <InterpolationHarness
+      messageContent={{
+        kind: "functionCall",
+        callee: "buildOdinPrompt",
+        args: [
+          { kind: "primitive", value: "taskId" },
+          { kind: "primitive", value: "taskInfo" },
+        ],
+      }}
+    />,
+  );
+  const editor = component.locator(".token-editor").nth(1);
+
+  await expect(editor.locator(".te-token")).toHaveText(
+    '${buildOdinPrompt("taskId", "taskInfo")}',
+  );
+});
+
+test("an object message content also renders as a single interpolation token", async ({
+  mount,
+  page,
+}) => {
+  await mockApiRoutes(page);
+  const component = await mount(
+    <InterpolationHarness
+      messageContent={{
+        kind: "object",
+        properties: { role: { kind: "primitive", value: "system" } },
+      }}
+    />,
+  );
+  const editor = component.locator(".token-editor").nth(1);
+
+  await expect(editor.locator(".te-token")).toHaveText('${{ role: "system" }}');
+});
