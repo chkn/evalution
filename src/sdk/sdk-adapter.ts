@@ -143,3 +143,28 @@ export function findPackageDts(
   }
   return null;
 }
+
+/**
+ * Whether `err` is Node's "package not installed" error for `packageName`
+ * itself, as opposed to a resolution failure *inside* that package (a broken
+ * transitive dependency), which is a real error worth surfacing.
+ *
+ * Used to tell an uninstalled optional peer dependency apart from a genuine
+ * failure when lazily importing one.
+ */
+export function isMissingPackage(err: unknown, packageName: string): boolean {
+  return (
+    (err as NodeJS.ErrnoException)?.code === "ERR_MODULE_NOT_FOUND" &&
+    (err as Error)?.message?.includes(`'${packageName}'`)
+  );
+}
+
+/**
+ * Message shown when an optional peer dependency an adapter needs is missing.
+ */
+export function missingPackageMessage(packageName: string): string {
+  return (
+    `The \`${packageName}\` package isn't installed in this project. ` +
+    `Run \`npm install ${packageName}\` to execute these prompts.`
+  );
+}

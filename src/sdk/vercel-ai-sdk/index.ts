@@ -29,6 +29,8 @@ import type { TraceIngestor } from "../../trace/trace-ingestor.ts";
 import {
   type ExecuteConfigOptions,
   findPackageDts,
+  isMissingPackage,
+  missingPackageMessage,
   type SDKAdapter,
 } from "../sdk-adapter.ts";
 import {
@@ -187,6 +189,26 @@ export default {
 // `setupGlobalOTelPipeline`.)
 let globalIngestionSetup: Promise<TraceIngestor | undefined> | undefined;
 
+/** Thrown by {@link importAI} when the `ai` package isn't installed. */
+class MissingAIPackageError extends Error {}
+
+/**
+ * Imports the consumer's copy of `ai`, turning "not installed" into an
+ * actionable message. Keeping the bare specifier in one place also keeps it
+ * legible to the bundler, which is configured never to bundle `ai`.
+ */
+async function importAI(): Promise<typeof import("ai")> {
+  try {
+    return await import("ai");
+  } catch (err) {
+    if (isMissingPackage(err, "ai"))
+      throw new MissingAIPackageError(missingPackageMessage("ai"), {
+        cause: err,
+      });
+    throw err;
+  }
+}
+
 /**
  * {@link SDKAdapter} implementation for the
  * [Vercel AI SDK](https://sdk.vercel.ai/).
@@ -325,7 +347,7 @@ export class VercelAISDK implements SDKAdapter {
     // who actually execute a Vercel AI SDK prompt need the package installed,
     // and execution runs against the consumer's own copy of `ai` (the same
     // instance their provider/model objects were built with).
-    const { generateText } = await import("ai");
+    const { generateText } = await importAI();
 
     let integration: PerTraceTelemetry | undefined;
     if (traceId) {
@@ -391,7 +413,18 @@ export class VercelAISDK implements SDKAdapter {
   }
 
   private async doSetupTraceIngestion(): Promise<TraceIngestor | undefined> {
-    const ai = await import("ai");
+    let ai: typeof import("ai");
+    try {
+      ai = await importAI();
+    } catch (err) {
+      if (!(err instanceof MissingAIPackageError)) throw err;
+      // `ai` is optional: without it there is nothing to trace, but the rest of
+      // the playground (browsing and editing prompts) still works, so warn
+      // instead of taking the CLI down at startup. Executing a prompt reports
+      // the same message through the normal execution-error path.
+      console.warn(`⚠️ ${err.message}`);
+      return undefined;
+    }
 
     if (typeof ai.registerTelemetry === "function") {
       // v7+: native telemetry, no OTel detour needed.

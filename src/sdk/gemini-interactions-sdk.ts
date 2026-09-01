@@ -19,7 +19,12 @@ import type {
   NormalizedPromptUpdates,
   ParsedPrompt,
 } from "../shared/types.ts";
-import { findPackageDts, type SDKAdapter } from "./sdk-adapter.ts";
+import {
+  findPackageDts,
+  isMissingPackage,
+  missingPackageMessage,
+  type SDKAdapter,
+} from "./sdk-adapter.ts";
 
 // Use an `import(...)` type query so the type is derived from `@google/genai`
 // without emitting a runtime import — the package is an optional peer
@@ -248,7 +253,13 @@ export class GeminiInteractionsSDK implements SDKAdapter {
     // only users who execute a Gemini Interactions prompt need it installed.
     // This adapter has no tracing support, so it ignores the route's `traceId`
     // and produces no spans.
-    const { GoogleGenAI } = await import("@google/genai");
+    let GoogleGenAI: typeof import("@google/genai").GoogleGenAI;
+    try {
+      ({ GoogleGenAI } = await import("@google/genai"));
+    } catch (err) {
+      if (!isMissingPackage(err, "@google/genai")) throw err;
+      throw new Error(missingPackageMessage("@google/genai"), { cause: err });
+    }
     const client = new GoogleGenAI({});
     await client.interactions.create({ ...config, store: false });
   }

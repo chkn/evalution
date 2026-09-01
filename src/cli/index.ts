@@ -9,7 +9,10 @@ import { startServer } from "../server/index.ts";
 import { TerminalSessionRegistry } from "../server/terminal.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import type { TraceIngestor } from "../trace/trace-ingestor.ts";
-import { registerEvalutionResolver } from "./config-loader-hooks.ts";
+import {
+  registerEvalutionResolver,
+  registerPeerDependencyResolver,
+} from "./config-loader-hooks.ts";
 import { watchForConfigCreation } from "./config-watcher.ts";
 import { findAvailablePort } from "./find-port.ts";
 import { openBrowser } from "./open-browser.ts";
@@ -114,6 +117,14 @@ async function main() {
   const pathArg = args[1];
   const startDir = pathArg ? path.resolve(pathArg) : process.cwd();
   const { rootDir, hasConfig } = await findRootDir(startDir);
+
+  // Let the lazily-imported optional peer deps (`ai`, `@google/genai`) fall
+  // back to the served project's node_modules. Under `npx` they are absent
+  // from the CLI's own install — npm never installs optional peer deps — so
+  // without this the first `import('ai')` crashes the CLI at startup even
+  // though the project has `ai` installed. Registered before any config or
+  // prompt module is imported.
+  registerPeerDependencyResolver(rootDir);
 
   // Resolve the port once, up front, so the onboarding restart binds the same
   // port the browser was opened on. An explicit `PORT` is honored strictly; a
