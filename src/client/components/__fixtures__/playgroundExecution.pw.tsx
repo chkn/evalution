@@ -80,3 +80,51 @@ test("a string parameter accepts newlines", async ({ mount, page }) => {
 
   await expect(field).toHaveValue("line one\nline two");
 });
+
+test("execute parameter values persist to localStorage per prompt and restore on remount", async ({
+  mount,
+}) => {
+  const params = [
+    {
+      name: "note",
+      type: { kind: "primitive" as const, syntax: "string" },
+      optional: false,
+    },
+  ];
+
+  const component = await mount(
+    <PlaygroundExecutionHarness functionParameters={params} promptId="p1" />,
+  );
+  await component.locator("textarea, input").first().fill("remember me");
+  await component.unmount();
+
+  const remounted = await mount(
+    <PlaygroundExecutionHarness functionParameters={params} promptId="p1" />,
+  );
+  await expect(remounted.locator("textarea, input").first()).toHaveValue(
+    "remember me",
+  );
+});
+
+test("stored parameter values don't leak between different prompts", async ({
+  mount,
+}) => {
+  const params = [
+    {
+      name: "note",
+      type: { kind: "primitive" as const, syntax: "string" },
+      optional: false,
+    },
+  ];
+
+  const component = await mount(
+    <PlaygroundExecutionHarness functionParameters={params} promptId="p1" />,
+  );
+  await component.locator("textarea, input").first().fill("only for p1");
+  await component.unmount();
+
+  const other = await mount(
+    <PlaygroundExecutionHarness functionParameters={params} promptId="p2" />,
+  );
+  await expect(other.locator("textarea, input").first()).toHaveValue("");
+});

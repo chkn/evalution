@@ -4,9 +4,12 @@
 import type { NormalizedPrompt, PropDefinition } from "../../../shared/types";
 import PlaygroundExecution from "../PlaygroundExecution";
 
-function makePrompt(functionParameters: PropDefinition[]): NormalizedPrompt {
+function makePrompt(
+  functionParameters: PropDefinition[],
+  id = "test",
+): NormalizedPrompt {
   return {
-    id: "test",
+    id,
     providerId: "test",
     name: "test",
     functionParameters,
@@ -42,8 +45,13 @@ export function PlaygroundExecutionRawParamHarness({
 /** Mounts PlaygroundExecution with the given function parameters. */
 export function PlaygroundExecutionHarness({
   functionParameters,
+  promptId,
 }: {
   functionParameters: PropDefinition[];
+  /** Overrides the mounted prompt's `id`, for testing per-prompt storage keys. */
+  promptId?: string;
 }) {
-  return <PlaygroundExecution prompt={makePrompt(functionParameters)} />;
+  return (
+    <PlaygroundExecution prompt={makePrompt(functionParameters, promptId)} />
+  );
 }
