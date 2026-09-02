@@ -15,6 +15,8 @@ import type { FileProvider } from "../../../file-provider.ts";
 import { LocalFileProvider } from "../../../file-provider-local.ts";
 import type { CalleeBinding, ModelPropValue } from "../../../shared/types.ts";
 import type { ParsedFilePrompt, PromptFileType } from "../prompt-file-type.ts";
+import type { PromptProgram } from "./prompt-program.ts";
+import { createPromptProgram } from "./prompt-program.ts";
 
 /**
  * {@link PromptFileType} implementation for TypeScript `.prompt.ts` files.
@@ -67,6 +69,9 @@ export default prompts(
 
   private fileProvider: FileProvider;
 
+  /** Kept between parses so TypeScript can reuse unchanged source files. */
+  private previousProgram?: ts.Program;
+
   constructor(fileProvider: FileProvider = new LocalFileProvider()) {
     this.fileProvider = fileProvider;
   }
@@ -75,13 +80,34 @@ export default prompts(
     files: string[],
     rootDir: string = "",
   ): Promise<ParsedFilePrompt[]> {
-    const results = await Promise.all(
-      files.map(async filePath => {
-        const sourceCode = await this.fileProvider.readFile(filePath);
-        return this.parseFileContent(filePath, sourceCode, rootDir);
-      }),
+    const sources = new Map(
+      await Promise.all(
+        files.map(
+          async filePath =>
+            [filePath, await this.fileProvider.readFile(filePath)] as const,
+        ),
+      ),
     );
-    return results.flat();
+
+    // Type resolution is best-effort: a project whose tsconfig or imports fail
+    // to load still parses, just without checker-backed types.
+    let program: PromptProgram | undefined;
+    try {
+      program = createPromptProgram(sources, this.previousProgram);
+      this.previousProgram = program?.program;
+    } catch {
+      program = undefined;
+    }
+
+    return [...sources].flatMap(([filePath, sourceCode]) =>
+      this.parseFileContent(
+        filePath,
+        sourceCode,
+        rootDir,
+        program?.getSourceFile(filePath),
+        program?.typeChecker,
+      ),
+    );
   }
 
   async updateProperty(
@@ -260,13 +286,15 @@ export default prompts(
     filePath: string,
     sourceCode: string,
     rootDir: string,
+    programSourceFile?: ts.SourceFile,
+    typeChecker?: ts.TypeChecker,
   ): ParsedFilePrompt[] {
-    const sourceFile = ts.createSourceFile(
-      filePath,
-      sourceCode,
-      ts.ScriptTarget.ESNext,
-      true,
-    );
+    // The checker can only resolve nodes belonging to its own program, so the
+    // two must travel together: use the program's source file, or neither.
+    const sourceFile =
+      programSourceFile ??
+      ts.createSourceFile(filePath, sourceCode, ts.ScriptTarget.ESNext, true);
+    const checker = programSourceFile ? typeChecker : undefined;
     const prompts: ParsedFilePrompt[] = [];
 
     const visitNode = (node: ts.Node) => {
@@ -280,6 +308,7 @@ export default prompts(
             sourceFile,
             filePath,
             rootDir,
+            checker,
           );
           if (prompt) prompts.push(prompt);
         }
@@ -293,6 +322,7 @@ export default prompts(
               filePath,
               rootDir,
               helper.moduleId,
+              checker,
             );
             if (parsed) prompts.push(parsed);
           }
@@ -311,6 +341,7 @@ export default prompts(
     filePath: string,
     rootDir: string,
     moduleId?: string,
+    typeChecker?: ts.TypeChecker,
   ): ParsedFilePrompt | null {
     const name = getPropertyName(prop);
     if (!name) return null;
@@ -324,6 +355,7 @@ export default prompts(
     const functionParameters = extractPropertiesFromParameters(
       fn.parameters,
       sourceFile,
+      typeChecker,
     ).definitions;
     const relativeFilePath = rootDir
       ? path.relative(rootDir, filePath)
@@ -351,6 +383,7 @@ export default prompts(
     sourceFile: ts.SourceFile,
     filePath: string,
     rootDir: string,
+    typeChecker?: ts.TypeChecker,
   ): ParsedFilePrompt | null {
     if (!node.name) return null;
 
@@ -358,6 +391,7 @@ export default prompts(
     const functionParameters = extractPropertiesFromParameters(
       node.parameters,
       sourceFile,
+      typeChecker,
     ).definitions;
     const returnObject = this.findReturnObjectInFunction(node);
     if (!returnObject) return null;

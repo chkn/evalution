@@ -50,7 +50,32 @@ describe("defaultValueForType", () => {
     });
   });
 
-  it("falls back to first type in a union with no constants", () => {
+  it("seeds the open-ended member of a nullable union, not the null", () => {
+    const type: PropType = {
+      kind: "union",
+      syntax: "string | null",
+      types: [
+        { kind: "primitive", syntax: "string" },
+        { kind: "constant", syntax: "null", value: null },
+      ],
+    };
+    expect(defaultValueForType(type)).toEqual({ kind: "primitive", value: "" });
+  });
+
+  it("seeds the first open-ended member, skipping leading constants", () => {
+    const type: PropType = {
+      kind: "union",
+      syntax: "'auto' | 'none' | number",
+      types: [
+        { kind: "constant", syntax: "'auto'", value: "auto" },
+        { kind: "constant", syntax: "'none'", value: "none" },
+        { kind: "primitive", syntax: "number" },
+      ],
+    };
+    expect(defaultValueForType(type)).toEqual({ kind: "primitive", value: 0 });
+  });
+
+  it("seeds the first member of a union with no constants", () => {
     const type: PropType = {
       kind: "union",
       syntax: "number | string",

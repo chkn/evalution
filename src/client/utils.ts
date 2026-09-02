@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { getSelectableUnionInfo } from "ts-proppy/react";
 import type { PropDefinition, PropValue } from "../shared/types";
 
 export function encodePromptId(id: string): string {
@@ -38,10 +39,17 @@ export function defaultValueForType(type: PropDefinition["type"]): PropValue {
   }
   if (type.kind === "array") return { kind: "array", elements: [] };
   if (type.kind === "union") {
+    // A union with an open-ended member (`string | null`, `'auto' | number`)
+    // opens on that member's editor, so seed its default rather than a
+    // constant the user would have to clear.
+    const selectable = getSelectableUnionInfo(type);
+    if (selectable)
+      return defaultValueForType(selectable.members[selectable.defaultIndex]);
+    // Otherwise every member is a constant, and the first is the dropdown's
+    // initial selection.
     const constant = type.types.find(t => t.kind === "constant");
     if (constant && constant.kind === "constant")
       return { kind: "primitive", value: constant.value };
-    if (type.types.length > 0) return defaultValueForType(type.types[0]);
   }
   return { kind: "primitive", value: undefined };
 }

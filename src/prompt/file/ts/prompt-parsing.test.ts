@@ -362,6 +362,64 @@ describe("PromptParser", () => {
     });
   });
 
+  describe("checker-backed parameter types", () => {
+    it("resolves a readonly array of Pick<> over a type from another file", async () => {
+      const { paths, fileType } = await loadFixtures(
+        "cross-file-param.prompt.ts",
+      );
+      const prompts = await fileType.parsePrompts([paths[0]], "");
+
+      const threadMsgs = prompts[0].functionParameters.find(
+        p => p.name === "threadMsgs",
+      );
+      expect(threadMsgs?.type.kind).toBe("array");
+      if (threadMsgs?.type.kind !== "array") return;
+
+      // The author's own text is what the UI shows.
+      expect(threadMsgs.type.syntax).toBe(
+        'readonly Pick<ThreadMessage, "excerpt">[]',
+      );
+
+      // Each element is an editable object rather than an opaque blob.
+      expect(threadMsgs.type.elementType.kind).toBe("object");
+      if (threadMsgs.type.elementType.kind !== "object") return;
+      expect(threadMsgs.type.elementType.properties).toEqual([
+        {
+          name: "excerpt",
+          type: { kind: "primitive", syntax: "string" },
+          optional: false,
+          description: "The portion of the message that pertains to this thread.",
+        },
+      ]);
+    });
+
+    it("keeps a nullable property editable instead of falling back to JSON", async () => {
+      const { paths, fileType } = await loadFixtures(
+        "cross-file-param.prompt.ts",
+      );
+      const prompts = await fileType.parsePrompts([paths[0]], "");
+
+      const taskInfo = prompts[0].functionParameters.find(
+        p => p.name === "taskInfo",
+      );
+      expect(taskInfo?.type.kind).toBe("object");
+      if (taskInfo?.type.kind !== "object") return;
+
+      // `string | null` is a union of the primitive and a single-value
+      // constant, which the editor pairs with a dropdown rather than treating
+      // as an opaque blob.
+      const description = taskInfo.type.properties[0];
+      expect(description.name).toBe("description");
+      expect(description.type.kind).toBe("union");
+      if (description.type.kind !== "union") return;
+      expect(description.type.syntax).toBe("string | null");
+      expect(description.type.types).toEqual([
+        { kind: "primitive", syntax: "string" },
+        { kind: "constant", syntax: "null", value: null },
+      ]);
+    });
+  });
+
   describe("parseAll", () => {
     it("should parse all files in the program", async () => {
       const { paths, fileType } = await loadFixtures(
