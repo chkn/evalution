@@ -85,11 +85,13 @@ describe("PromptParser", () => {
       expect(prompts[0].functionParameters).toHaveLength(2);
       expect(prompts[0].functionParameters[0]).toEqual({
         name: "name",
-        type: { kind: "primitive", syntax: "string" },
+        type: { kind: "primitive", syntax: "string", base: "string" },
         optional: false,
       });
       expect(prompts[0].functionParameters[1]).toEqual({
         name: "language",
+        // No type annotation, so this is inferred from the default value via
+        // the syntax-tree path rather than the checker — no `base` field.
         type: { kind: "primitive", syntax: "string" },
         optional: true,
         defaultValue: { kind: "primitive", value: "en" },
@@ -386,9 +388,10 @@ describe("PromptParser", () => {
       expect(threadMsgs.type.elementType.properties).toEqual([
         {
           name: "excerpt",
-          type: { kind: "primitive", syntax: "string" },
+          type: { kind: "primitive", syntax: "string", base: "string" },
           optional: false,
-          description: "The portion of the message that pertains to this thread.",
+          description:
+            "The portion of the message that pertains to this thread.",
         },
       ]);
     });
@@ -414,7 +417,7 @@ describe("PromptParser", () => {
       if (description.type.kind !== "union") return;
       expect(description.type.syntax).toBe("string | null");
       expect(description.type.types).toEqual([
-        { kind: "primitive", syntax: "string" },
+        { kind: "primitive", syntax: "string", base: "string" },
         { kind: "constant", syntax: "null", value: null },
       ]);
     });

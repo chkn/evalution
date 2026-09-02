@@ -39,7 +39,14 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
         }
         resolved.push(undefined);
       } else {
-        resolved.push(await materializeValue(current));
+        try {
+          resolved.push(await materializeValue(current));
+        } catch (e: any) {
+          setError(
+            `Parameter '${param.name}' could not be resolved: ${e.message}`,
+          );
+          return null;
+        }
       }
     }
     return resolved;
