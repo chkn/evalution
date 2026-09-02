@@ -5,10 +5,14 @@ import { useState } from "react";
 import type {
   NormalizedMessage,
   NormalizedPrompt,
+  PropDefinition,
 } from "../../../shared/types";
 import PlaygroundContent from "../PlaygroundContent";
 
-function makePrompt(messagesCount: number): NormalizedPrompt {
+function makePrompt(
+  messagesCount: number,
+  functionParameters: PropDefinition[],
+): NormalizedPrompt {
   const messages: NormalizedMessage[] = Array.from(
     { length: messagesCount },
     (_, i) => ({
@@ -23,7 +27,7 @@ function makePrompt(messagesCount: number): NormalizedPrompt {
     id: "test",
     providerId: "test",
     name: "test",
-    functionParameters: [],
+    functionParameters,
     modelEditable: true,
     systemEditable: true,
     messages,
@@ -40,13 +44,15 @@ export function PlaygroundContentHarness({
   width,
   height,
   messagesCount,
+  functionParameters = [],
 }: {
   width: number;
   height: number;
   messagesCount: number;
+  functionParameters?: PropDefinition[];
 }) {
   const [prompt, setPrompt] = useState<NormalizedPrompt>(
-    makePrompt(messagesCount),
+    makePrompt(messagesCount, functionParameters),
   );
   return (
     <div className="main-content" style={{ width, height }}>

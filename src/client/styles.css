@@ -1294,6 +1294,7 @@ pre {
   .pg-exec-col {
     width: 280px;
     flex-shrink: 0;
+    min-height: 0;
     border-top: none;
     border-left: 1px solid var(--exec-border);
     overflow: hidden;
@@ -1305,7 +1306,8 @@ pre {
     flex-direction: column !important;
     align-items: stretch !important;
     padding: 0 !important;
-    height: auto !important;
+    height: 100% !important;
+    min-height: 0;
   }
 
   .pg-exec-header {
@@ -1320,7 +1322,8 @@ pre {
   .pg-exec-body {
     padding: 14px 16px !important;
     overflow-y: auto;
-    flex: none !important;
+    flex: 1 !important;
+    min-height: 0;
   }
 
   .pg-exec-body > div {
