@@ -9,6 +9,7 @@ import { startServer } from "../server/index.ts";
 import { TerminalSessionRegistry } from "../server/terminal.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import type { TraceIngestor } from "../trace/trace-ingestor.ts";
+import { registerBundlerResolutionFallback } from "./bundler-resolution-hook.ts";
 import {
   registerEvalutionResolver,
   registerPeerDependencyResolver,
@@ -22,6 +23,12 @@ import { openBrowser } from "./open-browser.ts";
 // evalution is run via `npx` with no local install. Registered once, up front,
 // before any config import happens.
 registerEvalutionResolver(import.meta.url);
+
+// Served projects' prompt files (and whatever they import) are commonly
+// authored for a bundler, which resolves extensionless and directory
+// imports; Node's own loader, which runs them here, does not. Registered
+// once, up front, before any prompt file is ever imported for execution.
+registerBundlerResolutionFallback();
 
 async function findRootDir(
   startDir: string,
