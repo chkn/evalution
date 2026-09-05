@@ -200,6 +200,9 @@ export class VercelAISDKTelemetry
         ? {
             id: identity.id,
             functionParameters: identity.functionParameters,
+            functionInputs: identity.functionInputs,
+            executeInputs: identity.executeInputs,
+            parameterDefinitions: identity.parameterDefinitions,
           }
         : undefined,
     };

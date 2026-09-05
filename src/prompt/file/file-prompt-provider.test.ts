@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { valueToSourceText } from "ts-proppy";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryFileProvider } from "../../file-provider-memory.ts";
@@ -99,29 +101,79 @@ export function myPrompt() {
 
   it("execute forwards the trace id and prompt identity to the SDK adapter", async () => {
     const fileProvider = new MemoryFileProvider({
+      // Untyped parameter: the in-memory provider imports through a `data:`
+      // URL, where Node does not strip type annotations.
       [p("id.prompt.ts")]:
-        `export function greet() { return { model: 'openai/gpt-4o', system: 'hi' }; }`,
+        `export function greet(name) { return { model: 'openai/gpt-4o', system: 'hi' }; }`,
     });
     const sdk = new VercelAISDK();
-    const spy = vi.spyOn(sdk, "executeConfig").mockResolvedValue(undefined);
+    const spy = vi
+      .spyOn(sdk, "executeConfig")
+      .mockResolvedValue({ done: Promise.resolve() });
     const provider = new FilePromptProvider({
       rootDir: ROOT,
       fileProvider,
       sdk,
     });
 
+    const functionInputs = [
+      {
+        kind: "value" as const,
+        value: { kind: "primitive" as const, value: "Ada" },
+      },
+    ];
     await provider.execute("id.prompt.ts#greet", ["Ada"], {
       traceId: "trace-x",
+      inputs: { functionInputs },
     });
 
     expect(spy).toHaveBeenCalledWith(expect.anything(), {
       traceId: "trace-x",
+      executeValues: undefined,
       identity: {
         id: "id.prompt.ts#greet",
         name: "greet",
-        functionParameters: ["Ada"],
+        // The trace records the recipe, not the resolved arguments: one of
+        // those could be a live handle that doesn't serialize, and the recipe
+        // is what a replay needs. The signature snapshot rides along so a
+        // replay can diff two known shapes instead of guessing.
+        functionInputs,
+        executeInputs: undefined,
+        parameterDefinitions: [expect.objectContaining({ name: "name" })],
       },
     });
+  });
+
+  it("run-scoped teardown waits for the run to settle, not for execute to return", async () => {
+    const fileProvider = new MemoryFileProvider({
+      [p("id.prompt.ts")]:
+        `export function greet() { return { model: 'openai/gpt-4o', system: 'hi' }; }`,
+    });
+    const sdk = new VercelAISDK();
+    let finish!: () => void;
+    const done = new Promise<void>(resolve => {
+      finish = resolve;
+    });
+    vi.spyOn(sdk, "executeConfig").mockResolvedValue({ done });
+    const provider = new FilePromptProvider({
+      rootDir: ROOT,
+      fileProvider,
+      sdk,
+    });
+
+    let settled = false;
+    await provider.execute("id.prompt.ts#greet", [], {
+      onSettled: () => {
+        settled = true;
+      },
+    });
+
+    // `execute` is fire-and-forget by design, so the run is still going.
+    expect(settled).toBe(false);
+    finish();
+    await done;
+    await Promise.resolve();
+    expect(settled).toBe(true);
   });
 
   it("should update editable property", async () => {
@@ -499,5 +551,103 @@ export function regularPrompt() {
       expect(prompts).toHaveLength(1);
       expect(prompts[0].name).toBe("customPrompt");
     });
+  });
+});
+
+describe("FilePromptProvider resource inputs", () => {
+  /** A project whose playground module exports one resource. */
+  function withResource(extra: Record<string, string> = {}) {
+    const helper = pathToFileURL(
+      path.join(import.meta.dirname, "../playground/resource.ts"),
+    ).href;
+    const fileProvider = new MemoryFileProvider({
+      [p("x.prompt.ts")]:
+        `export function greet(taskId) { return { model: 'openai/gpt-4o', system: 'hi' }; }`,
+      [p("x.playground.ts")]:
+        `import { resource } from ${JSON.stringify(helper)};\n` +
+        `globalThis.__disposed = 0;\n` +
+        `export const taskId = resource({\n` +
+        `  label: "Seeded task",\n` +
+        `  create: () => ({ value: "tsk_seeded", receipt: "tsk_seeded",\n` +
+        `    dispose: () => { globalThis.__disposed++; } }),\n` +
+        `});`,
+      ...extra,
+    });
+    return new FilePromptProvider({
+      rootDir: ROOT,
+      fileProvider,
+      sdk: new VercelAISDK(),
+    });
+  }
+
+  it("offers the resource on the panel without ever sending its value", async () => {
+    const [prompt] = await withResource().getAllPrompts();
+    const sources = prompt.inputSources!;
+
+    expect(sources.functionSlots.taskId).toEqual(["x.playground.ts#taskId"]);
+    expect(sources.resources).toEqual([
+      {
+        uri: "x.playground.ts#taskId",
+        label: "Seeded task",
+        scope: "run",
+      },
+    ]);
+  });
+
+  it("resolves a resource reference into the value execute receives", async () => {
+    const provider = withResource();
+    const resolved = await provider.resolveInputs("x.prompt.ts#greet", {
+      functionInputs: [{ kind: "resource", uri: "x.playground.ts#taskId" }],
+    });
+
+    // `execute` still takes plain `any[]` — the provider contract did not
+    // change with the wire format.
+    expect(resolved.functionParams).toEqual(["tsk_seeded"]);
+    // A receipt lets a trace display what the run used, even though replaying
+    // it would mint a new one.
+    expect(resolved.receipts).toEqual({
+      "x.playground.ts#taskId": "tsk_seeded",
+    });
+
+    (globalThis as any).__disposed = 0;
+    await resolved.release?.();
+    expect((globalThis as any).__disposed).toBe(1);
+  });
+
+  it("resolves the same relative ref under a different rootDir", async () => {
+    // Refs are persisted in localStorage today and destined for a synced DB,
+    // where a machine-absolute path would break for every teammate.
+    const helper = pathToFileURL(
+      path.join(import.meta.dirname, "../playground/resource.ts"),
+    ).href;
+    const source =
+      `import { resource } from ${JSON.stringify(helper)};\n` +
+      `export const taskId = resource({ create: () => ({ value: "tsk_1" }) });`;
+    const promptSource = `export function greet(taskId) { return { model: 'm', system: 'hi' }; }`;
+
+    const ref = "x.playground.ts#taskId";
+    for (const root of ["/proj", "/elsewhere/deeper"]) {
+      const provider = new FilePromptProvider({
+        rootDir: root,
+        fileProvider: new MemoryFileProvider({
+          [path.join(root, "x.prompt.ts")]: promptSource,
+          [path.join(root, "x.playground.ts")]: source,
+        }),
+        sdk: new VercelAISDK(),
+      });
+      const resolved = await provider.resolveInputs("x.prompt.ts#greet", {
+        functionInputs: [{ kind: "resource", uri: ref }],
+      });
+      expect(resolved.functionParams).toEqual(["tsk_1"]);
+    }
+  });
+
+  it("releases the lease when resolution fails, so nothing is left alive", async () => {
+    const provider = withResource();
+    await expect(
+      provider.resolveInputs("x.prompt.ts#greet", {
+        functionInputs: [{ kind: "resource", uri: "x.playground.ts#missing" }],
+      }),
+    ).rejects.toThrow(/not found/);
   });
 });

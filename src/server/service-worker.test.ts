@@ -147,7 +147,7 @@ describe("createMemoryApp", () => {
     const res = await app.request("/api/prompts/fs/anyid/execute", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ functionParams: [] }),
+      body: JSON.stringify({ functionInputs: [] }),
     });
     expect(res.status).toBe(400);
     expect(((await res.json()) as any).error).toBe(RUN_LOCALLY_MESSAGE);

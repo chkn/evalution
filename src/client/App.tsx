@@ -17,7 +17,7 @@ import { useResizable } from "./hooks/useResizable";
 import { useSSE } from "./hooks/useSSE";
 import { useTraces } from "./hooks/useTraces";
 import { consumeSelfEdit } from "./self-edits";
-import { requireProviderId } from "./utils";
+import { requireProviderId, withSetMembership } from "./utils";
 
 // ─── Tab / Pane model ─────────────────────────────────────────────────────────
 
@@ -335,8 +335,7 @@ function App() {
 
   const handleDirtyChange = useCallback((key: string, dirty: boolean) => {
     setDirtyTabs(prev => {
-      const next = new Set(prev);
-      dirty ? next.add(key) : next.delete(key);
+      const next = withSetMembership(prev, key, dirty);
       dirtyTabsRef.current = next;
       return next;
     });

@@ -67,6 +67,8 @@ export class MemoryFileProvider implements FileProvider {
   async import(filePath: string): Promise<any> {
     const content = this.files.get(filePath);
     if (content === undefined) throw new Error(`File not found: ${filePath}`);
+    // No `ImportOptions` handling: the specifier embeds the content, so every
+    // import of a changed file is already a fresh evaluation.
     return import(
       `data:text/javascript;charset=utf-8,${encodeURIComponent(content)}`
     );

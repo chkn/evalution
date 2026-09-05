@@ -21,6 +21,24 @@ export interface PromptID {
   providerId?: string;
   /** Positional arguments the prompt function was called with. */
   functionParameters?: unknown[];
+  /**
+   * The unresolved inputs the run was launched with — the recipe, not the
+   * resolution.
+   *
+   * Replaying them is only exactly faithful for the `value` kind. A `resource`
+   * re-runs its `create()`, producing an *equivalent* value rather than the
+   * same one — a fresh handle, a newly seeded row — so a UI must present it as
+   * something that will be re-created, never as a restored value.
+   */
+  functionInputs?: unknown[];
+  /** The unresolved execute-parameter inputs, keyed by parameter name. */
+  executeInputs?: Record<string, unknown>;
+  /**
+   * The prompt's parameter definitions as they stood when the run was
+   * launched, so a replay can diff them against today's signature rather than
+   * guess whether the recorded inputs still fit.
+   */
+  parameterDefinitions?: unknown[];
 }
 
 /**

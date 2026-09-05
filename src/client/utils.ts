@@ -4,6 +4,25 @@
 import { getSelectableUnionInfo } from "ts-proppy/react";
 import type { PropDefinition, PropValue } from "../shared/types";
 
+/**
+ * Returns `set` with `value`'s membership set to `present`, or `set` itself
+ * unchanged when membership already matches. Callers that feed the result
+ * into `setState` rely on getting back the same reference for a no-op change
+ * so React can bail out of the update — otherwise a state setter invoked
+ * every render (e.g. from a prop callback recreated each render) never
+ * settles.
+ */
+export function withSetMembership<T>(
+  set: Set<T>,
+  value: T,
+  present: boolean,
+): Set<T> {
+  if (present === set.has(value)) return set;
+  const next = new Set(set);
+  present ? next.add(value) : next.delete(value);
+  return next;
+}
+
 export function encodePromptId(id: string): string {
   return btoa(id).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }

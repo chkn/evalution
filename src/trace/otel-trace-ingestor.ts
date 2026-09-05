@@ -173,6 +173,40 @@ function readLLM(
   };
 }
 
+/**
+ * Read back the inputs a run was launched with.
+ *
+ * OTel attribute values are primitives, so the inputs travel as a JSON string
+ * (see `getPromptSpanAttributes`) and are parsed here. Without this the OTel
+ * path could record inputs but never replay them — it was write-only.
+ *
+ * A malformed value is dropped rather than thrown on: a span carrying an
+ * unreadable attribute is still a perfectly good span.
+ */
+function readInputs(
+  attributes: Record<string, unknown>,
+): Pick<PromptID, "functionInputs" | "executeInputs" | "parameterDefinitions"> {
+  const raw = str(attributes["evalution.prompt.inputs"]);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return {
+      ...(Array.isArray(parsed.functionInputs) && {
+        functionInputs: parsed.functionInputs,
+      }),
+      ...(parsed.executeInputs && typeof parsed.executeInputs === "object"
+        ? { executeInputs: parsed.executeInputs }
+        : {}),
+      ...(Array.isArray(parsed.parameterDefinitions) && {
+        parameterDefinitions: parsed.parameterDefinitions,
+      }),
+    };
+  } catch {
+    return {};
+  }
+}
+
 function llmAndPrompt(attributes: Record<string, unknown>): Partial<Span> {
   const llm = readLLM(attributes);
   // Store the prompt reference exactly as emitted: `id` is global unless a
@@ -181,7 +215,7 @@ function llmAndPrompt(attributes: Record<string, unknown>): Partial<Span> {
   const id = str(attributes["evalution.prompt.id"]);
   const providerId = str(attributes["evalution.prompt.provider.id"]);
   const prompt: PromptID | undefined = id
-    ? { id, ...(providerId && { providerId }) }
+    ? { id, ...(providerId && { providerId }), ...readInputs(attributes) }
     : undefined;
   return {
     ...(llm && { llm }),

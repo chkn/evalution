@@ -4,6 +4,7 @@
 import type { SetupTask } from "../shared/setup-task";
 import type {
   AddPromptContext,
+  ExecuteRequest,
   ExecuteResponse,
   ModelCatalog,
   NormalizedPrompt,
@@ -143,14 +144,25 @@ export async function updatePromptProperties(
   return res.json();
 }
 
+/**
+ * Starts a prompt run.
+ *
+ * Inputs are sent **unresolved**: a resource reference has no value until the
+ * server creates one, and a value's import bindings cannot be imported in a
+ * browser at all. Resolution therefore happens server-side, immediately before
+ * the prompt is called.
+ *
+ * @param prompt - The prompt to run.
+ * @param inputs - Positional function inputs and named execute inputs.
+ */
 export async function executePrompt(
   prompt: NormalizedPrompt,
-  functionParams: any[],
+  inputs: ExecuteRequest,
 ): Promise<ExecuteResponse> {
   const res = await fetch(promptUrl(prompt, "execute"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ functionParams }),
+    body: JSON.stringify(inputs),
   });
   await throwIfError(res);
   return res.json();

@@ -27,7 +27,7 @@ Using the helper brings these benefits:
 import { prompts } from "@evalution/vercel-ai-sdk";
 
 export default prompts(
-  { id: "assistant" }, // <- this is an ID that should be unique and not change
+  { id: "assistant" }, // <- this ID should be unique and not change
 
   // Destructure model providers here instead of importing them directly.
   ({ openai, anthropic }) => ({
@@ -50,9 +50,10 @@ export default prompts(
 
 ### Anatomy
 
-`prompts(id, factory)` takes:
+`prompts({ id }, factory)` takes:
 
-- **`id`** *(string, required)* — a stable, unique identifier for this group of
+- **`{ id }`** *(object, required)* — an object containing a single `id` key,
+  whose value should be a stable, unique identifier for this group of
   prompts. Each prompt's global ID becomes `` `id#entryName` `` (e.g.
   `assistant#greet`), which is what links runtime traces back to the prompt.
   This ensures the link is not broken if prompt files are moved or renamed.

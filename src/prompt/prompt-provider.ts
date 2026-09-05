@@ -3,6 +3,7 @@
 
 import type {
   AddPromptContext,
+  ExecutionInput,
   ModelCatalog,
   NormalizedPrompt,
   NormalizedPromptUpdates,
@@ -18,6 +19,50 @@ import type { PromptFileType } from "./file/prompt-file-type.ts";
 export interface ExecuteOptions {
   /** The ID to use for the trace created by this execution, if any. */
   traceId?: string;
+  /**
+   * Named values the SDK needs to execute the prompt's config, keyed by
+   * execute-parameter name. Forwarded to the SDK adapter, which knows how they
+   * reach the underlying call.
+   */
+  executeValues?: Record<string, any>;
+  /**
+   * The unresolved inputs these values came from, recorded on the trace so a
+   * past run can be read back as the recipe it ran with rather than as a
+   * snapshot of values that may not even be serializable.
+   */
+  inputs?: {
+    functionInputs?: readonly ExecutionInput[];
+    executeInputs?: Record<string, ExecutionInput>;
+  };
+  /**
+   * Called once the run is over, successfully or not.
+   *
+   * {@link PromptProvider.execute} resolves as soon as the run is dispatched —
+   * the route answers with a trace id and the generation continues in the
+   * background — so this is the only signal that anything scoped to the run
+   * (a resource created for it) may now be torn down. A provider that cannot
+   * detect completion should call it immediately rather than never.
+   */
+  onSettled?: () => void;
+}
+
+/** What {@link PromptProvider.resolveInputs} hands back. */
+export interface ResolvedInputs {
+  /** Positional arguments for {@link PromptProvider.execute}. */
+  functionParams: any[];
+  /** Named values for {@link ExecuteOptions.executeValues}. */
+  executeValues: Record<string, any>;
+  /**
+   * Serializable summaries of what any resources produced, keyed by `uri`, so
+   * a trace can show the value a run used even though replaying it would mint
+   * a new one.
+   */
+  receipts?: Record<string, unknown>;
+  /**
+   * Releases anything the resolution created that is scoped to this run.
+   * Called once the run settles.
+   */
+  release?(): Promise<void>;
 }
 
 /**
@@ -71,6 +116,11 @@ export interface PromptProvider<
   /**
    * Executes a prompt.
    *
+   * Receives plain materialized values — a provider never has to recognise an
+   * {@link ExecutionInput} or interpret someone else's `uri` grammar.
+   * Resolution happens before this is called, through
+   * {@link resolveInputs} where a provider offers one.
+   *
    * @param promptId - ID of the prompt to run.
    * @param params - Positional arguments forwarded to the prompt function.
    * @param options - Optional execution settings; see {@link ExecuteOptions}.
@@ -80,6 +130,30 @@ export interface PromptProvider<
     params: any[],
     options?: ExecuteOptions,
   ): Promise<void>;
+
+  /**
+   * Turns the unresolved inputs the playground sends into the concrete values
+   * {@link execute} takes.
+   *
+   * Both halves are resolved in one call rather than one call per half: a
+   * run-scoped resource referenced by both a function input and an execute
+   * input must be created **once** per run, which is only decidable with every
+   * input in view.
+   *
+   * Optional. Without it, inputs of kind `value` are materialized by a
+   * built-in fallback and anything else is rejected — so a provider that has
+   * no resources of its own keeps working untouched.
+   *
+   * @param promptId - ID of the prompt the inputs are for.
+   * @param inputs - The unresolved inputs. See {@link ExecutionInput}.
+   */
+  resolveInputs?(
+    promptId: string,
+    inputs: {
+      functionInputs?: readonly ExecutionInput[];
+      executeInputs?: Record<string, ExecutionInput>;
+    },
+  ): Promise<ResolvedInputs>;
 
   /**
    * Performs whatever process-global setup this provider's tracing mechanism

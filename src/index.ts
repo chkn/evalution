@@ -22,9 +22,19 @@ export type {
   FileWatchCallback,
   FileWatchOptions,
   GlobOptions,
+  ImportOptions,
 } from "./file-provider.ts";
 export { LocalFileProvider } from "./file-provider-local.ts";
 export { MemoryFileProvider } from "./file-provider-memory.ts";
+export {
+  collectInputSlots,
+  type InputSlot,
+  type InputSource,
+  matchSourcesToSlots,
+  type ResourceResolver,
+  resolveExecutionInput,
+  resolveExecutionInputs,
+} from "./prompt/execution-inputs.ts";
 export {
   FilePromptProvider,
   type FilePromptProviderOptions,
@@ -33,16 +43,39 @@ export type {
   FilePromptMetadata,
   NormalizedFilePrompt,
   ParsedFilePrompt,
+  ParsePromptsOptions,
   PromptFileType,
+  SlotMatchRequest,
+  SlotMatchSource,
+  TypeProbe,
+  TypeProbeRequest,
 } from "./prompt/file/prompt-file-type.ts";
 export { TSPromptFileType } from "./prompt/file/ts/ts-prompt-file-type.ts";
+export {
+  isResource,
+  type ResolvedNeeds,
+  type Resource,
+  type ResourceDefinition,
+  type ResourceInstance,
+  type ResourceNeeds,
+  resource,
+} from "./prompt/playground/resource.ts";
+export {
+  DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
+  type PlaygroundModuleError,
+  type RegisteredResource,
+  type ResourceLease,
+  ResourceRegistry,
+} from "./prompt/playground/resource-registry.ts";
 export type {
   ExecuteOptions,
   PromptProvider,
+  ResolvedInputs,
 } from "./prompt/prompt-provider.ts";
 export { GeminiInteractionsSDK } from "./sdk/gemini-interactions-sdk.ts";
 export type {
   ExecuteConfigOptions,
+  ExecutionHandle,
   SDKAdapter,
 } from "./sdk/sdk-adapter.ts";
 export { VercelAISDK } from "./sdk/vercel-ai-sdk/index.ts";
@@ -59,6 +92,7 @@ export type {
   ChangeEventType,
   ExecuteRequest,
   ExecuteResponse,
+  ExecutionInput,
   ExtractedProps,
   LLMSpanDetails,
   ModelCatalog,
@@ -74,9 +108,13 @@ export type {
   ParsedPrompt,
   PromptChangeEvent,
   PromptID,
+  PromptInputSources,
   PromptProviderInfo,
   PropDefinition,
+  PropType,
   PropValue,
+  ResourceInfo,
+  ResourceScope,
   SourceSpan,
   Span,
   SpanKind,

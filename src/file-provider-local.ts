@@ -11,6 +11,7 @@ import type {
   FileWatchCallback,
   FileWatchOptions,
   GlobOptions,
+  ImportOptions,
 } from "./file-provider.ts";
 
 /**
@@ -37,8 +38,38 @@ export class LocalFileProvider implements FileProvider {
     await fs.unlink(filePath);
   }
 
-  async import(filePath: string): Promise<any> {
-    return import(pathToFileURL(filePath).href);
+  /**
+   * Whether the host rejected a cache-busting query string, so we stop adding
+   * one. Node accepts `file:///x.ts?v=1` and treats it as a distinct module,
+   * but a transform pipeline in front of it may read the extension off the
+   * whole specifier and choke on `.ts?v=1`.
+   */
+  #cacheBustingUnsupported = false;
+
+  async import(filePath: string, { fresh }: ImportOptions = {}): Promise<any> {
+    const plain = pathToFileURL(filePath).href;
+    if (!fresh || this.#cacheBustingUnsupported) return import(plain);
+
+    // A distinct specifier is the only way past Node's module cache. mtime
+    // rather than a counter, so an unchanged file still hits the cache.
+    const { mtimeMs } = await fs.stat(filePath);
+    const url = pathToFileURL(filePath);
+    url.search = `?v=${mtimeMs}`;
+
+    try {
+      return await import(url.href);
+    } catch (err) {
+      // Either the host can't take the query, or the module itself threw.
+      // Retrying plain tells the two apart: if it also throws, that is the
+      // real error and worth surfacing; if it succeeds, the host is the
+      // problem and this instance stops trying (at the cost of staleness,
+      // which beats not loading at all).
+      const loaded = await import(plain).catch(() => {
+        throw err;
+      });
+      this.#cacheBustingUnsupported = true;
+      return loaded;
+    }
   }
 
   async *glob(

@@ -50,6 +50,9 @@
   --panel-card-border: #e5e7eb;
   --panel-title: #9ca3af;
   --panel-text: #111827;
+  /* Field names, etc. — a shade stronger than --panel-text, for the label
+     that's the whole point of a form row. */
+  --panel-text-primary: #05050a;
   --panel-text-secondary: #9ca3af;
   --panel-text-muted: #d1d5db;
 
@@ -144,6 +147,9 @@
     --panel-card-border: rgba(255, 255, 255, 0.08);
     --panel-title: #9aa3b8;
     --panel-text: #e5e5e7;
+    /* Field names, etc. — brighter than --panel-text, for the label that's
+       the whole point of a form row. */
+    --panel-text-primary: #f8f8fa;
     --panel-text-secondary: #9aa3b8;
     --panel-text-muted: #6e7280;
 
@@ -199,7 +205,7 @@
     --proppy-button-color: #e5e5e7;
     --proppy-input-bg: #1c1c1e;
     --proppy-input-color: #e5e5e7;
-    --proppy-text-primary: #e5e5e7;
+    --proppy-text-primary: #f8f8fa;
     --proppy-text-muted: #6e7280;
     --proppy-text-secondary: #9aa3b8;
     --proppy-danger-bg: rgba(220, 38, 38, 0.12);
@@ -1201,26 +1207,154 @@ pre {
   color: var(--panel-text-secondary);
 }
 
-.pg-exec-param-count {
-  font-family: "Geist Mono", ui-monospace, monospace;
-  font-size: 10.5px;
-  font-weight: 500;
-  color: var(--panel-text-secondary);
-}
-
+/* Narrow mode lays the input rows out side by side. */
 .pg-exec-body {
   flex: 1;
   min-width: 0;
   padding: 0 12px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: flex-end;
 }
 
-/* Override PropsEditor's inline flex-direction:column → row in narrow mode */
-.pg-exec-body > div {
-  display: flex !important;
-  flex-direction: row !important;
-  flex-wrap: wrap;
-  gap: 8px 16px !important;
-  align-items: flex-end;
+.pg-exec-param {
+  min-width: 0;
+}
+
+.pg-exec-param-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.pg-exec-param-name {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--panel-text-primary);
+}
+
+.pg-exec-param-type {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--panel-text-secondary);
+}
+
+.pg-exec-param-desc {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--panel-text-secondary);
+  margin-bottom: 4px;
+}
+
+/* Marks off the values needed to *run* the prompt from the ones it takes. */
+.pg-exec-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--panel-text-secondary);
+  border-top: 1px solid var(--exec-border);
+  padding-top: 10px;
+  margin-top: 2px;
+}
+
+/* ─── Input slots ──────────────────────────────────────────────────────────── */
+
+.pg-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pg-slot-source {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  border: 1px solid var(--exec-border);
+  border-radius: 6px;
+  background: var(--panel-card-bg);
+  color: inherit;
+  transition:
+    border-color 0.1s,
+    box-shadow 0.1s;
+}
+
+.pg-slot-source:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(165, 180, 252, 0.25);
+}
+
+/* A resource's value doesn't exist until the run creates it, so the chip
+   names the source rather than pretending to preview a value. */
+.pg-slot-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 1px solid var(--exec-border);
+  border-radius: 6px;
+  background: var(--panel-card-bg);
+  font-size: 12px;
+}
+
+.pg-slot-chip-note {
+  font-size: 10px;
+  font-style: normal;
+  color: var(--panel-text-secondary);
+}
+
+.pg-slot-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  /* Matches the sibling .pg-slot-source / .pg-slot-chip controls, so this
+     reads at the same size as the rest of the row rather than a footnote. */
+  font-size: 12px !important;
+  color: var(--panel-text-secondary);
+  background: var(--panel-card-bg);
+}
+
+.pg-slot-hint-help {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid var(--panel-text-secondary);
+  font-size: 10px;
+  color: var(--panel-text-secondary);
+  text-decoration: none;
+}
+
+.pg-slot-hint-help:hover {
+  color: var(--panel-text);
+  border-color: var(--panel-text);
+}
+
+.pg-slot-hint code,
+.pg-exec-error code {
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 10.5px;
 }
 
 .pg-exec-footer {
@@ -1324,9 +1458,6 @@ pre {
     overflow-y: auto;
     flex: 1 !important;
     min-height: 0;
-  }
-
-  .pg-exec-body > div {
     display: flex !important;
     flex-direction: column !important;
     align-items: stretch !important;
@@ -1982,18 +2113,6 @@ pre {
   border: 1px solid #ef9a9a;
 }
 
-.function-params-section {
-  margin: 1.5rem 0;
-  padding: 1rem;
-  background: #f9f9f9;
-  border-radius: 4px;
-}
-
-.function-params-section h3 {
-  margin: 0 0 0.5rem 0;
-  font-size: 1.1rem;
-}
-
 .params-info {
   font-size: 0.85rem;
   color: #666;
@@ -2034,32 +2153,13 @@ pre {
   color: #555;
 }
 
-.parameter-editor label {
-  display: block;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-  color: #333;
-}
-
-.parameter-editor input,
-.parameter-editor textarea,
-.parameter-editor select {
+.pg-slot-hint {
   width: 100%;
   padding: 0.5rem;
-  border: 1px solid #ddd;
+  border: 1px solid var(--input-border);
   border-radius: 4px;
   font-size: 0.9rem;
   font-family: inherit;
-}
-
-.parameter-editor textarea {
-  font-family: "Menlo", "Monaco", monospace;
-  resize: vertical;
-}
-
-.parameter-editor textarea.has-tokens {
-  border-color: var(--accent);
-  background: #f0f4ff;
 }
 
 .token-indicator {

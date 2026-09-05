@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { PropDefinition, PropValue } from "ts-proppy";
+import type { TypeProbe } from "../prompt/file/prompt-file-type.ts";
 import type {
   ModelCatalog,
   ModelPropValue,
@@ -22,11 +23,38 @@ export interface ExecuteConfigOptions {
   /** The ID to use for the trace created by this execution, if any. */
   traceId?: string;
   /**
-   * The prompt's identity (id, name, parameters). Used to name and link the
+   * The prompt's identity (id, name, inputs). Used to name and link the
    * trace when the config wasn't built by the `prompts()` helper (which would
    * otherwise carry that identity itself).
    */
   identity?: PromptSpanInfo;
+  /**
+   * Named values the SDK needs to execute this config, resolved from the
+   * prompt's `executeParameters` — the Vercel AI SDK's `toolsContext`, say.
+   *
+   * How they reach the underlying call is the adapter's business: merging
+   * them generically would assume an execute parameter's name is always a
+   * config key, which is true for `toolsContext` but is the adapter's fact to
+   * know rather than the caller's.
+   */
+  executeValues?: Record<string, any>;
+}
+
+/**
+ * Handle on an execution that has been dispatched.
+ *
+ * `executeConfig` deliberately resolves as soon as the call is in flight — the
+ * route answers with a trace id and the generation continues in the background
+ * — so this is how a caller learns when the run is actually over, which is
+ * what run-scoped resource teardown hangs off.
+ */
+export interface ExecutionHandle {
+  /**
+   * Settles when the run is over, successfully or not. Never rejects: a
+   * failure is already reported through the trace, and a caller awaiting this
+   * only wants to know that it is safe to tear down.
+   */
+  done: Promise<void>;
 }
 
 /**
@@ -68,10 +96,17 @@ export interface SDKAdapter {
   /**
    * Executes a prompt config object.
    *
+   * Resolves once the call has been dispatched, not once it has finished. Use
+   * the returned {@link ExecutionHandle} to await completion.
+   *
    * @param config - The config object returned by the prompt function.
-   * @param options - Optional execution options (trace id, prompt identity).
+   * @param options - Optional execution options (trace id, prompt identity,
+   *   resolved execute values).
    */
-  executeConfig(config: any, options?: ExecuteConfigOptions): Promise<void>;
+  executeConfig(
+    config: any,
+    options?: ExecuteConfigOptions,
+  ): Promise<ExecutionHandle | undefined>;
 
   /**
    * Called once, during server startup, before any prompt config is built,
@@ -96,9 +131,42 @@ export interface SDKAdapter {
    * {@link PromptFileType} into a {@link NormalizedPrompt} that the UI can
    * consume without knowing the SDK's specific property names or message shape.
    *
+   * Stays synchronous: the expensive, asynchronous work of resolving probes
+   * happens in the provider, which passes the results back in.
+   *
    * @param prompt - The raw parsed prompt.
+   * @param executeParameters - What this prompt's
+   *   {@link getExecuteParameterProbes} resolved to, in the order the probes
+   *   were returned: a {@link PropDefinition}, `null` for "no such
+   *   requirement", or `undefined` for "could not be evaluated". Absent when
+   *   the file type cannot evaluate probes at all — which an adapter should
+   *   treat the same as `undefined`, declaring the parameter with an
+   *   unresolved type rather than omitting it.
    */
-  normalizePrompt(prompt: ParsedPrompt): NormalizedPrompt;
+  normalizePrompt(
+    prompt: ParsedPrompt,
+    executeParameters?: readonly (PropDefinition | null | undefined)[],
+  ): NormalizedPrompt;
+
+  /**
+   * Returns the type expressions to evaluate in order to discover this
+   * prompt's **execute parameters** — the named values this SDK needs at run
+   * time that the prompt function's signature cannot express.
+   *
+   * The file type declares the language and this method is asked *in* it, so
+   * the decision of whether the expression can be written at all belongs here,
+   * where the SDK knowledge is. Return `[]` for a language this adapter does
+   * not speak, rather than emitting every variant and hoping.
+   *
+   * Optional — an SDK whose configs are self-contained omits it.
+   *
+   * @param prompt - The parsed prompt to probe.
+   * @param language - The file type's {@link PromptFileType.language}.
+   */
+  getExecuteParameterProbes?(
+    prompt: ParsedPrompt,
+    language: string,
+  ): TypeProbe[];
 
   /**
    * Convert {@link NormalizedPromptUpdates} (what the UI sends back) into the

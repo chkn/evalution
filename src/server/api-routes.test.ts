@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import { PromptRegistry } from "../prompt/prompt-registry.ts";
+import type { ExecuteRequest } from "../shared/types.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { setupRoutes } from "./api-routes.ts";
 
@@ -73,11 +74,11 @@ function makeApp(execute?: PromptProvider["execute"]) {
   return { app, traceProvider };
 }
 
-function executeRequest() {
+function executeRequest(body: ExecuteRequest = { functionInputs: [] }) {
   return new Request("http://localhost/api/prompts/fake/cCN0ZXN0/execute", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ functionParams: [] }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -163,5 +164,68 @@ describe("POST /api/prompts/:providerId/:id/execute", () => {
 
     const res = await app.request(executeRequest());
     expect(res.status).toBe(500);
+  });
+
+  it("resolves value inputs for a provider that implements no resolveInputs", async () => {
+    // The provider contract did not change with the wire format: a provider
+    // that only implements `execute` still runs, and still sees plain
+    // materialized values — never an `ExecutionInput` or someone else's `uri`
+    // grammar. The route's built-in fallback covers it.
+    let seen: any[] | undefined;
+    const { app } = makeApp(async (_prompt, params) => {
+      seen = params;
+    });
+
+    const res = await app.request(
+      executeRequest({
+        functionInputs: [
+          { kind: "value", value: { kind: "primitive", value: "Ada" } },
+          {
+            kind: "value",
+            value: {
+              kind: "object",
+              properties: { n: { kind: "primitive", value: 42 } },
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(seen).toEqual(["Ada", { n: 42 }]);
+  });
+
+  it("rejects a dataset input as unimplemented rather than crashing", async () => {
+    // The variant is declared now so the resolver, the matching layer and the
+    // panel are all built over the union before `DatasetProvider` exists. The
+    // seam has to be exercised, not just present.
+    const { app } = makeApp();
+
+    const res = await app.request(
+      executeRequest({
+        functionInputs: [{ kind: "dataset", uri: "rows/1#col" }],
+      }),
+    );
+
+    // A bad request, not a failed run: nothing was dispatched, so there is no
+    // trace to carry the error and the caller has to hear it here.
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).error).toMatch(/not implemented/i);
+  });
+
+  it("hands the provider the unresolved inputs alongside the resolved values", async () => {
+    // What gets recorded on the trace is the recipe, so the provider needs to
+    // see it — the resolved values alone cannot be replayed.
+    let opts: any;
+    const { app } = makeApp(async (_prompt, _params, o) => {
+      opts = o;
+    });
+
+    const functionInputs: ExecuteRequest["functionInputs"] = [
+      { kind: "value", value: { kind: "primitive", value: "Ada" } },
+    ];
+    await app.request(executeRequest({ functionInputs }));
+
+    expect(opts.inputs.functionInputs).toEqual(functionInputs);
   });
 });

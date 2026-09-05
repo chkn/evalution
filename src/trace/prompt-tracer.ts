@@ -72,20 +72,72 @@ export interface PromptSpanInfo {
   id?: string;
   /** Human-readable prompt name. */
   name: string;
-  /** Positional arguments the prompt function was called with. */
+  /**
+   * Positional arguments the prompt function was called with.
+   *
+   * Only the `prompts()` helper records these, because it is the only caller
+   * that sees the arguments and nothing else. A playground run records
+   * {@link functionInputs} instead: its arguments may include a live database
+   * handle, which is neither serializable nor the thing a replay needs.
+   */
   functionParameters?: unknown[];
+  /**
+   * The unresolved inputs this run was launched with — the *recipe* rather
+   * than the resolution.
+   *
+   * This is what makes a past run replayable. A resolved value cannot be
+   * recorded faithfully (a live handle does not serialize) and would not be
+   * the right thing to record anyway: replaying a resource means running its
+   * `create()` again, which is the recipe, not the value it produced last
+   * time. Each entry is JSON-safe by construction.
+   */
+  functionInputs?: unknown[];
+  /** The unresolved execute-parameter inputs, keyed by parameter name. */
+  executeInputs?: Record<string, unknown>;
+  /**
+   * The prompt's parameter definitions as they stood when the run was
+   * launched, recorded beside the inputs.
+   *
+   * For a file-based prompt git is the version, and the playground has no
+   * business checking out old commits to replay one — so writing the shape
+   * down at run time is the cheap equivalent. A later replay diffs two known
+   * signatures instead of guessing whether the recorded inputs still fit.
+   */
+  parameterDefinitions?: unknown[];
 }
 
+/**
+ * Build the attributes that associate a span with a prompt.
+ *
+ * @param prompt - The prompt to attribute the span to.
+ * @param attributes - Attributes to merge in; these take precedence.
+ * @param includeInputs - Whether to stamp the run's inputs. Inputs belong on
+ *   the **root span only**: they are identical on every span of a trace, so
+ *   repeating them is invisible when the input is `["Ada"]` and wasteful when
+ *   it is a fifty-message thread — multiplied by span count, then persisted.
+ */
 export function getPromptSpanAttributes(
   prompt: PromptSpanInfo,
   attributes: Attributes = {},
+  includeInputs = true,
 ): Record<string, AttributeValue> {
+  // OTel attribute values are primitives or arrays of them, so the inputs
+  // travel as JSON and are parsed back by the ingestor.
+  const inputs =
+    includeInputs && (prompt.functionInputs || prompt.executeInputs)
+      ? JSON.stringify({
+          functionInputs: prompt.functionInputs,
+          executeInputs: prompt.executeInputs,
+          parameterDefinitions: prompt.parameterDefinitions,
+        })
+      : undefined;
+
   return Object.fromEntries(
     [
       [SPAN_KIND_ATTRIBUTE, "LLM"],
       [PROMPT_NAME_ATTRIBUTE, prompt.name],
       [PROMPT_ID_ATTRIBUTE, prompt.id],
-      [PROMPT_INPUTS_ATTRIBUTE, prompt.functionParameters],
+      [PROMPT_INPUTS_ATTRIBUTE, inputs],
       ...Object.entries(attributes),
     ].filter(([, v]) => v !== undefined && v !== null),
   );
@@ -117,10 +169,19 @@ export function createTracerForPrompt(
 ): Tracer {
   const inner = tracer ?? trace.getTracer("evalution");
 
-  const withPromptAttributes = (options?: SpanOptions): SpanOptions => ({
-    ...options,
-    attributes: getPromptSpanAttributes(prompt, options?.attributes),
-  });
+  // The run's inputs go on the first span this tracer produces and no other:
+  // they describe the run, not each span within it, and duplicating them
+  // across a trace costs storage and sync bandwidth for nothing.
+  let rootEmitted = false;
+  const withPromptAttributes = (options?: SpanOptions): SpanOptions => {
+    const attributes = getPromptSpanAttributes(
+      prompt,
+      options?.attributes,
+      !rootEmitted,
+    );
+    rootEmitted = true;
+    return { ...options, attributes };
+  };
 
   return {
     startSpan(name: string, options?: SpanOptions, context?: Context): Span {

@@ -8,7 +8,11 @@ import {
 } from "@opentelemetry/api";
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import type { PromptProvider } from "../prompt/prompt-provider.ts";
+import { resolveExecutionInputs } from "../prompt/execution-inputs.ts";
+import type {
+  PromptProvider,
+  ResolvedInputs,
+} from "../prompt/prompt-provider.ts";
 import type { PromptRegistry } from "../prompt/prompt-registry.ts";
 import type { SetupTask } from "../shared/setup-task.ts";
 import type {
@@ -279,7 +283,7 @@ export function setupRoutes({
       }
 
       const decodedId = decodePromptId(id);
-      const { functionParams = [] } = (await c.req
+      const { functionInputs = [], executeInputs = {} } = (await c.req
         .json()
         .catch(() => ({}))) as ExecuteRequest;
 
@@ -287,6 +291,27 @@ export function setupRoutes({
       if (!prompt) {
         return c.json({ error: "Prompt not found" }, 404);
       }
+
+      // Inputs arrive unresolved, so resolution happens here — server-side,
+      // where a resource can actually be created and where a value's import
+      // bindings can actually be imported. A provider that offers non-value
+      // sources interprets its own `uri` grammar through `resolveInputs`;
+      // every other provider gets the value-only fallback and never has to
+      // know an `ExecutionInput` exists.
+      const inputs = { functionInputs, executeInputs };
+      let resolved: ResolvedInputs;
+      try {
+        resolved = provider.resolveInputs
+          ? await provider.resolveInputs(decodedId, inputs)
+          : { ...(await resolveExecutionInputs(inputs)), release: undefined };
+      } catch (err: any) {
+        // The request named something that cannot be turned into a value — a
+        // dataset cell, a resource that no longer exists. That is a bad
+        // request, not a failed run: nothing has been dispatched and no trace
+        // exists to carry the error, so it has to be answered here.
+        return c.json({ error: err?.message ?? String(err) }, 400);
+      }
+      const { functionParams, executeValues } = resolved;
 
       const response = await tracer.startActiveSpan(prompt.name, async span => {
         const ctx = span.spanContext();
@@ -306,8 +331,17 @@ export function setupRoutes({
         // polls `GET /api/traces/:p/:id` until it appears (see the client's
         // `getTrace`), so no server-side pre-creation is needed.
         try {
-          await provider.execute(decodedId, functionParams, { traceId });
+          await provider.execute(decodedId, functionParams, {
+            traceId,
+            executeValues,
+            inputs,
+            // Run-scoped resources outlive this response: `execute` returns as
+            // soon as the run is dispatched, so teardown hangs off completion
+            // rather than off the HTTP request.
+            onSettled: () => void resolved.release?.(),
+          });
         } catch (err: any) {
+          void resolved.release?.();
           console.error("prompt execution failed:", err);
           span.recordException(err);
           span.setStatus({

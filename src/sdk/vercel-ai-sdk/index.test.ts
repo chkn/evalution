@@ -32,7 +32,23 @@ describe("VercelAISDK", () => {
       expect(generateTextMock).toHaveBeenCalledWith(config);
     });
 
-    it("resolves immediately without waiting for generateText to finish", async () => {
+    it("merges resolved execute values into the call it already owns", async () => {
+      // `toolsContext` is a top-level `generateText` argument, so the merge is
+      // this adapter's business — a generic spread would have to assume every
+      // execute parameter's name is a config key.
+      const toolsContext = { list_tasks: { db: {} } };
+      await sdk.executeConfig(
+        { model: "m", prompt: "hi" },
+        { executeValues: { toolsContext } },
+      );
+      expect(generateTextMock).toHaveBeenCalledWith({
+        model: "m",
+        prompt: "hi",
+        toolsContext,
+      });
+    });
+
+    it("returns a handle that settles only once the run is over", async () => {
       let resolveGenerate!: () => void;
       generateTextMock.mockReturnValue(
         new Promise<void>(resolve => {
@@ -40,21 +56,32 @@ describe("VercelAISDK", () => {
         }),
       );
 
-      const result = await sdk.executeConfig({ model: "m", prompt: "hi" });
+      const handle = await sdk.executeConfig({ model: "m", prompt: "hi" });
 
-      // executeConfig is fire-and-forget: resolves immediately (void) while
-      // the underlying generateText call is still pending.
-      expect(result).toBeUndefined();
-      resolveGenerate(); // resolve the pending promise to avoid leaking
+      // executeConfig stays fire-and-forget — it resolves while generateText
+      // is still pending — but now hands back the completion signal that
+      // run-scoped resource teardown hangs off.
+      let settled = false;
+      void handle!.done.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      resolveGenerate();
+      await handle!.done;
+      expect(settled).toBe(true);
     });
 
-    // Not covered here: calling the integration's `fail()` when `generateText`
-    // rejects before any event fires. Exercising that through this file's
-    // mocked `await import("ai")` reliably trips a Vitest/tinyspy timing quirk
-    // around repeated calls through a mocked dynamic import (reproduced in
-    // isolation independent of this code — the `.catch` handler itself runs
-    // and calls `fail()` correctly every time). See `executeConfig`'s
-    // `generateText(config).catch(...)` wiring.
+    // Not covered here: anything on the path where `generateText` *rejects* —
+    // the integration's `fail()`, and `done` settling rather than rejecting.
+    // Exercising either through this file's mocked `await import("ai")`
+    // reliably trips a Vitest/tinyspy timing quirk around repeated calls
+    // through a mocked dynamic import, which re-invokes the mock during
+    // teardown with no handler attached and reports the rejection as
+    // unhandled. (Reproduced in isolation independent of this code — the
+    // rejection handler itself runs correctly every time.) See
+    // `executeConfig`'s `generateText(config).then(ok, fail)` wiring.
 
     it("binds the native fallback to the route traceId + identity for a raw (non-helper) config", async () => {
       // A raw config carries no per-call integration, so without binding the

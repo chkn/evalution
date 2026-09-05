@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { PropDefinition } from "../shared/types";
-import { defaultValueForType } from "./utils";
+import { defaultValueForType, withSetMembership } from "./utils";
 
 type PropType = PropDefinition["type"];
 
@@ -85,5 +85,31 @@ describe("defaultValueForType", () => {
       ],
     };
     expect(defaultValueForType(type)).toEqual({ kind: "primitive", value: 0 });
+  });
+});
+
+describe("withSetMembership", () => {
+  it("adds a value that should be present but isn't", () => {
+    const set = new Set(["a"]);
+    const next = withSetMembership(set, "b", true);
+    expect(next).not.toBe(set);
+    expect([...next].sort()).toEqual(["a", "b"]);
+  });
+
+  it("removes a value that shouldn't be present but is", () => {
+    const set = new Set(["a", "b"]);
+    const next = withSetMembership(set, "b", false);
+    expect(next).not.toBe(set);
+    expect([...next]).toEqual(["a"]);
+  });
+
+  it("returns the same reference when membership already matches (present)", () => {
+    const set = new Set(["a"]);
+    expect(withSetMembership(set, "a", true)).toBe(set);
+  });
+
+  it("returns the same reference when membership already matches (absent)", () => {
+    const set = new Set(["a"]);
+    expect(withSetMembership(set, "b", false)).toBe(set);
   });
 });

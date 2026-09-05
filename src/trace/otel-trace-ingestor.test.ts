@@ -10,6 +10,7 @@ import { OTelTraceIngestor } from "./otel-trace-ingestor.ts";
 import { mergeSpans } from "./span-merge.ts";
 import {
   PROMPT_ID_ATTRIBUTE,
+  PROMPT_INPUTS_ATTRIBUTE,
   PROMPT_PROVIDER_ID_ATTRIBUTE,
   SPAN_KIND_ATTRIBUTE,
 } from "./trace-provider.ts";
@@ -41,6 +42,72 @@ describe("OTelTraceIngestor", () => {
     expect(loaded?.spans).toHaveLength(1);
     expect(loaded?.spans[0].kind).toBe("LLM");
     expect(loaded?.spans[0].endTime).toBeDefined();
+  });
+
+  it("reads the run's inputs back, so the OTel path can replay too", async () => {
+    // `evalution.prompt.inputs` was written by `getPromptSpanAttributes` and
+    // parsed back by nothing — the OTel path could record inputs but never
+    // replay them.
+    const ingestor = new OTelTraceIngestor();
+    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const tracer = makeTracer(ingestor);
+
+    const functionInputs = [
+      { kind: "value", value: { kind: "primitive", value: "Ada" } },
+      { kind: "resource", uri: ".evalution/playground/db.ts#db" },
+    ];
+    const span = tracer.startSpan("run", {
+      attributes: {
+        [PROMPT_ID_ATTRIBUTE]: "mod#greet",
+        [PROMPT_INPUTS_ATTRIBUTE]: JSON.stringify({
+          functionInputs,
+          executeInputs: {
+            toolsContext: { kind: "resource", uri: "pg.ts#ctx" },
+          },
+          parameterDefinitions: [
+            { name: "name", type: { kind: "primitive", syntax: "string" } },
+          ],
+        }),
+      },
+    });
+    const { traceId } = span.spanContext();
+    span.end();
+
+    await ingestor.drainPendingHandlers();
+    const loaded = await provider.getTrace(traceId);
+
+    // The recipe comes back exactly, including the `PropValue` form — a
+    // template would still be a template, not the string it flattened to.
+    expect(loaded?.spans[0].prompt?.functionInputs).toEqual(functionInputs);
+    expect(loaded?.spans[0].prompt?.executeInputs).toEqual({
+      toolsContext: { kind: "resource", uri: "pg.ts#ctx" },
+    });
+    // The signature they were captured against rides along, so a replay can
+    // diff two known shapes rather than guess whether they still line up.
+    expect(loaded?.spans[0].prompt?.parameterDefinitions).toEqual([
+      { name: "name", type: { kind: "primitive", syntax: "string" } },
+    ]);
+  });
+
+  it("drops an unreadable inputs attribute rather than failing the span", async () => {
+    const ingestor = new OTelTraceIngestor();
+    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const tracer = makeTracer(ingestor);
+
+    const span = tracer.startSpan("run", {
+      attributes: {
+        [PROMPT_ID_ATTRIBUTE]: "mod#greet",
+        [PROMPT_INPUTS_ATTRIBUTE]: "{not json",
+      },
+    });
+    const { traceId } = span.spanContext();
+    span.end();
+
+    await ingestor.drainPendingHandlers();
+    const loaded = await provider.getTrace(traceId);
+    // A span carrying one unreadable attribute is still a perfectly good span.
+    expect(loaded?.spans[0].prompt?.id).toBe("mod#greet");
+    expect(loaded?.spans[0].prompt?.functionInputs).toBeUndefined();
   });
 
   it("stores the prompt reference raw — global id without a provider, scoped id with one", async () => {

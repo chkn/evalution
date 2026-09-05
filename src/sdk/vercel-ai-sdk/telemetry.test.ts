@@ -84,6 +84,38 @@ describe("Evalution", () => {
     expect(step?.llm?.totalTokens).toBe(8);
   });
 
+  it("carries the unresolved inputs onto the root span", async () => {
+    // The recipe, not the resolution: one of a run's resolved arguments can be
+    // a live database handle, which serializes into a span as a useless blob
+    // and is not what a replay needs anyway.
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const traceId = "trace-inputs";
+    const functionInputs = [
+      { kind: "value", value: { kind: "primitive", value: "Ada" } },
+      { kind: "resource", uri: ".evalution/playground/db.ts#db" },
+    ];
+    const integration = evalution
+      .createTelemetryForPrompt({
+        id: "mod#greet",
+        name: "greet",
+        functionInputs,
+        executeInputs: { toolsContext: { kind: "resource", uri: "pg.ts#ctx" } },
+      })
+      .withTraceId(traceId);
+
+    const callId = "call-inputs";
+    await integration.onStart?.({ callId, operationId: "generateText" } as any);
+
+    const root = (await provider.getTrace(traceId))?.spans.find(
+      s => !s.parentId,
+    );
+    expect(root?.prompt?.functionInputs).toEqual(functionInputs);
+    expect(root?.prompt?.executeInputs).toEqual({
+      toolsContext: { kind: "resource", uri: "pg.ts#ctx" },
+    });
+  });
+
   it("records a tool call nested under the current step", async () => {
     const evalution = new VercelAISDKTelemetry();
     const provider = new MemoryTraceProvider({ ingestors: [evalution] });

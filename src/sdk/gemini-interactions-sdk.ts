@@ -248,7 +248,7 @@ export class GeminiInteractionsSDK implements SDKAdapter {
     return FALLBACK_GENERATION_CONFIG_PARAMS;
   }
 
-  async executeConfig(config: BaseCreateInteractionParams): Promise<void> {
+  async executeConfig(config: BaseCreateInteractionParams): Promise<undefined> {
     // Import `@google/genai` lazily so it stays an optional peer dependency:
     // only users who execute a Gemini Interactions prompt need it installed.
     // This adapter has no tracing support, so it ignores the route's `traceId`
@@ -262,6 +262,9 @@ export class GeminiInteractionsSDK implements SDKAdapter {
     }
     const client = new GoogleGenAI({});
     await client.interactions.create({ ...config, store: false });
+    // No completion handle: this call is awaited to completion here, so there
+    // is nothing left for a caller to wait on.
+    return undefined;
   }
 
   normalizePrompt(prompt: ParsedPrompt): NormalizedPrompt {

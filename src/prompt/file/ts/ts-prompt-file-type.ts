@@ -7,6 +7,7 @@ import {
   addProperty as applyAdd,
   removeProperty as applyRemove,
   updateProperty as applyUpdate,
+  buildPropTypeFromType,
   extractPropertiesFromObjectLiteral,
   extractPropertiesFromParameters,
 } from "ts-proppy";
@@ -14,9 +15,16 @@ import ts from "typescript";
 import type { FileProvider } from "../../../file-provider.ts";
 import { LocalFileProvider } from "../../../file-provider-local.ts";
 import type { CalleeBinding, ModelPropValue } from "../../../shared/types.ts";
-import type { ParsedFilePrompt, PromptFileType } from "../prompt-file-type.ts";
+import type {
+  ParsedFilePrompt,
+  ParsePromptsOptions,
+  PromptFileType,
+  SlotMatchRequest,
+  TypeProbeRequest,
+} from "../prompt-file-type.ts";
 import type { PromptProgram } from "./prompt-program.ts";
 import { createPromptProgram } from "./prompt-program.ts";
+import { collectSlotTypes, matchByAssignability } from "./slot-matching.ts";
 
 /**
  * {@link PromptFileType} implementation for TypeScript `.prompt.ts` files.
@@ -48,6 +56,7 @@ function isValidIdentifier(name: string): boolean {
 }
 
 export class TSPromptFileType implements PromptFileType {
+  readonly language = "typescript";
   defaultIncludePatterns = ["**/*.prompt.ts", "**/*.promp.ts"];
   defaultFileExtension = ".prompt.ts";
 
@@ -79,25 +88,17 @@ export default prompts(
   async parsePrompts(
     files: string[],
     rootDir: string = "",
+    { companionFiles = [] }: ParsePromptsOptions = {},
   ): Promise<ParsedFilePrompt[]> {
-    const sources = new Map(
-      await Promise.all(
-        files.map(
-          async filePath =>
-            [filePath, await this.fileProvider.readFile(filePath)] as const,
-        ),
-      ),
-    );
+    const sources = await this.readAll(files);
 
-    // Type resolution is best-effort: a project whose tsconfig or imports fail
-    // to load still parses, just without checker-backed types.
-    let program: PromptProgram | undefined;
-    try {
-      program = createPromptProgram(sources, this.previousProgram);
-      this.previousProgram = program?.program;
-    } catch {
-      program = undefined;
-    }
+    // Playground modules join the same program as the prompts they serve, so
+    // the checker can name both sides of a resource-to-slot match. They are
+    // roots, not overlays, because nothing in the prompt files imports them.
+    const companions = await this.readAll(
+      companionFiles.filter(f => !sources.has(f)),
+    );
+    const program = this.buildProgram(new Map([...sources, ...companions]));
 
     return [...sources].flatMap(([filePath, sourceCode]) =>
       this.parseFileContent(
@@ -108,6 +109,315 @@ export default prompts(
         program?.typeChecker,
       ),
     );
+  }
+
+  /**
+   * Evaluates each probe by injecting it into its prompt file as a type alias
+   * and asking the checker what that alias resolves to.
+   *
+   * All the probes ride in **one** program build: resolving them one prompt at
+   * a time would throw away the source-file reuse a program build depends on,
+   * and an extra alias is cheap where an extra program is not.
+   */
+  async resolveTypeProbes(
+    requests: readonly TypeProbeRequest[],
+  ): Promise<(PropDefinition | null | undefined)[]> {
+    if (requests.length === 0) return [];
+
+    const results: (PropDefinition | null | undefined)[] = requests.map(
+      () => undefined,
+    );
+
+    await this.withInjectedTypes(
+      requests.map(req => ({
+        filePath: req.filePath,
+        promptName: req.promptName,
+        expressions: { probe: req.probe.expression },
+      })),
+      (index, resolve, program, sourceFile) => {
+        const type = resolve("probe");
+        if (!type) return;
+        // `never` is a defensively-written probe saying "this prompt has no
+        // such requirement". Reported as `null` rather than left `undefined`,
+        // which would be indistinguishable from a failure to evaluate — and a
+        // caller must not degrade a definite "no" into a placeholder.
+        if (type.flags & ts.TypeFlags.Never) {
+          results[index] = null;
+          return;
+        }
+        const built = buildPropTypeFromType(
+          type,
+          program.typeChecker,
+          sourceFile,
+        );
+        const { syntax } = requests[index].probe;
+        const def: PropDefinition = {
+          name: requests[index].probe.name,
+          type: syntax ? { ...built, syntax } : built,
+          optional: false,
+        };
+        if (requests[index].probe.description) {
+          def.description = requests[index].probe.description;
+        }
+        results[index] = def;
+      },
+    );
+
+    return results;
+  }
+
+  async resolveSlotMatches(
+    requests: readonly SlotMatchRequest[],
+  ): Promise<Record<string, string[]>[]> {
+    if (requests.length === 0) return [];
+
+    const sourceAlias = (key: string) => `src_${aliasSafe(key)}`;
+    const slotAlias = (name: string) => `slot_${aliasSafe(name)}`;
+
+    const results: Record<string, string[]>[] = requests.map(() => ({}));
+
+    await this.withInjectedTypes(
+      requests.map(req => ({
+        filePath: req.filePath,
+        promptName: req.promptName,
+        expressions: {
+          ...Object.fromEntries(
+            req.sources.map(src => [sourceAlias(src.key), src.expression]),
+          ),
+          ...Object.fromEntries(
+            Object.entries(req.extraSlots ?? {}).map(([name, expression]) => [
+              slotAlias(name),
+              expression,
+            ]),
+          ),
+        },
+      })),
+      (index, resolve, program, sourceFile) => {
+        const request = requests[index];
+        const { typeChecker } = program;
+
+        // Root slots: the prompt function's own parameters, plus any extra
+        // roots the caller named (execute parameters, whose types are nowhere
+        // in the signature).
+        const roots = new Map<string, ts.Type>();
+        const fn = findPromptFunctionLike(sourceFile, request.promptName);
+        for (const parameter of fn?.parameters ?? []) {
+          if (!ts.isIdentifier(parameter.name)) continue;
+          roots.set(
+            parameter.name.text,
+            typeChecker.getTypeAtLocation(parameter),
+          );
+        }
+        for (const name of Object.keys(request.extraSlots ?? {})) {
+          const type = resolve(slotAlias(name));
+          if (type && !(type.flags & ts.TypeFlags.Never)) roots.set(name, type);
+        }
+
+        const sourceTypes = new Map<string, ts.Type>();
+        for (const src of request.sources) {
+          const type = resolve(sourceAlias(src.key));
+          // A source whose type will not resolve matches nothing here; the
+          // caller still has the name rule to fall back on.
+          if (!type || type.flags & (ts.TypeFlags.Never | ts.TypeFlags.Any)) {
+            continue;
+          }
+          sourceTypes.set(src.key, type);
+        }
+        if (sourceTypes.size === 0) return;
+
+        results[index] = matchByAssignability(
+          collectSlotTypes(roots, typeChecker, sourceFile),
+          sourceTypes,
+          typeChecker,
+        );
+      },
+    );
+
+    return results;
+  }
+
+  /**
+   * Evaluate named type expressions in the scope of the prompt files they
+   * concern, in a single program build.
+   *
+   * Each expression becomes a `type` alias appended to its own prompt file, so
+   * it is evaluated where the file's own imports and declarations are visible,
+   * and `$config` is substituted for a way to name what that prompt returns.
+   * `visit` is then called once per request with a `resolve(name)` that hands
+   * back the type each alias landed on.
+   *
+   * Batching is the whole point: one build serves every request, however many
+   * aliases they contribute between them.
+   */
+  private async withInjectedTypes(
+    requests: readonly {
+      filePath: string;
+      promptName: string;
+      expressions: Record<string, string>;
+    }[],
+    visit: (
+      index: number,
+      resolve: (name: string) => ts.Type | undefined,
+      program: PromptProgram,
+      sourceFile: ts.SourceFile,
+    ) => void,
+  ): Promise<void> {
+    // Alias names are scoped by request index so two prompts in one file can
+    // contribute expressions with the same local name without colliding.
+    const alias = (index: number, name: string) =>
+      `__evalution_t${index}_${name}`;
+
+    const byFile = new Map<string, number[]>();
+    requests.forEach((req, index) => {
+      const list = byFile.get(req.filePath);
+      if (list) list.push(index);
+      else byFile.set(req.filePath, [index]);
+    });
+
+    const sources = new Map<string, string>();
+    for (const [filePath, indices] of byFile) {
+      let sourceCode: string;
+      try {
+        sourceCode = await this.fileProvider.readFile(filePath);
+      } catch {
+        continue;
+      }
+      const sourceFile = ts.createSourceFile(
+        filePath,
+        sourceCode,
+        ts.ScriptTarget.ESNext,
+        true,
+      );
+
+      const lines: string[] = [];
+      for (const index of indices) {
+        const request = requests[index];
+        const config = this.configTypeExpression(
+          sourceFile,
+          filePath,
+          request.promptName,
+        );
+        for (const [name, expression] of Object.entries(request.expressions)) {
+          const substituted = config
+            ? expression.replaceAll("$config", config)
+            : expression;
+          // An expression that still wants `$config` in a file whose shape we
+          // could not read would not compile; `never` is the honest stand-in
+          // and reads downstream as "no such requirement".
+          const rhs =
+            !config && expression.includes("$config") ? "never" : substituted;
+          lines.push(`type ${alias(index, name)} = ${rhs}`);
+        }
+      }
+      if (lines.length > 0) {
+        sources.set(filePath, `${sourceCode}\n${lines.join("\n")}\n`);
+      }
+    }
+
+    const program = this.buildProgram(sources);
+    if (!program) return;
+
+    for (const [filePath, indices] of byFile) {
+      const sourceFile = program.getSourceFile(filePath);
+      if (!sourceFile) continue;
+      for (const index of indices) {
+        visit(
+          index,
+          name =>
+            resolveTypeAlias(
+              sourceFile,
+              alias(index, name),
+              program.typeChecker,
+            ),
+          program,
+          sourceFile,
+        );
+      }
+    }
+  }
+
+  /**
+   * A type expression naming what the prompt named `promptName` returns, to
+   * substitute for a probe's `$config` token.
+   *
+   * Which shape a prompt file uses is this file type's knowledge: an exported
+   * function declaration can be named directly, while a prompt defined through
+   * the `prompts()` helper lives inside an anonymous default export and has to
+   * be reached by importing the module back into itself.
+   */
+  private configTypeExpression(
+    sourceFile: ts.SourceFile,
+    filePath: string,
+    promptName: string,
+  ): string | undefined {
+    let shape: "function" | "helper" | undefined;
+    const visit = (node: ts.Node) => {
+      if (shape) return;
+      if (
+        ts.isFunctionDeclaration(node) &&
+        node.name?.text === promptName &&
+        node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
+      ) {
+        shape = "function";
+        return;
+      }
+      if (ts.isExportAssignment(node)) {
+        const helper = findPromptsHelperCall(node.expression);
+        if (
+          helper?.object.properties.some(p => getPropertyName(p) === promptName)
+        ) {
+          shape = "helper";
+          return;
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+
+    if (shape === "function") return `ReturnType<typeof ${promptName}>`;
+    if (shape === "helper") {
+      // TypeScript substitutes `.js` for `.ts` on a relative specifier under
+      // every resolution mode, so this names the file itself without depending
+      // on `allowImportingTsExtensions`.
+      const self = `./${path.basename(filePath).replace(/\.ts$/, ".js")}`;
+      return (
+        `ReturnType<ReturnType<typeof import(${JSON.stringify(self)}).default>` +
+        `[${JSON.stringify(promptName)}]>`
+      );
+    }
+    return undefined;
+  }
+
+  private async readAll(
+    files: readonly string[],
+  ): Promise<Map<string, string>> {
+    return new Map(
+      await Promise.all(
+        files.map(
+          async filePath =>
+            [filePath, await this.fileProvider.readFile(filePath)] as const,
+        ),
+      ),
+    );
+  }
+
+  /**
+   * Build a program over `sources`, reusing the previous one's unchanged
+   * source files.
+   *
+   * Type resolution is best-effort: a project whose tsconfig or imports fail
+   * to load still parses, just without checker-backed types.
+   */
+  private buildProgram(
+    sources: ReadonlyMap<string, string>,
+  ): PromptProgram | undefined {
+    try {
+      const program = createPromptProgram(sources, this.previousProgram);
+      this.previousProgram = program?.program;
+      return program;
+    } catch {
+      return undefined;
+    }
   }
 
   async updateProperty(
@@ -496,6 +806,62 @@ export default prompts(
     return returnObj;
   }
   // #endregion
+}
+
+/** Make an arbitrary key safe to embed in a TypeScript identifier. */
+function aliasSafe(key: string): string {
+  return key.replace(/[^A-Za-z0-9_$]/g, "_");
+}
+
+/**
+ * The function-like node a prompt is defined by, in either shape this file
+ * type recognises — a top-level exported declaration, or a property of the
+ * object a `prompts()` helper's factory returns.
+ */
+function findPromptFunctionLike(
+  sourceFile: ts.SourceFile,
+  promptName: string,
+): ts.FunctionDeclaration | FunctionLike | undefined {
+  let found: ts.FunctionDeclaration | FunctionLike | undefined;
+  const visit = (node: ts.Node) => {
+    if (found) return;
+    if (ts.isFunctionDeclaration(node) && node.name?.text === promptName) {
+      found = node;
+      return;
+    }
+    if (ts.isExportAssignment(node)) {
+      const helper = findPromptsHelperCall(node.expression);
+      for (const prop of helper?.object.properties ?? []) {
+        if (getPropertyName(prop) === promptName) {
+          found = getPropertyFunction(prop) ?? undefined;
+          return;
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+
+/**
+ * Resolve the type an injected probe alias stands for.
+ *
+ * Reads the alias's *declared* type rather than the symbol's, so a probe that
+ * resolves to a mapped or conditional type is evaluated rather than handed
+ * back as the alias name.
+ */
+function resolveTypeAlias(
+  sourceFile: ts.SourceFile,
+  aliasName: string,
+  typeChecker: ts.TypeChecker,
+): ts.Type | undefined {
+  for (const stmt of sourceFile.statements) {
+    if (ts.isTypeAliasDeclaration(stmt) && stmt.name.text === aliasName) {
+      return typeChecker.getTypeFromTypeNode(stmt.type);
+    }
+  }
+  return undefined;
 }
 
 // #region Helper-shape parsing

@@ -8,6 +8,7 @@ import {
   findTypeDeclaration,
 } from "ts-proppy";
 import ts from "typescript";
+import type { TypeProbe } from "../../prompt/file/prompt-file-type.ts";
 import { isEditable } from "../../shared/helpers.ts";
 import {
   CONFIG_FILE_RELATIVE_PATH,
@@ -28,6 +29,7 @@ import { setupGlobalOTelPipeline } from "../../trace/otel-global-pipeline.ts";
 import type { TraceIngestor } from "../../trace/trace-ingestor.ts";
 import {
   type ExecuteConfigOptions,
+  type ExecutionHandle,
   findPackageDts,
   isMissingPackage,
   missingPackageMessage,
@@ -45,6 +47,10 @@ import {
 const MODEL_KEY = "model";
 const SYSTEM_KEY = "system";
 const MESSAGES_KEY = "messages";
+const TOOLS_KEY = "tools";
+
+/** How the `toolsContext` type is labelled in the UI, resolved or not. */
+const TOOLS_CONTEXT_SYNTAX = "InferToolSetContext<typeof tools>";
 const RESERVED_KEYS = new Set([MODEL_KEY, SYSTEM_KEY, MESSAGES_KEY]);
 
 // Fallback parameter definitions for the Vercel AI SDK's `CallSettings` (from
@@ -339,10 +345,48 @@ export class VercelAISDK implements SDKAdapter {
     return FALLBACK_CALL_SETTINGS_PARAMS;
   }
 
+  /**
+   * The per-tool context object that `generateText` requires whenever a tool
+   * declares a `contextSchema`.
+   */
+  private static readonly TOOLS_CONTEXT_PROBE: TypeProbe = {
+    name: "toolsContext",
+    description:
+      "Per-tool context required by tools that declare a `contextSchema`.",
+    // Reached entirely through `ai`'s own public surface, and deliberately so.
+    // `InferToolSetContext` lives in `@ai-sdk/provider-utils`, but naming that
+    // package directly resolves whichever copy the *prompt file* sees, which
+    // is not necessarily the one `ai` was built against — `ai` bundles its own.
+    // Going through `generateText` gets the SDK's semantics from the same
+    // module the prompt's config is destined for.
+    //
+    // Defensive by construction: a config with no `tools`, or tools that
+    // declare no context, makes `toolsContext` `never`/optional and the whole
+    // expression collapses to `never`, yielding no parameter. That is also how
+    // tools without a `contextSchema` are dropped — no filtering logic of ours.
+    expression:
+      '$config extends { tools: infer T extends import("ai").ToolSet } ' +
+      '? NonNullable<Parameters<typeof import("ai").generateText<T>>[0]["toolsContext"]> ' +
+      ": never",
+    // The checker spells the resolved type as a deeply-instantiated
+    // `Normalize<RequiredToolSetContext<…>>`, which is accurate and unreadable.
+    syntax: TOOLS_CONTEXT_SYNTAX,
+  };
+
+  getExecuteParameterProbes(
+    _prompt: ParsedPrompt,
+    language: string,
+  ): TypeProbe[] {
+    // The expression above is plainly TypeScript; an adapter should say so
+    // rather than emit it for a language that cannot evaluate it.
+    if (language !== "typescript") return [];
+    return [VercelAISDK.TOOLS_CONTEXT_PROBE];
+  }
+
   async executeConfig(
     config: any,
-    { traceId, identity }: ExecuteConfigOptions = {},
-  ): Promise<void> {
+    { traceId, identity, executeValues }: ExecuteConfigOptions = {},
+  ): Promise<ExecutionHandle> {
     // Import `ai` lazily so it stays an optional peer dependency: only users
     // who actually execute a Vercel AI SDK prompt need the package installed,
     // and execution runs against the consumer's own copy of `ai` (the same
@@ -396,15 +440,32 @@ export class VercelAISDK implements SDKAdapter {
       }
     }
 
+    // Execute parameters are merged here rather than by the caller: they are
+    // top-level `generateText` arguments for this SDK, but that is this
+    // adapter's fact to know, not a general rule about where a named run-time
+    // value belongs.
+    if (executeValues && Object.keys(executeValues).length > 0) {
+      config = { ...config, ...executeValues };
+    }
+
     // Fire-and-forget: the route only needs the (already-known) traceId to
     // respond; the actual generation continues in the background and is
     // recorded via the attached telemetry integration's lifecycle events. A
     // rejection before any event fires (e.g. a bad model id) would otherwise
     // leave the pre-created trace hanging in `running` forever.
-    generateText(config).catch((err: any) => {
-      void integration?.fail(err?.message ?? String(err));
-      console.error("prompt execution failed:", err);
-    });
+    //
+    // `done` settles either way, and never rejects: a caller awaiting it (to
+    // dispose run-scoped resources, say) only needs to know the run is over,
+    // and the failure has already been reported through the trace.
+    const done = generateText(config).then(
+      () => undefined,
+      (err: any) => {
+        void integration?.fail(err?.message ?? String(err));
+        console.error("prompt execution failed:", err);
+      },
+    );
+
+    return { done };
   }
 
   setupTraceIngestion(): Promise<TraceIngestor | undefined> {
@@ -441,7 +502,10 @@ export class VercelAISDK implements SDKAdapter {
     return setupGlobalOTelPipeline();
   }
 
-  normalizePrompt(prompt: ParsedPrompt): NormalizedPrompt {
+  normalizePrompt(
+    prompt: ParsedPrompt,
+    resolvedProbes?: readonly (PropDefinition | null | undefined)[],
+  ): NormalizedPrompt {
     const { definitions, values } = prompt.extractedProps;
     const modelValue = values?.[MODEL_KEY];
     const systemValue = values?.[SYSTEM_KEY];
@@ -473,7 +537,46 @@ export class VercelAISDK implements SDKAdapter {
       messages: extractMessages(messagesValue),
       messagesEditable: messagesValue ? isEditable(messagesValue) : true,
       modelParameters,
+      executeParameters: this.executeParametersFor(prompt, resolvedProbes),
     };
+  }
+
+  /**
+   * Assemble the prompt's execute parameters from what the probes resolved to.
+   *
+   * The interesting case is the third one. When no probe could run — a file
+   * type with no checker, an in-memory provider, a resolution failure — the
+   * parameter is still declared, with an unresolved type. "This prompt needs
+   * `toolsContext` and I cannot tell you its shape" is a usable state; staying
+   * silent reproduces exactly the failure this machinery exists to prevent,
+   * where the first tool call dies at run time with nothing having warned you.
+   *
+   * That degradation is scoped by a cheap syntactic check — does the config
+   * even have a `tools` property? — so a prompt that plainly has no tools does
+   * not sprout a mystery parameter.
+   */
+  private executeParametersFor(
+    prompt: ParsedPrompt,
+    resolvedProbes?: readonly (PropDefinition | null | undefined)[],
+  ): PropDefinition[] | undefined {
+    const resolved = resolvedProbes?.[0];
+    if (resolved) return [resolved];
+    // `null` is a definite "this prompt needs no context" — never degrade it.
+    if (resolved === null) return undefined;
+
+    const hasTools = prompt.extractedProps.definitions.some(
+      d => d.name === TOOLS_KEY,
+    );
+    if (!hasTools) return undefined;
+
+    return [
+      {
+        name: VercelAISDK.TOOLS_CONTEXT_PROBE.name,
+        description: VercelAISDK.TOOLS_CONTEXT_PROBE.description,
+        type: { kind: "opaque", syntax: TOOLS_CONTEXT_SYNTAX },
+        optional: false,
+      },
+    ];
   }
 
   denormalizeUpdates(

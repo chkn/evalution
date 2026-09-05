@@ -26,6 +26,21 @@ export interface FileWatchOptions {
   ignoreInitial?: boolean;
 }
 
+/** Options accepted by {@link FileProvider.import}. */
+export interface ImportOptions {
+  /**
+   * When `true`, re-evaluate the module even if it has been imported before.
+   *
+   * Node caches an ES module for the lifetime of the process, so editing a
+   * file and importing it again would otherwise hand back the old version —
+   * which you notice immediately when iterating on code you are re-running.
+   * Providers with no module cache to defeat may ignore this.
+   *
+   * @default false
+   */
+  fresh?: boolean;
+}
+
 /**
  * Callback invoked by {@link FileProvider.watch} when a watched file changes.
  * @param eventType - The kind of change: `'add'`, `'change'`, or `'remove'`.
@@ -69,8 +84,11 @@ export interface FileProvider {
   /**
    * Dynamically imports the module at `filePath` and returns its namespace
    * object. Rejects if the file does not exist.
+   *
+   * @param filePath - Absolute path of the module to import.
+   * @param options - See {@link ImportOptions}.
    */
-  import(filePath: string): Promise<any>;
+  import(filePath: string, options?: ImportOptions): Promise<any>;
 
   /**
    * Returns an async iterator that yields paths matching `pattern`.

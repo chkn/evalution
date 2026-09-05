@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createTracerForPrompt,
   PROMPT_ID_ATTRIBUTE,
+  PROMPT_INPUTS_ATTRIBUTE,
   PROMPT_NAME_ATTRIBUTE,
   SPAN_KIND_ATTRIBUTE,
 } from "./prompt-tracer.ts";
@@ -121,5 +122,50 @@ describe("createTracerForPrompt", () => {
     createTracerForPrompt({ name: "My Prompt" });
     expect(getTracer).toHaveBeenCalledWith("evalution");
     getTracer.mockRestore();
+  });
+});
+
+describe("input attributes are stamped on the root span only", () => {
+  it("puts the run's inputs on the first span and no other", () => {
+    const inner = recordingTracer();
+    const tracer = createTracerForPrompt(
+      {
+        id: "mod#greet",
+        name: "greet",
+        functionInputs: [
+          { kind: "value", value: { kind: "primitive", value: "Ada" } },
+        ],
+      },
+      inner,
+    );
+
+    tracer.startSpan("root");
+    tracer.startSpan("child");
+    tracer.startActiveSpan("grandchild", () => undefined);
+
+    // Inputs describe the run, not each span within it. Repeating them is
+    // invisible for `["Ada"]` and wasteful for a fifty-message thread —
+    // multiplied by span count, then persisted and synced.
+    const [root, child] = inner.startSpanCalls;
+    expect(root.options?.attributes?.[PROMPT_INPUTS_ATTRIBUTE]).toContain(
+      "Ada",
+    );
+    expect(
+      child.options?.attributes?.[PROMPT_INPUTS_ATTRIBUTE],
+    ).toBeUndefined();
+    expect(
+      inner.activeSpanCalls[0].options?.attributes?.[PROMPT_INPUTS_ATTRIBUTE],
+    ).toBeUndefined();
+
+    // The identifying attributes still go on every span.
+    expect(child.options?.attributes?.[PROMPT_ID_ATTRIBUTE]).toBe("mod#greet");
+  });
+
+  it("stamps nothing when the run recorded no inputs", () => {
+    const inner = recordingTracer();
+    createTracerForPrompt({ name: "greet" }, inner).startSpan("root");
+    expect(
+      inner.startSpanCalls[0].options?.attributes?.[PROMPT_INPUTS_ATTRIBUTE],
+    ).toBeUndefined();
   });
 });

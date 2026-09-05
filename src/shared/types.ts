@@ -141,7 +141,114 @@ export interface NormalizedPrompt {
    * `model`, `system`, and `messages`).
    */
   modelParameters: NormalizedParameter[];
+
+  /**
+   * Named values the SDK needs to **execute** the config this prompt renders,
+   * supplied at run time rather than authored in the file.
+   *
+   * Distinct from {@link functionParameters}, which answers *what does this
+   * prompt take?* — this answers *what does running it require?*, which the
+   * function signature cannot express. The Vercel AI SDK's `toolsContext` is
+   * the motivating case: tools that declare a `contextSchema` need a context
+   * object the prompt function never sees.
+   *
+   * Absent when the prompt needs nothing beyond its arguments. Present with an
+   * unresolved type when the requirement is known but its shape is not — a
+   * usable state, and better than the silent failure at the first tool call
+   * that omitting it would produce.
+   */
+  executeParameters?: PropDefinition[];
+
+  /**
+   * Non-authored sources that can fill this prompt's input slots — currently
+   * code-defined resources. Absent when the provider offers none.
+   */
+  inputSources?: PromptInputSources;
 }
+
+/** How long a resource's value lives, and how often `create()` runs. */
+export type ResourceScope = "run" | "server";
+
+/**
+ * A code-defined resource offered as an input source, as the UI sees it.
+ *
+ * The resource's *value* never crosses the wire — the whole point is that only
+ * running code can produce it — so this is just enough to render a chip and
+ * send the choice back as an {@link ExecutionInput}.
+ */
+export interface ResourceInfo {
+  /**
+   * Provider-interpreted reference to this resource, relative to the
+   * provider's root so it stays valid on another machine (e.g.
+   * `.evalution/playground/db.ts#db`).
+   */
+  uri: string;
+  /** Human-readable label shown on the chip. */
+  label: string;
+  /** How long the created value lives. See {@link ResourceScope}. */
+  scope: ResourceScope;
+  /**
+   * Why this resource is unavailable, if it is — typically its module threw
+   * at import time. Surfaced in the panel rather than hidden, so a broken
+   * playground module is visible instead of silently absent.
+   */
+  error?: string;
+}
+
+/**
+ * Which non-authored sources can fill which of a prompt's input slots.
+ *
+ * Matching runs provider-side, where the checker lives (see
+ * `matchResourcesToSlots`), and ships as slot paths so the panel can offer a
+ * source without re-deriving the rules.
+ */
+export interface PromptInputSources {
+  /** Every resource in scope for this prompt, identified by `uri`. */
+  resources: ResourceInfo[];
+  /**
+   * Dotted slot path within {@link NormalizedPrompt.functionParameters}
+   * (`taskId`, `ctx.db`) → URIs of the resources that can fill it.
+   */
+  functionSlots: Record<string, string[]>;
+  /**
+   * Dotted slot path within {@link NormalizedPrompt.executeParameters}
+   * (`toolsContext.list_tasks.db`) → URIs of the resources that can fill it.
+   */
+  executeSlots: Record<string, string[]>;
+}
+
+/**
+ * One prompt input, *before* resolution — the recipe rather than the value.
+ *
+ * The panel sends these instead of concrete JSON because a resource reference
+ * cannot survive a JSON round trip: its value doesn't exist until the run
+ * creates it. Every variant is JSON-safe by construction, which is also what
+ * lets a trace record what it ran with and replay it (see `PromptSpanInfo`).
+ */
+export type ExecutionInput =
+  /** A value typed into the panel. */
+  | { kind: "value"; value: PropValue }
+  /**
+   * An object assembled from per-property inputs, so a resource can fill one
+   * field of an otherwise hand-edited object — `toolsContext`'s `db` beside
+   * its typed-in ids. Only objects nest: an array of resources isn't a case
+   * any slot has yet.
+   */
+  | { kind: "object"; properties: Record<string, ExecutionInput> }
+  /** A code-defined resource, created by the provider at run time. */
+  | {
+      kind: "resource";
+      /** The resource's {@link ResourceInfo.uri}. */
+      uri: string;
+      /**
+       * A serializable summary of what a past run's `create()` produced, so a
+       * trace can display the value it ran with even though replaying mints a
+       * new one. Recorded, never sent by the panel.
+       */
+      receipt?: unknown;
+    }
+  /** A cell from a dataset row. Declared, not yet implemented. */
+  | { kind: "dataset"; uri: string };
 
 /**
  * Updates that can be applied to a {@link NormalizedPrompt} via
@@ -205,9 +312,18 @@ export interface PromptProviderInfo {
   hasAddPrompt: boolean;
 }
 
+/**
+ * Request body of `POST /api/prompts/:providerId/:id/execute`.
+ *
+ * Inputs arrive *unresolved*: the server resolves them (creating resources,
+ * materializing values) immediately before calling
+ * {@link PromptProvider.execute}. See {@link ExecutionInput}.
+ */
 export interface ExecuteRequest {
-  stream?: boolean;
-  functionParams?: any[];
+  /** Positional, one per {@link NormalizedPrompt.functionParameters} entry. */
+  functionInputs?: ExecutionInput[];
+  /** By name, keyed on {@link NormalizedPrompt.executeParameters} entries. */
+  executeInputs?: Record<string, ExecutionInput>;
 }
 
 /**
@@ -249,6 +365,7 @@ import type {
   ExtractedProps,
   ImportSpecifier,
   PropDefinition,
+  PropType,
   PropValue,
   SourceSpan,
   TemplateToken,
@@ -260,6 +377,7 @@ export type {
   ExtractedProps,
   ImportSpecifier,
   PropDefinition,
+  PropType,
   PropValue,
   SourceSpan,
   TemplateToken,
