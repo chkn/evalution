@@ -45,6 +45,58 @@ interface Instance {
 }
 
 /**
+ * A resource's scope when it names none explicitly. A static `value`
+ * resource has nothing to create per run — it defaults to `'server'` rather
+ * than `'run'`, since it's already the same value for the life of the
+ * process. Kept as one function so every place that needs the default (
+ * instantiation, dependency-lifetime checks, and the panel's description)
+ * agrees with it.
+ */
+function defaultScope(target: Resource<unknown>): ResourceScope {
+  return "value" in target ? "server" : "run";
+}
+
+/**
+ * Whether `value` is built entirely from plain JSON data — primitives, plain
+ * objects, and arrays, recursively, with no `undefined`, function, symbol,
+ * `bigint`, class instance, or cycle.
+ *
+ * This is what decides whether {@link ResourceRegistry.describe} ships a
+ * resource's value to the panel: a live handle (a `Db`, a class-backed
+ * client) fails here even though `JSON.stringify` would happily — if
+ * misleadingly — turn it into `{}`, silently dropping the methods that made
+ * it a handle in the first place. Only a value this function accepts is safe
+ * to hand to the panel's own editor as a preview.
+ */
+function isPlainSerializable(
+  value: unknown,
+  seen = new Set<object>(),
+): boolean {
+  if (value === null) return true;
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "boolean":
+      return true;
+    case "object":
+      break;
+    default:
+      // undefined, function, symbol, bigint.
+      return false;
+  }
+  if (seen.has(value)) return false;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.every(v => isPlainSerializable(v, seen));
+  }
+  // Excludes class instances (a `Db` handle, a `Date`, a `Map`) — only a
+  // literal `{}` or one created with `Object.create(null)` qualifies.
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return false;
+  return Object.values(value).every(v => isPlainSerializable(v, seen));
+}
+
+/**
  * A handle on the resources created for one execution.
  *
  * Run-scoped instances live for exactly as long as this lease; server-scoped
@@ -102,7 +154,10 @@ export class ResourceRegistry {
   /** Modules that threw at import time, by absolute path. */
   private moduleErrors: PlaygroundModuleError[] = [];
   /** Memoized `scope: 'server'` instances, by the resource they belong to. */
-  private serverInstances = new Map<Resource<unknown>, Promise<Instance>>();
+  private serverInstances = new Map<
+    Resource<unknown>,
+    Promise<Instance> | Instance
+  >();
   /** The scan in flight, so concurrent callers don't each re-import. */
   private scanning: Promise<void> | null = null;
 
@@ -154,13 +209,41 @@ export class ResourceRegistry {
     return this.moduleErrors;
   }
 
-  /** Describes `resources` for the UI. Values are never included. */
+  /**
+   * Describes `resources` for the UI, including a snapshot of the value
+   * itself where one is already known and safe to show — a static `value`
+   * resource, or a `scope: 'server'` one this process has already created.
+   *
+   * A run-scoped resource never qualifies: its instance lives only for the
+   * run that created it, so there is nothing memoized to peek at, and
+   * showing one run's value as if it previewed the next would be wrong.
+   * Neither does a value that isn't plain JSON data (see `isPlainSerializable`
+   * below) — an opaque handle survives the trip through `describe` as a chip
+   * with no preview, same as before this existed.
+   */
   describe(resources: readonly RegisteredResource[]): ResourceInfo[] {
-    return resources.map(r => ({
-      uri: r.uri,
-      label: r.resource.label ?? r.key,
-      scope: r.resource.scope ?? ("run" as ResourceScope),
-    }));
+    return resources.map(r => {
+      const instance = this.peekInstance(r.resource);
+      const value =
+        instance && isPlainSerializable(instance.value)
+          ? // A detached snapshot: `instance.value` is the live object the
+            // registry itself holds, and the check above already proved it
+            // round-trips cleanly, so this can't lose information.
+            (JSON.parse(JSON.stringify(instance.value)) as unknown)
+          : undefined;
+      return {
+        uri: r.uri,
+        label: r.resource.label ?? r.key,
+        scope: r.resource.scope ?? defaultScope(r.resource),
+        value,
+      };
+    });
+  }
+
+  /** The memoized instance for `target`, if one has already settled. */
+  private peekInstance(target: Resource<unknown>): Instance | undefined {
+    const cached = this.serverInstances.get(target);
+    return cached instanceof Promise ? undefined : cached;
   }
 
   /**
@@ -262,7 +345,7 @@ export class ResourceRegistry {
       );
     }
 
-    const scope = target.scope ?? "run";
+    const scope = target.scope ?? defaultScope(target);
     const cache = scope === "server" ? this.serverInstances : runInstances;
 
     let pending = cache.get(target);
@@ -275,6 +358,24 @@ export class ResourceRegistry {
       // A failed create must not be memoized as the resource's value, or every
       // later run in this process inherits the failure.
       pending.catch(() => cache.delete(target));
+      // Once a server-scoped create settles, replace the pending promise with
+      // the instance itself so `describe()` can peek it synchronously without
+      // re-running `create()` — that's the whole point of memoizing it.
+      // Guarded on still being the cached entry: `invalidate()` may have
+      // swapped in a fresh map while this was in flight, and the old value
+      // must not leak into it.
+      if (scope === "server") {
+        pending
+          .then(instance => {
+            if (this.serverInstances.get(target) === pending) {
+              this.serverInstances.set(target, instance);
+            }
+          })
+          // A rejection is already handled by the `.catch` above, on the same
+          // `pending` — this chain off of it needs its own no-op handler or
+          // it reports the same rejection again as unhandled.
+          .catch(() => {});
+      }
     }
     return pending;
   }
@@ -286,6 +387,7 @@ export class ResourceRegistry {
     runInstances: Map<Resource<unknown>, Promise<Instance>>,
     chain: readonly { resource: Resource<unknown>; label: string }[],
   ): Promise<Instance> {
+    if ("value" in target) return target;
     const needs: ResourceNeeds = target.needs ?? {};
     const resolved: Record<string, unknown> = {};
 
@@ -298,7 +400,7 @@ export class ResourceRegistry {
       const depTarget = registered?.resource ?? dep;
       const depLabel = registered?.uri ?? `${label} → ${name}`;
 
-      const depScope = depTarget.scope ?? "run";
+      const depScope = depTarget.scope ?? defaultScope(depTarget);
       if (scope === "server" && depScope === "run") {
         throw new Error(
           `Resource '${label}' is server-scoped but needs '${depLabel}', which is ` +
@@ -394,6 +496,7 @@ export class ResourceRegistry {
         identities.set(value, registered);
         const alias = shared[key];
         if (isResource(alias)) identities.set(alias, registered);
+        if ("value" in value) this.serverInstances.set(value, value);
       }
     }
 

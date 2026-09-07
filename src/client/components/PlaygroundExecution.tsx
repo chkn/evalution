@@ -7,10 +7,20 @@ import type {
   ExecuteRequest,
   ExecuteResponse,
   ExecutionInput,
+  InputLayout,
   NormalizedPrompt,
   PropDefinition,
 } from "../../shared/types";
 import { executePrompt } from "../api";
+import { CombinedInputEditor } from "./CombinedInputEditor";
+import {
+  collapseLossy,
+  expand,
+  type FieldGroup,
+  fanOutGroups,
+  isCombinable,
+  resolveLayout,
+} from "./combined-inputs";
 import { brokenResources, ExecutionInputEditor } from "./ExecutionInputEditor";
 import {
   fromExecutionInput,
@@ -30,10 +40,27 @@ interface Props {
 /** Editor state for one prompt's inputs, keyed by slot name. */
 type Selections = Record<string, SlotSelection>;
 
+/** Per-slot layout choices, split the same way `Selections` is. */
+interface LayoutChoices {
+  fn: Record<string, InputLayout>;
+  exec: Record<string, InputLayout>;
+}
+
+/** Per-slot "what got overwritten by forcing combined mode" notes. Not persisted. */
+type OverwrittenNotes = {
+  fn: Record<string, Record<string, string[]>>;
+  exec: Record<string, Record<string, string[]>>;
+};
+
 /** What is persisted between sessions: the inputs themselves, not the values. */
 interface StoredInputs {
   functionInputs?: Record<string, ExecutionInput>;
   executeInputs?: Record<string, ExecutionInput>;
+  /** The user's explicit layout choice, by slot path. Absent until they touch the toggle. */
+  layout?: {
+    functionSlots?: Record<string, InputLayout>;
+    executeSlots?: Record<string, InputLayout>;
+  };
 }
 
 // `globalId` survives file moves/renames, so it's the more stable key when
@@ -52,8 +79,9 @@ function paramStorageKey(prompt: NormalizedPrompt): string {
 function loadStored(prompt: NormalizedPrompt): {
   fn: Selections;
   exec: Selections;
+  layout: LayoutChoices;
 } {
-  const empty = { fn: {}, exec: {} };
+  const empty = { fn: {}, exec: {}, layout: { fn: {}, exec: {} } };
   try {
     const raw = localStorage.getItem(paramStorageKey(prompt));
     if (!raw) return empty;
@@ -69,11 +97,28 @@ function loadStored(prompt: NormalizedPrompt): {
     return {
       fn: restore(parsed.functionInputs),
       exec: restore(parsed.executeInputs),
+      layout: {
+        fn: parsed.layout?.functionSlots ?? {},
+        exec: parsed.layout?.executeSlots ?? {},
+      },
     };
   } catch {
     /* ignore (private browsing, quota, corrupt entry, etc.) */
     return empty;
   }
+}
+
+/** Replace (or clear) one `which`/`name` entry of a `{fn, exec}`-shaped record. */
+function withEntry<T>(
+  obj: Record<"fn" | "exec", Record<string, T>>,
+  which: "fn" | "exec",
+  name: string,
+  value: T | undefined,
+): Record<"fn" | "exec", Record<string, T>> {
+  const bucket = { ...obj[which] };
+  if (value === undefined) delete bucket[name];
+  else bucket[name] = value;
+  return { ...obj, [which]: bucket };
 }
 
 function PlaygroundExecution({ prompt, onExecuted }: Props) {
@@ -84,6 +129,13 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
   const [executeSelections, setExecuteSelections] = useState<Selections>(
     stored.exec,
   );
+  const [layoutChoices, setLayoutChoices] = useState<LayoutChoices>(
+    stored.layout,
+  );
+  const [overwrittenNotes, setOverwrittenNotes] = useState<OverwrittenNotes>({
+    fn: {},
+    exec: {},
+  });
   const [executing, setExecuting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,7 +143,7 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
   const sources = prompt.inputSources;
   const broken = brokenResources(sources);
 
-  const persist = (fn: Selections, exec: Selections) => {
+  const persist = (fn: Selections, exec: Selections, layout: LayoutChoices) => {
     try {
       const collect = (defs: readonly PropDefinition[], sel: Selections) =>
         Object.fromEntries(
@@ -105,6 +157,7 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
         JSON.stringify({
           functionInputs: collect(prompt.functionParameters, fn),
           executeInputs: collect(executeParameters, exec),
+          layout: { functionSlots: layout.fn, executeSlots: layout.exec },
         } satisfies StoredInputs),
       );
     } catch {
@@ -124,8 +177,67 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
           : executeSelections;
       setFunctionSelections(fn);
       setExecuteSelections(exec);
-      persist(fn, exec);
+      persist(fn, exec, layoutChoices);
     };
+
+  /**
+   * A slot's effective layout (§B precedence): the user's own stored choice,
+   * else `"expanded"` if the stored input's members disagree, else the
+   * adapter's hint, else `"expanded"`.
+   */
+  const layoutFor = (
+    which: "fn" | "exec",
+    def: PropDefinition,
+    groups: readonly FieldGroup[],
+  ): InputLayout => {
+    const selections = which === "fn" ? functionSelections : executeSelections;
+    const hint = (
+      which === "fn"
+        ? prompt.inputLayout?.functionSlots
+        : prompt.inputLayout?.executeSlots
+    )?.[def.name];
+    return resolveLayout(
+      groups,
+      toExecutionInput(selections[def.name]),
+      layoutChoices[which][def.name],
+      hint,
+    );
+  };
+
+  /**
+   * Switch one slot's layout. Forcing a disagreeing slot into combined mode
+   * keeps the first member's value and records what it overwrote (§D); the
+   * reverse direction is lossless, so nothing else needs to change.
+   */
+  const toggleLayout = (
+    which: "fn" | "exec",
+    def: PropDefinition,
+    groups: readonly FieldGroup[],
+    next: InputLayout,
+  ) => {
+    let fn = functionSelections;
+    let exec = executeSelections;
+
+    if (next === "combined") {
+      const selections = which === "fn" ? fn : exec;
+      const storedInput = toExecutionInput(selections[def.name]);
+      const { selection, overwritten } = collapseLossy(groups, storedInput);
+      const merged = fromExecutionInput(expand(groups, selection));
+      if (which === "fn") fn = { ...fn, [def.name]: merged };
+      else exec = { ...exec, [def.name]: merged };
+      setFunctionSelections(fn);
+      setExecuteSelections(exec);
+      setOverwrittenNotes(prev =>
+        withEntry(prev, which, def.name, overwritten),
+      );
+    } else {
+      setOverwrittenNotes(prev => withEntry(prev, which, def.name, undefined));
+    }
+
+    const layout = withEntry(layoutChoices, which, def.name, next);
+    setLayoutChoices(layout);
+    persist(fn, exec, layout);
+  };
 
   /**
    * Assemble the request.
@@ -134,6 +246,11 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
    * resolves them: a resource has no value until the run creates one, and a
    * value whose `functionCall` is bound to an import cannot be resolved in a
    * browser at all.
+   *
+   * Combined mode never appears here: a combined-mode edit is folded into the
+   * fully expanded selection immediately (see {@link toggleLayout} and
+   * `CombinedInputEditor`'s `onChange`), so what's stored per slot is always
+   * the same per-member tree expanded mode would have produced.
    */
   const buildRequest = (): ExecuteRequest | null => {
     const functionInputs: ExecutionInput[] = [];
@@ -191,32 +308,80 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
     slots: Record<string, string[]>,
     which: "fn" | "exec",
   ) =>
-    defs.map(def => (
-      <div className="pg-exec-param" key={def.name}>
-        {/* The control this labels varies by slot — a dropdown, an editor, or
-            a hint with nothing focusable at all — so it wraps rather than
-            naming an id that may not exist. */}
-        <div className="pg-exec-param-label">
-          <span className="pg-exec-param-name">
-            {def.name}
-            {def.optional ? "" : " *"}
-          </span>
-          <span className="pg-exec-param-type" title={def.type.syntax}>
-            {shortSyntax(def.type.syntax, 60)}
-          </span>
+    defs.map(def => {
+      const groups = fanOutGroups(def);
+      const combinable = isCombinable(groups);
+      const layout = combinable ? layoutFor(which, def, groups) : "expanded";
+
+      return (
+        <div className="pg-exec-param" key={def.name}>
+          {/* The control this labels varies by slot — a dropdown, an editor, or
+              a hint with nothing focusable at all — so it wraps rather than
+              naming an id that may not exist. */}
+          <div className="pg-exec-param-label">
+            <span className="pg-exec-param-name">
+              {def.name}
+              {def.optional ? "" : " *"}
+            </span>
+            <span className="pg-exec-param-type" title={def.type.syntax}>
+              {shortSyntax(def.type.syntax, 60)}
+            </span>
+          </div>
+          {def.description && (
+            <div className="pg-exec-param-desc">{def.description}</div>
+          )}
+          {combinable && (
+            <div className="pg-combined-toggle">
+              <div
+                className="pg-layout-tabs"
+                role="tablist"
+                aria-label={`Layout for ${def.name}`}
+              >
+                {(["expanded", "combined"] as const).map(option => (
+                  <button
+                    key={option}
+                    type="button"
+                    role="tab"
+                    aria-selected={layout === option}
+                    className={`pg-layout-tab${
+                      layout === option ? " pg-layout-tab-active" : ""
+                    }`}
+                    onClick={() => toggleLayout(which, def, groups, option)}
+                  >
+                    {option === "expanded" ? "Expanded" : "Combined"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {layout === "combined" ? (
+            <CombinedInputEditor
+              propDef={def}
+              groups={groups}
+              selection={
+                collapseLossy(groups, toExecutionInput(selections[def.name]))
+                  .selection
+              }
+              onChange={combined => {
+                const nextInput = expand(groups, combined);
+                change(which)(def.name, fromExecutionInput(nextInput));
+              }}
+              resources={sources?.resources ?? []}
+              slots={slots}
+              overwritten={overwrittenNotes[which][def.name]}
+            />
+          ) : (
+            <ExecutionInputEditor
+              propDef={def}
+              selection={selections[def.name] ?? {}}
+              onChange={selection => change(which)(def.name, selection)}
+              resources={sources?.resources ?? []}
+              slots={slots}
+            />
+          )}
         </div>
-        {def.description && (
-          <div className="pg-exec-param-desc">{def.description}</div>
-        )}
-        <ExecutionInputEditor
-          propDef={def}
-          selection={selections[def.name] ?? {}}
-          onChange={selection => change(which)(def.name, selection)}
-          resources={sources?.resources ?? []}
-          slots={slots}
-        />
-      </div>
-    ));
+      );
+    });
 
   return (
     <div className="pg-exec-inner">

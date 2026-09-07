@@ -352,7 +352,7 @@ export class VercelAISDK implements SDKAdapter {
   private static readonly TOOLS_CONTEXT_PROBE: TypeProbe = {
     name: "toolsContext",
     description:
-      "Per-tool context required by tools that declare a `contextSchema`.",
+      "Per-tool context required by tools that declare a contextSchema.",
     // Reached entirely through `ai`'s own public surface, and deliberately so.
     // `InferToolSetContext` lives in `@ai-sdk/provider-utils`, but naming that
     // package directly resolves whichever copy the *prompt file* sees, which
@@ -522,6 +522,8 @@ export class VercelAISDK implements SDKAdapter {
         };
       });
 
+    const executeParameters = this.executeParametersFor(prompt, resolvedProbes);
+
     return {
       id: prompt.id,
       providerId: prompt.providerId,
@@ -537,7 +539,15 @@ export class VercelAISDK implements SDKAdapter {
       messages: extractMessages(messagesValue),
       messagesEditable: messagesValue ? isEditable(messagesValue) : true,
       modelParameters,
-      executeParameters: this.executeParametersFor(prompt, resolvedProbes),
+      executeParameters,
+      // `toolsContext` fans out per tool because the AI SDK resolves tools
+      // individually, not because prompt authors think in terms of separate
+      // contexts — `odin/index.ts` builds one object and hands the same
+      // reference to every tool. That is this adapter's fact to know, so it
+      // says so rather than leaving the panel to guess from the data.
+      inputLayout: executeParameters && {
+        executeSlots: { [VercelAISDK.TOOLS_CONTEXT_PROBE.name]: "combined" },
+      },
     };
   }
 

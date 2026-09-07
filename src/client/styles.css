@@ -1256,6 +1256,64 @@ pre {
   margin-bottom: 4px;
 }
 
+/* ─── Combined mode (fan-out slots) ─────────────────────────────────────────── */
+
+.pg-combined-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.pg-layout-tabs {
+  display: flex;
+  gap: 14px;
+}
+
+.pg-layout-tab {
+  padding: 2px 0 5px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--panel-text-secondary);
+  cursor: pointer;
+}
+
+.pg-layout-tab:hover {
+  color: var(--panel-text-primary);
+}
+
+.pg-layout-tab-active,
+.pg-layout-tab-active:hover {
+  /* Same 2px weight as the vertical guide on a combined row's nested
+     entries (`.pg-combined-row`), so a selected tab reads as part of the
+     same visual language rather than a mismatched control. */
+  color: var(--panel-text-primary);
+  border-bottom-color: var(--accent);
+}
+
+.pg-combined-row {
+  padding-left: 10px;
+  border-left: 2px solid var(--exec-border);
+}
+
+.pg-combined-members {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--panel-text-secondary);
+  font-style: italic;
+}
+
+.pg-combined-note {
+  font-size: 10.5px;
+  color: var(--panel-text-secondary);
+  font-style: italic;
+  margin-bottom: 4px;
+}
+
 /* Marks off the values needed to *run* the prompt from the ones it takes. */
 .pg-exec-section {
   display: flex;
@@ -1277,32 +1335,77 @@ pre {
 
 .pg-slot {
   display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.pg-slot-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.pg-slot-source {
-  width: 100%;
+/* The source select's button chrome. Sized and aligned like the array
+   editor's per-item remove button so a slot with a source reads the same
+   way a repeated item does: control on the left, a small square affordance
+   on the right. */
+.pg-slot-source-wrap {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   padding: 5px 8px;
-  font-size: 12px;
-  font-family: inherit;
+  box-sizing: border-box;
   border: 1px solid var(--exec-border);
   border-radius: 6px;
   background: var(--panel-card-bg);
-  color: inherit;
+  color: var(--panel-text-secondary);
   transition:
     border-color 0.1s,
     box-shadow 0.1s;
 }
 
-.pg-slot-source:focus {
+.pg-slot-source-wrap:hover {
+  color: var(--panel-text);
+}
+
+.pg-slot-source-wrap:focus-within {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(165, 180, 252, 0.25);
 }
 
-/* A resource's value doesn't exist until the run creates it, so the chip
-   names the source rather than pretending to preview a value. */
+.pg-slot-source-icon {
+  font-size: 13px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* The real control — stretched invisibly over the icon above so the native
+   picker still opens on click, keyboard, and `selectOption` in tests. */
+.pg-slot-source {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* Most resources' values don't exist until the run creates them, so the chip
+   names the source rather than pretending to preview a value; see
+   .pg-slot-preview below for the resources that can show one. */
 .pg-slot-chip {
   display: flex;
   flex-direction: column;
@@ -1320,6 +1423,15 @@ pre {
   color: var(--panel-text-secondary);
 }
 
+/* A read-only preview of a resource's already-known value, through the
+   slot's own editor — rendered with `disabled` (a real ts-proppy editor
+   prop, not an `inert` wrapper), so the value stays focusable, selectable,
+   and copyable, and a textarea keeps its native resize handle. The dimming
+   here just says visually what `disabled` already enforces functionally. */
+.pg-slot-preview {
+  opacity: 0.55;
+}
+
 .pg-slot-hint {
   display: flex;
   align-items: center;
@@ -1330,6 +1442,11 @@ pre {
   font-size: 12px !important;
   color: var(--panel-text-secondary);
   background: var(--panel-card-bg);
+  /* Same height as the "..." resource-picker button (.pg-slot-source-wrap),
+     so a row with no editor doesn't sit shorter than one that has the
+     picker beside it. */
+  height: 28px;
+  box-sizing: border-box;
 }
 
 .pg-slot-hint-help {
@@ -1456,6 +1573,14 @@ pre {
   .pg-exec-body {
     padding: 14px 16px !important;
     overflow-y: auto;
+    /* `overflow-y: auto` alone leaves `overflow-x` computed as `auto` too (per
+       spec, since a scroll container can't mix `visible` with a set axis) —
+       Safari then shows a horizontal scrollbar for a stray few px of width
+       from something with no visible footprint (a hidden `<select>`
+       overlay is the likely source; Safari sizes a `<select>` by its content
+       even under `width: 100%` + `inset: 0`). Nothing in this column is
+       meant to scroll sideways, so clip it outright. */
+    overflow-x: hidden;
     flex: 1 !important;
     min-height: 0;
     display: flex !important;

@@ -5,10 +5,13 @@ import { expect, test } from "@playwright/experimental-ct-react";
 import type { Page } from "@playwright/test";
 import {
   DB_RESOURCE,
+  ODIN_TOOLS_CONTEXT,
   OPAQUE_DB,
+  odinDbSlots,
   SEEDED_TASK,
   sourcesFor,
   TOOLS_CONTEXT_WITH_NESTED_DB,
+  WORKSPACE_RESOURCE,
 } from "./executionFixtures";
 import { PlaygroundExecutionHarness } from "./PlaygroundExecutionHarness";
 
@@ -216,6 +219,50 @@ test("picking a resource replaces the editor with a labelled chip, and it surviv
   );
 });
 
+test("a resource the server already has a value for previews it, read-only, through the slot's own editor", async ({
+  mount,
+  page,
+}) => {
+  const component = await mount(
+    <PlaygroundExecutionHarness
+      functionParameters={[
+        {
+          name: "workspaceId",
+          type: { kind: "primitive", syntax: "WorkspaceId", base: "string" },
+          optional: false,
+        },
+      ]}
+      inputSources={sourcesFor({ workspaceId: [WORKSPACE_RESOURCE.uri] }, [
+        WORKSPACE_RESOURCE,
+      ])}
+    />,
+  );
+  await component
+    .locator(".pg-slot-source")
+    .selectOption(WORKSPACE_RESOURCE.uri);
+
+  // Unlike SEEDED_TASK (run-scoped, no value until Run), the server already
+  // knows this one — so the panel shows it, seeded into the same string
+  // editor a "Custom" choice would use, rather than just naming it on a chip.
+  const preview = component.locator(".pg-slot-preview");
+  const field = preview.locator("textarea, input");
+  await expect(field).toHaveAttribute("readonly", "");
+  await expect(field).toHaveValue(WORKSPACE_RESOURCE.value as string);
+  // The chip would be redundant with a real preview on screen.
+  await expect(component.locator(".pg-slot-chip")).toHaveCount(0);
+
+  // `readOnly`, unlike the `inert` wrapper this replaced, still lets the
+  // value be selected and copied — that's the whole reason for the change.
+  await field.dblclick();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString()))
+    .not.toBe("");
+
+  // But it does block editing — typing must leave the value unchanged.
+  await field.pressSequentially("nope");
+  await expect(field).toHaveValue(WORKSPACE_RESOURCE.value as string);
+});
+
 test("an opaque slot with no matching resource shows the hint, not a JSON textarea", async ({
   mount,
 }) => {
@@ -229,7 +276,7 @@ test("an opaque slot with no matching resource shows the hint, not a JSON textar
   await expect(component.locator("textarea")).toHaveCount(0);
   await expect(component.locator(".pg-exec-param-type")).toContainText("Db");
   const hint = component.locator(".pg-slot-hint");
-  await expect(hint).toContainText("No value editor for this type");
+  await expect(hint).toContainText("No editor for this type");
   await expect(hint.getByRole("link")).toHaveAccessibleName(
     "Learn more about opaque types",
   );
@@ -248,7 +295,7 @@ test("an opaque slot with a matching resource makes the dropdown its only contro
   const source = component.locator(".pg-slot-source");
   // No "Custom": there is no editor to fall back to.
   await expect(source.locator("option")).toHaveText([
-    "Choose a resource…",
+    "Pick a resource…",
     DB_RESOURCE.label,
   ]);
 
@@ -275,10 +322,64 @@ test("a nested opaque slot shows the hint even when no resource is wired to it",
 
   const hint = component.locator(".pg-slot-hint");
   await expect(hint).toHaveCount(1);
-  await expect(hint).toContainText("No value editor for this type");
+  await expect(hint).toContainText("No editor for this type");
   await expect(hint.getByRole("link")).toHaveAccessibleName(
     "Learn more about opaque types",
   );
+});
+
+test("typing into a nested Custom editor doesn't lose focus after each character", async ({
+  mount,
+}) => {
+  // Regression: the nested-slot plugin's `component` closed over `selection`
+  // directly, so it was rebuilt — a brand new function identity — on every
+  // keystroke (typing updates `selection.value`). ts-proppy renders a
+  // plugin's component by reference, so a new one each keystroke unmounted
+  // and remounted the field being typed into, dropping focus after every
+  // character. `fill()` doesn't catch this (it sets the whole value in one
+  // native-input mutation); only per-character typing does.
+  const component = await mount(
+    <PlaygroundExecutionHarness
+      functionParameters={[]}
+      executeParameters={[
+        {
+          name: "toolsContext",
+          optional: false,
+          type: {
+            kind: "object",
+            syntax: "Ctx",
+            properties: [
+              {
+                name: "list_tasks",
+                optional: false,
+                type: {
+                  kind: "object",
+                  syntax: "{ workspaceId: string }",
+                  properties: [
+                    {
+                      name: "workspaceId",
+                      optional: false,
+                      type: { kind: "primitive", syntax: "string" },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      ]}
+      inputSources={sourcesFor(
+        { "toolsContext.list_tasks.workspaceId": [WORKSPACE_RESOURCE.uri] },
+        [WORKSPACE_RESOURCE],
+        "executeSlots",
+      )}
+    />,
+  );
+
+  const field = component.locator("textarea, input").first();
+  await field.click();
+  await field.pressSequentially("ws_abc123");
+  await expect(field).toHaveValue("ws_abc123");
 });
 
 test("execute parameters render in their own section, after a divider", async ({
@@ -335,4 +436,112 @@ test("a broken playground module is reported rather than silently absent", async
   );
 
   await expect(component.locator(".pg-exec-error")).toContainText("miniflare");
+});
+
+test("a fan-out slot's combined mode renders one row per group, each labelled with its members", async ({
+  mount,
+}) => {
+  const component = await mount(
+    <PlaygroundExecutionHarness
+      functionParameters={[]}
+      executeParameters={[ODIN_TOOLS_CONTEXT]}
+    />,
+  );
+
+  await component.getByRole("tab", { name: "Combined" }).click();
+
+  const rows = component.locator(".pg-combined-row");
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(0)).toContainText("db");
+  await expect(rows.nth(0)).toContainText("all 4");
+  await expect(rows.nth(1)).toContainText("workspaceId");
+  await expect(rows.nth(1)).toContainText("all 4");
+  await expect(rows.nth(2)).toContainText("rootTaskId");
+  await expect(rows.nth(2)).toContainText("list_tasks, create_task");
+  await expect(rows.nth(3)).toContainText("runId");
+  await expect(rows.nth(3)).toContainText("post_message");
+});
+
+test("choosing a resource on a combined row fans it out to every member, visible after switching to expanded", async ({
+  mount,
+}) => {
+  const component = await mount(
+    <PlaygroundExecutionHarness
+      functionParameters={[]}
+      executeParameters={[ODIN_TOOLS_CONTEXT]}
+      inputSources={{
+        resources: [DB_RESOURCE],
+        functionSlots: {},
+        executeSlots: odinDbSlots(DB_RESOURCE),
+      }}
+    />,
+  );
+
+  await component.getByRole("tab", { name: "Combined" }).click();
+  const dbRow = component.locator(".pg-combined-row").first();
+  await dbRow.locator(".pg-slot-source").selectOption(DB_RESOURCE.uri);
+  await expect(dbRow.locator(".pg-slot-chip")).toContainText(DB_RESOURCE.label);
+
+  await component.getByRole("tab", { name: "Expanded" }).click();
+  // Each member is its own collapsible section (ts-proppy collapses a nested
+  // object by default once there's more than one sibling) — expand all four
+  // before looking for their chips, same as a user would.
+  for (const name of [
+    "list_tasks",
+    "create_task",
+    "update_task",
+    "post_message",
+  ]) {
+    await component.getByRole("button", { name: `Expand ${name}` }).click();
+  }
+
+  const chips = component.locator(".pg-slot-chip");
+  await expect(chips).toHaveCount(4);
+  for (let i = 0; i < 4; i++) {
+    await expect(chips.nth(i)).toContainText(DB_RESOURCE.label);
+  }
+});
+
+test("typing into a combined row persists as the expanded form and restores it, combined, on remount", async ({
+  mount,
+}) => {
+  const props = {
+    functionParameters: [],
+    executeParameters: [ODIN_TOOLS_CONTEXT],
+    promptId: "combined-prompt",
+  };
+
+  const component = await mount(<PlaygroundExecutionHarness {...props} />);
+  await component.getByRole("tab", { name: "Combined" }).click();
+  const workspaceRow = component.locator(".pg-combined-row").nth(1);
+  await workspaceRow
+    .locator("textarea, input")
+    .first()
+    .fill("ws_internal_default");
+  await component.unmount();
+
+  const remounted = await mount(<PlaygroundExecutionHarness {...props} />);
+  // The layout choice is the user's explicit one, so it's stored too and
+  // reopens combined rather than falling back to the default.
+  await expect(remounted.locator(".pg-combined-row")).toHaveCount(4);
+  await expect(
+    remounted
+      .locator(".pg-combined-row")
+      .nth(1)
+      .locator("textarea, input")
+      .first(),
+  ).toHaveValue("ws_internal_default");
+});
+
+test("the layout toggle is absent for a slot with only one member", async ({
+  mount,
+}) => {
+  const component = await mount(
+    <PlaygroundExecutionHarness
+      functionParameters={[]}
+      executeParameters={[TOOLS_CONTEXT_WITH_NESTED_DB]}
+    />,
+  );
+
+  await expect(component.locator(".pg-layout-tabs")).toHaveCount(0);
 });

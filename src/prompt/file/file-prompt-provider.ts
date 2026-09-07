@@ -98,13 +98,18 @@ export interface FilePromptProviderOptions {
 let defaultIDCounter = 0;
 
 /**
- * A TypeScript type expression naming what a resource's `create()` produces,
- * for the file type to evaluate in the scope of `promptFilePath`.
+ * A TypeScript type expression naming what a resource produces, for the file
+ * type to evaluate in the scope of `promptFilePath`.
  *
- * The type is read back off `create` rather than declared separately: it is
- * where the type came from in the first place, so there is nothing to keep in
- * sync, nothing to go stale under a rename, and nothing a checker could not
- * verify. `Awaited` covers the common async `create`.
+ * The type is read back off the resource's own declaration rather than
+ * declared separately: it is where the type came from in the first place, so
+ * there is nothing to keep in sync, nothing to go stale under a rename, and
+ * nothing a checker could not verify. A dynamic resource's type comes off
+ * `create()`'s return (`Awaited` covers the common async `create`); a static
+ * `value` resource has no `create` to read, so its `value` property is read
+ * directly. Which one applies is known from the scan (see
+ * {@link RegisteredResource.resource}), and has to be — the two definitions
+ * are a union, so indexing the wrong property wouldn't type-check.
  */
 function resourceTypeExpression(
   promptFilePath: string,
@@ -117,7 +122,10 @@ function resourceTypeExpression(
   if (!specifier.startsWith(".")) specifier = `./${specifier}`;
 
   const module = `typeof import(${JSON.stringify(specifier)})`;
-  const created = `ReturnType<${module}[${JSON.stringify(resource.key)}]["create"]>`;
+  const exported = `${module}[${JSON.stringify(resource.key)}]`;
+  if ("value" in resource.resource) return `${exported}["value"]`;
+
+  const created = `ReturnType<${exported}["create"]>`;
   return `Awaited<${created}>["value"]`;
 }
 

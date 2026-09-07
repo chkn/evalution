@@ -103,6 +103,25 @@ describe("resource-to-slot matching (§D)", () => {
     expect(taskId.type.kind).toBe("primitive");
   });
 
+  it("matches a static `value` resource by type, same as a `create()`-based one", async () => {
+    // A `value` resource has no `create()` to read a type off — regression
+    // coverage for the checker-based match having ever assumed one existed.
+    // The resource is named `defaultWorkspace` and spelled `` `ws_${string}` ``
+    // against a `workspaceId: WorkspaceId` slot, so a match here can only come
+    // from assignability, not from name matching or identical type text.
+    const provider = new FilePromptProvider({
+      rootDir: fixturesDir,
+      includePatterns: ["static-value.prompt.ts"],
+      playgroundIncludePatterns: ["static-value.playground.ts"],
+      sdk: new VercelAISDK(),
+    });
+
+    const [prompt] = await provider.getAllPrompts();
+    expect(prompt.inputSources!.functionSlots.workspaceId).toContain(
+      "static-value.playground.ts#defaultWorkspace",
+    );
+  });
+
   it("falls back to name matching when no checker can see the types", async () => {
     // The documented in-memory situation: cross-file types stay unresolved, so
     // there is nothing for the type rule to compare and the name rule carries.
@@ -199,6 +218,35 @@ describe("execute parameters (§E)", () => {
     const sdk = new VercelAISDK();
     const prompts = { name: "x", extractedProps: { definitions: [] } } as any;
     expect(sdk.getExecuteParameterProbes(prompts, "yaml")).toEqual([]);
+  });
+});
+
+describe("combined-mode layout hint (specs/combined-execute-inputs.md §B)", () => {
+  it("hints toolsContext as combined for a prompt with tools", async () => {
+    // `toolsContext` fans out per tool only because the AI SDK resolves tools
+    // individually — this adapter is the one party that knows that, so it
+    // says so rather than leaving the client to infer it from the data.
+    const sdk = new VercelAISDK();
+    const prompts = await fileType().parsePrompts(
+      [fixture("contextual-tools.prompt.ts")],
+      fixturesDir,
+    );
+    const normalized = sdk.normalizePrompt(prompts[0], [undefined]);
+
+    expect(normalized.inputLayout).toEqual({
+      executeSlots: { toolsContext: "combined" },
+    });
+  });
+
+  it("emits no hint at all for a prompt with no tools", async () => {
+    const sdk = new VercelAISDK();
+    const prompts = await fileType().parsePrompts(
+      [fixture("basic.prompt.ts")],
+      fixturesDir,
+    );
+    const normalized = sdk.normalizePrompt(prompts[0], [null]);
+
+    expect(normalized.inputLayout).toBeUndefined();
   });
 });
 

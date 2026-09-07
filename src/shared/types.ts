@@ -164,7 +164,27 @@ export interface NormalizedPrompt {
    * code-defined resources. Absent when the provider offers none.
    */
   inputSources?: PromptInputSources;
+
+  /**
+   * Slot path → how to lay out a fan-out slot's fields in the execute panel.
+   * Any path not named here uses `"expanded"`.
+   *
+   * Set by an {@link SDKAdapter} whose own API shape is the reason a slot
+   * fans out — e.g. the Vercel AI SDK's `toolsContext`, which is keyed per
+   * tool because tools are resolved individually, not because prompt authors
+   * think in terms of separate contexts. Mirrors the `functionSlots` /
+   * `executeSlots` split on {@link PromptInputSources}, which exists for the
+   * same reason: a function parameter and an execute parameter may share a
+   * name.
+   */
+  inputLayout?: {
+    functionSlots?: Record<string, InputLayout>;
+    executeSlots?: Record<string, InputLayout>;
+  };
 }
+
+/** How a fan-out slot's fields are laid out in the execute panel. */
+export type InputLayout = "combined" | "expanded";
 
 /** How long a resource's value lives, and how often `create()` runs. */
 export type ResourceScope = "run" | "server";
@@ -193,6 +213,15 @@ export interface ResourceInfo {
    * playground module is visible instead of silently absent.
    */
   error?: string;
+  /**
+   * A snapshot of the resource's current value, so the panel can preview it
+   * instead of just naming it. Present only when the server already has an
+   * instance to peek at — a static `value` resource, or a `scope: 'server'`
+   * one it has already created — and that instance's value is plain JSON
+   * data. A run-scoped resource, or one whose value isn't plain data (a live
+   * handle), has nothing here; the chip is all there is to show.
+   */
+  value?: unknown;
 }
 
 /**

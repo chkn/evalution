@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import type { EditorPlugin, ItemEditorProps, SlotPath } from "ts-proppy/react";
 import { ItemEditor } from "ts-proppy/react";
 import type {
@@ -11,6 +11,7 @@ import type {
   ResourceInfo,
 } from "../../shared/types";
 import { SELF, type SlotSelection } from "./execution-input-state";
+import { SourceRow } from "./SourceRow";
 
 interface Props {
   /** The slot being edited. */
@@ -55,15 +56,25 @@ export function ExecutionInputEditor({
     [resources],
   );
 
-  const chooseResource = useCallback(
-    (path: string, uri: string | null) => {
-      const next = { ...(selection.resources ?? {}) };
-      if (uri) next[path] = uri;
-      else delete next[path];
-      onChange({ ...selection, resources: next });
-    },
-    [selection, onChange],
-  );
+  // `plugins` below has to stay referentially stable while the user is
+  // typing — ts-proppy renders a plugin's `component` by reference, so a new
+  // one every keystroke unmounts and remounts the field it's editing,
+  // dropping focus after every character. `selection` changes on every
+  // keystroke (it carries the typed value), so neither `chooseResource` nor
+  // the plugin below may depend on it directly; a ref keeps both reading the
+  // latest `selection` anyway, just not as a dependency.
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  const chooseResource = useCallback((path: string, uri: string | null) => {
+    const current = selectionRef.current;
+    const next = { ...(current.resources ?? {}) };
+    if (uri) next[path] = uri;
+    else delete next[path];
+    onChangeRef.current({ ...current, resources: next });
+  }, []);
 
   // Nested slots are handled by a plugin rather than by a bespoke recursive
   // editor: `ItemEditor` already walks the shape correctly, and threading the
@@ -90,7 +101,7 @@ export function ExecutionInputEditor({
             <SourceRow
               propDef={props.propDef}
               matching={matchingFor(slots, propDef.name, props.path, byUri)}
-              chosen={selection.resources?.[path]}
+              chosen={selectionRef.current.resources?.[path]}
               onChoose={uri => chooseResource(path, uri)}
             >
               <ItemEditor
@@ -104,9 +115,7 @@ export function ExecutionInputEditor({
         },
       },
     ];
-    // `selection` is read inside the plugin, so the plugin has to be rebuilt
-    // when it changes; `chooseResource` closes over the same state.
-  }, [slots, propDef.name, byUri, selection, chooseResource]);
+  }, [slots, propDef.name, byUri, chooseResource]);
 
   const ownMatches = matchingFor(slots, propDef.name, [propDef.name], byUri);
 
@@ -125,95 +134,6 @@ export function ExecutionInputEditor({
         path={[propDef.name]}
       />
     </SourceRow>
-  );
-}
-
-/**
- * A slot's source dropdown and the control beneath it.
- *
- * With a resource chosen the editor is replaced by a chip rather than seeded
- * from it: a resource's value does not exist until the run creates it, so
- * there is nothing to show. (Seeding an editor from a stored value is what a
- * dataset row is for.)
- */
-function SourceRow({
-  propDef,
-  matching,
-  chosen,
-  onChoose,
-  children,
-}: {
-  propDef: PropDefinition;
-  matching: ResourceInfo[];
-  chosen: string | undefined;
-  onChoose: (uri: string | null) => void;
-  children: React.ReactNode;
-}) {
-  const editable = propDef.type.kind !== "opaque";
-  const selected = chosen ? matching.find(r => r.uri === chosen) : undefined;
-  // A stored choice whose resource is gone — renamed, deleted, or in a module
-  // that now fails to load. It stays listed, and selected, because it is still
-  // what a run would send: dropping it silently would show an editor while
-  // submitting the resource behind it.
-  const stale = chosen && !selected ? chosen : undefined;
-
-  if (matching.length === 0 && !stale && editable) return <>{children}</>;
-
-  return (
-    <div className="pg-slot">
-      {(matching.length > 0 || stale) && (
-        <select
-          className="pg-slot-source"
-          value={chosen ?? ""}
-          onChange={e => onChoose(e.target.value || null)}
-          aria-label={`Source for ${propDef.name}`}
-        >
-          {/* An opaque slot has no editor to fall back to, so it offers no
-              "Custom" — picking a source is the only way to fill it. */}
-          {editable && <option value="">Custom</option>}
-          {!editable && !chosen && <option value="">Choose a resource…</option>}
-          {matching.map(r => (
-            <option key={r.uri} value={r.uri}>
-              {r.label}
-            </option>
-          ))}
-          {stale && <option value={stale}>{stale} (unavailable)</option>}
-        </select>
-      )}
-
-      {selected ? (
-        <span className="pg-slot-chip" title={selected.uri}>
-          {selected.label}
-          <em className="pg-slot-chip-note">
-            {selected.scope === "server"
-              ? "created once per server"
-              : "created for each run"}
-          </em>
-        </span>
-      ) : stale ? (
-        <div className="pg-slot-hint">
-          <span>This resource is no longer available</span>
-        </div>
-      ) : editable ? (
-        children
-      ) : (
-        // The type already appears in this slot's own label, right above —
-        // repeating it here would just be noise.
-        <div className="pg-slot-hint">
-          <span>No value editor for this type</span>
-          {/* TODO: point at real docs once they exist. */}
-          <a
-            className="pg-slot-hint-help"
-            href="https://example.com/docs/opaque-types"
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Learn more about opaque types"
-          >
-            ?
-          </a>
-        </div>
-      )}
-    </div>
   );
 }
 

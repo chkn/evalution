@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { LocalFileProvider } from "../../file-provider-local.ts";
 import { MemoryFileProvider } from "../../file-provider-memory.ts";
+import { resolveExecutionInputs } from "../execution-inputs.ts";
 import { resource } from "./resource.ts";
 import { ResourceRegistry } from "./resource-registry.ts";
 
@@ -288,6 +289,208 @@ describe("resource lifecycle", () => {
       "x.playground.ts#seeded": "tsk_abc123",
     });
     await lease.release();
+  });
+});
+
+describe("static value resources", () => {
+  it("resolves a `value` resource without a create()", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const apiKey = resource({ value: "secret" });`,
+    });
+
+    const lease = reg.lease();
+    expect(await lease.acquire("x.playground.ts#apiKey")).toBe("secret");
+    await lease.release();
+  });
+
+  it("defaults an unscoped value resource to 'server' in the panel description", async () => {
+    // A literal has nothing to create per run, so it defaults to 'server' —
+    // memoized for the life of the process — the same as `instantiate()`
+    // treats it. `describe()` must agree, or the execute panel's chip lies
+    // about whether the value is recreated on every run.
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const apiKey = resource({ value: "secret" });`,
+    });
+
+    const [described] = reg.describe(await reg.all());
+    expect(described.scope).toBe("server");
+  });
+
+  it("lets a server-scoped resource depend on a value resource", async () => {
+    // A value resource defaults to 'server' scope (see above), so it must
+    // pass the "server can't depend on run-scoped" check just like an
+    // explicitly server-scoped dependency would.
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const apiKey = resource({ value: "secret" });
+        export const client = resource({
+          scope: "server",
+          needs: { apiKey },
+          create: ({ apiKey }) => ({ value: "client-" + apiKey }),
+        });`,
+    });
+
+    const lease = reg.lease();
+    expect(await lease.acquire("x.playground.ts#client")).toBe("client-secret");
+    await lease.release();
+  });
+
+  it("does not call dispose on a value resource when a lease releases", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const apiKey = resource({ value: "secret" });`,
+    });
+
+    const lease = reg.lease();
+    await lease.acquire("x.playground.ts#apiKey");
+    // A literal has no lifecycle to tear down; releasing must not throw
+    // trying to call a `dispose` it never had.
+    await expect(lease.release()).resolves.toBeUndefined();
+  });
+});
+
+describe("value previews in the panel description", () => {
+  it("ships a static `value` resource's value, since it's known before any run", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const workspace = resource({
+          value: { id: "ws_1", tags: ["a", "b"] },
+        });`,
+    });
+
+    const [described] = reg.describe(await reg.all());
+    expect(described.value).toEqual({ id: "ws_1", tags: ["a", "b"] });
+  });
+
+  it("ships a server-scoped resource's value only after it's actually been created", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const config = resource({
+          scope: "server",
+          create: () => ({ value: { host: "localhost" } }),
+        });`,
+    });
+
+    // Nothing to peek yet — showing a value here would mean either creating
+    // it just to preview it (defeating the point of lazy 'server' scope) or
+    // showing a stale one from nowhere.
+    const [beforeRun] = reg.describe(await reg.all());
+    expect(beforeRun.value).toBeUndefined();
+
+    const lease = reg.lease();
+    await lease.acquire("x.playground.ts#config");
+    await lease.release();
+
+    const [afterRun] = reg.describe(await reg.all());
+    expect(afterRun.value).toEqual({ host: "localhost" });
+  });
+
+  it("never ships a run-scoped resource's value, even after acquiring it", async () => {
+    // A run-scoped instance is disposed with the lease that created it — the
+    // registry itself never memoizes one, so there's nothing later to peek.
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const seeded = resource({
+          create: () => ({ value: "tsk_1" }),
+        });`,
+    });
+
+    const lease = reg.lease();
+    await lease.acquire("x.playground.ts#seeded");
+    await lease.release();
+
+    const [described] = reg.describe(await reg.all());
+    expect(described.value).toBeUndefined();
+  });
+
+  it("does not ship a value that isn't plain JSON data, even though it's known", async () => {
+    // A live handle survives `JSON.stringify` (it just silently drops the
+    // methods that make it a handle) — that's exactly the misleading preview
+    // this must not produce.
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        class FakeDb { query() {} }
+        export const db = resource({ value: new FakeDb() });`,
+    });
+
+    const [described] = reg.describe(await reg.all());
+    expect(described.value).toBeUndefined();
+  });
+
+  it("ships a detached snapshot, not the registry's own live object", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const workspace = resource({ value: { tags: ["a"] } });`,
+    });
+
+    const [described] = reg.describe(await reg.all());
+    (described.value as { tags: string[] }).tags.push("mutated");
+
+    const [again] = reg.describe(await reg.all());
+    expect(again.value).toEqual({ tags: ["a"] });
+  });
+});
+
+describe("combined execute inputs (specs/combined-execute-inputs.md §C.2)", () => {
+  it("creates a run-scoped resource once even when four member paths reference it", async () => {
+    const { registry: reg } = registry({
+      [p("db.playground.ts")]: `${importHelper}
+        globalThis.__creates = 0;
+        globalThis.__disposes = 0;
+        export const db = resource({
+          create: () => {
+            globalThis.__creates++;
+            return { value: { conn: globalThis.__creates }, dispose: () => { globalThis.__disposes++; } };
+          },
+        });`,
+    });
+
+    const lease = reg.lease();
+    const uri = "db.playground.ts#db";
+    // The shape combined mode expands `db` into: one `resource` node per tool
+    // member, all naming the same uri — exactly what `ResourceRegistry.lease`
+    // is supposed to memoize by identity rather than by how many times it's
+    // referenced.
+    const resourceNode = { kind: "resource" as const, uri };
+    const executeInputs = {
+      toolsContext: {
+        kind: "object" as const,
+        properties: {
+          list_tasks: {
+            kind: "object" as const,
+            properties: { db: resourceNode },
+          },
+          create_task: {
+            kind: "object" as const,
+            properties: { db: resourceNode },
+          },
+          update_task: {
+            kind: "object" as const,
+            properties: { db: resourceNode },
+          },
+          post_message: {
+            kind: "object" as const,
+            properties: { db: resourceNode },
+          },
+        },
+      },
+    };
+
+    const { executeValues } = await resolveExecutionInputs(
+      { executeInputs },
+      resourceUri => lease.acquire(resourceUri),
+    );
+
+    const ctx = executeValues.toolsContext as Record<string, { db: unknown }>;
+    expect(ctx.list_tasks.db).toBe(ctx.create_task.db);
+    expect(ctx.update_task.db).toBe(ctx.post_message.db);
+    expect(ctx.list_tasks.db).toBe(ctx.post_message.db);
+    expect((globalThis as any).__creates).toBe(1);
+
+    await lease.release();
+    expect((globalThis as any).__disposes).toBe(1);
   });
 });
 

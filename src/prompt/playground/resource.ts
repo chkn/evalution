@@ -49,8 +49,11 @@ export type ResolvedNeeds<N extends ResourceNeeds> = {
   [K in keyof N]: N[K] extends Resource<infer T> ? T : never;
 };
 
-/** What {@link resource} is given. See {@link resource} for the narrative. */
-export interface ResourceDefinition<
+/**
+ * A resource whose value is produced by running code, resolved via
+ * `create()`. See {@link resource} for the narrative.
+ */
+export interface DynamicResourceDefinition<
   T,
   N extends ResourceNeeds = Record<string, never>,
 > {
@@ -87,6 +90,32 @@ export interface ResourceDefinition<
 }
 
 /**
+ * A resource whose value is already known — a literal rather than something
+ * `create()` computes. Scoped as `'server'` always (see
+ * {@link DynamicResourceDefinition.scope}): there is nothing to create per
+ * run, so the same value is handed out for the life of the process.
+ */
+export interface StaticResourceDefinition<T> {
+  /** Human-readable label shown on the chip in the execute panel. */
+  label?: string;
+  scope?: undefined;
+  /**
+   * Explicit slot to fill, as a dotted path optionally prefixed by a prompt
+   * name — `'orchestrate.taskId'`, `'toolsContext.list_tasks.db'`. An escape
+   * hatch that always works, tried before type and name matching.
+   */
+  for?: string | readonly string[];
+  /** The value itself. */
+  value: T;
+}
+
+/** What {@link resource} is given. See {@link resource} for the narrative. */
+export type ResourceDefinition<
+  T,
+  N extends ResourceNeeds = Record<string, never>,
+> = DynamicResourceDefinition<T, N> | StaticResourceDefinition<T>;
+
+/**
  * A named value produced by code at run time, in-process, with a lifecycle.
  *
  * Returned by {@link resource}; see it for what a resource is and how one is
@@ -94,10 +123,10 @@ export interface ResourceDefinition<
  *
  * @typeParam T - The type of value this resource produces.
  */
-export interface Resource<T> extends ResourceDefinition<T, any> {
+export type Resource<T> = ResourceDefinition<T, any> & {
   /** @internal Identifies this object to the playground-module loader. */
   readonly [RESOURCE_TAG]: true;
-}
+};
 
 /**
  * Declares a value that only running code can produce, so the playground can
@@ -158,11 +187,25 @@ export interface Resource<T> extends ResourceDefinition<T, any> {
  * @param definition - See {@link ResourceDefinition}.
  * @returns The resource, to be exported under the name it should be known by.
  */
+// Overloaded rather than typed with the `ResourceDefinition<T, N>` union
+// directly: a caller's `export const db = resource({ create: ... })` needs
+// `create` still present on `db`'s own inferred type, not erased behind
+// `Resource<T>`. The checker-based slot matcher reads a resource's type back
+// off its own declaration (`db["create"]`'s return, or `apiKey["value"]`
+// directly) — see `resourceTypeExpression` in `file-prompt-provider.ts` — and
+// that indexed access only type-checks against the concrete shape, not a
+// union where the property is missing from one branch.
+export function resource<T>(
+  definition: StaticResourceDefinition<T>,
+): StaticResourceDefinition<T> & { readonly [RESOURCE_TAG]: true };
 export function resource<
   T,
   const N extends ResourceNeeds = Record<string, never>,
->(definition: ResourceDefinition<T, N>): Resource<T> {
-  return { ...definition, [RESOURCE_TAG]: true } as Resource<T>;
+>(
+  definition: DynamicResourceDefinition<T, N>,
+): DynamicResourceDefinition<T, N> & { readonly [RESOURCE_TAG]: true };
+export function resource(definition: ResourceDefinition<any, any>): unknown {
+  return { ...definition, [RESOURCE_TAG]: true };
 }
 
 /** Whether `value` was produced by {@link resource}. */

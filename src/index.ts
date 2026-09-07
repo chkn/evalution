@@ -52,6 +52,7 @@ export type {
 } from "./prompt/file/prompt-file-type.ts";
 export { TSPromptFileType } from "./prompt/file/ts/ts-prompt-file-type.ts";
 export {
+  type DynamicResourceDefinition,
   isResource,
   type ResolvedNeeds,
   type Resource,
@@ -59,6 +60,7 @@ export {
   type ResourceInstance,
   type ResourceNeeds,
   resource,
+  type StaticResourceDefinition,
 } from "./prompt/playground/resource.ts";
 export {
   DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
@@ -94,6 +96,7 @@ export type {
   ExecuteResponse,
   ExecutionInput,
   ExtractedProps,
+  InputLayout,
   LLMSpanDetails,
   ModelCatalog,
   ModelGroupInfo,
