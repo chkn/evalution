@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { valueToDisplayString } from "ts-proppy/react";
 import { propValueEquals } from "../../shared/helpers";
@@ -12,6 +12,7 @@ import type {
   PropValue,
 } from "../../shared/types";
 import ProviderIcon from "./ProviderIcon";
+import { useAnchoredPopover } from "./use-anchored-popover";
 
 interface Props {
   value: PropValue | undefined;
@@ -102,9 +103,14 @@ export default function ModelPicker({
 }: Props) {
   const [open, setOpen] = useState(false);
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+  const {
+    triggerRef,
+    popoverRef: dropdownRef,
+    style: dropdownStyle,
+  } = useAnchoredPopover<HTMLButtonElement>({
+    open,
+    onClose: () => setOpen(false),
+  });
 
   const { modes, modelsByGroup, selectedModel } = useMemo(() => {
     const modes = Object.entries(modelCatalog.modelValueTypes ?? {});
@@ -147,42 +153,6 @@ export default function ModelPicker({
     ? valueToDisplayString(propertyValue)
     : undefined;
   const displayLabel = selectedModel?.label ?? valueString ?? undefined;
-
-  const updatePosition = useCallback(() => {
-    if (!triggerRef.current) return;
-    const rect = triggerRef.current.getBoundingClientRect();
-    setDropdownStyle({
-      position: "fixed",
-      top: rect.bottom + 4,
-      left: rect.left,
-      width: rect.width,
-      zIndex: 9999,
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    updatePosition();
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (triggerRef.current?.contains(target)) return;
-      if (dropdownRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    window.addEventListener("scroll", updatePosition, true);
-    window.addEventListener("resize", updatePosition);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-      window.removeEventListener("scroll", updatePosition, true);
-      window.removeEventListener("resize", updatePosition);
-    };
-  }, [open, updatePosition]);
 
   const emitValue = (value: ModelPropValue, close: boolean = true) => {
     onChange(value);

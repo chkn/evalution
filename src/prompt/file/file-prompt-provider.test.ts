@@ -650,4 +650,33 @@ describe("FilePromptProvider resource inputs", () => {
       }),
     ).rejects.toThrow(/not found/);
   });
+
+  it("matches a value by its own key, not by the resource's export name, when no checker is available", async () => {
+    // No checker over `MemoryFileProvider` — the documented fallback. A value
+    // source's `key` is the value's own key (`title`), which must be what the
+    // name rule compares against; the export name (`taskA`) must not leak in.
+    const helper = pathToFileURL(
+      path.join(import.meta.dirname, "../playground/resource.ts"),
+    ).href;
+    const fileProvider = new MemoryFileProvider({
+      [p("x.prompt.ts")]:
+        `export function greet(title) { return { model: 'openai/gpt-4o', system: 'hi' }; }`,
+      [p("x.playground.ts")]:
+        `import { resource } from ${JSON.stringify(helper)};\n` +
+        `export const taskA = resource({\n` +
+        `  values: { id: "Task ID", title: "Task Name" },\n` +
+        `  create: () => ({ value: { id: "tsk_a", title: "Fix it" } }),\n` +
+        `});`,
+    });
+    const provider = new FilePromptProvider({
+      rootDir: ROOT,
+      fileProvider,
+      sdk: new VercelAISDK(),
+    });
+
+    const [prompt] = await provider.getAllPrompts();
+    expect(prompt.inputSources!.functionSlots.title).toEqual([
+      "x.playground.ts#taskA.title",
+    ]);
+  });
 });

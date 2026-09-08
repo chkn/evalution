@@ -149,6 +149,67 @@ export const WORKSPACE_RESOURCE: ResourceInfo = {
   value: "ws_internal_default",
 };
 
+/**
+ * A grouped, multi-value library — `specs/resource-hierarchy.md`'s
+ * motivating "Tasks" example: two seeded tasks under one group, `taskA`
+ * exposing three values (so it keeps a submenu) and `taskB` exposing only
+ * one (so it collapses to its own label — `siblings === 1`, per §E).
+ */
+export const TASK_A: ResourceInfo = {
+  uri: "tasks.playground.ts#taskA",
+  label: "Task A — simple bug report",
+  scope: "run",
+  group: ["Tasks"],
+};
+export const TASK_A_ID: ResourceInfo = {
+  uri: "tasks.playground.ts#taskA.id",
+  label: "Task ID",
+  scope: "run",
+  group: ["Tasks"],
+  parent: TASK_A.uri,
+  siblings: 3,
+};
+export const TASK_A_TITLE: ResourceInfo = {
+  uri: "tasks.playground.ts#taskA.title",
+  label: "Task Name",
+  scope: "run",
+  group: ["Tasks"],
+  parent: TASK_A.uri,
+  siblings: 3,
+};
+export const TASK_A_INFO: ResourceInfo = {
+  uri: "tasks.playground.ts#taskA.info",
+  label: "Task Info",
+  scope: "run",
+  group: ["Tasks"],
+  parent: TASK_A.uri,
+  siblings: 3,
+};
+export const TASK_B: ResourceInfo = {
+  uri: "tasks.playground.ts#taskB",
+  label: "Task B — blocked subtree",
+  scope: "run",
+  group: ["Tasks"],
+};
+export const TASK_B_ID: ResourceInfo = {
+  uri: "tasks.playground.ts#taskB.id",
+  label: "Task ID",
+  scope: "run",
+  group: ["Tasks"],
+  parent: TASK_B.uri,
+  siblings: 1,
+};
+
+/** Every source in the `Tasks` library, unfiltered — for `PromptInputSources.resources`. */
+export const TASKS_LIBRARY: ResourceInfo[] = [
+  TASK_A,
+  TASK_A_ID,
+  TASK_A_TITLE,
+  TASK_A_INFO,
+  TASK_B,
+  TASK_B_ID,
+];
+
 /** Offers `resources` on whichever slot paths `slots` names. */
 export function sourcesFor(
   slots: Record<string, string[]>,

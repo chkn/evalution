@@ -100,6 +100,7 @@ export function ExecutionInputEditor({
           return (
             <SourceRow
               propDef={props.propDef}
+              resources={resources}
               matching={matchingFor(slots, propDef.name, props.path, byUri)}
               chosen={selectionRef.current.resources?.[path]}
               onChoose={uri => chooseResource(path, uri)}
@@ -115,13 +116,14 @@ export function ExecutionInputEditor({
         },
       },
     ];
-  }, [slots, propDef.name, byUri, chooseResource]);
+  }, [slots, propDef.name, byUri, chooseResource, resources]);
 
   const ownMatches = matchingFor(slots, propDef.name, [propDef.name], byUri);
 
   return (
     <SourceRow
       propDef={propDef}
+      resources={resources}
       matching={ownMatches}
       chosen={selection.resources?.[SELF]}
       onChoose={uri => chooseResource(SELF, uri)}

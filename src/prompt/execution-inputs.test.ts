@@ -124,6 +124,20 @@ describe("matchSourcesToSlots", () => {
     });
   });
 
+  it("lets one value's `for` pin only that value, leaving its sibling value matched by name", () => {
+    // Two sources sharing one resource — a resource's `RegisteredSource`s all
+    // resolve through the same `create()`, but they are independent entries
+    // to the matcher, and pinning one must not touch the other.
+    const sources: InputSource[] = [
+      { uri: "pg.ts#taskA.taskId", key: "taskId", for: "ctx.taskId" },
+      { uri: "pg.ts#taskA.db", key: "db" },
+    ];
+    expect(matchSourcesToSlots(slots, sources)).toEqual({
+      "ctx.taskId": ["pg.ts#taskA.taskId"],
+      "ctx.db": ["pg.ts#taskA.db"],
+    });
+  });
+
   it("offers a source beside an editable slot rather than instead of it", () => {
     // Matching says what *can* fill a slot; whether the slot has an editor is
     // decided from its type alone. A string slot stays a string slot.

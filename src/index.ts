@@ -59,6 +59,7 @@ export {
   type ResourceDefinition,
   type ResourceInstance,
   type ResourceNeeds,
+  type ResourceValueDefinition,
   resource,
   type StaticResourceDefinition,
 } from "./prompt/playground/resource.ts";
@@ -66,6 +67,7 @@ export {
   DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
   type PlaygroundModuleError,
   type RegisteredResource,
+  type RegisteredSource,
   type ResourceLease,
   ResourceRegistry,
 } from "./prompt/playground/resource-registry.ts";

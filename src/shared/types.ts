@@ -222,6 +222,27 @@ export interface ResourceInfo {
    * handle), has nothing here; the chip is all there is to show.
    */
   value?: unknown;
+  /**
+   * Group path this source is displayed under, outermost first. Absent means
+   * top level. Purely display metadata — never part of {@link uri} — so
+   * renaming a group invalidates no saved selection. See
+   * `specs/resource-hierarchy.md` §B.
+   */
+  group?: string[];
+  /**
+   * For a value source (one read off another resource): the `uri` of the
+   * resource it is read from. Absent for the resource itself.
+   */
+  parent?: string;
+  /**
+   * For a value source: how many values that resource exposes in total,
+   * before slot matching narrows them down for a particular slot. Only the
+   * provider can supply this — after filtering, the panel cannot tell "this
+   * resource exposes one value" from "it exposes five and four don't fit
+   * here", and those read differently once a submenu collapses to its one
+   * remaining entry.
+   */
+  siblings?: number;
 }
 
 /**

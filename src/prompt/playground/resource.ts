@@ -44,6 +44,29 @@ export interface ResourceInstance<T> {
  */
 export type ResourceNeeds = Record<string, Resource<any>>;
 
+/**
+ * One named value a resource exposes as its own entry in the picker, read as
+ * a top-level property off whatever `create()` (or a static `value`)
+ * produces.
+ *
+ * A resource exposing `values` still produces one value from one `create()` —
+ * `ResourceRegistry.instantiate` memoizes by resource *object* within a
+ * lease, so picking one value for one slot and another for a different slot
+ * creates the underlying value once, not twice. Declaring a key here is
+ * opt-in: it is the author saying which paths are meaningful inputs, the same
+ * judgement {@link DynamicResourceDefinition.label} already is. See
+ * `specs/resource-hierarchy.md` §A.
+ */
+export interface ResourceValueDefinition {
+  /** Human-readable label, shown as the submenu entry. Defaults to the key. */
+  label?: string;
+  /**
+   * Explicit slot(s) this value fills — same grammar and precedence as a
+   * resource's own {@link DynamicResourceDefinition.for}.
+   */
+  for?: string | readonly string[];
+}
+
 /** The values `create()` receives, one per entry in {@link ResourceNeeds}. */
 export type ResolvedNeeds<N extends ResourceNeeds> = {
   [K in keyof N]: N[K] extends Resource<infer T> ? T : never;
@@ -83,6 +106,20 @@ export interface DynamicResourceDefinition<
    * hatch that always works, tried before type and name matching.
    */
   for?: string | readonly string[];
+  /**
+   * Display path of the group this resource belongs to, `/`-separated for
+   * nesting (`'Tasks'`, `'Tasks/Regressions'`). Purely how the picker's menu
+   * is drawn — never part of the resource's URI, so renaming a group
+   * invalidates no saved selection and no past trace. Absent means top
+   * level. See `specs/resource-hierarchy.md` §B.
+   */
+  group?: string;
+  /**
+   * Named values read off the produced value, each selectable on its own in
+   * the picker alongside the resource itself. See
+   * {@link ResourceValueDefinition} and `specs/resource-hierarchy.md` §A.
+   */
+  values?: Partial<Record<keyof T & string, string | ResourceValueDefinition>>;
   /** Produces the value. See {@link ResourceInstance}. */
   create(
     needs: ResolvedNeeds<N>,
@@ -105,6 +142,19 @@ export interface StaticResourceDefinition<T> {
    * hatch that always works, tried before type and name matching.
    */
   for?: string | readonly string[];
+  /**
+   * Display path of the group this resource belongs to, `/`-separated for
+   * nesting (`'Tasks'`, `'Tasks/Regressions'`). Purely how the picker's menu
+   * is drawn — never part of the resource's URI. Absent means top level. See
+   * `specs/resource-hierarchy.md` §B.
+   */
+  group?: string;
+  /**
+   * Named values read off {@link value}, each selectable on its own in the
+   * picker alongside the resource itself. See {@link ResourceValueDefinition}
+   * and `specs/resource-hierarchy.md` §A.
+   */
+  values?: Partial<Record<keyof T & string, string | ResourceValueDefinition>>;
   /** The value itself. */
   value: T;
 }

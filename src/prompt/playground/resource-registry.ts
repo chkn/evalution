@@ -4,7 +4,12 @@
 import path from "node:path";
 import type { FileProvider } from "../../file-provider.ts";
 import type { ResourceInfo, ResourceScope } from "../../shared/types.ts";
-import { isResource, type Resource, type ResourceNeeds } from "./resource.ts";
+import {
+  isResource,
+  type Resource,
+  type ResourceNeeds,
+  type ResourceValueDefinition,
+} from "./resource.ts";
 
 /** Default patterns matching playground modules. See {@link ResourceRegistry}. */
 export const DEFAULT_PLAYGROUND_INCLUDE_PATTERNS = [
@@ -42,6 +47,113 @@ interface Instance {
   value: unknown;
   receipt?: unknown;
   dispose?: () => void | Promise<void>;
+}
+
+/**
+ * One selectable input source: a resource, or one named value read off one.
+ *
+ * The registry's map is `uri → RegisteredResource`, one entry per
+ * `resource()` export; a `RegisteredSource` is a new leaf on the same data —
+ * the resource itself (`valuePath: []`), or one of its declared
+ * {@link ResourceValueDefinition} entries. Every consumer (`describe`,
+ * `inScopeFor`, matching, `lease.acquire`) wants this flat form rather than a
+ * nested one. See `specs/resource-hierarchy.md` §C.
+ */
+export interface RegisteredSource {
+  /** `<module>#<export>` or `<module>#<export>.<value key>`. */
+  uri: string;
+  /** The name the source is matched by: the export name, or the value's key. */
+  key: string;
+  /** Display label — the resource's, or the value's. */
+  label: string;
+  /** Group path segments, from `group`. Empty for a top-level source. */
+  group: readonly string[];
+  /** Explicit slot targeting, from the resource's or the value's `for`. */
+  for?: string | readonly string[];
+  /** The registration whose `create()` produces this. Its own, for a root source. */
+  resource: RegisteredResource;
+  /** Path read off the produced value. Empty for a root source. */
+  valuePath: readonly string[];
+}
+
+/** `"Tasks/Regressions"` → `["Tasks", "Regressions"]`, trimmed and with empty segments dropped. */
+function parseGroupPath(group: string | undefined): string[] {
+  if (!group) return [];
+  return group
+    .split("/")
+    .map(segment => segment.trim())
+    .filter(segment => segment.length > 0);
+}
+
+/** Every {@link RegisteredSource} — the resource itself, plus one per declared value — for one registration. */
+function sourcesFor(registered: RegisteredResource): RegisteredSource[] {
+  const { resource, uri, key } = registered;
+  const group = parseGroupPath(resource.group);
+  const root: RegisteredSource = {
+    uri,
+    key,
+    label: resource.label ?? key,
+    group,
+    for: resource.for,
+    resource: registered,
+    valuePath: [],
+  };
+
+  const values = Object.entries(resource.values ?? {}) as [
+    string,
+    string | ResourceValueDefinition | undefined,
+  ][];
+  const valueSources = values
+    .filter(
+      (entry): entry is [string, string | ResourceValueDefinition] =>
+        entry[1] !== undefined,
+    )
+    .map(([valueKey, def]): RegisteredSource => {
+      const valueDef: ResourceValueDefinition =
+        typeof def === "string" ? { label: def } : def;
+      return {
+        uri: `${uri}.${valueKey}`,
+        key: valueKey,
+        label: valueDef.label ?? valueKey,
+        group,
+        for: valueDef.for,
+        resource: registered,
+        valuePath: [valueKey],
+      };
+    });
+
+  return [root, ...valueSources];
+}
+
+/** Splits a source `uri` into the registered resource's own `uri` and the value path within it. */
+function parseSourceUri(uri: string): {
+  rootUri: string;
+  valuePath: readonly string[];
+} {
+  const hashIdx = uri.indexOf("#");
+  if (hashIdx < 0) return { rootUri: uri, valuePath: [] };
+  const exportAndValue = uri.slice(hashIdx + 1);
+  const dotIdx = exportAndValue.indexOf(".");
+  if (dotIdx < 0) return { rootUri: uri, valuePath: [] };
+  return {
+    rootUri: uri.slice(0, hashIdx + 1) + exportAndValue.slice(0, dotIdx),
+    valuePath: [exportAndValue.slice(dotIdx + 1)],
+  };
+}
+
+/** Reads `path` off `value`, reporting whether it actually existed there. */
+function readValuePath(
+  value: unknown,
+  path: readonly string[],
+): { found: true; value: unknown } | { found: false } {
+  let cursor = value;
+  for (const key of path) {
+    if (cursor === null || typeof cursor !== "object" || !(key in cursor)) {
+      return { found: false };
+    }
+    cursor = (cursor as Record<string, unknown>)[key];
+  }
+  return { found: true, value: cursor };
 }
 
 /**
@@ -191,16 +303,23 @@ export class ResourceRegistry {
     return [...(await this.byUri()).values()];
   }
 
+  /** Every selectable source, across all playground modules: every resource, plus one per declared value. */
+  async sources(): Promise<RegisteredSource[]> {
+    return (await this.all()).flatMap(sourcesFor);
+  }
+
   /**
-   * The resources in scope for a prompt in `promptFilePath`: every
-   * project-scoped one, plus those from `*.playground.ts` modules in the same
-   * directory.
+   * The sources in scope for a prompt in `promptFilePath`: every
+   * project-scoped resource (and its values), plus those from
+   * `*.playground.ts` modules in the same directory.
    *
    * @param promptFilePath - Absolute path of the prompt's source file.
    */
-  async inScopeFor(promptFilePath: string): Promise<RegisteredResource[]> {
+  async inScopeFor(promptFilePath: string): Promise<RegisteredSource[]> {
     const dir = path.dirname(promptFilePath);
-    return (await this.all()).filter(r => !r.scopeDir || r.scopeDir === dir);
+    return (await this.all())
+      .filter(r => !r.scopeDir || r.scopeDir === dir)
+      .flatMap(sourcesFor);
   }
 
   /** Playground modules that failed to import, so the panel can say so. */
@@ -210,33 +329,43 @@ export class ResourceRegistry {
   }
 
   /**
-   * Describes `resources` for the UI, including a snapshot of the value
-   * itself where one is already known and safe to show — a static `value`
-   * resource, or a `scope: 'server'` one this process has already created.
+   * Describes `sources` for the UI, including a snapshot of the value itself
+   * where one is already known and safe to show — a static `value` resource,
+   * or a `scope: 'server'` one this process has already created.
    *
    * A run-scoped resource never qualifies: its instance lives only for the
    * run that created it, so there is nothing memoized to peek at, and
    * showing one run's value as if it previewed the next would be wrong.
    * Neither does a value that isn't plain JSON data (see `isPlainSerializable`
    * below) — an opaque handle survives the trip through `describe` as a chip
-   * with no preview, same as before this existed.
+   * with no preview, same as before this existed. A value source previews the
+   * same way, reading its own path off the memoized instance.
    */
-  describe(resources: readonly RegisteredResource[]): ResourceInfo[] {
-    return resources.map(r => {
-      const instance = this.peekInstance(r.resource);
+  describe(sources: readonly RegisteredSource[]): ResourceInfo[] {
+    return sources.map(s => {
+      const instance = this.peekInstance(s.resource.resource);
+      const read = instance
+        ? readValuePath(instance.value, s.valuePath)
+        : undefined;
       const value =
-        instance && isPlainSerializable(instance.value)
-          ? // A detached snapshot: `instance.value` is the live object the
-            // registry itself holds, and the check above already proved it
-            // round-trips cleanly, so this can't lose information.
-            (JSON.parse(JSON.stringify(instance.value)) as unknown)
+        read?.found && isPlainSerializable(read.value)
+          ? // A detached snapshot: `read.value` may be (a path into) the live
+            // object the registry itself holds, and the check above already
+            // proved it round-trips cleanly, so this can't lose information.
+            (JSON.parse(JSON.stringify(read.value)) as unknown)
           : undefined;
-      return {
-        uri: r.uri,
-        label: r.resource.label ?? r.key,
-        scope: r.resource.scope ?? defaultScope(r.resource),
+      const info: ResourceInfo = {
+        uri: s.uri,
+        label: s.label,
+        scope: s.resource.resource.scope ?? defaultScope(s.resource.resource),
         value,
       };
+      if (s.group.length > 0) info.group = [...s.group];
+      if (s.valuePath.length > 0) {
+        info.parent = s.resource.uri;
+        info.siblings = Object.keys(s.resource.resource.values ?? {}).length;
+      }
+      return info;
     });
   }
 
@@ -276,28 +405,44 @@ export class ResourceRegistry {
    */
   lease(): ResourceLease {
     const runInstances = new Map<Resource<unknown>, Promise<Instance>>();
-    const acquired = new Map<string, Instance>();
+    const acquired = new Map<string, { receipt?: unknown }>();
     let released = false;
 
     const acquire = async (uri: string): Promise<unknown> => {
-      const registered = (await this.byUri()).get(uri);
+      const { rootUri, valuePath } = parseSourceUri(uri);
+      const registered = (await this.byUri()).get(rootUri);
       if (!registered) throw new Error(`Resource '${uri}' not found`);
       const instance = await this.instantiate(
         registered.resource,
-        uri,
+        rootUri,
         runInstances,
         [],
       );
-      acquired.set(uri, instance);
-      return instance.value;
+      const read = readValuePath(instance.value, valuePath);
+      if (!read.found) {
+        throw new Error(
+          `Resource '${rootUri}': no value at '${valuePath.join(".")}'`,
+        );
+      }
+      // A value source's receipt is the value itself when it's plain JSON
+      // data — that's what lets a trace say the run used `tsk_abc123` — and
+      // otherwise the registration's own receipt, same as a root source.
+      const receipt =
+        valuePath.length === 0
+          ? instance.receipt
+          : isPlainSerializable(read.value)
+            ? read.value
+            : instance.receipt;
+      acquired.set(uri, { receipt });
+      return read.value;
     };
 
     return {
       acquire,
       receipts: () =>
         Object.fromEntries(
-          [...acquired].flatMap(([uri, i]) =>
-            i.receipt === undefined ? [] : [[uri, i.receipt] as const],
+          [...acquired].flatMap(([uri, e]) =>
+            e.receipt === undefined ? [] : [[uri, e.receipt] as const],
           ),
         ),
       release: async () => {

@@ -122,6 +122,31 @@ describe("resource-to-slot matching (§D)", () => {
     );
   });
 
+  it("offers taskA.id on a TaskId slot and taskA.info on a taskInfo slot, from one resource, via assignability (specs/resource-hierarchy.md §A)", async () => {
+    const provider = new FilePromptProvider({
+      rootDir: fixturesDir,
+      includePatterns: ["resource-values.prompt.ts"],
+      playgroundIncludePatterns: ["resource-values.playground.ts"],
+      sdk: new VercelAISDK(),
+    });
+
+    const [prompt] = await provider.getAllPrompts();
+    const slots = prompt.inputSources!.functionSlots;
+
+    expect(slots.taskId).toContain("resource-values.playground.ts#taskA.id");
+    expect(slots.taskInfo).toContain(
+      "resource-values.playground.ts#taskA.info",
+    );
+    // Each value is offered only where its own type fits — `info`'s object
+    // shape doesn't fit the `TaskId` slot, and vice versa.
+    expect(slots.taskId ?? []).not.toContain(
+      "resource-values.playground.ts#taskA.info",
+    );
+    expect(slots.taskInfo ?? []).not.toContain(
+      "resource-values.playground.ts#taskA.id",
+    );
+  });
+
   it("falls back to name matching when no checker can see the types", async () => {
     // The documented in-memory situation: cross-file types stay unresolved, so
     // there is nothing for the type rule to compare and the name rule carries.

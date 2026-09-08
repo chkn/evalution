@@ -4,6 +4,7 @@
 import { ItemEditor } from "ts-proppy/react";
 import type { PropDefinition, ResourceInfo } from "../../shared/types";
 import { jsonToPropValue } from "./json-to-prop-value";
+import SourcePicker from "./SourcePicker";
 
 /** `ItemEditor` needs an `onChange` even for the read-only preview — `disabled` already keeps it from ever firing. */
 function noop() {}
@@ -24,12 +25,15 @@ function noop() {}
  */
 export function SourceRow({
   propDef,
+  resources,
   matching,
   chosen,
   onChoose,
   children,
 }: {
   propDef: PropDefinition;
+  /** Every source offered to the prompt, unfiltered — for the picker's group/value tree. */
+  resources: readonly ResourceInfo[];
   matching: ResourceInfo[];
   chosen: string | undefined;
   onChoose: (uri: string | null) => void;
@@ -96,34 +100,18 @@ export function SourceRow({
         )}
       </div>
 
-      {/* Styled as an icon-only button — same size and alignment as the
-          array editor's per-item remove button — with the real `<select>`
-          stretched over it invisibly so the native picker still opens on
-          click. */}
+      {/* An opaque slot has no editor to fall back to, so its picker offers
+          no "Custom" — picking a source is the only way to fill it. */}
       {(matching.length > 0 || stale) && (
-        <div className="pg-slot-source-wrap">
-          <span className="pg-slot-source-icon" aria-hidden="true">
-            ⋯
-          </span>
-          <select
-            className="pg-slot-source"
-            value={chosen ?? ""}
-            onChange={e => onChoose(e.target.value || null)}
-            aria-label={`Source for ${propDef.name}`}
-            title="Pick a resource"
-          >
-            {/* An opaque slot has no editor to fall back to, so it offers no
-                "Custom" — picking a source is the only way to fill it. */}
-            {editable && <option value="">Custom</option>}
-            {!editable && !chosen && <option value="">Pick a resource…</option>}
-            {matching.map(r => (
-              <option key={r.uri} value={r.uri}>
-                {r.label}
-              </option>
-            ))}
-            {stale && <option value={stale}>{stale} (unavailable)</option>}
-          </select>
-        </div>
+        <SourcePicker
+          resources={resources}
+          matching={matching}
+          chosen={chosen}
+          stale={stale}
+          editable={editable}
+          label={propDef.name}
+          onChoose={onChoose}
+        />
       )}
     </div>
   );

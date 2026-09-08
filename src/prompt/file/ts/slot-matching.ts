@@ -1,11 +1,38 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type ts from "typescript";
+import { isOpaqueType } from "ts-proppy";
+import ts from "typescript";
 import { MAX_SLOT_DEPTH } from "../../execution-inputs.ts";
 
 /** How many properties one slot tree may contribute, as a runaway guard. */
 const MAX_SLOTS = 500;
+
+/**
+ * Type flags a slot never gains anything from being walked past.
+ *
+ * The `*Like` flags matter: they also cover a branded primitive spelled as a
+ * template literal (`` `tsk_${string}` ``, the shape the AI SDK infers ids
+ * as) — which otherwise carries the whole `String` interface, so without this
+ * a single branded-id leaf expands into ~50 method slots (`.charAt`,
+ * `.slice`, …) and can burn through {@link MAX_SLOTS} before a sibling
+ * member's own fields are ever reached. Mirrors the constant `ts-proppy`'s
+ * `PropType` extraction is built from, for the same reason `isOpaqueType`
+ * below is: `collectInputSlots` (over `PropDefinition`s built by that same
+ * extraction) never produces a path past a primitive either, and the two
+ * walks have to agree.
+ */
+const PRIMITIVE_FLAGS =
+  ts.TypeFlags.StringLike |
+  ts.TypeFlags.NumberLike |
+  ts.TypeFlags.BooleanLike |
+  ts.TypeFlags.BigIntLike |
+  ts.TypeFlags.ESSymbolLike |
+  ts.TypeFlags.VoidLike |
+  ts.TypeFlags.Null |
+  ts.TypeFlags.Never |
+  ts.TypeFlags.Any |
+  ts.TypeFlags.Unknown;
 
 /**
  * Collect every slot reachable from `roots`, as dotted path → type.
@@ -13,9 +40,14 @@ const MAX_SLOTS = 500;
  * Mirrors `collectInputSlots`'s walk over `PropDefinition`s: parameters, plus
  * the object properties nested inside them, to the same {@link MAX_SLOT_DEPTH}
  * — the two must agree, or this side would offer a source at a path the other
- * never produces. Arrays and unions are not descended into: neither has a path
- * that stays meaningful once the value changes shape, so a saved selection
- * could not name one reliably.
+ * never produces. That agreement is also why this stops at exactly the types
+ * `collectInputSlots` treats as leaves: a primitive (including a branded one,
+ * see {@link PRIMITIVE_FLAGS}), a function, or a type `isOpaqueType` calls
+ * unconstructible (a class-instance handle, an all-method interface) — the
+ * same {@link isOpaqueType} the `PropDefinition` side uses to decide `kind:
+ * 'opaque'` rather than `'object'`. Arrays and unions are not descended into
+ * either: neither has a path that stays meaningful once the value changes
+ * shape, so a saved selection could not name one reliably.
  */
 export function collectSlotTypes(
   roots: ReadonlyMap<string, ts.Type>,
@@ -30,8 +62,22 @@ export function collectSlotTypes(
     if (depth + 1 >= MAX_SLOT_DEPTH) return;
     if (type.isUnion() || typeChecker.isArrayType(type)) return;
     if (typeChecker.isTupleType(type)) return;
+    if (type.flags & PRIMITIVE_FLAGS) return;
+    // A branded primitive expressed as an intersection (`string & { __brand
+    // }`) isn't caught by the flag check above — the intersection itself
+    // carries neither flag — so it needs its own look at its members.
+    if (
+      type.isIntersection() &&
+      type.types.some(t => t.flags & PRIMITIVE_FLAGS)
+    ) {
+      return;
+    }
+    if (type.getCallSignatures().length > 0) return;
 
-    for (const property of typeChecker.getPropertiesOfType(type)) {
+    const properties = typeChecker.getPropertiesOfType(type);
+    if (isOpaqueType(type, typeChecker, location, properties)) return;
+
+    for (const property of properties) {
       const declaration =
         property.valueDeclaration ?? property.declarations?.[0];
       const propertyType = typeChecker.getTypeOfSymbolAtLocation(

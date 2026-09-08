@@ -314,7 +314,7 @@ describe("static value resources", () => {
         export const apiKey = resource({ value: "secret" });`,
     });
 
-    const [described] = reg.describe(await reg.all());
+    const [described] = reg.describe(await reg.sources());
     expect(described.scope).toBe("server");
   });
 
@@ -360,7 +360,7 @@ describe("value previews in the panel description", () => {
         });`,
     });
 
-    const [described] = reg.describe(await reg.all());
+    const [described] = reg.describe(await reg.sources());
     expect(described.value).toEqual({ id: "ws_1", tags: ["a", "b"] });
   });
 
@@ -376,14 +376,14 @@ describe("value previews in the panel description", () => {
     // Nothing to peek yet — showing a value here would mean either creating
     // it just to preview it (defeating the point of lazy 'server' scope) or
     // showing a stale one from nowhere.
-    const [beforeRun] = reg.describe(await reg.all());
+    const [beforeRun] = reg.describe(await reg.sources());
     expect(beforeRun.value).toBeUndefined();
 
     const lease = reg.lease();
     await lease.acquire("x.playground.ts#config");
     await lease.release();
 
-    const [afterRun] = reg.describe(await reg.all());
+    const [afterRun] = reg.describe(await reg.sources());
     expect(afterRun.value).toEqual({ host: "localhost" });
   });
 
@@ -401,7 +401,7 @@ describe("value previews in the panel description", () => {
     await lease.acquire("x.playground.ts#seeded");
     await lease.release();
 
-    const [described] = reg.describe(await reg.all());
+    const [described] = reg.describe(await reg.sources());
     expect(described.value).toBeUndefined();
   });
 
@@ -415,7 +415,7 @@ describe("value previews in the panel description", () => {
         export const db = resource({ value: new FakeDb() });`,
     });
 
-    const [described] = reg.describe(await reg.all());
+    const [described] = reg.describe(await reg.sources());
     expect(described.value).toBeUndefined();
   });
 
@@ -425,10 +425,10 @@ describe("value previews in the panel description", () => {
         export const workspace = resource({ value: { tags: ["a"] } });`,
     });
 
-    const [described] = reg.describe(await reg.all());
+    const [described] = reg.describe(await reg.sources());
     (described.value as { tags: string[] }).tags.push("mutated");
 
-    const [again] = reg.describe(await reg.all());
+    const [again] = reg.describe(await reg.sources());
     expect(again.value).toEqual({ tags: ["a"] });
   });
 });
@@ -536,6 +536,210 @@ function duplicatingProvider(
     },
   } as unknown as MemoryFileProvider;
 }
+
+describe("resource values (specs/resource-hierarchy.md §A, §C)", () => {
+  it("registers four sources for a resource with three values: the root, plus one per value", async () => {
+    const { registry: reg } = registry({
+      [p("tasks.playground.ts")]: `${importHelper}
+        export const taskA = resource({
+          label: "Task A",
+          values: { id: "Task ID", title: "Task Name", info: "Task Info" },
+          create: () => ({ value: { id: "tsk_a", title: "Fix it", info: { title: "Fix it" } } }),
+        });`,
+    });
+
+    const sources = await reg.sources();
+    expect(sources.map(s => s.uri)).toEqual([
+      "tasks.playground.ts#taskA",
+      "tasks.playground.ts#taskA.id",
+      "tasks.playground.ts#taskA.title",
+      "tasks.playground.ts#taskA.info",
+    ]);
+    expect(sources.map(s => s.key)).toEqual(["taskA", "id", "title", "info"]);
+    expect(sources.map(s => s.label)).toEqual([
+      "Task A",
+      "Task ID",
+      "Task Name",
+      "Task Info",
+    ]);
+  });
+
+  it("creates one instance and disposes it once when two values of a resource are acquired in a lease", async () => {
+    const { registry: reg } = registry({
+      [p("tasks.playground.ts")]: `${importHelper}
+        globalThis.__creates = 0;
+        globalThis.__disposes = 0;
+        export const taskA = resource({
+          values: { id: "Task ID", title: "Task Name" },
+          create: () => {
+            globalThis.__creates++;
+            return {
+              value: { id: "tsk_a", title: "Fix it" },
+              dispose: () => { globalThis.__disposes++; },
+            };
+          },
+        });`,
+    });
+
+    const lease = reg.lease();
+    const id = await lease.acquire("tasks.playground.ts#taskA.id");
+    const title = await lease.acquire("tasks.playground.ts#taskA.title");
+    expect(id).toBe("tsk_a");
+    expect(title).toBe("Fix it");
+    expect((globalThis as any).__creates).toBe(1);
+
+    await lease.release();
+    expect((globalThis as any).__disposes).toBe(1);
+  });
+
+  it("fails naming the resource and the key when create() doesn't return a declared value", async () => {
+    const { registry: reg } = registry({
+      [p("tasks.playground.ts")]: `${importHelper}
+        export const taskA = resource({
+          values: { title: "Task Name" },
+          create: () => ({ value: { id: "tsk_a" } }),
+        });`,
+    });
+
+    const lease = reg.lease();
+    await expect(
+      lease.acquire("tasks.playground.ts#taskA.title"),
+    ).rejects.toThrow(
+      "Resource 'tasks.playground.ts#taskA': no value at 'title'",
+    );
+  });
+
+  it("uses the value itself as the receipt when it's plain, and the registration's receipt otherwise", async () => {
+    const { registry: reg } = registry({
+      [p("tasks.playground.ts")]: `${importHelper}
+        class Handle { query() {} }
+        export const taskA = resource({
+          values: { id: "Task ID", handle: "Handle" },
+          create: () => ({
+            value: { id: "tsk_a", handle: new Handle() },
+            receipt: "taskA-receipt",
+          }),
+        });`,
+    });
+
+    const lease = reg.lease();
+    await lease.acquire("tasks.playground.ts#taskA.id");
+    await lease.acquire("tasks.playground.ts#taskA.handle");
+    expect(lease.receipts()).toEqual({
+      "tasks.playground.ts#taskA.id": "tsk_a",
+      "tasks.playground.ts#taskA.handle": "taskA-receipt",
+    });
+  });
+
+  it("previews each declared value of a static `value` resource through describe", async () => {
+    const { registry: reg } = registry({
+      [p("tasks.playground.ts")]: `${importHelper}
+        export const taskA = resource({
+          values: { id: "Task ID", title: "Task Name" },
+          value: { id: "tsk_a", title: "Fix it" },
+        });`,
+    });
+
+    const described = reg.describe(await reg.sources());
+    expect(
+      described.find(d => d.uri === "tasks.playground.ts#taskA.id")?.value,
+    ).toBe("tsk_a");
+    expect(
+      described.find(d => d.uri === "tasks.playground.ts#taskA.title")?.value,
+    ).toBe("Fix it");
+  });
+
+  it("never lets `group` appear in any uri", async () => {
+    const { registry: reg } = registry({
+      [p("tasks.playground.ts")]: `${importHelper}
+        export const taskA = resource({
+          group: "Tasks/Regressions",
+          values: { id: "Task ID" },
+          create: () => ({ value: { id: "tsk_a" } }),
+        });`,
+    });
+
+    const sources = await reg.sources();
+    for (const s of sources) {
+      expect(s.uri).not.toContain("Tasks");
+      expect(s.uri).not.toContain("Regressions");
+    }
+  });
+});
+
+describe("resource groups (specs/resource-hierarchy.md §B, §D)", () => {
+  it("splits and trims a `/`-separated group into ResourceInfo.group segments", async () => {
+    const { registry: reg } = registry({
+      [p("tasks.playground.ts")]: `${importHelper}
+        export const taskA = resource({
+          group: "Tasks / Regressions",
+          create: () => ({ value: 1 }),
+        });`,
+    });
+
+    const [described] = reg.describe(await reg.sources());
+    expect(described.group).toEqual(["Tasks", "Regressions"]);
+  });
+
+  it("leaves `group` absent for a top-level resource", async () => {
+    const { registry: reg } = registry({
+      [p("tasks.playground.ts")]: `${importHelper}
+        export const solo = resource({ create: () => ({ value: 1 }) });`,
+    });
+
+    const [described] = reg.describe(await reg.sources());
+    expect(described.group).toBeUndefined();
+  });
+
+  it("sets parent and siblings on a value source, and leaves them absent on the root", async () => {
+    const { registry: reg } = registry({
+      [p("tasks.playground.ts")]: `${importHelper}
+        export const taskA = resource({
+          values: { id: "Task ID", title: "Task Name" },
+          create: () => ({ value: { id: "tsk_a", title: "Fix it" } }),
+        });`,
+    });
+
+    const described = reg.describe(await reg.sources());
+    const root = described.find(d => d.uri === "tasks.playground.ts#taskA")!;
+    const id = described.find(d => d.uri === "tasks.playground.ts#taskA.id")!;
+
+    expect(root.parent).toBeUndefined();
+    expect(root.siblings).toBeUndefined();
+    expect(id.parent).toBe("tasks.playground.ts#taskA");
+    expect(id.siblings).toBe(2);
+  });
+
+  it("still resolves and describes a plain resource — no values, no group — exactly as before this change", async () => {
+    // A stored selection made before `values`/`group` existed is a bare uri
+    // like `db.ts#db`; this is the regression that would catch grouping (or
+    // anything else new) leaking into identity or into the described shape.
+    const { registry: reg } = registry({
+      [p("db.playground.ts")]: `${importHelper}
+        export const db = resource({ create: () => ({ value: "db_1" }) });`,
+    });
+
+    const lease = reg.lease();
+    expect(await lease.acquire("db.playground.ts#db")).toBe("db_1");
+    await lease.release();
+
+    const sources = await reg.sources();
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({
+      uri: "db.playground.ts#db",
+      key: "db",
+      valuePath: [],
+    });
+
+    const [described] = reg.describe(sources);
+    expect(described).toEqual({
+      uri: "db.playground.ts#db",
+      label: "db",
+      scope: "run",
+      value: undefined,
+    });
+  });
+});
 
 describe("duplicate module instances", () => {
   /** A `db` whose value says which evaluation of its module produced it. */

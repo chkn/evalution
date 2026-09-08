@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { expect, test } from "@playwright/experimental-ct-react";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import {
   DB_RESOURCE,
   ODIN_TOOLS_CONTEXT,
@@ -10,10 +10,30 @@ import {
   odinDbSlots,
   SEEDED_TASK,
   sourcesFor,
+  TASK_A,
+  TASK_A_ID,
+  TASK_A_INFO,
+  TASK_A_TITLE,
+  TASK_B,
+  TASK_B_ID,
+  TASKS_LIBRARY,
   TOOLS_CONTEXT_WITH_NESTED_DB,
   WORKSPACE_RESOURCE,
 } from "./executionFixtures";
 import { PlaygroundExecutionHarness } from "./PlaygroundExecutionHarness";
+
+/**
+ * Opens a slot's SourcePicker (its `...` trigger button) and clicks a
+ * top-level menu entry by its label — the flat resources this suite mostly
+ * deals with never need a submenu. `trigger` scopes to one slot's own
+ * trigger when a row has more than one on screen; the menu itself is
+ * portal-rendered to `document.body`, so it's found via `page`, not the
+ * mounted component's own locator.
+ */
+async function chooseSource(page: Page, trigger: Locator, label: string) {
+  await trigger.click();
+  await page.getByRole("menuitem", { name: label, exact: true }).click();
+}
 
 async function mockExecute(page: Page) {
   await page.route("**/api/**", route =>
@@ -156,8 +176,9 @@ test("stored parameter values don't leak between different prompts", async ({
   await expect(other.locator("textarea, input").first()).toHaveValue("");
 });
 
-test("a slot with matching resources gains a dropdown listing them, plus Custom", async ({
+test("a slot with matching resources gains a picker listing them, plus Custom", async ({
   mount,
+  page,
 }) => {
   const component = await mount(
     <PlaygroundExecutionHarness
@@ -172,19 +193,23 @@ test("a slot with matching resources gains a dropdown listing them, plus Custom"
     />,
   );
 
-  const source = component.locator(".pg-slot-source");
-  await expect(source).toHaveCount(1);
+  const trigger = component.locator(".pg-slot-source-wrap");
+  await expect(trigger).toHaveCount(1);
+  await trigger.click();
   // "Custom" is present because the slot is editable: matching offers a
-  // resource *beside* the editor, never instead of it.
-  await expect(source.locator("option")).toHaveText([
-    "Custom",
+  // resource *beside* the editor, never instead of it. It's also the current
+  // choice (nothing else is picked yet), hence its checkmark.
+  await expect(page.getByRole("menuitem")).toHaveText([
+    "✓Custom",
     SEEDED_TASK.label,
   ]);
+  await page.keyboard.press("Escape");
   await expect(component.locator("textarea, input").first()).toBeVisible();
 });
 
 test("picking a resource replaces the editor with a labelled chip, and it survives a remount", async ({
   mount,
+  page,
 }) => {
   const props = {
     functionParameters: [
@@ -203,7 +228,11 @@ test("picking a resource replaces the editor with a labelled chip, and it surviv
   };
 
   const component = await mount(<PlaygroundExecutionHarness {...props} />);
-  await component.locator(".pg-slot-source").selectOption(SEEDED_TASK.uri);
+  await chooseSource(
+    page,
+    component.locator(".pg-slot-source-wrap"),
+    SEEDED_TASK.label,
+  );
 
   // A resource's value doesn't exist until the run creates it, so there is
   // nothing to seed an editor with — the chip says what will happen instead.
@@ -237,9 +266,11 @@ test("a resource the server already has a value for previews it, read-only, thro
       ])}
     />,
   );
-  await component
-    .locator(".pg-slot-source")
-    .selectOption(WORKSPACE_RESOURCE.uri);
+  await chooseSource(
+    page,
+    component.locator(".pg-slot-source-wrap"),
+    WORKSPACE_RESOURCE.label,
+  );
 
   // Unlike SEEDED_TASK (run-scoped, no value until Run), the server already
   // knows this one — so the panel shows it, seeded into the same string
@@ -282,8 +313,9 @@ test("an opaque slot with no matching resource shows the hint, not a JSON textar
   );
 });
 
-test("an opaque slot with a matching resource makes the dropdown its only control", async ({
+test("an opaque slot with a matching resource makes the picker its only control", async ({
   mount,
+  page,
 }) => {
   const component = await mount(
     <PlaygroundExecutionHarness
@@ -292,14 +324,16 @@ test("an opaque slot with a matching resource makes the dropdown its only contro
     />,
   );
 
-  const source = component.locator(".pg-slot-source");
-  // No "Custom": there is no editor to fall back to.
-  await expect(source.locator("option")).toHaveText([
-    "Pick a resource…",
-    DB_RESOURCE.label,
-  ]);
+  const trigger = component.locator(".pg-slot-source-wrap");
+  await trigger.click();
+  // No "Custom": there is no editor to fall back to. "Pick a resource…" is a
+  // plain placeholder row, not a menuitem — nothing to pick it *from*.
+  await expect(
+    component.page().locator(".pg-source-menu-placeholder"),
+  ).toHaveText("Pick a resource…");
+  await expect(page.getByRole("menuitem")).toHaveText([DB_RESOURCE.label]);
 
-  await source.selectOption(DB_RESOURCE.uri);
+  await page.getByRole("menuitem", { name: DB_RESOURCE.label }).click();
   await expect(component.locator(".pg-slot-chip")).toContainText(
     "created once per server",
   );
@@ -464,6 +498,7 @@ test("a fan-out slot's combined mode renders one row per group, each labelled wi
 
 test("choosing a resource on a combined row fans it out to every member, visible after switching to expanded", async ({
   mount,
+  page,
 }) => {
   const component = await mount(
     <PlaygroundExecutionHarness
@@ -479,7 +514,11 @@ test("choosing a resource on a combined row fans it out to every member, visible
 
   await component.getByRole("tab", { name: "Combined" }).click();
   const dbRow = component.locator(".pg-combined-row").first();
-  await dbRow.locator(".pg-slot-source").selectOption(DB_RESOURCE.uri);
+  await chooseSource(
+    page,
+    dbRow.locator(".pg-slot-source-wrap"),
+    DB_RESOURCE.label,
+  );
   await expect(dbRow.locator(".pg-slot-chip")).toContainText(DB_RESOURCE.label);
 
   await component.getByRole("tab", { name: "Expanded" }).click();
@@ -544,4 +583,194 @@ test("the layout toggle is absent for a slot with only one member", async ({
   );
 
   await expect(component.locator(".pg-layout-tabs")).toHaveCount(0);
+});
+
+test.describe("SourcePicker (specs/resource-hierarchy.md §E)", () => {
+  const taskRefSlot = {
+    name: "taskRef",
+    type: { kind: "primitive" as const, syntax: "string" },
+    optional: false,
+  };
+
+  /** The "Tasks" library, offered on one editable slot. */
+  function taskRefHarness(promptId?: string) {
+    return (
+      <PlaygroundExecutionHarness
+        functionParameters={[taskRefSlot]}
+        promptId={promptId}
+        inputSources={{
+          resources: TASKS_LIBRARY,
+          functionSlots: {
+            taskRef: [
+              TASK_A_ID.uri,
+              TASK_A_TITLE.uri,
+              TASK_A_INFO.uri,
+              TASK_B_ID.uri,
+            ],
+          },
+          executeSlots: {},
+        }}
+      />
+    );
+  }
+
+  test("opens a nested menu, not a native <select>", async ({
+    mount,
+    page,
+  }) => {
+    const component = await mount(taskRefHarness());
+
+    await expect(component.locator("select")).toHaveCount(0);
+    await component.locator(".pg-slot-source-wrap").click();
+    await expect(page.locator(".pg-source-menu-root")).toBeVisible();
+    // The two tasks are one group's worth of menu, not four flat entries.
+    await expect(page.getByRole("menuitem", { name: "Tasks" })).toBeVisible();
+  });
+
+  test("hovering Tasks opens a submenu, and hovering Task A opens its own values", async ({
+    mount,
+    page,
+  }) => {
+    const component = await mount(taskRefHarness());
+    await component.locator(".pg-slot-source-wrap").click();
+
+    await page.getByRole("menuitem", { name: "Tasks" }).hover();
+    // Task B has only one matching value (`siblings === 1`), so it collapses
+    // to its own label rather than opening a one-item submenu of its own.
+    await expect(
+      page.getByRole("menuitem", { name: TASK_A.label, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("menuitem", { name: TASK_B.label, exact: true }),
+    ).toBeVisible();
+
+    await page
+      .getByRole("menuitem", { name: TASK_A.label, exact: true })
+      .hover();
+    await expect(
+      page.getByRole("menuitem", { name: TASK_A_ID.label, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("menuitem", { name: TASK_A_TITLE.label, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("menuitem", { name: TASK_A_INFO.label, exact: true }),
+    ).toBeVisible();
+  });
+
+  test("choosing Task ID shows the chip and round-trips through localStorage", async ({
+    mount,
+    page,
+  }) => {
+    const component = await mount(taskRefHarness("task-picker-prompt"));
+    await component.locator(".pg-slot-source-wrap").click();
+    await page.getByRole("menuitem", { name: "Tasks" }).hover();
+    await page
+      .getByRole("menuitem", { name: TASK_A.label, exact: true })
+      .hover();
+    await page
+      .getByRole("menuitem", { name: TASK_A_ID.label, exact: true })
+      .click();
+
+    const chip = component.locator(".pg-slot-chip");
+    await expect(chip).toContainText(TASK_A_ID.label);
+    await expect(component.locator("textarea, input")).toHaveCount(0);
+
+    await component.unmount();
+    const remounted = await mount(taskRefHarness("task-picker-prompt"));
+    await expect(remounted.locator(".pg-slot-chip")).toContainText(
+      TASK_A_ID.label,
+    );
+  });
+
+  test("Task B's collapsed entry is a leaf — clicking it chooses directly, with no submenu to open first", async ({
+    mount,
+    page,
+  }) => {
+    const component = await mount(taskRefHarness());
+    await component.locator(".pg-slot-source-wrap").click();
+    await page.getByRole("menuitem", { name: "Tasks" }).hover();
+
+    // The row itself is labelled with the resource's own name (its one
+    // declared value collapsed the submenu away) — but it's still that
+    // value being chosen underneath, so the chip afterward names the value.
+    const taskBRow = page.getByRole("menuitem", {
+      name: TASK_B.label,
+      exact: true,
+    });
+    await expect(taskBRow).not.toHaveAttribute("aria-haspopup", "menu");
+    await taskBRow.click();
+
+    await expect(component.locator(".pg-slot-chip")).toContainText(
+      TASK_B_ID.label,
+    );
+  });
+
+  test("keyboard traversal reaches a depth-3 entry, and ← returns to Task A's row", async ({
+    mount,
+    page,
+  }) => {
+    const component = await mount(taskRefHarness());
+    await component.locator(".pg-slot-source-wrap").click();
+
+    // Custom, then Tasks — one ArrowDown from the auto-focused first row.
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("menuitem", { name: "Tasks" })).toBeFocused();
+
+    // → opens the Tasks submenu, focusing its first row (Task A).
+    await page.keyboard.press("ArrowRight");
+    const taskARow = page.getByRole("menuitem", {
+      name: TASK_A.label,
+      exact: true,
+    });
+    await expect(taskARow).toBeFocused();
+
+    // → again opens Task A's own submenu — a third menu level.
+    await page.keyboard.press("ArrowRight");
+    const taskIdRow = page.getByRole("menuitem", {
+      name: TASK_A_ID.label,
+      exact: true,
+    });
+    await expect(taskIdRow).toBeVisible();
+    await expect(taskIdRow).toBeFocused();
+
+    // ← closes that third level and returns focus to Task A's own row.
+    await page.keyboard.press("ArrowLeft");
+    await expect(taskIdRow).not.toBeVisible();
+    await expect(taskARow).toBeFocused();
+  });
+
+  test("the menu portals to the document body, so a scrolling sidebar can never clip it", async ({
+    mount,
+    page,
+  }) => {
+    const component = await mount(taskRefHarness());
+    await component.locator(".pg-slot-source-wrap").click();
+
+    const menu = page.locator(".pg-source-menu-root");
+    await expect(menu).toBeVisible();
+    expect(await menu.evaluate(el => el.parentElement === document.body)).toBe(
+      true,
+    );
+  });
+
+  test("stays fully inside the viewport when its trigger sits near the right edge", async ({
+    mount,
+    page,
+  }) => {
+    // Regression: the root menu used to anchor only its left edge to the
+    // trigger and size itself to content, with no awareness of the viewport
+    // — a trigger near the right edge (the execute panel's own right column
+    // is exactly this) pushed the menu off-screen, unreadable.
+    await page.setViewportSize({ width: 400, height: 700 });
+    const component = await mount(taskRefHarness());
+    await component.locator(".pg-slot-source-wrap").click();
+
+    const menu = page.locator(".pg-source-menu-root");
+    await expect(menu).toBeVisible();
+    const box = await menu.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(400);
+  });
 });

@@ -1347,10 +1347,12 @@ pre {
   gap: 4px;
 }
 
-/* The source select's button chrome. Sized and aligned like the array
-   editor's per-item remove button so a slot with a source reads the same
-   way a repeated item does: control on the left, a small square affordance
-   on the right. */
+/* SourcePicker's trigger button — the source picker's chrome. Sized and
+   aligned like the array editor's per-item remove button so a slot with a
+   source reads the same way a repeated item does: control on the left, a
+   small square affordance on the right. A real <button> (not a wrapper over
+   an invisible native control) now that the picker is a portal-rendered
+   menu rather than a `<select>`. */
 .pg-slot-source-wrap {
   position: relative;
   flex-shrink: 0;
@@ -1365,6 +1367,10 @@ pre {
   border-radius: 6px;
   background: var(--panel-card-bg);
   color: var(--panel-text-secondary);
+  font: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
   transition:
     border-color 0.1s,
     box-shadow 0.1s;
@@ -1374,7 +1380,7 @@ pre {
   color: var(--panel-text);
 }
 
-.pg-slot-source-wrap:focus-within {
+.pg-slot-source-wrap:focus-visible {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(165, 180, 252, 0.25);
@@ -1384,23 +1390,6 @@ pre {
   font-size: 13px;
   line-height: 1;
   pointer-events: none;
-}
-
-/* The real control — stretched invisibly over the icon above so the native
-   picker still opens on click, keyboard, and `selectOption` in tests. */
-.pg-slot-source {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
-  opacity: 0;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
 }
 
 /* Most resources' values don't exist until the run creates them, so the chip
@@ -1415,6 +1404,7 @@ pre {
   border-radius: 6px;
   background: var(--panel-card-bg);
   font-size: 12px;
+  color: var(--panel-text-primary);
 }
 
 .pg-slot-chip-note {
@@ -1845,6 +1835,129 @@ pre {
 .pg-custom-model-use:hover {
   background: var(--dropdown-option-hover);
   border-color: var(--dropdown-border);
+}
+
+/* ─── SourcePicker: nested resource menu (specs/resource-hierarchy.md §E) ──── */
+
+.pg-source-picker {
+  display: contents;
+}
+
+.pg-source-menu-root,
+.pg-source-menu-flyout {
+  min-width: 200px;
+  max-width: 320px;
+  background: var(--dropdown-bg);
+  border: 1px solid var(--dropdown-border);
+  border-radius: 10px;
+  box-shadow: var(--dropdown-shadow);
+  padding: 4px 0;
+}
+
+.pg-source-menu-root {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.pg-source-menu {
+  display: flex;
+  flex-direction: column;
+}
+
+.pg-source-menu-filter {
+  margin: 4px 8px 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--dropdown-border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--dropdown-text);
+  background: var(--dropdown-bg);
+  outline: none;
+  width: calc(100% - 16px);
+  box-sizing: border-box;
+}
+
+.pg-source-menu-filter:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(165, 180, 252, 0.25);
+}
+
+.pg-source-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--dropdown-text);
+  text-align: left;
+  transition: background 0.08s;
+}
+
+.pg-source-menu-item:hover,
+.pg-source-menu-item:focus-visible {
+  background: var(--dropdown-option-hover);
+  outline: none;
+}
+
+.pg-source-menu-item.selected {
+  background: var(--dropdown-option-selected);
+}
+
+.pg-source-menu-item.muted {
+  color: var(--dropdown-text-faint);
+  font-style: italic;
+}
+
+.pg-source-menu-check {
+  width: 14px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--dropdown-text);
+}
+
+.pg-source-menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pg-source-menu-breadcrumb {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--dropdown-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
+
+.pg-source-menu-caret {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--dropdown-text-faint);
+}
+
+.pg-source-menu-placeholder,
+.pg-source-menu-empty {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--dropdown-text-faint);
+  font-style: italic;
+}
+
+.pg-source-menu-row-wrap {
+  position: relative;
 }
 
 .pg-model-overlay-select {

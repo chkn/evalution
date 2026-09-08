@@ -22,7 +22,7 @@ import {
 } from "../execution-inputs.ts";
 import {
   DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
-  type RegisteredResource,
+  type RegisteredSource,
   ResourceRegistry,
 } from "../playground/resource-registry.ts";
 import type {
@@ -98,7 +98,7 @@ export interface FilePromptProviderOptions {
 let defaultIDCounter = 0;
 
 /**
- * A TypeScript type expression naming what a resource produces, for the file
+ * A TypeScript type expression naming what a source produces, for the file
  * type to evaluate in the scope of `promptFilePath`.
  *
  * The type is read back off the resource's own declaration rather than
@@ -108,13 +108,16 @@ let defaultIDCounter = 0;
  * `create()`'s return (`Awaited` covers the common async `create`); a static
  * `value` resource has no `create` to read, so its `value` property is read
  * directly. Which one applies is known from the scan (see
- * {@link RegisteredResource.resource}), and has to be — the two definitions
- * are a union, so indexing the wrong property wouldn't type-check.
+ * {@link RegisteredSource.resource}), and has to be — the two definitions are
+ * a union, so indexing the wrong property wouldn't type-check. A value source
+ * appends its own key(s) as further indexed access, which is what makes
+ * `taskA.id` type-check as `TaskId` rather than as the whole seeded object.
  */
 function resourceTypeExpression(
   promptFilePath: string,
-  resource: RegisteredResource,
+  source: RegisteredSource,
 ): string {
+  const resource = source.resource;
   let specifier = path
     .relative(path.dirname(promptFilePath), resource.modulePath)
     .replace(/\\/g, "/")
@@ -123,10 +126,14 @@ function resourceTypeExpression(
 
   const module = `typeof import(${JSON.stringify(specifier)})`;
   const exported = `${module}[${JSON.stringify(resource.key)}]`;
-  if ("value" in resource.resource) return `${exported}["value"]`;
-
-  const created = `ReturnType<${exported}["create"]>`;
-  return `Awaited<${created}>["value"]`;
+  let expression =
+    "value" in resource.resource
+      ? `${exported}["value"]`
+      : `Awaited<ReturnType<${exported}["create"]>>["value"]`;
+  for (const key of source.valuePath) {
+    expression = `${expression}[${JSON.stringify(key)}]`;
+  }
+  return expression;
 }
 
 /**
@@ -345,7 +352,7 @@ export class FilePromptProvider
       const sources: InputSource[] = available.map(r => ({
         uri: r.uri,
         key: r.key,
-        for: r.resource.for,
+        for: r.for,
         // Only claim a type opinion where the checker actually produced one:
         // a resource the checker could not read must fall through to the name
         // rule rather than silently matching nothing.
@@ -396,7 +403,7 @@ export class FilePromptProvider
    */
   private async resolveTypeMatches(
     parsed: readonly ParsedFilePrompt[],
-    inScope: readonly RegisteredResource[][],
+    inScope: readonly RegisteredSource[][],
     probes: readonly TypeProbe[][],
     executeParameters: readonly (
       | (PropDefinition | null | undefined)[]
