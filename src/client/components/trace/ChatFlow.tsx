@@ -17,27 +17,40 @@
  * arrives. See `specs/trace-workshopping.md` §D.
  */
 
+import type { SpanMessage } from "../../../shared/types";
 import { JsonView } from "./JsonView.tsx";
 import { MessageList } from "./MessageList.tsx";
 import type { Row } from "./rows.ts";
+import { newMessagesByTurn } from "./rows.ts";
 
-function ChatLLMBlock({ row }: { row: Row }) {
+/**
+ * Renders one `LLM` span's turn as bare chat bubbles (no surrounding card).
+ * `newMessages` is the caller-computed suffix of `span.messages` that hasn't
+ * already been rendered by an earlier turn — see {@link ChatFlow}. Tool
+ * (role `"tool"`) messages are dropped here — the adjacent `TOOL` span's
+ * card already shows that call's arguments/result.
+ */
+function ChatLLMBlock({
+  row,
+  newMessages,
+}: {
+  row: Row;
+  newMessages: SpanMessage[];
+}) {
   const { span } = row;
-  const running = span.endMs === undefined;
+  const visibleMessages = newMessages.filter(m => m.role !== "tool");
   return (
     <div
-      className={`chat-block chat-block-llm${span.status === "error" ? " chat-block-error" : ""}`}
+      className={`chat-turn${span.status === "error" ? " chat-turn-error" : ""}`}
     >
-      <div className="chat-block-header">
-        <span className="chat-block-label">{span.name}</span>
-        {span.model && <span className="chat-block-model">{span.model}</span>}
-        {running && <span className="chat-block-running">running…</span>}
-      </div>
-      {span.messages && span.messages.length > 0 && (
-        <MessageList messages={span.messages} />
+      {visibleMessages.length > 0 && (
+        <MessageList messages={visibleMessages} variant="bubble" />
       )}
       {span.output && (
-        <MessageList messages={[{ role: "assistant", content: span.output }]} />
+        <MessageList
+          messages={[{ role: "assistant", content: span.output }]}
+          variant="bubble"
+        />
       )}
       {span.errorMessage && (
         <pre className="span-details-error">{span.errorMessage}</pre>
@@ -83,6 +96,13 @@ function ChatToolBlock({ row }: { row: Row }) {
  * Renders `rows` (already parent-sorted by `buildRows`) as a linear thread.
  * `AGENT`/`EMBEDDING`/`DEFAULT` spans are structural — their `LLM`/`TOOL`
  * descendants are what actually render a chat block.
+ *
+ * Each `LLM` span's `messages` is the *full* conversation sent to the model,
+ * so a later turn's `messages` re-includes everything already shown by
+ * earlier turns (system prompt, prior user/assistant turns, prior tool
+ * results, prior `output`). To avoid repeating those, each turn only renders
+ * the suffix of `messages` past the longest prefix already rendered so far
+ * — see `newMessagesByTurn`.
  */
 export function ChatFlow({ rows }: { rows: Row[] }) {
   const blocks = rows.filter(
@@ -93,11 +113,16 @@ export function ChatFlow({ rows }: { rows: Row[] }) {
       <div className="chat-flow-empty">No messages or tool calls yet.</div>
     );
   }
+  const newMessages = newMessagesByTurn(rows);
   return (
     <div className="chat-flow">
       {blocks.map(row =>
         row.span.spanType === "LLM" ? (
-          <ChatLLMBlock key={row.span.id} row={row} />
+          <ChatLLMBlock
+            key={row.span.id}
+            row={row}
+            newMessages={newMessages.get(row.span.id) ?? []}
+          />
         ) : (
           <ChatToolBlock key={row.span.id} row={row} />
         ),

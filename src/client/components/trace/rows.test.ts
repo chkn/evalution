@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import { buildRows, computeWindow } from "./rows.ts";
+import { buildRows, computeWindow, newMessagesByTurn } from "./rows.ts";
 import type { SpanViewModel } from "./spanViewModel.ts";
 
 function span(
@@ -56,6 +56,82 @@ describe("buildRows", () => {
     ]);
 
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("newMessagesByTurn", () => {
+  it("only returns the messages appended since the previous LLM turn", () => {
+    const rows = buildRows([
+      span("turn1", {
+        spanType: "LLM",
+        startMs: 0,
+        messages: [
+          { role: "system", content: "be helpful" },
+          { role: "user", content: "hi" },
+        ],
+      }),
+      span("turn2", {
+        spanType: "LLM",
+        startMs: 1,
+        messages: [
+          { role: "system", content: "be helpful" },
+          { role: "user", content: "hi" },
+          { role: "assistant", content: "hello!" },
+          { role: "user", content: "how are you?" },
+        ],
+      }),
+    ]);
+
+    const result = newMessagesByTurn(rows);
+    expect(result.get("turn1")).toEqual([
+      { role: "system", content: "be helpful" },
+      { role: "user", content: "hi" },
+    ]);
+    expect(result.get("turn2")).toEqual([
+      { role: "assistant", content: "hello!" },
+      { role: "user", content: "how are you?" },
+    ]);
+  });
+
+  it("counts a turn's output as an already-shown message once the next turn's messages fold it back in", () => {
+    const rows = buildRows([
+      span("turn1", {
+        spanType: "LLM",
+        startMs: 0,
+        messages: [{ role: "user", content: "first question" }],
+        output: "first answer",
+      }),
+      span("turn2", {
+        spanType: "LLM",
+        startMs: 1,
+        messages: [
+          { role: "user", content: "first question" },
+          { role: "assistant", content: "first answer" },
+          { role: "user", content: "second question" },
+        ],
+        output: "second answer",
+      }),
+    ]);
+
+    const result = newMessagesByTurn(rows);
+    expect(result.get("turn1")).toEqual([
+      { role: "user", content: "first question" },
+    ]);
+    // "first answer" is already shown via turn1's `output`, not repeated here.
+    expect(result.get("turn2")).toEqual([
+      { role: "user", content: "second question" },
+    ]);
+  });
+
+  it("ignores TOOL spans and treats a span with no messages as empty", () => {
+    const rows = buildRows([
+      span("llm", { spanType: "LLM", startMs: 0 }),
+      span("tool", { spanType: "TOOL", startMs: 1 }),
+    ]);
+
+    const result = newMessagesByTurn(rows);
+    expect(result.get("llm")).toEqual([]);
+    expect(result.has("tool")).toBe(false);
   });
 });
 

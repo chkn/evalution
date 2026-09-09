@@ -38,13 +38,26 @@ function MessageContent({ content }: { content: string | SpanContentPart[] }) {
   );
 }
 
-export function MessageList({ messages }: { messages: SpanMessage[] }) {
+export function MessageList({
+  messages,
+  variant = "card",
+}: {
+  messages: SpanMessage[];
+  /** `"card"` (default) for the span-details panel; `"bubble"` for chat bubbles in {@link ChatFlow}. */
+  variant?: "card" | "bubble";
+}) {
+  const rootClass =
+    variant === "bubble" ? "message-list-bubble" : "message-list";
+  const itemClass = variant === "bubble" ? "chat-bubble" : "message";
+  const roleClass = variant === "bubble" ? "chat-bubble-role" : "message-role";
+  const contentClass =
+    variant === "bubble" ? "chat-bubble-content" : "message-content";
   return (
-    <div className="message-list">
+    <div className={rootClass}>
       {messages.map((msg, i) => (
-        <div key={i} className={`message message-role-${msg.role}`}>
-          <div className="message-role">{msg.role}</div>
-          <div className="message-content">
+        <div key={i} className={`${itemClass} ${itemClass}-role-${msg.role}`}>
+          <div className={roleClass}>{msg.role}</div>
+          <div className={contentClass}>
             <MessageContent content={msg.content} />
           </div>
         </div>

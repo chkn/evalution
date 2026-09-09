@@ -3247,6 +3247,7 @@ pre {
   --trace-bar-track: rgba(0, 0, 0, 0.05);
   --trace-code-bg: rgba(0, 0, 0, 0.05);
   --trace-message-bg: #f3f4f6;
+  --trace-user-bubble-bg: #e7ecf7;
   --trace-error-text: #b91c1c;
 
   /* Annotations — light */
@@ -3283,6 +3284,7 @@ pre {
     --trace-bar-track: rgba(255, 255, 255, 0.04);
     --trace-code-bg: rgba(0, 0, 0, 0.25);
     --trace-message-bg: rgba(0, 0, 0, 0.22);
+    --trace-user-bubble-bg: #17182a;
     --trace-error-text: #ff8a8a;
 
     /* Annotations — dark */
@@ -4273,6 +4275,12 @@ pre {
   background: var(--error-bg);
 }
 
+.chat-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .chat-block-header {
   display: flex;
   align-items: center;
@@ -4287,10 +4295,6 @@ pre {
   color: var(--trace-text);
 }
 
-.chat-block-model {
-  font-size: 10.5px;
-}
-
 .chat-block-running {
   font-style: italic;
 }
@@ -4301,6 +4305,55 @@ pre {
 
 .chat-block-tool-section {
   margin-top: 6px;
+}
+
+/* ── Chat bubbles (ChatFlow's LLM turns; see MessageList's "bubble" variant) ── */
+
+.message-list-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-bubble {
+  max-width: 78%;
+  border-radius: 14px;
+  padding: 8px 12px;
+  background: var(--trace-message-bg);
+}
+
+.chat-bubble-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--trace-text-dim);
+  margin-bottom: 3px;
+}
+
+.chat-bubble-content {
+  font-size: 12.5px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.chat-bubble-role-user {
+  align-self: flex-end;
+  background: var(--trace-user-bubble-bg);
+}
+
+.chat-bubble-role-assistant {
+  align-self: flex-start;
+}
+
+.chat-bubble-role-system {
+  align-self: center;
+  max-width: 90%;
+  background: transparent;
+  border: 1px dashed var(--trace-border);
+}
+
+.chat-turn-error .chat-bubble {
+  border: 1px solid var(--error-border);
 }
 
 /* ─── Welcome / onboarding wizard ───────────────────────────────────────────── */

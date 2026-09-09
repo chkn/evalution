@@ -132,7 +132,7 @@ test("expanding an LLM row renders its message (markdown) and output", async ({
   await expect(details).toContainText("Hi there!");
 });
 
-test("switching to the Chat tab renders LLM and tool chat blocks", async ({
+test("switching to the Chat tab renders LLM turns as bubbles (not cards) and tool calls as cards", async ({
   mount,
   page,
 }) => {
@@ -140,8 +140,185 @@ test("switching to the Chat tab renders LLM and tool chat blocks", async ({
   const component = await mount(<TraceViewHarness />);
 
   await component.locator(".trace-view-tab", { hasText: "Chat" }).click();
-  await expect(component.locator(".chat-block-llm")).toContainText("Hi there!");
+
+  const llmTurn = component.locator(".chat-turn");
+  await expect(llmTurn).toContainText("Hi there!");
+  // The input message and the output each render as their own bubble.
+  await expect(llmTurn.locator(".chat-bubble")).toHaveCount(2);
+  // LLM turns aren't cards; only the tool call renders with `.chat-block`.
+  await expect(component.locator(".chat-flow > .chat-block")).toHaveCount(1);
   await expect(component.locator(".chat-block-tool")).toContainText("search");
+});
+
+test("Chat tab hides tool-role messages, since the adjacent TOOL span already shows them", async ({
+  mount,
+  page,
+}) => {
+  await page.route("**/api/traces/*/*/events", route =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body: 'data: {"type":"connected"}\n\n',
+    }),
+  );
+  await page.route("**/api/traces/*/*/annotations", route =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route("**/api/traces/*/*", route => {
+    if (route.request().method() !== "GET") return route.fallback();
+    return route.fulfill({
+      json: {
+        trace: {
+          id: "t1",
+          providerId: "p1",
+          name: "tool-message",
+          startTime: 1000,
+          endTime: 1200,
+          status: "ok",
+        },
+        spans: [
+          {
+            id: "root",
+            traceId: "t1",
+            name: "agent",
+            kind: "AGENT",
+            startTime: 1000,
+            endTime: 1200,
+            status: "ok",
+          },
+          {
+            id: "tool1",
+            traceId: "t1",
+            parentId: "root",
+            name: "tool: search",
+            kind: "TOOL",
+            startTime: 1000,
+            endTime: 1050,
+            status: "ok",
+            tool: {
+              toolName: "search",
+              input: { query: "cats" },
+              output: { count: 3 },
+            },
+          },
+          {
+            id: "llm1",
+            traceId: "t1",
+            parentId: "root",
+            name: "step: 0",
+            kind: "LLM",
+            startTime: 1050,
+            endTime: 1100,
+            status: "ok",
+            llm: {
+              messages: [
+                { role: "user", content: "search for cats" },
+                { role: "tool", content: "raw-tool-output-marker" },
+              ],
+              output: "I found 3 results.",
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  const component = await mount(<TraceViewHarness />);
+  await component.locator(".trace-view-tab", { hasText: "Chat" }).click();
+
+  const llmTurn = component.locator(".chat-turn");
+  // Only the user message and the output render — the tool-role message
+  // (already shown by the TOOL span's card) is dropped.
+  await expect(llmTurn.locator(".chat-bubble")).toHaveCount(2);
+  await expect(llmTurn).not.toContainText("raw-tool-output-marker");
+});
+
+test("Chat tab does not repeat an earlier turn's messages in a later turn", async ({
+  mount,
+  page,
+}) => {
+  await page.route("**/api/traces/*/*/events", route =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body: 'data: {"type":"connected"}\n\n',
+    }),
+  );
+  await page.route("**/api/traces/*/*/annotations", route =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route("**/api/traces/*/*", route => {
+    if (route.request().method() !== "GET") return route.fallback();
+    return route.fulfill({
+      json: {
+        trace: {
+          id: "t1",
+          providerId: "p1",
+          name: "multi-turn",
+          startTime: 1000,
+          endTime: 1200,
+          status: "ok",
+        },
+        spans: [
+          {
+            id: "root",
+            traceId: "t1",
+            name: "agent",
+            kind: "AGENT",
+            startTime: 1000,
+            endTime: 1200,
+            status: "ok",
+          },
+          {
+            id: "llm1",
+            traceId: "t1",
+            parentId: "root",
+            name: "step: 0",
+            kind: "LLM",
+            startTime: 1000,
+            endTime: 1050,
+            status: "ok",
+            llm: {
+              messages: [{ role: "user", content: "first question" }],
+              output: "first answer",
+            },
+          },
+          {
+            id: "llm2",
+            traceId: "t1",
+            parentId: "root",
+            name: "step: 1",
+            kind: "LLM",
+            startTime: 1050,
+            endTime: 1100,
+            status: "ok",
+            llm: {
+              // Folds turn1's `output` back in as an assistant message, the
+              // way a real multi-turn agent loop resends full history.
+              messages: [
+                { role: "user", content: "first question" },
+                { role: "assistant", content: "first answer" },
+                { role: "user", content: "second question" },
+              ],
+              output: "second answer",
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  const component = await mount(<TraceViewHarness />);
+  await component.locator(".trace-view-tab", { hasText: "Chat" }).click();
+
+  const turns = component.locator(".chat-turn");
+  await expect(turns).toHaveCount(2);
+  // Each turn shows only its own new input message plus its own output —
+  // "first question" and "first answer" must not reappear in turn 2.
+  await expect(turns.nth(0).locator(".chat-bubble")).toHaveCount(2);
+  await expect(turns.nth(1).locator(".chat-bubble")).toHaveCount(2);
+  await expect(turns.nth(1)).not.toContainText("first question");
+  await expect(turns.nth(1)).not.toContainText("first answer");
+  await expect(turns.nth(1)).toContainText("second question");
+  await expect(turns.nth(1)).toContainText("second answer");
 });
 
 test("creates and then deletes a trace-level annotation", async ({

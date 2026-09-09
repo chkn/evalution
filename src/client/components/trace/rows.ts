@@ -7,6 +7,7 @@
  * {@link Row} list linearly.
  */
 
+import type { SpanMessage } from "../../../shared/types";
 import type { SpanViewModel } from "./spanViewModel.ts";
 
 export interface Row {
@@ -50,6 +51,31 @@ export function buildRows(spans: SpanViewModel[]): Row[] {
   };
   visit(undefined, 0);
   return rows;
+}
+
+/**
+ * For `ChatFlow`'s linear thread: maps each `LLM` row's span id to the
+ * suffix of its `messages` not already shown by an earlier turn. An `LLM`
+ * span's `messages` is the *full* conversation sent to the model, so a later
+ * turn's `messages` re-includes everything already rendered by earlier
+ * turns — not just their `messages`, but also their `output`, which the next
+ * turn's `messages` folds back in as an assistant message once the
+ * conversation continues. This trims that repeated prefix, counting a prior
+ * turn's `output` (if any) as one extra already-shown message.
+ */
+export function newMessagesByTurn(rows: Row[]): Map<string, SpanMessage[]> {
+  const result = new Map<string, SpanMessage[]>();
+  let shownCount = 0;
+  for (const row of rows) {
+    if (row.span.spanType !== "LLM") continue;
+    const allMessages = row.span.messages ?? [];
+    result.set(row.span.id, allMessages.slice(shownCount));
+    shownCount = Math.max(
+      shownCount,
+      allMessages.length + (row.span.output ? 1 : 0),
+    );
+  }
+  return result;
 }
 
 /** The time window the timeline should cover, in ms. */
