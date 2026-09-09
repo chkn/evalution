@@ -9,7 +9,19 @@ export default defineConfig({
   outDir: "dist",
   dts: true,
   deps: {
-    neverBundle: ["typescript", "ai", "@google/genai", "chokidar", "minimatch"],
+    neverBundle: [
+      "typescript",
+      "ai",
+      "@google/genai",
+      "chokidar",
+      "minimatch",
+      // Native (napi) module: its binding loader `require`s a per-platform
+      // `@tursodatabase/sync-<platform>` package at module scope, which only
+      // resolves from an installed `node_modules` tree — inlining it into the
+      // bundle would make `dist/cli/index.js` throw on import.
+      "@tursodatabase/sync",
+      "drizzle-orm",
+    ],
   },
   // Emit `.js`/`.d.ts` rather than tsdown's default `.mjs`/`.d.mts`.
   // The package is `"type": "module"`, so `.js` is already ESM, which keeps the

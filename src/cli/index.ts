@@ -7,7 +7,8 @@ import { pathToFileURL } from "node:url";
 import type { EvalutionConfig } from "../config.ts";
 import { startServer } from "../server/index.ts";
 import { TerminalSessionRegistry } from "../server/terminal.ts";
-import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
+import { LocalDatabaseTraceProvider } from "../trace/local-database-trace-provider.ts";
+import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import type { TraceIngestor } from "../trace/trace-ingestor.ts";
 import { registerBundlerResolutionFallback } from "./bundler-resolution-hook.ts";
 import {
@@ -85,6 +86,16 @@ async function startConfiguredServer(
 
   const promptProviders = config.promptProviders ?? [];
   let traceProviders = config.traceProviders;
+  // The process's single OTLP ingestor, so an external app can export traces
+  // to this server (`POST /v1/traces`) alongside whatever the playground
+  // records itself. Only wired up on the default trace-provider path — a
+  // project supplying its own `traceProviders` owns its own OTLP story, if
+  // any (see `specs/trace-workshopping.md` §A.8).
+  let otlpIngestor: OtlpTraceIngestor | undefined;
+  // Tells `startServer` which provider to prefer for new traces when more
+  // than one is configured — set only on this (built-in) path; a project
+  // supplying its own `traceProviders` picks its own default (§B.5).
+  let defaultTraceProviderId: string | undefined;
   if (!traceProviders) {
     // Each adapter runs its own SDK-specific setup and returns the resulting
     // ingestor — we stand up nothing here beyond the default provider.
@@ -98,7 +109,20 @@ async function startConfiguredServer(
     for (const ing of collected) {
       if (!ingestors.some(kept => kept.isRedundant?.(ing))) ingestors.push(ing);
     }
-    traceProviders = [new MemoryTraceProvider({ ingestors })];
+    otlpIngestor = new OtlpTraceIngestor();
+    ingestors.push(otlpIngestor);
+
+    // An explicit `rootDir`-relative path rather than `LocalDatabaseTraceProvider`'s
+    // own CWD-relative default: onboarding mode (no config file yet) never
+    // `chdir`s to `rootDir` the way a loaded `config.ts` does, so relying on
+    // CWD here could resolve against the wrong directory when the CLI is
+    // invoked with an explicit path argument (`evalution ui <path>`).
+    const provider = new LocalDatabaseTraceProvider({
+      path: path.join(rootDir, ".evalution", "traces", "local.db"),
+      ingestors,
+    });
+    traceProviders = [provider];
+    defaultTraceProviderId = provider.id;
   }
 
   return startServer({
@@ -108,6 +132,8 @@ async function startConfiguredServer(
     rootPath: rootDir,
     hasConfig,
     terminalSessions,
+    otlpIngestor,
+    defaultTraceProviderId,
   });
 }
 

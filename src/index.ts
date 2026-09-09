@@ -92,6 +92,11 @@ export {
 export type {
   AddPromptContext,
   AddPromptField,
+  Annotation,
+  AnnotationEvent,
+  AnnotationEventOp,
+  AnnotationKind,
+  AnnotationSource,
   CalleeBinding,
   ChangeEventType,
   ExecuteRequest,
@@ -122,20 +127,40 @@ export type {
   ResourceScope,
   SourceSpan,
   Span,
+  SpanContentPart,
+  SpanImagePart,
   SpanKind,
   SpanMessage,
+  SpanTextPart,
   ToolSpanDetails,
   Trace,
   TraceChangeEvent,
   TraceChangeType,
+  TraceLiveEvent,
   TraceProviderInfo,
   TraceStreamEvent,
   TraceSummary,
   TraceWithSpans,
 } from "./shared/types.ts";
+export {
+  createLocalTursoClient,
+  type LocalTursoClientOptions,
+} from "./trace/db/local-turso-client.ts";
+export { MIGRATIONS_TABLE, runMigrations } from "./trace/db/migrate.ts";
+export {
+  LocalDatabaseTraceProvider,
+  type LocalDatabaseTraceProviderOptions,
+} from "./trace/local-database-trace-provider.ts";
 export { MemoryTraceProvider } from "./trace/memory-trace-provider.ts";
 export { setupGlobalOTelPipeline } from "./trace/otel-global-pipeline.ts";
 export { OTelTraceIngestor } from "./trace/otel-trace-ingestor.ts";
+export {
+  type NormalizedOtlpEvent,
+  type NormalizedOtlpSpan,
+  normalizeOtlpRequest,
+} from "./trace/otlp/normalize.ts";
+export { decodeOtlpProtobuf } from "./trace/otlp/otlp-protobuf.ts";
+export { OtlpTraceIngestor } from "./trace/otlp-trace-ingestor.ts";
 export {
   createTracerForPrompt,
   getPromptSpanAttributes,
@@ -156,3 +181,4 @@ export {
 } from "./trace/trace-ingestor.ts";
 export type { TraceProvider } from "./trace/trace-provider.ts";
 export { BaseTraceProvider, type TraceSink } from "./trace/trace-sink.ts";
+export { TursoTraceProvider } from "./trace/turso-trace-provider.ts";

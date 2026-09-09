@@ -2,6 +2,9 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type {
+  Annotation,
+  AnnotationEvent,
+  AnnotationEventOp,
   TraceChangeEvent,
   TraceStreamEvent,
   TraceSummary,
@@ -74,4 +77,47 @@ export interface TraceProvider {
    * @returns A no-argument function that unregisters the watcher.
    */
   watch?(callback: (event: TraceChangeEvent) => void): () => void;
+
+  // ── Annotations — all optional; a provider with no annotation store
+  // (e.g. `MemoryTraceProvider`) simply omits every member below, and the
+  // REST handlers in `src/server/handlers/annotations.ts` treat their
+  // absence as "not supported" (404/405) rather than assuming any of them
+  // exist. See `specs/trace-workshopping.md` §B.2/§0e.
+
+  /** Lists every annotation on a trace, oldest first. */
+  listAnnotations?(traceId: string): Promise<Annotation[]>;
+
+  /** Creates a new annotation, minting its `id`/`createdAt`. */
+  createAnnotation?(
+    input: Omit<Annotation, "id" | "createdAt">,
+  ): Promise<Annotation>;
+
+  /** Deletes an annotation by id. A no-op if it doesn't exist. */
+  deleteAnnotation?(id: string): Promise<void>;
+
+  /**
+   * Subscribes to annotation changes on a specific trace — the counterpart
+   * to {@link subscribeTrace} that a client's per-trace SSE connection also
+   * opens, so both ride the same stream. Callers (the annotation REST
+   * handlers) invoke {@link emitAnnotation} after a successful
+   * create/delete; this only delivers what's explicitly emitted.
+   *
+   * @returns A no-argument function that cancels the subscription.
+   */
+  subscribeAnnotations?(
+    traceId: string,
+    callback: (event: AnnotationEvent) => void,
+  ): () => void;
+
+  /**
+   * Notifies this trace's {@link subscribeAnnotations} subscribers of an
+   * annotation change. Called by the annotation REST handlers immediately
+   * after {@link createAnnotation}/{@link deleteAnnotation} succeeds — the
+   * provider itself never calls this on its own.
+   */
+  emitAnnotation?(
+    traceId: string,
+    op: AnnotationEventOp,
+    annotation: Annotation,
+  ): void;
 }

@@ -66,6 +66,7 @@
       "!**/node_modules",
       "!**/.wrangler",
       "!**/dist",
+      "!**/test-results",
       "!**/*.gen.ts",
       "!**/migrations",
       "!src/prompt/file/ts/__fixtures__/invalid-syntax.prompt.ts",

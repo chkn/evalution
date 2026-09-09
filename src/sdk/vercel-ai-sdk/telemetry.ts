@@ -15,7 +15,11 @@ type Arrayable<T> = T | T[];
 
 import { makeBrand } from "../../brand.ts";
 import { BaseTraceIngestor } from "../../trace/trace-ingestor.ts";
-import type { Span, SpanMessage } from "../../trace/trace-types.ts";
+import type {
+  Span,
+  SpanContentPart,
+  SpanMessage,
+} from "../../trace/trace-types.ts";
 
 export interface PerPromptTelemetry extends Telemetry {
   /**
@@ -61,11 +65,36 @@ function toSpanMessages(messages: ModelMessage[]): SpanMessage[] | undefined {
     const role = msg.role;
     const content = msg.content;
     if (typeof content === "string") return { role, content };
-    const text = content
-      .filter(c => c.type === "text")
-      .map(c => c.text)
-      .join("");
-    return { role, content: text };
+
+    const parts: SpanContentPart[] = [];
+    for (const c of content) {
+      if (c.type === "text") {
+        if (c.text) parts.push({ type: "text", text: c.text });
+      } else if (c.type === "image") {
+        const image =
+          typeof c.image === "string" ? c.image : c.image?.toString();
+        if (image) {
+          parts.push({
+            type: "image",
+            image,
+            ...(c.mediaType && { mediaType: c.mediaType }),
+          });
+        }
+      } else if (c.type === "file" && c.mediaType?.startsWith("image/")) {
+        const data = typeof c.data === "string" ? c.data : c.data?.toString();
+        if (data)
+          parts.push({ type: "image", image: data, mediaType: c.mediaType });
+      }
+    }
+    // Collapse an all-text part list back to a plain string — the common
+    // case, and keeps existing string-content consumers working unchanged.
+    if (parts.length > 0 && parts.every(p => p.type === "text")) {
+      return {
+        role,
+        content: parts.map(p => (p as { text: string }).text).join(""),
+      };
+    }
+    return { role, content: parts };
   });
 }
 
@@ -252,7 +281,7 @@ export class VercelAISDKTelemetry
       id: crypto.randomUUID(),
       traceId: run.traceId,
       parentId: parentSpan.id,
-      name: `tool: ${event.toolCall.toolName}`,
+      name: event.toolCall.toolName,
       kind: "TOOL",
       startTime: Date.now(),
       tool: {

@@ -16,3 +16,6 @@ docs/extensibility/api/
 # Playwright
 playwright/.cache/
 test-results/
+
+# Evalution
+.evalution/traces/

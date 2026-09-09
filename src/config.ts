@@ -49,8 +49,11 @@ export interface EvalutionConfig {
   /**
    * One or more providers that supply execution traces to the playground.
    *
-   * If omitted, a {@link MemoryTraceProvider} is used automatically so the
-   * Traces tab can still be exercised without wiring a real tracing backend.
+   * If omitted, a {@link LocalDatabaseTraceProvider} is used, which creates a
+   * SQLite database under `.evalution/traces/local.db` by default. Nothing
+   * is written to disk until the first trace is actually recorded. Use
+   * {@link MemoryTraceProvider} instead for ephemeral, in-process-only
+   * storage (e.g. in tests).
    */
   traceProviders?: TraceProvider[];
 }

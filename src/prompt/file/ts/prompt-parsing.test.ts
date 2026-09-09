@@ -372,7 +372,7 @@ describe("PromptParser", () => {
       const prompts = await fileType.parsePrompts([paths[0]], "");
 
       const threadMsgs = prompts[0].functionParameters.find(
-        p => p.name === "threadMsgs",
+        p => p.name === "_threadMsgs",
       );
       expect(threadMsgs?.type.kind).toBe("array");
       if (threadMsgs?.type.kind !== "array") return;
@@ -403,7 +403,7 @@ describe("PromptParser", () => {
       const prompts = await fileType.parsePrompts([paths[0]], "");
 
       const taskInfo = prompts[0].functionParameters.find(
-        p => p.name === "taskInfo",
+        p => p.name === "_taskInfo",
       );
       expect(taskInfo?.type.kind).toBe("object");
       if (taskInfo?.type.kind !== "object") return;

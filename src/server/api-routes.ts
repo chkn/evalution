@@ -6,8 +6,9 @@ import {
   SpanStatusCode,
   type Tracer,
 } from "@opentelemetry/api";
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { resolveExecutionInputs } from "../prompt/execution-inputs.ts";
 import type {
   PromptProvider,
@@ -20,9 +21,17 @@ import type {
   ExecuteResponse,
   Span,
   SSEData,
-  TraceStreamEvent,
 } from "../shared/types.ts";
+import type { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
+import {
+  type AnnotationHandlerResult,
+  handleCreateAnnotation,
+  handleDeleteAnnotation,
+  handleListAnnotations,
+} from "./handlers/annotations.ts";
+import { handleOtlpTraces } from "./handlers/otlp-ingest.ts";
+import { streamTrace } from "./handlers/trace-stream.ts";
 
 /** Decodes a URL-safe base64 prompt id produced by `encodePromptId`. Uses the
  * Web `atob` (rather than Node's `Buffer`) so it works in browser/worker
@@ -70,6 +79,13 @@ export interface SetupRoutesOptions {
    * demo, where execution happens locally via `npx evalution`.
    */
   executeDisabledMessage?: string;
+  /**
+   * The process's OTLP ingestor, if any. When set, `POST /v1/traces` (and the
+   * `/otel/v1/traces` alias) accept incoming OTLP trace exports and feed them
+   * to it. Omitted hosts (e.g. the in-browser demo) simply don't expose the
+   * route's functionality — `resolveIngestor` always returns `undefined`.
+   */
+  otlpIngestor?: OtlpTraceIngestor;
 }
 
 export function setupRoutes({
@@ -84,6 +100,7 @@ export function setupRoutes({
   defaultTraceProviderId,
   setupTasks,
   executeDisabledMessage,
+  otlpIngestor,
 }: SetupRoutesOptions) {
   // Resolve a span's prompt reference (which may be a global ID) to a concrete
   // provider-scoped prompt the client can open. Done at read time against the
@@ -407,6 +424,7 @@ export function setupRoutes({
   });
 
   // GET /api/traces/:providerId/:id/events - SSE stream of trace updates
+  // (span lifecycle + annotations — see `./handlers/trace-stream.ts`)
   app.get("/api/traces/:providerId/:id/events", c => {
     const { providerId, id } = c.req.param();
     const provider = traceProviders.get(providerId);
@@ -414,41 +432,80 @@ export function setupRoutes({
       return c.json({ error: "Trace provider not found" }, 404);
     }
 
-    // Resolve a stream event's span (if any) back to a concrete prompt.
-    const resolveEvent = (event: TraceStreamEvent): TraceStreamEvent =>
-      "span" in event
-        ? { ...event, span: resolveSpanPrompt(event.span) }
-        : event;
-
-    return streamSSE(c, async stream => {
-      await stream.writeSSE({ data: JSON.stringify({ type: "connected" }) });
-
-      // Replay existing state so late subscribers aren't stuck waiting for the
-      // next event before they can render anything.
-      const existing = await provider.getTrace(id);
-      if (existing) {
-        for (const span of existing.spans) {
-          const resolved = resolveSpanPrompt(span);
-          const initial: TraceStreamEvent =
-            resolved.endTime === undefined
-              ? { type: "span-start", span: resolved }
-              : { type: "span-end", span: resolved };
-          await stream.writeSSE({ data: JSON.stringify(initial) });
-        }
-      }
-
-      const unsubscribe = provider.subscribeTrace?.(id, event => {
-        void stream.writeSSE({ data: JSON.stringify(resolveEvent(event)) });
-      });
-
-      await new Promise<void>(resolve => {
-        stream.onAbort(() => {
-          unsubscribe?.();
-          resolve();
-        });
-      });
-    });
+    return streamSSE(c, stream =>
+      streamTrace(stream, { provider, traceId: id, resolveSpanPrompt }),
+    );
   });
+
+  // Annotation routes: resolve the provider, then relay the neutral handler's
+  // `{status, body}` — a 204 carries no body of its own.
+  const annotationRoute =
+    (
+      handle: (
+        provider: TraceProvider,
+        params: Record<string, string>,
+        c: Context,
+      ) => Promise<AnnotationHandlerResult>,
+    ) =>
+    async (c: Context) => {
+      const params = c.req.param();
+      const provider = traceProviders.get(params.providerId);
+      if (!provider) return c.json({ error: "Trace provider not found" }, 404);
+      const { status, body } = await handle(provider, params, c);
+      return body === undefined
+        ? c.body(null, status as ContentfulStatusCode)
+        : c.json(body as object, status as ContentfulStatusCode);
+    };
+
+  // GET /api/traces/:providerId/:traceId/annotations - List annotations
+  app.get(
+    "/api/traces/:providerId/:traceId/annotations",
+    annotationRoute((provider, { traceId }) =>
+      handleListAnnotations(provider, traceId),
+    ),
+  );
+
+  // POST /api/traces/:providerId/:traceId/annotations - Create an annotation
+  app.post(
+    "/api/traces/:providerId/:traceId/annotations",
+    annotationRoute(async (provider, { traceId }, c) =>
+      handleCreateAnnotation(
+        provider,
+        traceId,
+        await c.req.json().catch(() => ({})),
+      ),
+    ),
+  );
+
+  // DELETE /api/traces/:providerId/:traceId/annotations/:id - Delete an annotation
+  app.delete(
+    "/api/traces/:providerId/:traceId/annotations/:id",
+    annotationRoute((provider, { traceId, id }) =>
+      handleDeleteAnnotation(provider, traceId, id),
+    ),
+  );
+
+  // POST /v1/traces, POST /otel/v1/traces - OTLP trace export (protobuf or JSON)
+  //
+  // `x-evalution-provider` lets a sender name which configured trace provider
+  // an export should land on when more than one is wired up; the OSS
+  // `resolveIngestor` here ignores it and always returns the process's single
+  // ingestor (Phase 0 — see `specs/trace-workshopping.md` §A.8). A cloud host
+  // supplies its own `otlpIngestor`/`resolveIngestor` keyed off request auth
+  // instead.
+  const otlpRoute = async (c: Context) => {
+    const result = await handleOtlpTraces(
+      {
+        contentType: c.req.header("content-type") ?? "",
+        body: await c.req.arrayBuffer(),
+        headers: Object.fromEntries(c.req.raw.headers.entries()),
+      },
+      { resolveIngestor: () => otlpIngestor },
+    );
+    return c.json(result.body as object, result.status as ContentfulStatusCode);
+  };
+  app.post("/v1/traces", otlpRoute);
+  app.post("/otel/v1/traces", otlpRoute);
 
   // GET /api/events - Server-Sent Events for hot reload
   app.get("/api/events", c =>

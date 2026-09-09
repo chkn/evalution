@@ -51,6 +51,7 @@ import type {
 import { getModelCatalog, updatePromptProperties } from "../api";
 import PlaygroundEditor from "./PlaygroundEditor";
 import PlaygroundExecution from "./PlaygroundExecution";
+import { PromptLinkIcon } from "./trace/icons.tsx";
 
 interface Props {
   prompt: NormalizedPrompt;
@@ -164,30 +165,35 @@ function PlaygroundContent({
   return (
     <div className="pg-playground-wrapper">
       <div className="pg-prompt-header">
-        <div className="pg-prompt-header-identity">
+        <div className="pg-prompt-header-row">
           <span className="pg-prompt-name">{prompt.name}</span>
-          {prompt.treePath && prompt.treePath.length > 0 && (
-            <span className="pg-prompt-path">{prompt.treePath.join("/")}</span>
-          )}
+          <div className="pg-prompt-header-right">
+            {error && (
+              <div className="pg-header-error">
+                {error}
+                <button
+                  type="button"
+                  className="pg-dismiss"
+                  onClick={() => setError(null)}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+            {/*
+            <button className="pg-header-btn pg-header-btn--icon" title="Show traces"><TracesIcon /></button>
+            <button className="pg-header-btn pg-header-btn--icon" title="New variant"><NewVariantIcon /></button>
+            */}
+          </div>
         </div>
-        <div className="pg-prompt-header-right">
-          {error && (
-            <div className="pg-header-error">
-              {error}
-              <button
-                type="button"
-                className="pg-dismiss"
-                onClick={() => setError(null)}
-              >
-                ×
-              </button>
-            </div>
-          )}
-          {/*
-          <button className="pg-header-btn pg-header-btn--icon" title="Show traces"><TracesIcon /></button>
-          <button className="pg-header-btn pg-header-btn--icon" title="New variant"><NewVariantIcon /></button>
-          */}
-        </div>
+        {prompt.treePath && prompt.treePath.length > 0 && (
+          <span className="pg-prompt-path">
+            <PromptLinkIcon />
+            <span className="pg-prompt-path-text">
+              {prompt.treePath.join("/")}
+            </span>
+          </span>
+        )}
       </div>
       <div className="pg-content">
         <div className="pg-editor-col">

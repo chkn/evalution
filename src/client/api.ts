@@ -4,6 +4,8 @@
 import type { SetupTask } from "../shared/setup-task";
 import type {
   AddPromptContext,
+  Annotation,
+  AnnotationKind,
   ExecuteRequest,
   ExecuteResponse,
   ModelCatalog,
@@ -11,8 +13,8 @@ import type {
   NormalizedPromptUpdates,
   PromptProviderInfo,
   PropDefinition,
+  TraceLiveEvent,
   TraceProviderInfo,
-  TraceStreamEvent,
   TraceSummary,
   TraceWithSpans,
 } from "../shared/types";
@@ -239,13 +241,14 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 
 /**
  * Opens an SSE subscription for the given trace. The callback is invoked for
- * each {@link TraceStreamEvent}. Returns a cleanup function that closes the
- * underlying connection.
+ * each {@link TraceLiveEvent} — span/trace lifecycle events and annotation
+ * changes ride the same connection. Returns a cleanup function that closes
+ * the underlying connection.
  */
 export function subscribeTraceEvents(
   providerId: string,
   traceId: string,
-  onEvent: (event: TraceStreamEvent) => void,
+  onEvent: (event: TraceLiveEvent) => void,
 ): () => void {
   const url = `/api/traces/${encodeURIComponent(providerId)}/${encodeURIComponent(traceId)}/events`;
   const es = new EventSource(url);
@@ -253,11 +256,59 @@ export function subscribeTraceEvents(
     try {
       const data = JSON.parse(msg.data);
       if (data?.type && data.type !== "connected") {
-        onEvent(data as TraceStreamEvent);
+        onEvent(data as TraceLiveEvent);
       }
     } catch {
       /* ignore malformed payloads */
     }
   };
   return () => es.close();
+}
+
+function annotationsUrl(
+  providerId: string,
+  traceId: string,
+  suffix = "",
+): string {
+  return `/api/traces/${encodeURIComponent(providerId)}/${encodeURIComponent(traceId)}/annotations${suffix}`;
+}
+
+/** Lists every annotation on a trace, oldest first. */
+export async function getAnnotations(
+  providerId: string,
+  traceId: string,
+): Promise<Annotation[]> {
+  const res = await fetch(annotationsUrl(providerId, traceId));
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Creates a new annotation on a trace, or on one specific span within it. */
+export async function createAnnotation(
+  providerId: string,
+  traceId: string,
+  input: { kind: AnnotationKind; note: string; spanId?: string },
+): Promise<Annotation> {
+  const res = await fetch(annotationsUrl(providerId, traceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Deletes an annotation by id. */
+export async function deleteAnnotation(
+  providerId: string,
+  traceId: string,
+  id: string,
+): Promise<void> {
+  const res = await fetch(
+    annotationsUrl(providerId, traceId, `/${encodeURIComponent(id)}`),
+    {
+      method: "DELETE",
+    },
+  );
+  await throwIfError(res);
 }

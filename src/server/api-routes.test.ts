@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { trace } from "@opentelemetry/api";
+import { connect, type Database } from "@tursodatabase/sync";
+import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import { PromptRegistry } from "../prompt/prompt-registry.ts";
 import type { ExecuteRequest } from "../shared/types.ts";
+import { runMigrations } from "../trace/db/migrate.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
+import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
+import { TursoTraceProvider } from "../trace/turso-trace-provider.ts";
 import { setupRoutes } from "./api-routes.ts";
 
 const PROVIDER_ID = "fake";
@@ -51,7 +59,10 @@ function fakeProvider(
   };
 }
 
-function makeApp(execute?: PromptProvider["execute"]) {
+function makeApp(
+  execute?: PromptProvider["execute"],
+  otlpIngestor?: OtlpTraceIngestor,
+) {
   const app = new Hono();
   const promptProvider = fakeProvider(execute);
   const traceProvider = new MemoryTraceProvider({ id: TRACE_PROVIDER_ID });
@@ -69,6 +80,7 @@ function makeApp(execute?: PromptProvider["execute"]) {
     hasConfig: true,
     tracer: trace.getTracer("test"),
     defaultTraceProviderId: TRACE_PROVIDER_ID,
+    otlpIngestor,
   });
 
   return { app, traceProvider };
@@ -227,5 +239,194 @@ describe("POST /api/prompts/:providerId/:id/execute", () => {
     await app.request(executeRequest({ functionInputs }));
 
     expect(opts.inputs.functionInputs).toEqual(functionInputs);
+  });
+});
+
+describe("POST /v1/traces (OTLP ingest)", () => {
+  it("ingests a JSON OTLP export and records it on the resolved provider", async () => {
+    const ingestor = new OtlpTraceIngestor();
+    const { app, traceProvider } = makeApp(undefined, ingestor);
+    ingestor.addSink(traceProvider);
+
+    const body = {
+      resourceSpans: [
+        {
+          scopeSpans: [
+            {
+              spans: [
+                {
+                  traceId: "0102030405060708090a0b0c0d0e0f10",
+                  spanId: "0102030405060708",
+                  name: "otlp-span",
+                  startTimeUnixNano: "1000000",
+                  endTimeUnixNano: "2000000",
+                  status: { code: 1 },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const res = await app.request("/v1/traces", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ partialSuccess: {} });
+
+    const trace = await traceProvider.getTrace(
+      "0102030405060708090a0b0c0d0e0f10",
+    );
+    expect(trace?.trace.status).toBe("ok");
+    expect(trace?.spans[0].name).toBe("otlp-span");
+  });
+
+  it("accepts exports on the /otel/v1/traces alias too", async () => {
+    const ingestor = new OtlpTraceIngestor();
+    const { app } = makeApp(undefined, ingestor);
+
+    const res = await app.request("/otel/v1/traces", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ resourceSpans: [] }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("responds 404 when no OTLP ingestor is configured for the host", async () => {
+    const { app } = makeApp(); // no otlpIngestor passed
+
+    const res = await app.request("/v1/traces", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ resourceSpans: [] }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("responds 415 for an unrecognized content-type", async () => {
+    const ingestor = new OtlpTraceIngestor();
+    const { app } = makeApp(undefined, ingestor);
+
+    const res = await app.request("/v1/traces", {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: "nope",
+    });
+    expect(res.status).toBe(415);
+  });
+
+  it("responds 400 for malformed JSON", async () => {
+    const ingestor = new OtlpTraceIngestor();
+    const { app } = makeApp(undefined, ingestor);
+
+    const res = await app.request("/v1/traces", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{not json",
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("annotation routes", () => {
+  let dir: string;
+  let client: Database;
+
+  afterEach(async () => {
+    await client?.close();
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  /** Same wiring as `makeApp`, but with a real (Turso-backed) trace provider. */
+  async function makeAnnotationsApp() {
+    dir = await mkdtemp(join(tmpdir(), "evalution-annotations-routes-"));
+    client = await connect({ path: join(dir, "trace.db"), url: () => null });
+    await runMigrations(drizzle({ client }));
+    const traceProvider = new TursoTraceProvider({
+      id: TRACE_PROVIDER_ID,
+      client,
+    });
+    await traceProvider.recordSpanStart({
+      id: "t1:root",
+      traceId: "t1",
+      name: "root",
+      kind: "LLM",
+      startTime: Date.now(),
+    });
+
+    const app = new Hono();
+    setupRoutes({
+      app,
+      promptProviders: new Map(),
+      traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
+      promptRegistry: new PromptRegistry(),
+      hotReloadSubscribers: new Set(),
+      rootPath: "/demo",
+      hasConfig: true,
+      tracer: trace.getTracer("test"),
+      defaultTraceProviderId: TRACE_PROVIDER_ID,
+    });
+    return app;
+  }
+
+  it("supports the full list/create/delete cycle over HTTP", async () => {
+    const app = await makeAnnotationsApp();
+    const base = `/api/traces/${TRACE_PROVIDER_ID}/t1/annotations`;
+
+    expect(await (await app.request(base)).json()).toEqual([]);
+
+    const createRes = await app.request(base, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "issue", note: "bad output" }),
+    });
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as { id: string };
+    expect(created).toMatchObject({
+      kind: "issue",
+      note: "bad output",
+      source: "user",
+    });
+
+    const listed = await (await app.request(base)).json();
+    expect(listed).toEqual([created]);
+
+    const deleteRes = await app.request(`${base}/${created.id}`, {
+      method: "DELETE",
+    });
+    expect(deleteRes.status).toBe(204);
+    expect(await (await app.request(base)).json()).toEqual([]);
+  });
+
+  it("responds 404 for an unknown trace provider", async () => {
+    const app = await makeAnnotationsApp();
+    const res = await app.request("/api/traces/nonexistent/t1/annotations");
+    expect(res.status).toBe(404);
+  });
+
+  it("responds 400 when kind/note are missing from the create body", async () => {
+    const app = await makeAnnotationsApp();
+    const res = await app.request(
+      `/api/traces/${TRACE_PROVIDER_ID}/t1/annotations`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("responds 405 for a provider with no annotation store", async () => {
+    const { app } = makeApp(); // MemoryTraceProvider-backed
+    const res = await app.request(
+      `/api/traces/${TRACE_PROVIDER_ID}/t1/annotations`,
+    );
+    expect(res.status).toBe(405);
   });
 });

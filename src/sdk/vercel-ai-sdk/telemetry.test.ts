@@ -84,6 +84,54 @@ describe("Evalution", () => {
     expect(step?.llm?.totalTokens).toBe(8);
   });
 
+  it("keeps image content parts instead of dropping image-only messages", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const traceId = "trace-image";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#see", name: "see" })
+      .withTraceId(traceId);
+    const callId = "call-image";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "What is this?" },
+            {
+              type: "image",
+              image: "https://example.com/cat.png",
+              mediaType: "image/png",
+            },
+          ],
+        },
+      ],
+    } as any);
+    await integration.onStepEnd?.(stepEndEvent(callId, "A cat."));
+    await integration.onEnd?.({ callId, text: "A cat." } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.parentId);
+    expect(step?.llm?.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "What is this?" },
+          {
+            type: "image",
+            image: "https://example.com/cat.png",
+            mediaType: "image/png",
+          },
+        ],
+      },
+    ]);
+  });
+
   it("carries the unresolved inputs onto the root span", async () => {
     // The recipe, not the resolution: one of a run's resolved arguments can be
     // a live database handle, which serializes into a span as a useless blob

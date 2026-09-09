@@ -50,10 +50,35 @@ export interface PromptID {
  */
 export type SpanKind = "LLM" | "TOOL" | "AGENT" | "EMBEDDING" | "DEFAULT";
 
-/** A single message within an LLM span's input/output. */
+/** A text segment within a multi-part {@link SpanMessage} content. */
+export interface SpanTextPart {
+  type: "text";
+  text: string;
+}
+
+/** An image segment within a multi-part {@link SpanMessage} content. */
+export interface SpanImagePart {
+  type: "image";
+  /** A URL, or base64/data-URI image data. */
+  image: string;
+  /** MIME type (e.g. `image/png`), when known. */
+  mediaType?: string;
+}
+
+/** One segment of a multi-part {@link SpanMessage} content. */
+export type SpanContentPart = SpanTextPart | SpanImagePart;
+
+/**
+ * A single message within an LLM span's input/output.
+ *
+ * `content` is a plain string for the common text-only case. It is an array
+ * of {@link SpanContentPart} when the message carries non-text content (e.g.
+ * an image) — the `string` form stays in the union so existing consumers and
+ * already-stored rows keep working unchanged.
+ */
 export interface SpanMessage {
   role: string;
-  content: string;
+  content: string | SpanContentPart[];
 }
 
 /** LLM-specific attributes attached to `LLM` spans. */
@@ -149,6 +174,29 @@ export interface TraceWithSpans {
   spans: Span[];
 }
 
+/** Where an {@link Annotation} came from. */
+export type AnnotationSource = "user" | "claude-code" | "codex";
+
+/** What kind of note an {@link Annotation} records. */
+export type AnnotationKind = "issue" | "good" | "note";
+
+/**
+ * A note attached to a trace, or to one specific span within it — e.g. a
+ * reviewer flagging a bad tool call, or an agent leaving a note about a run
+ * it just replayed.
+ */
+export interface Annotation {
+  id: string;
+  traceId: string;
+  /** The span this annotation is attached to, or `undefined` for a trace-level annotation. */
+  spanId?: string;
+  kind: AnnotationKind;
+  note: string;
+  source: AnnotationSource;
+  /** Creation timestamp (ms). */
+  createdAt: number;
+}
+
 /** The kind of change that occurred to a trace. */
 export type TraceChangeType = "add" | "update" | "remove";
 
@@ -165,6 +213,24 @@ export type TraceStreamEvent =
   | { type: "span-update"; span: Span }
   | { type: "trace-update"; trace: Trace }
   | { type: "trace-end"; trace: Trace };
+
+/** The change an annotation event describes. */
+export type AnnotationEventOp = "insert" | "delete";
+
+/** The event a per-trace annotation subscription delivers. */
+export interface AnnotationEvent {
+  type: "annotation";
+  op: AnnotationEventOp;
+  annotation: Annotation;
+}
+
+/**
+ * Real-time event pushed over the per-trace SSE subscription, broadened
+ * beyond span/trace lifecycle to also carry annotation changes — so a client
+ * holding one `EventSource` open on a trace sees both without a second
+ * connection. See `specs/trace-workshopping.md` §C.2.
+ */
+export type TraceLiveEvent = TraceStreamEvent | AnnotationEvent;
 
 /** Information about a registered trace provider, returned by `GET /api/trace-providers`. */
 export interface TraceProviderInfo {

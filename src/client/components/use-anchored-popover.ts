@@ -57,7 +57,22 @@ export function useAnchoredPopover<T extends HTMLElement = HTMLElement>({
 } {
   const triggerRef = useRef<T>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const [style, setStyle] = useState<React.CSSProperties>({});
+  // Fixed-position from the very first render, not just after `updatePosition`
+  // runs: on a content-sized popover's first-ever open, the layout effect
+  // below measures `popoverRef.current` to clamp it back on screen — if that
+  // measurement happens while the node is still unstyled and in normal
+  // document flow, it reports a bogus full-width box instead of its real
+  // (shrink-to-fit) size, throwing the clamp math off and leaving the popover
+  // stuck in the wrong place for that open. Starting already `position:
+  // fixed` (even with no top/left yet) makes that first measurement accurate.
+  // (Deliberately not also starting `visibility: hidden` to mask the
+  // one-frame jump to the right spot — a `useEffect` inside the popover's
+  // content, such as an autofocus-first-item effect, can run before this
+  // hook's own layout effect corrects the position, in which case it would
+  // call `.focus()` on an element still hidden and the browser would refuse.)
+  const [style, setStyle] = useState<React.CSSProperties>({
+    position: "fixed",
+  });
 
   const updatePosition = useCallback(() => {
     if (!triggerRef.current) return;

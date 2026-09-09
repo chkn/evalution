@@ -9,6 +9,9 @@
 
 import type { TraceProvider } from "./trace-provider.ts";
 import type {
+  Annotation,
+  AnnotationEvent,
+  AnnotationEventOp,
   Span,
   Trace,
   TraceChangeEvent,
@@ -58,11 +61,15 @@ export abstract class BaseTraceProvider implements TraceProvider, TraceSink {
   readonly displayName?: string;
   readonly description?: string;
 
-  private subscribers = new Map<
+  protected subscribers = new Map<
     string,
     Set<(event: TraceStreamEvent) => void>
   >();
   private watchers = new Set<(event: TraceChangeEvent) => void>();
+  private annotationSubscribers = new Map<
+    string,
+    Set<(event: AnnotationEvent) => void>
+  >();
 
   constructor(options: {
     id: string;
@@ -124,6 +131,45 @@ export abstract class BaseTraceProvider implements TraceProvider, TraceSink {
     };
   }
 
+  /**
+   * Generic pub-sub for annotation changes — every subclass gets a working
+   * implementation "for free", even one with no annotation store of its own
+   * (e.g. `MemoryTraceProvider`): nothing is ever delivered unless a caller
+   * (the annotation REST handlers) explicitly calls {@link emitAnnotation}.
+   */
+  subscribeAnnotations(
+    traceId: string,
+    callback: (event: AnnotationEvent) => void,
+  ): () => void {
+    let set = this.annotationSubscribers.get(traceId);
+    if (!set) {
+      set = new Set();
+      this.annotationSubscribers.set(traceId, set);
+    }
+    set.add(callback);
+    return () => {
+      set!.delete(callback);
+      if (set!.size === 0) this.annotationSubscribers.delete(traceId);
+    };
+  }
+
+  emitAnnotation(
+    traceId: string,
+    op: AnnotationEventOp,
+    annotation: Annotation,
+  ): void {
+    const set = this.annotationSubscribers.get(traceId);
+    if (!set) return;
+    const event: AnnotationEvent = { type: "annotation", op, annotation };
+    for (const cb of set) {
+      try {
+        cb(event);
+      } catch (err) {
+        console.error("Annotation subscriber threw:", err);
+      }
+    }
+  }
+
   async recordSpanStart(span: Span): Promise<Span> {
     const isRoot = !span.parentId;
     if (isRoot && !(await this.hasTrace(span.traceId))) {
@@ -181,7 +227,7 @@ export abstract class BaseTraceProvider implements TraceProvider, TraceSink {
     this.emitChange({ type: "update", traceId });
   }
 
-  private emitStream(traceId: string, event: TraceStreamEvent): void {
+  protected emitStream(traceId: string, event: TraceStreamEvent): void {
     const set = this.subscribers.get(traceId);
     if (!set) return;
     for (const cb of set) {
@@ -193,7 +239,7 @@ export abstract class BaseTraceProvider implements TraceProvider, TraceSink {
     }
   }
 
-  private emitChange(event: TraceChangeEvent): void {
+  protected emitChange(event: TraceChangeEvent): void {
     for (const cb of this.watchers) {
       try {
         cb(event);

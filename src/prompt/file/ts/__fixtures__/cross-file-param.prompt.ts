@@ -6,8 +6,8 @@ import type { ThreadMessage } from "./thread-types.ts";
 
 export function summarize(
   title: string,
-  taskInfo: { description?: string | null },
-  threadMsgs: readonly Pick<ThreadMessage, "excerpt">[],
+  _taskInfo: { description?: string | null },
+  _threadMsgs: readonly Pick<ThreadMessage, "excerpt">[],
 ) {
   return {
     model: openai("gpt-4o"),
