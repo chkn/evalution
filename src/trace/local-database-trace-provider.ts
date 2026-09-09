@@ -62,6 +62,13 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
 
   private readonly bridgedTraceUnsubscribes = new Map<string, () => void>();
 
+  /**
+   * The failure from an earlier {@link open}, if any. Kept so a database that
+   * can't be opened fails fast on every later call rather than re-running
+   * migrations — and re-logging the same stack — once per span.
+   */
+  private openFailure: Error | undefined;
+
   constructor(options: LocalDatabaseTraceProviderOptions = {}) {
     super({
       id: options.id ?? "local-db",
@@ -73,14 +80,32 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
     this.ingestors = options.ingestors ?? [];
     for (const ingestor of this.ingestors) ingestor.addSink(this);
 
-    // Fire-and-forget: a constructor can't be async. Errors surface on the
-    // next read/write that awaits `ensureReal`/`currentReal` anyway, since
-    // `this.creating` stays rejected and every caller awaits the same
-    // promise.
+    // Fire-and-forget: a constructor can't be async, and nothing awaits this
+    // promise until the first read or write — so it must never reject, or an
+    // unhandled rejection takes the process down before anyone can report it.
+    // `reportOpenFailure` absorbs the error instead.
     this.creating = access(this.path, constants.R_OK | constants.W_OK).then(
-      () => this.open(),
+      () => this.open().catch(err => this.reportOpenFailure(err)),
       () => undefined, // if we can't access the file, eat the error for now (we try to open it again later)
     );
+  }
+
+  /**
+   * Reports — once — that the database could not be opened, and leaves this
+   * provider inert. Deliberately not fatal: the trace store is a feature of
+   * the playground, not a prerequisite for it, so a database left behind by
+   * an older schema shouldn't stop anyone from editing and running prompts.
+   * Explicit user actions still fail loudly (see {@link createAnnotation}).
+   */
+  private reportOpenFailure(err: unknown): undefined {
+    if (this.openFailure) return undefined;
+    this.openFailure = err instanceof Error ? err : new Error(String(err));
+    console.error(
+      `Could not open the trace database at ${this.path} — traces will not be recorded this session. ` +
+        "If it was created by an older version of evalution, deleting it will start a fresh one.\n",
+      this.openFailure,
+    );
+    return undefined;
   }
 
   /** The live provider if one exists, awaiting an already-in-flight open — but never starting one. */
@@ -95,10 +120,12 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
    * chain onto the same open instead of each starting their own — two sync
    * clients over one file fail outright with "database is busy".
    */
-  private ensureReal(): Promise<TursoTraceProvider> {
+  private ensureReal(): Promise<TursoTraceProvider | undefined> {
     if (this.real) return Promise.resolve(this.real);
+    if (this.openFailure) return Promise.resolve(undefined);
     const opening = (this.creating ?? Promise.resolve(undefined)).then(
-      existing => existing ?? this.open(),
+      existing =>
+        existing ?? this.open().catch(err => this.reportOpenFailure(err)),
     );
     this.creating = opening;
     return opening;
@@ -178,19 +205,22 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
 
   // ── TraceSink (write) — opens (and creates, on first write) the database ─
 
+  // With no database to record into, a span passes through unchanged —
+  // there is nothing stored to merge it with.
+
   override async recordSpanStart(span: Span): Promise<Span> {
-    return (await this.ensureReal()).recordSpanStart(span);
+    return (await this.ensureReal())?.recordSpanStart(span) ?? span;
   }
 
   override async recordSpanEnd(span: Span): Promise<Span> {
-    return (await this.ensureReal()).recordSpanEnd(span);
+    return (await this.ensureReal())?.recordSpanEnd(span) ?? span;
   }
 
   override async failTrace(
     traceId: string,
     errorMessage: string,
   ): Promise<void> {
-    await (await this.ensureReal()).failTrace(traceId, errorMessage);
+    await (await this.ensureReal())?.failTrace(traceId, errorMessage);
   }
 
   // ── annotation store — mirrors `TursoTraceProvider`'s (see its own docs) ─
@@ -200,11 +230,23 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
     return (await this.currentReal())?.listAnnotations(traceId) ?? [];
   }
 
-  /** Creates a new annotation, minting its `id`/`createdAt`. */
+  /**
+   * Creates a new annotation, minting its `id`/`createdAt`. Unlike span
+   * recording, this throws when the database can't be opened — someone asked
+   * for this note to be saved, so dropping it silently would be worse than
+   * the error.
+   */
   async createAnnotation(
     input: Omit<Annotation, "id" | "createdAt">,
   ): Promise<Annotation> {
-    return (await this.ensureReal()).createAnnotation(input);
+    const real = await this.ensureReal();
+    if (!real) {
+      throw new Error(
+        `Cannot save an annotation: the trace database at ${this.path} could not be opened.`,
+        { cause: this.openFailure },
+      );
+    }
+    return real.createAnnotation(input);
   }
 
   /** Deletes an annotation by id. A no-op if the database was never created. */

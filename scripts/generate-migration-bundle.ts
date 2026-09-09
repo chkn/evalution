@@ -17,6 +17,14 @@
  * content.
  *
  * Usage: `npm run db:bundle`, after `npm run db:generate`.
+ *
+ * ⚠️ Migrations are append-only once shipped. `migrateAsync` decides what to
+ * apply by comparing each bundled migration's `name` against the ledger, so
+ * regenerating an already-released migration (deleting its directory and
+ * re-running `db:generate`, which mints a fresh timestamped name) makes every
+ * existing database try to re-run its DDL and fail with "table already
+ * exists". Change the schema by adding a new migration, never by rewriting
+ * one that has been out in the world.
  */
 
 import { createHash } from "node:crypto";

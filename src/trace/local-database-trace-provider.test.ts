@@ -8,10 +8,13 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { dirname, join, resolve } from "node:path";
+import { drizzle } from "drizzle-orm/tursodatabase-sync";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createLocalTursoClient } from "./db/local-turso-client.ts";
+import { MIGRATIONS_TABLE, runMigrations } from "./db/migrate.ts";
 import {
   LocalDatabaseTraceProvider,
   resolveDbPath,
@@ -134,6 +137,71 @@ describe("LocalDatabaseTraceProvider — deferred creation", () => {
     // tick to finish before asserting.
     await new Promise(r => setTimeout(r, 50));
     expect(await second.getTrace("t1")).toBeDefined();
+  });
+});
+
+describe("LocalDatabaseTraceProvider — a database that can't be migrated", () => {
+  /**
+   * Writes a database whose tables exist but whose migration ledger doesn't
+   * name the migration we ship — exactly what an evalution build predating a
+   * regenerated migration leaves behind. `migrateAsync` matches applied
+   * migrations by name, so it re-runs the DDL and hits "table already exists".
+   */
+  async function writeStaleDb(dbPath: string): Promise<void> {
+    await mkdir(dirname(dbPath), { recursive: true });
+    const client = await createLocalTursoClient({ path: dbPath });
+    await runMigrations(drizzle({ client }));
+    await client.exec(
+      `UPDATE ${MIGRATIONS_TABLE} SET name = 'some_older_migration'`,
+    );
+  }
+
+  it("reports the failure without taking the process down", async () => {
+    const dbPath = await tempDbPath();
+    await writeStaleDb(dbPath);
+    const errors: unknown[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args);
+    });
+
+    try {
+      const provider = new LocalDatabaseTraceProvider({ path: dbPath });
+      // A rejection here used to escape the constructor's fire-and-forget
+      // open as an unhandled rejection, killing the server at startup.
+      const span = rootSpan("t1");
+      expect(await provider.recordSpanStart(span)).toEqual(span);
+      expect(await provider.getAllTraces()).toEqual([]);
+
+      expect(errors).toHaveLength(1);
+      expect(String(errors[0])).toContain(dbPath);
+
+      // Later writes reuse the recorded failure rather than retrying (and
+      // re-logging) once per span.
+      await provider.recordSpanEnd({ ...span, endTime: Date.now() });
+      expect(errors).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("still fails loudly when someone explicitly saves an annotation", async () => {
+    const dbPath = await tempDbPath();
+    await writeStaleDb(dbPath);
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const provider = new LocalDatabaseTraceProvider({ path: dbPath });
+      await expect(
+        provider.createAnnotation({
+          traceId: "t1",
+          kind: "note",
+          note: "hi",
+          source: "user",
+        }),
+      ).rejects.toThrow(/could not be opened/);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
