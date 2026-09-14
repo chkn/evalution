@@ -7,7 +7,7 @@
 // self-contained — it must import nothing from the rest of the core, only the
 // dual-licensed `src/trace/` glue and a type-only `ai` import. See LICENSING.md.
 
-import type { ModelMessage, Telemetry } from "ai"; // type-only: keeps `ai` an optional peer dep
+import type { Instructions, ModelMessage, Telemetry } from "ai"; // type-only: keeps `ai` an optional peer dep
 
 import type { PromptSpanInfo } from "../../trace/prompt-tracer.ts";
 
@@ -60,8 +60,23 @@ export interface VercelAISDKTelemetryOptions {
   nativeTelemetry?: "auto" | "always" | "never";
 }
 
-function toSpanMessages(messages: ModelMessage[]): SpanMessage[] | undefined {
-  return messages.map(msg => {
+function toSpanMessages(
+  messages: ModelMessage[],
+  instructions?: Instructions,
+): SpanMessage[] | undefined {
+  let combinedMessages: ModelMessage[];
+  if (instructions) {
+    const systemMessages: ModelMessage[] =
+      typeof instructions === "string"
+        ? [{ role: "system", content: instructions }]
+        : Array.isArray(instructions)
+          ? instructions
+          : [instructions];
+    combinedMessages = [...systemMessages, ...messages];
+  } else {
+    combinedMessages = messages;
+  }
+  return combinedMessages.map(msg => {
     const role = msg.role;
     const content = msg.content;
     if (typeof content === "string") return { role, content };
@@ -213,7 +228,7 @@ export class VercelAISDKTelemetry
     }: { identity?: PromptSpanInfo; traceId?: string } = {},
   ): Promise<void> {
     const startTime = Date.now();
-    const name = identity?.name ?? event.operationId ?? "generation";
+    const name = identity?.id ?? event.operationId ?? "generation";
 
     const span: Span = {
       id: `${traceId}:root`,
@@ -249,12 +264,12 @@ export class VercelAISDKTelemetry
     const run = this.runs.get(event.callId);
     if (!run) return;
 
-    const messages = toSpanMessages(event.messages);
+    const messages = toSpanMessages(event.messages, event.instructions);
     const span: Span = {
       id: crypto.randomUUID(),
       traceId: run.traceId,
       parentId: run.root.id,
-      name: `step: ${event.stepNumber}`,
+      name: event.modelId,
       kind: "LLM",
       startTime: Date.now(),
       llm: {

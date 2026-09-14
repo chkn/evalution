@@ -6,7 +6,6 @@ import { dirname, resolve } from "node:path";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { createLocalTursoClient } from "./db/local-turso-client.ts";
 import { runMigrations } from "./db/migrate.ts";
-import type { TraceIngestor } from "./trace-ingestor.ts";
 import type { TraceProvider } from "./trace-provider.ts";
 import { BaseTraceProvider } from "./trace-sink.ts";
 import type {
@@ -43,8 +42,6 @@ export interface LocalDatabaseTraceProviderOptions {
   id?: string;
   displayName?: string;
   description?: string;
-  /** Ingestors to connect to this provider as a sink. */
-  ingestors?: TraceIngestor[];
 }
 
 /**
@@ -56,7 +53,6 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
   /** The resolved (absolute) path this provider opens — see {@link LocalDatabaseTraceProviderOptions.path}. */
   readonly path: string;
 
-  private readonly ingestors: TraceIngestor[];
   private real: TursoTraceProvider | undefined;
   private creating: Promise<TursoTraceProvider | undefined> | undefined;
 
@@ -77,8 +73,6 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
         options.description ?? "Stores traces in a local SQLite database.",
     });
     this.path = resolveDbPath(options.path);
-    this.ingestors = options.ingestors ?? [];
-    for (const ingestor of this.ingestors) ingestor.addSink(this);
 
     // Fire-and-forget: a constructor can't be async, and nothing awaits this
     // promise until the first read or write — so it must never reject, or an

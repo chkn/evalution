@@ -90,7 +90,8 @@ describe("VercelAISDK", () => {
       // makes the spans land in the route's trace, so there's exactly one, and
       // the passed identity links it back to the prompt.
       const telemetry = await sdk.setupTraceIngestion();
-      const provider = new MemoryTraceProvider({ ingestors: [telemetry!] });
+      const provider = new MemoryTraceProvider();
+      telemetry!.addSink(provider);
 
       let work: Promise<void> | undefined;
       generateTextMock.mockImplementation((cfg: any) => {
@@ -131,7 +132,7 @@ describe("VercelAISDK", () => {
       expect(trace?.spans.length).toBeGreaterThan(0);
       const root = trace?.spans.find(s => !s.parentId);
       expect(root?.prompt?.id).toBe("weather.ts#weatherAgent");
-      expect(trace?.trace.name).toBe("weatherAgent");
+      expect(trace?.trace.name).toBe("weather.ts#weatherAgent");
       expect(await provider.getAllTraces()).toHaveLength(1); // no duplicate
     });
   });

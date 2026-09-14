@@ -19,9 +19,7 @@ import {
   LocalDatabaseTraceProvider,
   resolveDbPath,
 } from "./local-database-trace-provider.ts";
-import type { TraceIngestor } from "./trace-ingestor.ts";
 import { runTraceProviderContractTests } from "./trace-provider-contract.ts";
-import type { TraceSink } from "./trace-sink.ts";
 import type {
   Span,
   TraceChangeEvent,
@@ -299,22 +297,5 @@ describe("LocalDatabaseTraceProvider — path resolution", () => {
 
     await provider.recordSpanStart(rootSpan("t1"));
     expect(existsSync(absPath)).toBe(true);
-  });
-});
-
-describe("LocalDatabaseTraceProvider — ingestors", () => {
-  it("connects ingestors passed at construction time as sinks of the wrapper itself", async () => {
-    const dbPath = await tempDbPath();
-    const sinksCalled: TraceSink[] = [];
-    const ingestor: TraceIngestor = {
-      addSink: (sink: TraceSink) => sinksCalled.push(sink),
-      removeSink: () => false,
-    };
-    const provider = new LocalDatabaseTraceProvider({
-      path: dbPath,
-      ingestors: [ingestor],
-    });
-
-    expect(sinksCalled).toEqual([provider]);
   });
 });

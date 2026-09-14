@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "c943d853-2ec2-44b5-9bf8-2dc4413e930d",
+  "id": "025af179-5059-4ca8-9f56-435c38be2ffb",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -234,7 +234,17 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "llm_cost",
+      "name": "llm_cost_prompt",
+      "entityType": "columns",
+      "table": "spans"
+    },
+    {
+      "type": "real",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "llm_cost_completion",
       "entityType": "columns",
       "table": "spans"
     },

@@ -128,7 +128,7 @@ describe("TursoTraceProvider row round-tripping", () => {
         promptTokens: 5,
         completionTokens: 7,
         totalTokens: 12,
-        cost: 0.01,
+        cost: { prompt: 0.004, completion: 0.006 },
         messages: [
           {
             role: "user",
@@ -176,7 +176,7 @@ describe("TursoTraceProvider row round-tripping", () => {
       promptTokens: 5,
       completionTokens: 7,
       totalTokens: 12,
-      cost: 0.01,
+      cost: { prompt: 0.004, completion: 0.006 },
       messages: [
         {
           role: "user",

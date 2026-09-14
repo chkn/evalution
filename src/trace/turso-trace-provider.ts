@@ -13,7 +13,6 @@ import { desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { annotations, spans, traces } from "./db/schema.ts";
 import { mergeSpans } from "./span-merge.ts";
-import type { TraceIngestor } from "./trace-ingestor.ts";
 import { BaseTraceProvider } from "./trace-sink.ts";
 import type {
   Annotation,
@@ -73,7 +72,8 @@ function spanToRow(span: Span) {
     llmPromptTokens: span.llm?.promptTokens ?? null,
     llmCompletionTokens: span.llm?.completionTokens ?? null,
     llmTotalTokens: span.llm?.totalTokens ?? null,
-    llmCost: span.llm?.cost ?? null,
+    llmCostPrompt: span.llm?.cost?.prompt ?? null,
+    llmCostCompletion: span.llm?.cost?.completion ?? null,
     llmMessages: span.llm?.messages ? JSON.stringify(span.llm.messages) : null,
     llmOutput: span.llm?.output ?? null,
     llmParameters: span.llm?.modelParameters
@@ -94,7 +94,10 @@ function rowToSpan(row: typeof spans.$inferSelect): Span {
       completionTokens: row.llmCompletionTokens,
     }),
     ...(row.llmTotalTokens != null && { totalTokens: row.llmTotalTokens }),
-    ...(row.llmCost != null && { cost: row.llmCost }),
+    ...(row.llmCostPrompt != null &&
+      row.llmCostCompletion != null && {
+        cost: { prompt: row.llmCostPrompt, completion: row.llmCostCompletion },
+      }),
     ...(row.llmMessages && {
       messages: parseJson<SpanMessage[]>(row.llmMessages),
     }),
@@ -172,19 +175,15 @@ export class TursoTraceProvider extends BaseTraceProvider {
     id = "turso",
     displayName = "Traces",
     description = "Stores traces in a local (optionally synced) SQLite database.",
-    ingestors = [],
   }: {
     /** An already-connected `@tursodatabase/sync` client. */
     client: Database;
     id?: string;
     displayName?: string;
     description?: string;
-    /** Ingestors to connect to this provider as a sink. */
-    ingestors?: TraceIngestor[];
   }) {
     super({ id, displayName, description });
     this.db = drizzle({ client });
-    for (const ingestor of ingestors) ingestor.addSink(this);
   }
 
   /**

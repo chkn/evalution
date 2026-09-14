@@ -25,7 +25,8 @@ function makeTracer(ingestor: OTelTraceIngestor) {
 describe("OTelTraceIngestor", () => {
   it("records a root span as a new trace and exposes it via getTrace", async () => {
     const ingestor = new OTelTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
     const tracer = makeTracer(ingestor);
 
     const span = tracer.startSpan("hello", {
@@ -49,7 +50,8 @@ describe("OTelTraceIngestor", () => {
     // parsed back by nothing — the OTel path could record inputs but never
     // replay them.
     const ingestor = new OTelTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
     const tracer = makeTracer(ingestor);
 
     const functionInputs = [
@@ -91,7 +93,8 @@ describe("OTelTraceIngestor", () => {
 
   it("drops an unreadable inputs attribute rather than failing the span", async () => {
     const ingestor = new OTelTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
     const tracer = makeTracer(ingestor);
 
     const span = tracer.startSpan("run", {
@@ -112,7 +115,8 @@ describe("OTelTraceIngestor", () => {
 
   it("stores the prompt reference raw — global id without a provider, scoped id with one", async () => {
     const ingestor = new OTelTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
     const tracer = makeTracer(ingestor);
 
     // A runtime span: only a (global) prompt id, no provider.
@@ -146,7 +150,8 @@ describe("OTelTraceIngestor", () => {
 
   it("keeps attributes set at creation as well as ones set after the span starts", async () => {
     const ingestor = new OTelTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
     const tracer = makeTracer(ingestor);
 
     // Set one attribute at creation (visible at onStart) and another later
@@ -166,7 +171,8 @@ describe("OTelTraceIngestor", () => {
 
   it("reads LLM input/output/usage from the Vercel AI SDK attribute names", async () => {
     const ingestor = new OTelTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
     const tracer = makeTracer(ingestor);
 
     // The Vercel AI SDK emits `ai.prompt.messages` / `ai.response.text` /
@@ -196,7 +202,8 @@ describe("OTelTraceIngestor", () => {
 
   it("streams span-start, span-end and trace-end events in order", async () => {
     const ingestor = new OTelTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
     const tracer = makeTracer(ingestor);
 
     const root = tracer.startSpan("root");
@@ -218,7 +225,8 @@ describe("OTelTraceIngestor", () => {
 
   it("parents child spans via parentId and keeps the trace running until the root ends", async () => {
     const ingestor = new OTelTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
     const tracer = makeTracer(ingestor);
 
     const root = tracer.startSpan("root");
@@ -248,7 +256,8 @@ describe("OTelTraceIngestor", () => {
 
   it("marks the trace as error when the root span fails", async () => {
     const ingestor = new OTelTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
     const tracer = makeTracer(ingestor);
 
     const root = tracer.startSpan("root");
@@ -263,7 +272,8 @@ describe("OTelTraceIngestor", () => {
 
   it("getAllTraces lists traces newest-first", async () => {
     const ingestor = new OTelTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
     const tracer = makeTracer(ingestor);
 
     const a = tracer.startSpan("a");
@@ -280,7 +290,8 @@ describe("OTelTraceIngestor", () => {
 
   it("notifies watchers on add and update", async () => {
     const ingestor = new OTelTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
     const tracer = makeTracer(ingestor);
     const seen: string[] = [];
     provider.watch(e => seen.push(`${e.type}:${e.traceId}`));

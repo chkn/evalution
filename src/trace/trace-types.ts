@@ -65,6 +65,8 @@ export interface SpanImagePart {
   mediaType?: string;
 }
 
+export type SpanMessageRole = string; // known values: "user" | "assistant" | "system" | "tool"
+
 /** One segment of a multi-part {@link SpanMessage} content. */
 export type SpanContentPart = SpanTextPart | SpanImagePart;
 
@@ -77,7 +79,7 @@ export type SpanContentPart = SpanTextPart | SpanImagePart;
  * already-stored rows keep working unchanged.
  */
 export interface SpanMessage {
-  role: string;
+  role: SpanMessageRole;
   content: string | SpanContentPart[];
 }
 
@@ -97,8 +99,14 @@ export interface LLMSpanDetails {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
-  /** Dollar cost of the call, if known. */
-  cost?: number;
+  /**
+   * Dollar cost of the call, broken down by token type, if known. The total
+   * cost is `cost.prompt + cost.completion`.
+   */
+  cost?: {
+    prompt: number;
+    completion: number;
+  };
 }
 
 export interface ToolSpanDetails {

@@ -22,16 +22,18 @@ function traceDuration(t: TraceSummary): number | undefined {
   return t.endTime !== undefined ? t.endTime - t.startTime : undefined;
 }
 
-/** Columns the wide (table) layout can sort by — the sidebar-only trio, not name. */
-type SortKey = "startTime" | "spanCount" | "duration";
+/** Columns the wide (table) layout can sort by. */
+type SortKey = "name" | "startTime" | "spanCount" | "duration";
 
 interface SortState {
   key: SortKey;
   dir: "asc" | "desc";
 }
 
-function sortValue(t: TraceSummary, key: SortKey): number | undefined {
+function sortValue(t: TraceSummary, key: SortKey): number | string | undefined {
   switch (key) {
+    case "name":
+      return t.name;
     case "startTime":
       return t.startTime;
     case "spanCount":
@@ -47,6 +49,9 @@ function sortTraces(traces: TraceSummary[], sort: SortState): TraceSummary[] {
   return [...traces].sort((a, b) => {
     const av = sortValue(a, sort.key);
     const bv = sortValue(b, sort.key);
+    if (typeof av === "string" || typeof bv === "string") {
+      return (av as string).localeCompare(bv as string) * sign;
+    }
     if (av === undefined) return bv === undefined ? 0 : 1;
     if (bv === undefined) return -1;
     return (av - bv) * sign;
@@ -59,17 +64,19 @@ function SortableHeader({
   sortKey,
   sort,
   onSort,
+  className = "trace-table-th",
 }: {
   label: string;
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   sortKey: SortKey;
   sort: SortState;
   onSort: (key: SortKey) => void;
+  className?: string;
 }) {
   const active = sort.key === sortKey;
   return (
     <th
-      className="trace-table-th"
+      className={className}
       aria-sort={
         active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"
       }
@@ -80,7 +87,7 @@ function SortableHeader({
         onClick={() => onSort(sortKey)}
         title={`Sort by ${label}`}
       >
-        {icon}
+        {icon ?? label}
         <span className="trace-table-sort-arrow" aria-hidden>
           {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
         </span>
@@ -198,7 +205,13 @@ function TraceList({
         <table className="trace-table">
           <thead>
             <tr>
-              <th className="trace-table-name-th">Name</th>
+              <SortableHeader
+                label="Name"
+                sortKey="name"
+                sort={sort}
+                onSort={toggleSort}
+                className="trace-table-name-th"
+              />
               <SortableHeader
                 label="Date"
                 icon={<CalendarIcon />}

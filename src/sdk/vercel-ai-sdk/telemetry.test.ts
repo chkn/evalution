@@ -50,7 +50,8 @@ function stepEndEvent(callId: string, text: string) {
 describe("Evalution", () => {
   it("createTelemetryForPrompt records a single-step generation with full prompt identity", async () => {
     const evalution = new VercelAISDKTelemetry();
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
 
     const traceId = "trace-1";
     const integration = evalution
@@ -86,7 +87,8 @@ describe("Evalution", () => {
 
   it("keeps image content parts instead of dropping image-only messages", async () => {
     const evalution = new VercelAISDKTelemetry();
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
     const traceId = "trace-image";
     const integration = evalution
       .createTelemetryForPrompt({ id: "mod#see", name: "see" })
@@ -137,7 +139,8 @@ describe("Evalution", () => {
     // a live database handle, which serializes into a span as a useless blob
     // and is not what a replay needs anyway.
     const evalution = new VercelAISDKTelemetry();
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
     const traceId = "trace-inputs";
     const functionInputs = [
       { kind: "value", value: { kind: "primitive", value: "Ada" } },
@@ -166,7 +169,8 @@ describe("Evalution", () => {
 
   it("records a tool call nested under the current step", async () => {
     const evalution = new VercelAISDKTelemetry();
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
     const traceId = "trace-tool";
     const integration = evalution
       .createTelemetryForPrompt({ id: "mod#agent", name: "agent" })
@@ -205,7 +209,8 @@ describe("Evalution", () => {
 
   it("correlates parallel tool calls by toolCallId", async () => {
     const evalution = new VercelAISDKTelemetry();
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
     const traceId = "trace-parallel-tools";
     const integration = evalution
       .createTelemetryForPrompt({ id: "mod#agent", name: "agent" })
@@ -268,7 +273,8 @@ describe("Evalution", () => {
 
   it("marks a step span as error when its finishReason is error", async () => {
     const evalution = new VercelAISDKTelemetry();
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
     const traceId = "trace-step-err";
     const integration = evalution
       .createTelemetryForPrompt({ id: "mod#x", name: "x" })
@@ -294,7 +300,8 @@ describe("Evalution", () => {
 
   it("fail() ends still-open child spans as error, not just the trace", async () => {
     const evalution = new VercelAISDKTelemetry();
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
     const traceId = "trace-fail-leak";
     const integration = evalution
       .createTelemetryForPrompt({ id: "mod#x", name: "x" })
@@ -322,7 +329,8 @@ describe("Evalution", () => {
 
   it("marks a tool span as error when toolOutput.type is tool-error", async () => {
     const evalution = new VercelAISDKTelemetry();
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
     const traceId = "trace-tool-err";
     const integration = evalution
       .createTelemetryForPrompt({ id: "mod#agent", name: "agent" })
@@ -357,7 +365,8 @@ describe("Evalution", () => {
 
   it("root onStart lazily creates the running trace and emits span-start", async () => {
     const evalution = new VercelAISDKTelemetry();
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
     const traceId = "trace-pre";
     const integration = evalution
       .createTelemetryForPrompt({ id: "mod#x", name: "x" })
@@ -372,13 +381,14 @@ describe("Evalution", () => {
     await integration.onStart?.(startEvent("call-pre"));
 
     expect(events).toContain("span-start");
-    expect((await provider.getTrace(traceId))?.trace.name).toBe("x");
+    expect((await provider.getTrace(traceId))?.trace.name).toBe("mod#x");
     expect((await provider.getTrace(traceId))?.trace.status).toBe("running");
   });
 
   it("abort finishes the trace as error", async () => {
     const evalution = new VercelAISDKTelemetry();
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
     const traceId = "trace-abort";
     const integration = evalution
       .createTelemetryForPrompt({ id: "mod#x", name: "x" })
@@ -398,7 +408,8 @@ describe("Evalution", () => {
 
   it("two concurrent createTelemetryForPrompt integrations stay in separate traces", async () => {
     const evalution = new VercelAISDKTelemetry();
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
     const traceIdA = "trace-concurrent-a";
     const traceIdB = "trace-concurrent-b";
     const a = evalution
@@ -456,7 +467,8 @@ describe("Evalution", () => {
 
   it('global fallback onStart is a no-op when nativeTelemetry is "never"', async () => {
     const evalution = new VercelAISDKTelemetry({ nativeTelemetry: "never" });
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
 
     await evalution.onStart(startEvent("call-never"));
 
@@ -468,7 +480,8 @@ describe("Evalution", () => {
     (globalThis as any).AI_SDK_TELEMETRY_INTEGRATIONS = [new OpenTelemetry()];
 
     const evalution = new VercelAISDKTelemetry();
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
 
     await evalution.onStart(startEvent("call-auto-defer"));
 
@@ -477,7 +490,8 @@ describe("Evalution", () => {
 
   it("global fallback records without prompt identity when not deferring", async () => {
     const evalution = new VercelAISDKTelemetry();
-    const provider = new MemoryTraceProvider({ ingestors: [evalution] });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
 
     await evalution.onStart(startEvent("call-fallback"));
     await evalution.onEnd({ callId: "call-fallback" } as any);

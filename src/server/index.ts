@@ -38,14 +38,6 @@ export interface ServerOptions {
    * `SetupRoutesOptions.otlpIngestor`.
    */
   otlpIngestor?: OtlpTraceIngestor;
-  /**
-   * Id of the trace provider new traces should be attributed to when more
-   * than one is configured — set by the CLI to whichever provider it built
-   * itself (Memory or Turso) on the default (`config.traceProviders`
-   * omitted) path. Falls back to `traceProviders[0]` when unset — e.g. a
-   * project supplying its own `traceProviders` picks its own default.
-   */
-  defaultTraceProviderId?: string;
 }
 
 /** A running server, returned by {@link startServer}. */
@@ -71,7 +63,6 @@ export async function startServer(
     hasConfig,
     terminalSessions,
     otlpIngestor,
-    defaultTraceProviderId: preferredTraceProviderId,
   } = options;
 
   const promptProviderMap = new Map(promptProviders.map(p => [p.id, p]));
@@ -91,13 +82,8 @@ export async function startServer(
   // With no adapter registering one, this is a no-op tracer.
   const tracer = trace.getTracer("evalution");
 
-  // For the UI to render new traces, prefer whichever provider the caller
-  // built itself (see `ServerOptions.defaultTraceProviderId`), otherwise just
-  // use the first.
-  const defaultTraceProvider =
-    (preferredTraceProviderId &&
-      traceProviderMap.get(preferredTraceProviderId)) ??
-    traceProviders[0];
+  // New traces from the playground are attributed to the first provider.
+  const defaultTraceProvider = traceProviders[0];
   if (!defaultTraceProvider) {
     throw new Error("At least one trace provider must be configured");
   }

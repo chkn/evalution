@@ -18,7 +18,7 @@ import {
 
 export interface PromptsHelperOptions {
   /**
-   * Globally-unique identifier for this group of prompts.
+   * Globally-unique stable identifier for this group of prompts.
    */
   readonly id: string;
 }

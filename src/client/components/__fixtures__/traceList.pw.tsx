@@ -114,7 +114,8 @@ test.describe("wide width: sortable table", () => {
     await expect(component.locator(".trace-list-cards")).toBeHidden();
     await expect(component.locator(".trace-table")).toBeVisible();
 
-    // Header icons, one per sortable column, plus the plain "Name" header.
+    // Header icons, one per icon-only sortable column, plus the sortable
+    // text-label "Name" header.
     await expect(component.locator("thead th")).toHaveCount(4);
     await expect(component.locator("thead th").first()).toHaveText("Name");
     const sortHeaders = component.locator(".trace-table-th");
@@ -156,6 +157,28 @@ test.describe("wide width: sortable table", () => {
     await expect
       .poll(rowNames)
       .toEqual(["old and small", "still running", "new and big"]);
+  });
+
+  test("clicking the Name header sorts alphabetically", async ({
+    mount,
+    page,
+  }) => {
+    await page.setViewportSize({ width: 420, height: 700 });
+    const component = await mount(<TraceListHarness traces={TRACES} />);
+    const rowNames = () =>
+      component.locator(".trace-table-row .trace-list-name").allTextContents();
+
+    // First click defaults to descending, like every other column.
+    await component.locator(".trace-table-name-th").locator("button").click();
+    await expect
+      .poll(rowNames)
+      .toEqual(["still running", "old and small", "new and big"]);
+
+    // Click again reverses to ascending.
+    await component.locator(".trace-table-name-th").locator("button").click();
+    await expect
+      .poll(rowNames)
+      .toEqual(["new and big", "old and small", "still running"]);
   });
 
   test("a still-running trace (no duration) always sorts last", async ({

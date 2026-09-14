@@ -8,7 +8,7 @@ import { BaseTraceProvider } from "./trace-sink.ts";
 
 /**
  * In-memory {@link TraceProvider}, populated by one or more
- * {@link TraceIngestor}s connected at construction time.
+ * {@link TraceIngestor}s, each connected via `ingestor.addSink(provider)`.
  */
 export class MemoryTraceProvider extends BaseTraceProvider {
   private traces = new Map<string, Trace>();
@@ -18,16 +18,12 @@ export class MemoryTraceProvider extends BaseTraceProvider {
     id = "memory",
     displayName = "In-Memory Traces",
     description = "Stores traces in memory for the current process.",
-    ingestors = [],
   }: {
     id?: string;
     displayName?: string;
     description?: string;
-    /** Ingestors to connect to this provider as a sink. */
-    ingestors?: TraceIngestor[];
   } = {}) {
     super({ id, displayName, description });
-    for (const ingestor of ingestors) ingestor.addSink(this);
   }
 
   async getAllTraces(): Promise<TraceSummary[]> {

@@ -39,6 +39,7 @@ On startup Evalution opens the playground in your default browser automatically.
 | --- | --- |
 | `PORT` | Port for the local server. When set, it's used as-is. When unset, Evalution uses `3000`, falling back to the next free port if it's already taken. |
 | `EVALUTION_NO_OPEN` | When set to any value, Evalution does **not** open the playground in your browser on start — useful for CI and remote or headless hosts. |
+| `EVALUTION_NO_COST_ESTIMATES` | By default, the first time a trace records an LLM call with token usage, Evalution downloads model prices from OpenRouter's public catalog (`https://openrouter.ai/api/v1/models`) to show estimated costs. When set to any value, that request is never made and traces show no costs — useful for offline or air-gapped hosts. |
 
 ### Provider API keys
 

@@ -304,11 +304,11 @@ export type Prompt = GenerateTextConfig | StreamTextConfig; // | Agent<any, any,
  * The second argument is a factory function that receives a {@link Providers} object
  * and returns a record of prompt-building functions. Each key in the returned record
  * is the prompt name, and each value is a function that returns a Vercel AI SDK config object
- * (`generateText` / `streamText` parameters) with `experimental_telemetry`
- * automatically populated. The `Providers` object lazily imports provider singletons
- * (e.g. `openai` from `@ai-sdk/openai`) on first access, so only the providers you
- * destructure need to be installed. You can override individual providers by passing
- * a `Partial<{@link Providers}>` to the function returned by `prompts`.
+ * (`generateText` / `streamText` parameters) with telemetry automatically configured.
+ *
+ * The {@link Providers} object lazily imports provider singletons (e.g. `openai` from `@ai-sdk/openai`)
+ * on first access, so only the providers you destructure need to be installed. You can override
+ * individual providers by passing a `Partial<Providers>` to the function returned by `prompts`.
  *
  * @example
  * ```ts

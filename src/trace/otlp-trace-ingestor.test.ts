@@ -21,7 +21,8 @@ function span(overrides: Partial<NormalizedOtlpSpan>): NormalizedOtlpSpan {
 describe("OtlpTraceIngestor", () => {
   it("records a fully-ended root span as a completed trace", async () => {
     const ingestor = new OtlpTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
 
     await ingestor.ingest([
       span({
@@ -40,7 +41,8 @@ describe("OtlpTraceIngestor", () => {
 
   it("leaves a still-running trace when a span carries no end time", async () => {
     const ingestor = new OtlpTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
 
     await ingestor.ingest([span({ startTimeMs: 5 })]);
 
@@ -51,7 +53,8 @@ describe("OtlpTraceIngestor", () => {
 
   it("resolves a child delivered before its parent in the same batch", async () => {
     const ingestor = new OtlpTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
 
     // Deliberately out of order: the child appears first in the array.
     await ingestor.ingest([
@@ -80,7 +83,8 @@ describe("OtlpTraceIngestor", () => {
 
   it("maps gen_ai attributes into span kind and LLM details", async () => {
     const ingestor = new OtlpTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
 
     await ingestor.ingest([
       span({
@@ -105,7 +109,8 @@ describe("OtlpTraceIngestor", () => {
 
   it("maps tool-call attributes into ToolSpanDetails", async () => {
     const ingestor = new OtlpTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
 
     await ingestor.ingest([
       span({
@@ -131,7 +136,8 @@ describe("OtlpTraceIngestor", () => {
 
   it("falls back to an exception event's message when status carries none", async () => {
     const ingestor = new OtlpTraceIngestor();
-    const provider = new MemoryTraceProvider({ ingestors: [ingestor] });
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
 
     await ingestor.ingest([
       span({

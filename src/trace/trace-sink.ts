@@ -46,6 +46,16 @@ export interface TraceSink {
   failTrace(traceId: string, errorMessage: string): Promise<void>;
 }
 
+export function isTraceSink(o: any): o is TraceSink {
+  return (
+    typeof o === "object" &&
+    o !== null &&
+    typeof o.recordSpanStart === "function" &&
+    typeof o.recordSpanEnd === "function" &&
+    typeof o.failTrace === "function"
+  );
+}
+
 /**
  * Source-agnostic base class for a {@link TraceProvider}. Owns storage
  * delegation, subscriptions, watchers, and the generic trace lifecycle that

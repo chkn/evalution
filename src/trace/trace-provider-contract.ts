@@ -9,7 +9,6 @@
  */
 
 import { afterAll, describe, expect, it } from "vitest";
-import type { TraceIngestor } from "./trace-ingestor.ts";
 import type { TraceSink } from "./trace-sink.ts";
 import type { Span, TraceStreamEvent } from "./trace-types.ts";
 
@@ -48,10 +47,7 @@ function rootSpan(traceId: string, overrides: Partial<Span> = {}): Span {
  */
 export function runTraceProviderContractTests(
   name: string,
-  makeProvider: (opts?: {
-    id?: string;
-    ingestors?: TraceIngestor[];
-  }) => Promise<ContractProvider>,
+  makeProvider: (opts?: { id?: string }) => Promise<ContractProvider>,
   cleanup?: () => Promise<void>,
 ) {
   describe(name, () => {
@@ -209,20 +205,6 @@ export function runTraceProviderContractTests(
 
       const loaded = await provider.getTrace("t1");
       expect((loaded as any)?.spans).toHaveLength(4);
-    });
-
-    it("connects ingestors passed at construction time as sinks", async () => {
-      const sinksCalled: TraceSink[] = [];
-      const ingestor: TraceIngestor = {
-        addSink: (sink: TraceSink) => sinksCalled.push(sink),
-        removeSink: () => false,
-      };
-      const provider = await makeProvider({
-        id: "custom-id",
-        ingestors: [ingestor],
-      });
-
-      expect(sinksCalled).toEqual([provider]);
     });
   });
 }

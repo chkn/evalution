@@ -34,3 +34,16 @@ export function formatTimestampCompact(ms: number): string {
     minute: "2-digit",
   });
 }
+
+/** A token count with thousands separators, e.g. `12,345`. */
+export function formatTokenCount(tokens: number): string {
+  return tokens.toLocaleString();
+}
+
+/** A dollar cost, e.g. `$0.00012` — per-call costs are tiny fractions of a cent. */
+export function formatCost(cost: number): string {
+  if (cost < 0.0001) return "<$0.0001";
+  if (cost < 0.01) return `$${cost.toFixed(4)}`;
+  if (cost < 1) return `$${cost.toFixed(3)}`;
+  return `$${cost.toFixed(2)}`;
+}

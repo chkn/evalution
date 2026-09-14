@@ -3083,7 +3083,7 @@ pre {
 
 /* Below this width there's no room for the meta row without wrapping —
    drop it rather than wrap, per the card layout's one-line-of-meta design. */
-@container trace-list (max-width: 189px) {
+@container trace-list (max-width: 220px) {
   .trace-list-row-meta {
     display: none;
   }
@@ -3101,7 +3101,7 @@ pre {
   font-size: 11.5px;
 }
 
-@container trace-list (min-width: 400px) {
+@container trace-list (min-width: 325px) {
   .trace-list-cards {
     display: none;
   }
@@ -3402,7 +3402,7 @@ pre {
   display: none;
 }
 
-@container trace-header (max-width: 460px) {
+@container trace-header (max-width: 625px) {
   .trace-view-header-actions-full {
     display: none;
   }
@@ -3442,10 +3442,12 @@ pre {
 
 .trace-view-meta {
   display: flex;
+  flex-wrap: nowrap;
   height: 14px;
   gap: 12px;
   color: var(--trace-text-dim);
   font-size: 11.5px;
+  overflow: hidden;
 }
 
 .trace-view-meta-item {
@@ -3453,10 +3455,59 @@ pre {
   align-items: center;
   gap: 4px;
   line-height: 14px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .trace-view-meta-item svg {
   flex-shrink: 0;
+}
+
+@container trace-header (max-width: 550px) {
+  .trace-view-meta-model {
+    display: none;
+  }
+}
+
+@container trace-header (max-width: 450px) {
+  .trace-view-meta-tokens {
+    display: none;
+  }
+}
+
+.trace-cost-meta {
+  cursor: default;
+}
+
+.trace-cost-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+  max-width: calc(100vw - 16px);
+  padding: 8px 10px;
+  background: var(--dropdown-bg);
+  border: 1px solid var(--dropdown-border);
+  border-radius: 8px;
+  box-shadow: var(--dropdown-shadow);
+  color: var(--trace-text);
+  font-size: 11.5px;
+  line-height: 16px;
+}
+
+.trace-cost-tooltip-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.trace-cost-tooltip-total {
+  padding-top: 4px;
+  border-top: 1px solid var(--dropdown-border);
+  color: var(--trace-text);
+  font-weight: 600;
 }
 
 .trace-header-menu {
@@ -3502,9 +3553,104 @@ pre {
   text-align: left;
 }
 
-.trace-waterfall {
+.trace-view-body {
   flex: 1;
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+}
+
+.trace-view-main-column {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.trace-timeline-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.trace-waterfall {
+  flex-shrink: 0;
+}
+
+/* Spans the full height of the tab (tab strip + content together), not just
+   alongside the content — see `TraceView`'s `showDetailsPane`. */
+.trace-details-pane {
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 12px 16px 16px;
+  border-left: 1px solid var(--trace-border);
+  background: var(--trace-row-bg);
+}
+
+.trace-details-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.trace-details-pane-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.trace-details-pane-header .trace-row-name {
+  font-weight: 600;
+}
+
+.trace-details-pane-close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--trace-text-dim);
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.trace-details-pane-close:hover {
+  background: var(--trace-row-hover);
+  color: var(--color-text);
+}
+
+.trace-chat-region {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The selected span's details, shown below the active tab's content instead
+   of in `.trace-details-pane` when the viewport is too narrow for a side
+   pane — see `TraceView`'s `showDetailsPane`. Visible regardless of which
+   tab (Conversation or Spans) is active. */
+.trace-details-bottom-pane {
+  flex-shrink: 0;
+  max-height: 45%;
+  overflow-y: auto;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--trace-border);
+  background: var(--trace-row-bg);
 }
 
 .trace-row {
@@ -3518,9 +3664,14 @@ pre {
   gap: 12px;
   padding: 6px 16px 6px 13px;
   min-height: 32px;
+  cursor: pointer;
 }
 
-.trace-row-expanded > .trace-row-main {
+.trace-row-main:hover {
+  background: var(--trace-row-hover);
+}
+
+.trace-row-selected > .trace-row-main {
   background: var(--trace-row-hover);
 }
 
@@ -3529,7 +3680,7 @@ pre {
 }
 
 .trace-row-error > .trace-row-main:hover,
-.trace-row-error.trace-row-expanded > .trace-row-main {
+.trace-row-error.trace-row-selected > .trace-row-main {
   background: color-mix(
     in srgb,
     var(--error-bg) 85%,
@@ -3545,72 +3696,10 @@ pre {
   min-width: 0;
 }
 
-.trace-row-disclosure {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--trace-text-dim);
-  cursor: pointer;
-  border-radius: 3px;
-}
-
-.trace-row-disclosure:hover {
-  background: var(--trace-row-hover);
-  color: var(--color-text);
-}
-
-.trace-disclosure-icon {
-  transition: transform 0.15s ease;
-  transform: rotate(-90deg);
-}
-
-.trace-disclosure-icon-open {
-  transform: rotate(0deg);
-}
-
 .trace-row-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.trace-row-name-linked {
-  cursor: pointer;
-}
-
-.trace-row-name-linked:hover {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.trace-row-prompt-btn {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px;
-  border: none;
-  background: none;
-  color: var(--trace-text-dim);
-  cursor: pointer;
-  border-radius: 3px;
-  opacity: 0;
-  transition: opacity 0.1s;
-}
-
-.trace-row-label:hover .trace-row-prompt-btn {
-  opacity: 1;
-}
-
-.trace-row-prompt-btn:hover {
-  color: var(--color-text);
-  background: var(--trace-row-hover);
 }
 
 .trace-row-duration {
@@ -3738,33 +3827,27 @@ pre {
   }
 }
 
-/* Expanded span details */
-.trace-row-details {
-  background: var(--trace-row-bg);
-  padding: 12px 20px 16px;
-  border-top: 1px solid var(--trace-border);
-}
-
 .span-details-list {
-  display: grid;
-  grid-template-columns: 110px 1fr;
-  gap: 4px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   margin: 0 0 12px;
 }
 
 .span-details-row {
-  display: contents;
+  min-width: 0;
 }
 
-.span-details-row dt {
+.span-details-row-label {
   color: var(--trace-text-dim);
-  font-size: 11.5px;
+  font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
 }
 
-.span-details-row dd {
-  margin: 0;
+.span-details-row-value {
   font-size: 12.5px;
   min-width: 0;
   overflow: hidden;
@@ -4205,7 +4288,8 @@ pre {
   white-space: nowrap;
 }
 
-.trace-row-annotation-count {
+.trace-row-annotation-count,
+.trace-row-count-badge {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -4220,37 +4304,93 @@ pre {
   font-weight: 600;
 }
 
-/* ── Tree / Chat tabs ── */
+/* ── Combined tree view: multiple span instances on one bar ── */
+
+.trace-combined-bar-segment {
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.trace-combined-bar-segment:focus-visible {
+  outline: 2px solid var(--trace-text);
+  outline-offset: 1px;
+}
+
+.trace-combined-bar-segment-selected {
+  outline: 2px solid var(--trace-text);
+  outline-offset: 1px;
+}
+
+/* ── Main tabs (Conversation / Spans) ── */
 
 .trace-view-tabs {
   display: flex;
-  gap: 2px;
-  padding: 6px 16px 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--trace-border);
-  flex-shrink: 0;
+}
+
+.trace-view-tab-list {
+  display: flex;
+  gap: 4px;
 }
 
 .trace-view-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  margin-bottom: -1px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--trace-text-dim);
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  padding: 6px 10px;
 }
 
-.trace-view-tab-active {
+.trace-view-tab:hover {
   color: var(--trace-text);
-  border-bottom-color: var(--trace-text);
+}
+
+.trace-view-tab-active,
+.trace-view-tab-active:hover {
+  color: var(--trace-text);
+  border-bottom-color: var(--accent);
+}
+
+.trace-spans-combined-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--trace-text-dim);
+  cursor: pointer;
+}
+
+.trace-spans-combined-toggle:hover {
+  background: var(--trace-row-hover);
+  color: var(--trace-text);
+}
+
+.trace-spans-combined-toggle-active {
+  background: var(--trace-row-hover);
+  color: var(--trace-text);
 }
 
 /* ── Chat flow ── */
 
 .chat-flow {
-  flex: 1;
-  overflow: auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -4268,6 +4408,7 @@ pre {
   border-radius: 8px;
   padding: 10px 12px;
   background: var(--trace-row-bg);
+  cursor: pointer;
 }
 
 .chat-block-error {
@@ -4275,17 +4416,39 @@ pre {
   background: var(--error-bg);
 }
 
+.chat-block:hover {
+  border-color: var(--trace-text-dim);
+}
+
+.chat-block-selected,
+.chat-block-selected:hover {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .chat-turn {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 6px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.chat-turn:hover {
+  background: var(--trace-row-hover);
+}
+
+.chat-turn-selected,
+.chat-turn-selected:hover {
+  background: var(--accent-faint);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .chat-block-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
   font-size: 11.5px;
   color: var(--trace-text-dim);
 }
@@ -4300,11 +4463,54 @@ pre {
 }
 
 .chat-block-tool-icon {
-  color: #b45309;
+  display: inline-flex;
+  align-items: center;
+  color: var(--trace-text-dim);
+}
+
+.chat-block-error .chat-block-tool-icon {
+  color: var(--error-text);
+}
+
+.chat-block-duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-block-expand-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: var(--trace-text-dim);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.chat-block-expand-toggle:hover {
+  background: var(--trace-row-hover);
+  color: var(--color-text);
+}
+
+.chevron-icon {
+  transition: transform 0.15s;
+}
+
+.chevron-icon-open {
+  transform: rotate(90deg);
 }
 
 .chat-block-tool-section {
-  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--trace-border);
 }
 
 /* ── Chat bubbles (ChatFlow's LLM turns; see MessageList's "bubble" variant) ── */

@@ -7,12 +7,19 @@
  * {@link Row} list linearly.
  */
 
-import type { SpanMessage } from "../../../shared/types";
-import type { SpanViewModel } from "./spanViewModel.ts";
+import type { Span, SpanKind, SpanMessage } from "../../../shared/types";
 
 export interface Row {
-  span: SpanViewModel;
+  span: Span;
   depth: number;
+}
+
+/** All spans sharing a name, for the "Combined" tree view. */
+export interface GroupedRow {
+  name: string;
+  /** The `kind` of the group's spans (they're assumed homogeneous per name). */
+  kind: SpanKind;
+  spans: Span[];
 }
 
 /**
@@ -22,9 +29,9 @@ export interface Row {
  * rather than dropped, so no span is ever silently missing from the
  * waterfall.
  */
-export function buildRows(spans: SpanViewModel[]): Row[] {
+export function buildRows(spans: Span[]): Row[] {
   const ids = new Set(spans.map(s => s.id));
-  const byParent = new Map<string | undefined, SpanViewModel[]>();
+  const byParent = new Map<string | undefined, Span[]>();
   for (const span of spans) {
     const parentId =
       span.parentId !== undefined && ids.has(span.parentId)
@@ -35,7 +42,7 @@ export function buildRows(spans: SpanViewModel[]): Row[] {
     byParent.set(parentId, list);
   }
   for (const list of byParent.values()) {
-    list.sort((a, b) => a.startMs - b.startMs);
+    list.sort((a, b) => a.startTime - b.startTime);
   }
 
   const rows: Row[] = [];
@@ -54,6 +61,46 @@ export function buildRows(spans: SpanViewModel[]): Row[] {
 }
 
 /**
+ * Groups a flat span list by `name`, for the "Combined" tree view: each
+ * group renders as a single row whose bar shows every instance's extent, so
+ * e.g. a tool called in a loop collapses to one row instead of one per call.
+ * Groups are ordered by their earliest span's start time, and each group's
+ * spans by start time too — both fall out of visiting spans in start order,
+ * since a `Map` keeps insertion order.
+ */
+export function buildGroupedRows(spans: Span[]): GroupedRow[] {
+  const groups = new Map<string, GroupedRow>();
+  for (const span of [...spans].sort((a, b) => a.startTime - b.startTime)) {
+    let group = groups.get(span.name);
+    if (!group) {
+      group = { name: span.name, kind: span.kind, spans: [] };
+      groups.set(span.name, group);
+    }
+    group.spans.push(span);
+  }
+  return [...groups.values()];
+}
+
+/**
+ * Where a span's bar sits on a timeline covering `window`, as CSS percentages
+ * ready to pass as `style`. A still-running span extends to the window's end;
+ * every bar is at least 0.5% wide so an instantaneous span stays visible (and
+ * clickable).
+ */
+export function barGeometry(
+  span: Span,
+  window: { start: number; end: number },
+): { left: string; width: string } {
+  const total = Math.max(1, window.end - window.start);
+  const start = span.startTime - window.start;
+  const end = (span.endTime ?? window.end) - window.start;
+  return {
+    left: `${(start / total) * 100}%`,
+    width: `${Math.max(0.5, ((end - start) / total) * 100)}%`,
+  };
+}
+
+/**
  * For `ChatFlow`'s linear thread: maps each `LLM` row's span id to the
  * suffix of its `messages` not already shown by an earlier turn. An `LLM`
  * span's `messages` is the *full* conversation sent to the model, so a later
@@ -67,28 +114,37 @@ export function newMessagesByTurn(rows: Row[]): Map<string, SpanMessage[]> {
   const result = new Map<string, SpanMessage[]>();
   let shownCount = 0;
   for (const row of rows) {
-    if (row.span.spanType !== "LLM") continue;
-    const allMessages = row.span.messages ?? [];
+    if (row.span.kind !== "LLM") continue;
+    const allMessages = row.span.llm?.messages ?? [];
     result.set(row.span.id, allMessages.slice(shownCount));
     shownCount = Math.max(
       shownCount,
-      allMessages.length + (row.span.output ? 1 : 0),
+      allMessages.length + (row.span.llm?.output ? 1 : 0),
     );
   }
   return result;
+}
+
+/**
+ * A span's elapsed time in ms, or `undefined` while it is still running
+ * (no `endTime` yet) — the one derived quantity the timeline and chat views
+ * both need from a raw `Span`.
+ */
+export function spanDuration(span: Span): number | undefined {
+  return span.endTime !== undefined ? span.endTime - span.startTime : undefined;
 }
 
 /** The time window the timeline should cover, in ms. */
 export function computeWindow(
   traceStart: number,
   traceEnd: number | undefined,
-  spans: SpanViewModel[],
+  spans: Span[],
 ): { start: number; end: number } {
   let start = traceStart;
   let end = traceEnd ?? traceStart;
   for (const span of spans) {
-    if (span.startMs < start) start = span.startMs;
-    const spanEnd = span.endMs ?? span.startMs;
+    if (span.startTime < start) start = span.startTime;
+    const spanEnd = span.endTime ?? span.startTime;
     if (spanEnd > end) end = spanEnd;
   }
   if (end <= start) end = start + 1;

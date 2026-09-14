@@ -7,9 +7,11 @@ import { pathToFileURL } from "node:url";
 import type { EvalutionConfig } from "../config.ts";
 import { startServer } from "../server/index.ts";
 import { TerminalSessionRegistry } from "../server/terminal.ts";
+import { CostFetchingTraceSink } from "../trace/cost-fetching-trace-sink.ts";
 import { LocalDatabaseTraceProvider } from "../trace/local-database-trace-provider.ts";
 import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import type { TraceIngestor } from "../trace/trace-ingestor.ts";
+import { isTraceSink } from "../trace/trace-sink.ts";
 import { registerBundlerResolutionFallback } from "./bundler-resolution-hook.ts";
 import {
   registerEvalutionResolver,
@@ -86,32 +88,8 @@ async function startConfiguredServer(
 
   const promptProviders = config.promptProviders ?? [];
   let traceProviders = config.traceProviders;
-  // The process's single OTLP ingestor, so an external app can export traces
-  // to this server (`POST /v1/traces`) alongside whatever the playground
-  // records itself. Only wired up on the default trace-provider path — a
-  // project supplying its own `traceProviders` owns its own OTLP story, if
-  // any (see `specs/trace-workshopping.md` §A.8).
-  let otlpIngestor: OtlpTraceIngestor | undefined;
-  // Tells `startServer` which provider to prefer for new traces when more
-  // than one is configured — set only on this (built-in) path; a project
-  // supplying its own `traceProviders` picks its own default (§B.5).
-  let defaultTraceProviderId: string | undefined;
+
   if (!traceProviders) {
-    // Each adapter runs its own SDK-specific setup and returns the resulting
-    // ingestor — we stand up nothing here beyond the default provider.
-    const collected = (
-      await Promise.all(promptProviders.map(p => p.setupTraceIngestion?.()))
-    ).filter((i): i is TraceIngestor => !!i);
-
-    // Drop ingestors a kept one reports redundant (e.g. a 2nd OTelTraceIngestor
-    // — OTel is one process-global pipeline).
-    const ingestors: TraceIngestor[] = [];
-    for (const ing of collected) {
-      if (!ingestors.some(kept => kept.isRedundant?.(ing))) ingestors.push(ing);
-    }
-    otlpIngestor = new OtlpTraceIngestor();
-    ingestors.push(otlpIngestor);
-
     // An explicit `rootDir`-relative path rather than `LocalDatabaseTraceProvider`'s
     // own CWD-relative default: onboarding mode (no config file yet) never
     // `chdir`s to `rootDir` the way a loaded `config.ts` does, so relying on
@@ -119,10 +97,38 @@ async function startConfiguredServer(
     // invoked with an explicit path argument (`evalution ui <path>`).
     const provider = new LocalDatabaseTraceProvider({
       path: path.join(rootDir, ".evalution", "traces", "local.db"),
-      ingestors,
     });
     traceProviders = [provider];
-    defaultTraceProviderId = provider.id;
+  }
+
+  // Each adapter runs its own SDK-specific setup and returns the resulting
+  // ingestor — we stand up nothing here beyond the default provider.
+  const collected = (
+    await Promise.all(promptProviders.map(p => p.setupTraceIngestion?.()))
+  ).filter(i => !!i);
+
+  // Drop ingestors a kept one reports redundant (e.g. a 2nd OTelTraceIngestor
+  // — OTel is one process-global pipeline).
+  const ingestors: TraceIngestor[] = [];
+  for (const ing of collected) {
+    if (!ingestors.some(kept => kept.isRedundant?.(ing))) ingestors.push(ing);
+  }
+
+  // The process's single OTLP ingestor, so an external app can export traces
+  // to this server (`POST /v1/traces`) alongside whatever the playground
+  // records itself.
+  const otlpIngestor = new OtlpTraceIngestor();
+  ingestors.push(otlpIngestor);
+
+  // Stamp `llm.cost` on LLM spans before they reach any provider, rather
+  // than in each provider, so every trace store gets costed spans for free.
+  const costSink = new CostFetchingTraceSink();
+  const traceSinks = traceProviders.filter(p => isTraceSink(p));
+  for (const sink of traceSinks) {
+    costSink.addSink(sink);
+  }
+  for (const ingestor of ingestors) {
+    ingestor.addSink(costSink);
   }
 
   return startServer({
@@ -133,7 +139,6 @@ async function startConfiguredServer(
     hasConfig,
     terminalSessions,
     otlpIngestor,
-    defaultTraceProviderId,
   });
 }
 
