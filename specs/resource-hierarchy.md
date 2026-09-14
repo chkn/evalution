@@ -1,5 +1,10 @@
 # Proposal: Resource groups and multi-value resources
 
+> **Renamed since shipping.** This document's `needs` is
+> now `inputs` and its `values` is now `outputs`; `ResourceValueDefinition` is
+> `ResourceOutputDefinition` and `RegisteredSource.valuePath` is `outputPath`. The design below is
+> unchanged — read "value" as "output" throughout.
+
 ## Context
 
 `specs/execution-inputs.md` §B motivates resources-depending-on-resources with a seeded task:

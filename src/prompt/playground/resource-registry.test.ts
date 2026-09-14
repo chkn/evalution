@@ -125,18 +125,18 @@ describe("playground module discovery", () => {
 });
 
 describe("resource lifecycle", () => {
-  it("resolves `needs` by identity and passes the dependency's value in", async () => {
+  it("resolves `inputs` by identity and passes the dependency's value in", async () => {
     const { registry: reg } = registry({
       [p("a/seed.playground.ts")]: `${importHelper}
         const db = resource({ create: () => ({ value: { tag: "the-db" } }) });
         export const seeded = resource({
-          needs: { db },
+          inputs: { db },
           create: ({ db }) => ({ value: "seeded-with-" + db.tag }),
         });
         export { db };`,
     });
 
-    // `needs` takes the resource *values*, not string keys, so the registry
+    // `inputs` takes the resource *objects*, not string keys, so the registry
     // resolves them by identity — which is what makes the dependency typed at
     // the call site and immune to key collisions across playground files.
     const lease = reg.lease();
@@ -147,7 +147,7 @@ describe("resource lifecycle", () => {
   });
 
   it("resolves a dependency that lives in another playground module", async () => {
-    // Real filesystem: a cross-module `needs` is a genuine dynamic-import
+    // Real filesystem: a cross-module `inputs` is a genuine dynamic-import
     // resolution, which the in-memory provider's `data:` URLs cannot do — and
     // importing the project-scoped db from a prompt-scoped module is the
     // motivating idiom, so it is worth exercising for real.
@@ -167,7 +167,7 @@ describe("resource lifecycle", () => {
         `${importHelper}
          import { db } from "../.evalution/playground/db.ts";
          export const seededRootTask = resource({
-           needs: { db },
+           inputs: { db },
            create: ({ db }) => ({ value: "tsk_from_" + db.tag }),
          });`,
       );
@@ -243,11 +243,11 @@ describe("resource lifecycle", () => {
     const { registry: reg } = registry({
       [p("cycle.playground.ts")]: `${importHelper}
         const a = { label: "a", create: () => ({ value: 1 }) };
-        const b = { label: "b", needs: {}, create: () => ({ value: 2 }) };
+        const b = { label: "b", inputs: {}, create: () => ({ value: 2 }) };
         const A = resource(a);
         const B = resource(b);
-        A.needs = { B };
-        B.needs = { A };
+        A.inputs = { B };
+        B.inputs = { A };
         export { A, B };`,
     });
 
@@ -263,7 +263,7 @@ describe("resource lifecycle", () => {
         export const perRun = resource({ create: () => ({ value: 1 }) });
         export const longLived = resource({
           scope: "server",
-          needs: { perRun },
+          inputs: { perRun },
           create: () => ({ value: 2 }),
         });`,
     });
@@ -327,7 +327,7 @@ describe("static value resources", () => {
         export const apiKey = resource({ value: "secret" });
         export const client = resource({
           scope: "server",
-          needs: { apiKey },
+          inputs: { apiKey },
           create: ({ apiKey }) => ({ value: "client-" + apiKey }),
         });`,
     });
@@ -501,7 +501,7 @@ describe("combined execute inputs (specs/combined-execute-inputs.md §C.2)", () 
  * A cache-busted import (`fresh`) re-evaluates a module and produces *new*
  * resource objects; a plain one hands back the first evaluation. A module's
  * own `import` of a sibling carries no cache-busting query, so it always binds
- * the plain instance — which means the object arriving through `needs` is not
+ * the plain instance — which means the object arriving through `inputs` is not
  * the object discovery registered. Vitest's module runner collapses the two
  * into one instance, so the condition has to be modelled to be tested at all.
  */
@@ -537,13 +537,13 @@ function duplicatingProvider(
   } as unknown as MemoryFileProvider;
 }
 
-describe("resource values (specs/resource-hierarchy.md §A, §C)", () => {
-  it("registers four sources for a resource with three values: the root, plus one per value", async () => {
+describe("resource outputs (specs/resource-hierarchy.md §A, §C)", () => {
+  it("registers four sources for a resource with three outputs: the root, plus one per output", async () => {
     const { registry: reg } = registry({
       [p("tasks.playground.ts")]: `${importHelper}
         export const taskA = resource({
           label: "Task A",
-          values: { id: "Task ID", title: "Task Name", info: "Task Info" },
+          outputs: { id: "Task ID", title: "Task Name", info: "Task Info" },
           create: () => ({ value: { id: "tsk_a", title: "Fix it", info: { title: "Fix it" } } }),
         });`,
     });
@@ -564,13 +564,13 @@ describe("resource values (specs/resource-hierarchy.md §A, §C)", () => {
     ]);
   });
 
-  it("creates one instance and disposes it once when two values of a resource are acquired in a lease", async () => {
+  it("creates one instance and disposes it once when two outputs of a resource are acquired in a lease", async () => {
     const { registry: reg } = registry({
       [p("tasks.playground.ts")]: `${importHelper}
         globalThis.__creates = 0;
         globalThis.__disposes = 0;
         export const taskA = resource({
-          values: { id: "Task ID", title: "Task Name" },
+          outputs: { id: "Task ID", title: "Task Name" },
           create: () => {
             globalThis.__creates++;
             return {
@@ -596,7 +596,7 @@ describe("resource values (specs/resource-hierarchy.md §A, §C)", () => {
     const { registry: reg } = registry({
       [p("tasks.playground.ts")]: `${importHelper}
         export const taskA = resource({
-          values: { title: "Task Name" },
+          outputs: { title: "Task Name" },
           create: () => ({ value: { id: "tsk_a" } }),
         });`,
     });
@@ -605,7 +605,7 @@ describe("resource values (specs/resource-hierarchy.md §A, §C)", () => {
     await expect(
       lease.acquire("tasks.playground.ts#taskA.title"),
     ).rejects.toThrow(
-      "Resource 'tasks.playground.ts#taskA': no value at 'title'",
+      "Resource 'tasks.playground.ts#taskA': no output at 'title'",
     );
   });
 
@@ -614,7 +614,7 @@ describe("resource values (specs/resource-hierarchy.md §A, §C)", () => {
       [p("tasks.playground.ts")]: `${importHelper}
         class Handle { query() {} }
         export const taskA = resource({
-          values: { id: "Task ID", handle: "Handle" },
+          outputs: { id: "Task ID", handle: "Handle" },
           create: () => ({
             value: { id: "tsk_a", handle: new Handle() },
             receipt: "taskA-receipt",
@@ -635,7 +635,7 @@ describe("resource values (specs/resource-hierarchy.md §A, §C)", () => {
     const { registry: reg } = registry({
       [p("tasks.playground.ts")]: `${importHelper}
         export const taskA = resource({
-          values: { id: "Task ID", title: "Task Name" },
+          outputs: { id: "Task ID", title: "Task Name" },
           value: { id: "tsk_a", title: "Fix it" },
         });`,
     });
@@ -654,7 +654,7 @@ describe("resource values (specs/resource-hierarchy.md §A, §C)", () => {
       [p("tasks.playground.ts")]: `${importHelper}
         export const taskA = resource({
           group: "Tasks/Regressions",
-          values: { id: "Task ID" },
+          outputs: { id: "Task ID" },
           create: () => ({ value: { id: "tsk_a" } }),
         });`,
     });
@@ -695,7 +695,7 @@ describe("resource groups (specs/resource-hierarchy.md §B, §D)", () => {
     const { registry: reg } = registry({
       [p("tasks.playground.ts")]: `${importHelper}
         export const taskA = resource({
-          values: { id: "Task ID", title: "Task Name" },
+          outputs: { id: "Task ID", title: "Task Name" },
           create: () => ({ value: { id: "tsk_a", title: "Fix it" } }),
         });`,
     });
@@ -710,8 +710,8 @@ describe("resource groups (specs/resource-hierarchy.md §B, §D)", () => {
     expect(id.siblings).toBe(2);
   });
 
-  it("still resolves and describes a plain resource — no values, no group — exactly as before this change", async () => {
-    // A stored selection made before `values`/`group` existed is a bare uri
+  it("still resolves and describes a plain resource — no outputs, no group — exactly as before this change", async () => {
+    // A stored selection made before `outputs`/`group` existed is a bare uri
     // like `db.ts#db`; this is the regression that would catch grouping (or
     // anything else new) leaking into identity or into the described shape.
     const { registry: reg } = registry({
@@ -728,7 +728,7 @@ describe("resource groups (specs/resource-hierarchy.md §B, §D)", () => {
     expect(sources[0]).toMatchObject({
       uri: "db.playground.ts#db",
       key: "db",
-      valuePath: [],
+      outputPath: [],
     });
 
     const [described] = reg.describe(sources);
@@ -754,13 +754,13 @@ describe("duplicate module instances", () => {
     };
   };
 
-  it("resolves a `needs` dependency that arrives as a different module instance", async () => {
+  it("resolves an `inputs` dependency that arrives as a different module instance", async () => {
     const reg = new ResourceRegistry({
       fileProvider: duplicatingProvider({
         [p("db.playground.ts")]: dbModule,
         [p("odin.playground.ts")]: deps => ({
           seeded: resource({
-            needs: { db: deps[p("db.playground.ts")].db },
+            inputs: { db: deps[p("db.playground.ts")].db },
             create: ({ db }: any) => ({ value: `tsk_from_${db.tag}` }),
           }),
         }),
@@ -787,7 +787,7 @@ describe("duplicate module instances", () => {
         [p("db.playground.ts")]: dbModule,
         [p("odin.playground.ts")]: deps => ({
           seeded: resource({
-            needs: { db: deps[p("db.playground.ts")].db },
+            inputs: { db: deps[p("db.playground.ts")].db },
             create: ({ db }: any) => ({ value: `tsk_${db.tag}_${db.created}` }),
           }),
         }),

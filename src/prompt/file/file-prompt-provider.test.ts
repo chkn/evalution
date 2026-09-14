@@ -664,7 +664,7 @@ describe("FilePromptProvider resource inputs", () => {
       [p("x.playground.ts")]:
         `import { resource } from ${JSON.stringify(helper)};\n` +
         `export const taskA = resource({\n` +
-        `  values: { id: "Task ID", title: "Task Name" },\n` +
+        `  outputs: { id: "Task ID", title: "Task Name" },\n` +
         `  create: () => ({ value: { id: "tsk_a", title: "Fix it" } }),\n` +
         `});`,
     });

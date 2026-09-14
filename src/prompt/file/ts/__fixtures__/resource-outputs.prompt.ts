@@ -3,11 +3,11 @@
 
 import { openai } from "@ai-sdk/openai";
 import type { TaskId } from "./handle-types.ts";
-import type { TaskInfo } from "./resource-values.playground.ts";
+import type { TaskInfo } from "./resource-outputs.playground.ts";
 
 /**
  * A prompt taking both `taskId` and `taskInfo` — one seeded task's id and its
- * `{ title, description }`, which `resource-values.playground.ts#taskA`
+ * `{ title, description }`, which `resource-outputs.playground.ts#taskA`
  * exposes as two separate values off the one row its `create()` inserts.
  */
 export function orchestrate(taskId: TaskId, taskInfo: TaskInfo) {

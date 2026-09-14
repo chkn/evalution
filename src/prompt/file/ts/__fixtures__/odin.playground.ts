@@ -20,7 +20,7 @@ export const db = resource({
 
 export const seededRootTask = resource({
   label: "Freshly seeded root task",
-  needs: { db },
+  inputs: { db },
   create: () => ({ value: `tsk_${"abc"}` as const, receipt: "tsk_abc" }),
 });
 

@@ -28,7 +28,7 @@ import {
 import type {
   ExecuteOptions,
   PromptProvider,
-  ResolvedInputs,
+  ResolvedPromptInputs,
 } from "../prompt-provider.ts";
 import type {
   FilePromptMetadata,
@@ -130,7 +130,7 @@ function resourceTypeExpression(
     "value" in resource.resource
       ? `${exported}["value"]`
       : `Awaited<ReturnType<${exported}["create"]>>["value"]`;
-  for (const key of source.valuePath) {
+  for (const key of source.outputPath) {
     expression = `${expression}[${JSON.stringify(key)}]`;
   }
   return expression;
@@ -526,7 +526,7 @@ export class FilePromptProvider
       functionInputs?: readonly ExecutionInput[];
       executeInputs?: Record<string, ExecutionInput>;
     },
-  ): Promise<ResolvedInputs> {
+  ): Promise<ResolvedPromptInputs> {
     // One lease across both halves: a run-scoped resource named by a function
     // input *and* an execute input must be created once, not twice.
     const lease = this.resources.lease();

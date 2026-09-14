@@ -47,7 +47,7 @@ export interface ExecuteOptions {
 }
 
 /** What {@link PromptProvider.resolveInputs} hands back. */
-export interface ResolvedInputs {
+export interface ResolvedPromptInputs {
   /** Positional arguments for {@link PromptProvider.execute}. */
   functionParams: any[];
   /** Named values for {@link ExecuteOptions.executeValues}. */
@@ -153,7 +153,7 @@ export interface PromptProvider<
       functionInputs?: readonly ExecutionInput[];
       executeInputs?: Record<string, ExecutionInput>;
     },
-  ): Promise<ResolvedInputs>;
+  ): Promise<ResolvedPromptInputs>;
 
   /**
    * Performs whatever process-global setup this provider's tracing mechanism

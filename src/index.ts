@@ -54,12 +54,12 @@ export { TSPromptFileType } from "./prompt/file/ts/ts-prompt-file-type.ts";
 export {
   type DynamicResourceDefinition,
   isResource,
-  type ResolvedNeeds,
+  type ResolvedResourceInputs,
   type Resource,
   type ResourceDefinition,
+  type ResourceInputs,
   type ResourceInstance,
-  type ResourceNeeds,
-  type ResourceValueDefinition,
+  type ResourceOutputDefinition,
   resource,
   type StaticResourceDefinition,
 } from "./prompt/playground/resource.ts";
@@ -74,7 +74,7 @@ export {
 export type {
   ExecuteOptions,
   PromptProvider,
-  ResolvedInputs,
+  ResolvedPromptInputs,
 } from "./prompt/prompt-provider.ts";
 export { GeminiInteractionsSDK } from "./sdk/gemini-interactions-sdk.ts";
 export type {

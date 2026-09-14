@@ -34,41 +34,41 @@ export interface ResourceInstance<T> {
 }
 
 /**
- * The set of resources another resource depends on, keyed by the name its
- * `create()` receives them under.
+ * Everything a resource needs in order to be created, keyed by the name its
+ * `create()` receives each entry under.
  *
- * Dependencies are given as the resource *values* themselves rather than as
+ * Dependencies are given as the resource *objects* themselves rather than as
  * string keys: the registry resolves them by identity, so `create`'s argument
  * is typed from the dependency and there is no key-collision problem across
  * the many files a `.evalution/playground/` directory may hold.
  */
-export type ResourceNeeds = Record<string, Resource<any>>;
+export type ResourceInputs = Record<string, Resource<any>>;
 
 /**
- * One named value a resource exposes as its own entry in the picker, read as
- * a top-level property off whatever `create()` (or a static `value`)
+ * One named output a resource exposes as its own entry in the picker, read
+ * as a top-level property off whatever `create()` (or a static `value`)
  * produces.
  *
- * A resource exposing `values` still produces one value from one `create()` —
- * `ResourceRegistry.instantiate` memoizes by resource *object* within a
- * lease, so picking one value for one slot and another for a different slot
+ * A resource exposing `outputs` still produces one value from one `create()`
+ * — `ResourceRegistry.instantiate` memoizes by resource *object* within a
+ * lease, so picking one output for one slot and another for a different slot
  * creates the underlying value once, not twice. Declaring a key here is
- * opt-in: it is the author saying which paths are meaningful inputs, the same
- * judgement {@link DynamicResourceDefinition.label} already is. See
- * `specs/resource-hierarchy.md` §A.
+ * opt-in: it is the author saying which paths are worth offering on their
+ * own, the same judgement {@link DynamicResourceDefinition.label} already is.
+ * See `specs/resource-hierarchy.md` §A.
  */
-export interface ResourceValueDefinition {
+export interface ResourceOutputDefinition {
   /** Human-readable label, shown as the submenu entry. Defaults to the key. */
   label?: string;
   /**
-   * Explicit slot(s) this value fills — same grammar and precedence as a
+   * Explicit slot(s) this output fills — same grammar and precedence as a
    * resource's own {@link DynamicResourceDefinition.for}.
    */
   for?: string | readonly string[];
 }
 
-/** The values `create()` receives, one per entry in {@link ResourceNeeds}. */
-export type ResolvedNeeds<N extends ResourceNeeds> = {
+/** The resolved values `create()` receives, one per entry in {@link ResourceInputs}. */
+export type ResolvedResourceInputs<N extends ResourceInputs> = {
   [K in keyof N]: N[K] extends Resource<infer T> ? T : never;
 };
 
@@ -78,7 +78,7 @@ export type ResolvedNeeds<N extends ResourceNeeds> = {
  */
 export interface DynamicResourceDefinition<
   T,
-  N extends ResourceNeeds = Record<string, never>,
+  N extends ResourceInputs = Record<string, never>,
 > {
   /** Human-readable label shown on the chip in the execute panel. */
   label?: string;
@@ -96,10 +96,10 @@ export interface DynamicResourceDefinition<
    */
   scope?: ResourceScope;
   /**
-   * Other resources this one needs, resolved first and passed to `create`.
-   * See {@link ResourceNeeds}.
+   * Everything this resource needs, resolved first and passed to `create`.
+   * See {@link ResourceInputs}.
    */
-  needs?: N;
+  inputs?: N;
   /**
    * Explicit slot to fill, as a dotted path optionally prefixed by a prompt
    * name — `'orchestrate.taskId'`, `'toolsContext.list_tasks.db'`. An escape
@@ -115,14 +115,16 @@ export interface DynamicResourceDefinition<
    */
   group?: string;
   /**
-   * Named values read off the produced value, each selectable on its own in
+   * Named outputs read off the produced value, each selectable on its own in
    * the picker alongside the resource itself. See
-   * {@link ResourceValueDefinition} and `specs/resource-hierarchy.md` §A.
+   * {@link ResourceOutputDefinition} and `specs/resource-hierarchy.md` §A.
    */
-  values?: Partial<Record<keyof T & string, string | ResourceValueDefinition>>;
+  outputs?: Partial<
+    Record<keyof T & string, string | ResourceOutputDefinition>
+  >;
   /** Produces the value. See {@link ResourceInstance}. */
   create(
-    needs: ResolvedNeeds<N>,
+    inputs: ResolvedResourceInputs<N>,
   ): ResourceInstance<T> | Promise<ResourceInstance<T>>;
 }
 
@@ -150,11 +152,13 @@ export interface StaticResourceDefinition<T> {
    */
   group?: string;
   /**
-   * Named values read off {@link value}, each selectable on its own in the
-   * picker alongside the resource itself. See {@link ResourceValueDefinition}
+   * Named outputs read off {@link value}, each selectable on its own in the
+   * picker alongside the resource itself. See {@link ResourceOutputDefinition}
    * and `specs/resource-hierarchy.md` §A.
    */
-  values?: Partial<Record<keyof T & string, string | ResourceValueDefinition>>;
+  outputs?: Partial<
+    Record<keyof T & string, string | ResourceOutputDefinition>
+  >;
   /** The value itself. */
   value: T;
 }
@@ -162,7 +166,7 @@ export interface StaticResourceDefinition<T> {
 /** What {@link resource} is given. See {@link resource} for the narrative. */
 export type ResourceDefinition<
   T,
-  N extends ResourceNeeds = Record<string, never>,
+  N extends ResourceInputs = Record<string, never>,
 > = DynamicResourceDefinition<T, N> | StaticResourceDefinition<T>;
 
 /**
@@ -225,7 +229,7 @@ export type Resource<T> = ResourceDefinition<T, any> & {
  *
  * export const seededRootTask = resource<TaskId>({
  *   label: 'Freshly seeded root task',
- *   needs: { db },
+ *   inputs: { db },
  *   async create({ db }) {
  *     const id = makeNanoId('tsk_');
  *     await db.insert(tasks).values({ id });
@@ -250,7 +254,7 @@ export function resource<T>(
 ): StaticResourceDefinition<T> & { readonly [RESOURCE_TAG]: true };
 export function resource<
   T,
-  const N extends ResourceNeeds = Record<string, never>,
+  const N extends ResourceInputs = Record<string, never>,
 >(
   definition: DynamicResourceDefinition<T, N>,
 ): DynamicResourceDefinition<T, N> & { readonly [RESOURCE_TAG]: true };

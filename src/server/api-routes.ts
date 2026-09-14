@@ -12,7 +12,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { resolveExecutionInputs } from "../prompt/execution-inputs.ts";
 import type {
   PromptProvider,
-  ResolvedInputs,
+  ResolvedPromptInputs,
 } from "../prompt/prompt-provider.ts";
 import type { PromptRegistry } from "../prompt/prompt-registry.ts";
 import type { SetupTask } from "../shared/setup-task.ts";
@@ -316,7 +316,7 @@ export function setupRoutes({
       // every other provider gets the value-only fallback and never has to
       // know an `ExecutionInput` exists.
       const inputs = { functionInputs, executeInputs };
-      let resolved: ResolvedInputs;
+      let resolved: ResolvedPromptInputs;
       try {
         resolved = provider.resolveInputs
           ? await provider.resolveInputs(decodedId, inputs)

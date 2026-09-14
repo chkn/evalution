@@ -7,8 +7,8 @@ import type { ResourceInfo, ResourceScope } from "../../shared/types.ts";
 import {
   isResource,
   type Resource,
-  type ResourceNeeds,
-  type ResourceValueDefinition,
+  type ResourceInputs,
+  type ResourceOutputDefinition,
 } from "./resource.ts";
 
 /** Default patterns matching playground modules. See {@link ResourceRegistry}. */
@@ -54,8 +54,8 @@ interface Instance {
  *
  * The registry's map is `uri → RegisteredResource`, one entry per
  * `resource()` export; a `RegisteredSource` is a new leaf on the same data —
- * the resource itself (`valuePath: []`), or one of its declared
- * {@link ResourceValueDefinition} entries. Every consumer (`describe`,
+ * the resource itself (`outputPath: []`), or one of its declared
+ * {@link ResourceOutputDefinition} entries. Every consumer (`describe`,
  * `inScopeFor`, matching, `lease.acquire`) wants this flat form rather than a
  * nested one. See `specs/resource-hierarchy.md` §C.
  */
@@ -73,7 +73,7 @@ export interface RegisteredSource {
   /** The registration whose `create()` produces this. Its own, for a root source. */
   resource: RegisteredResource;
   /** Path read off the produced value. Empty for a root source. */
-  valuePath: readonly string[];
+  outputPath: readonly string[];
 }
 
 /** `"Tasks/Regressions"` → `["Tasks", "Regressions"]`, trimmed and with empty segments dropped. */
@@ -85,7 +85,7 @@ function parseGroupPath(group: string | undefined): string[] {
     .filter(segment => segment.length > 0);
 }
 
-/** Every {@link RegisteredSource} — the resource itself, plus one per declared value — for one registration. */
+/** Every {@link RegisteredSource} — the resource itself, plus one per declared output — for one registration. */
 function sourcesFor(registered: RegisteredResource): RegisteredSource[] {
   const { resource, uri, key } = registered;
   const group = parseGroupPath(resource.group);
@@ -96,53 +96,53 @@ function sourcesFor(registered: RegisteredResource): RegisteredSource[] {
     group,
     for: resource.for,
     resource: registered,
-    valuePath: [],
+    outputPath: [],
   };
 
-  const values = Object.entries(resource.values ?? {}) as [
+  const outputs = Object.entries(resource.outputs ?? {}) as [
     string,
-    string | ResourceValueDefinition | undefined,
+    string | ResourceOutputDefinition | undefined,
   ][];
-  const valueSources = values
+  const outputSources = outputs
     .filter(
-      (entry): entry is [string, string | ResourceValueDefinition] =>
+      (entry): entry is [string, string | ResourceOutputDefinition] =>
         entry[1] !== undefined,
     )
-    .map(([valueKey, def]): RegisteredSource => {
-      const valueDef: ResourceValueDefinition =
+    .map(([outputKey, def]): RegisteredSource => {
+      const outputDef: ResourceOutputDefinition =
         typeof def === "string" ? { label: def } : def;
       return {
-        uri: `${uri}.${valueKey}`,
-        key: valueKey,
-        label: valueDef.label ?? valueKey,
+        uri: `${uri}.${outputKey}`,
+        key: outputKey,
+        label: outputDef.label ?? outputKey,
         group,
-        for: valueDef.for,
+        for: outputDef.for,
         resource: registered,
-        valuePath: [valueKey],
+        outputPath: [outputKey],
       };
     });
 
-  return [root, ...valueSources];
+  return [root, ...outputSources];
 }
 
 /** Splits a source `uri` into the registered resource's own `uri` and the value path within it. */
 function parseSourceUri(uri: string): {
   rootUri: string;
-  valuePath: readonly string[];
+  outputPath: readonly string[];
 } {
   const hashIdx = uri.indexOf("#");
-  if (hashIdx < 0) return { rootUri: uri, valuePath: [] };
+  if (hashIdx < 0) return { rootUri: uri, outputPath: [] };
   const exportAndValue = uri.slice(hashIdx + 1);
   const dotIdx = exportAndValue.indexOf(".");
-  if (dotIdx < 0) return { rootUri: uri, valuePath: [] };
+  if (dotIdx < 0) return { rootUri: uri, outputPath: [] };
   return {
     rootUri: uri.slice(0, hashIdx + 1) + exportAndValue.slice(0, dotIdx),
-    valuePath: [exportAndValue.slice(dotIdx + 1)],
+    outputPath: [exportAndValue.slice(dotIdx + 1)],
   };
 }
 
 /** Reads `path` off `value`, reporting whether it actually existed there. */
-function readValuePath(
+function readOutputPath(
   value: unknown,
   path: readonly string[],
 ): { found: true; value: unknown } | { found: false } {
@@ -216,7 +216,7 @@ function isPlainSerializable(
  */
 export interface ResourceLease {
   /**
-   * Creates (or reuses) the value for `uri`, resolving its `needs` first.
+   * Creates (or reuses) the value for `uri`, resolving its `inputs` first.
    * Calling twice for the same resource within one lease returns the same
    * value — which is why resolution takes every input together.
    */
@@ -303,7 +303,7 @@ export class ResourceRegistry {
     return [...(await this.byUri()).values()];
   }
 
-  /** Every selectable source, across all playground modules: every resource, plus one per declared value. */
+  /** Every selectable source, across all playground modules: every resource, plus one per declared output. */
   async sources(): Promise<RegisteredSource[]> {
     return (await this.all()).flatMap(sourcesFor);
   }
@@ -338,14 +338,14 @@ export class ResourceRegistry {
    * showing one run's value as if it previewed the next would be wrong.
    * Neither does a value that isn't plain JSON data (see `isPlainSerializable`
    * below) — an opaque handle survives the trip through `describe` as a chip
-   * with no preview, same as before this existed. A value source previews the
+   * with no preview, same as before this existed. An output source previews the
    * same way, reading its own path off the memoized instance.
    */
   describe(sources: readonly RegisteredSource[]): ResourceInfo[] {
     return sources.map(s => {
       const instance = this.peekInstance(s.resource.resource);
       const read = instance
-        ? readValuePath(instance.value, s.valuePath)
+        ? readOutputPath(instance.value, s.outputPath)
         : undefined;
       const value =
         read?.found && isPlainSerializable(read.value)
@@ -361,9 +361,9 @@ export class ResourceRegistry {
         value,
       };
       if (s.group.length > 0) info.group = [...s.group];
-      if (s.valuePath.length > 0) {
+      if (s.outputPath.length > 0) {
         info.parent = s.resource.uri;
-        info.siblings = Object.keys(s.resource.resource.values ?? {}).length;
+        info.siblings = Object.keys(s.resource.resource.outputs ?? {}).length;
       }
       return info;
     });
@@ -409,7 +409,7 @@ export class ResourceRegistry {
     let released = false;
 
     const acquire = async (uri: string): Promise<unknown> => {
-      const { rootUri, valuePath } = parseSourceUri(uri);
+      const { rootUri, outputPath } = parseSourceUri(uri);
       const registered = (await this.byUri()).get(rootUri);
       if (!registered) throw new Error(`Resource '${uri}' not found`);
       const instance = await this.instantiate(
@@ -418,17 +418,17 @@ export class ResourceRegistry {
         runInstances,
         [],
       );
-      const read = readValuePath(instance.value, valuePath);
+      const read = readOutputPath(instance.value, outputPath);
       if (!read.found) {
         throw new Error(
-          `Resource '${rootUri}': no value at '${valuePath.join(".")}'`,
+          `Resource '${rootUri}': no output at '${outputPath.join(".")}'`,
         );
       }
-      // A value source's receipt is the value itself when it's plain JSON
+      // An output source's receipt is the value itself when it's plain JSON
       // data — that's what lets a trace say the run used `tsk_abc123` — and
       // otherwise the registration's own receipt, same as a root source.
       const receipt =
-        valuePath.length === 0
+        outputPath.length === 0
           ? instance.receipt
           : isPlainSerializable(read.value)
             ? read.value
@@ -466,7 +466,7 @@ export class ResourceRegistry {
   // #region Instantiation
 
   /**
-   * Creates (or reuses) the instance for `target`, resolving its `needs` first.
+   * Creates (or reuses) the instance for `target`, resolving its `inputs` first.
    *
    * Keyed on the resource **object**, not on its `uri`: a dependency is named
    * by reference, and a resource reached only that way (from a module the
@@ -533,10 +533,10 @@ export class ResourceRegistry {
     chain: readonly { resource: Resource<unknown>; label: string }[],
   ): Promise<Instance> {
     if ("value" in target) return target;
-    const needs: ResourceNeeds = target.needs ?? {};
+    const inputs: ResourceInputs = target.inputs ?? {};
     const resolved: Record<string, unknown> = {};
 
-    for (const [name, dep] of Object.entries(needs)) {
+    for (const [name, dep] of Object.entries(inputs)) {
       // A dependency arrives as whichever object the depending module's own
       // import produced, which is not necessarily the one discovery
       // registered. `byIdentity` maps both onto one registration so the value
@@ -612,7 +612,7 @@ export class ResourceRegistry {
       // resolves — no cache-busting query. Node keys its module cache on the
       // full specifier, so a busted import and a plain one are two evaluations
       // producing two distinct resource objects for the same declaration, and
-      // `needs` (which is by reference) hands over whichever one the depending
+      // `inputs` (which is by reference) hands over whichever one the depending
       // module happened to bind. Mapping both onto one registration is what
       // keeps a dependency resolvable *and* created once per run. Best-effort:
       // the busted import above is the one whose failure is worth reporting.

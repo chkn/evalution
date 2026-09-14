@@ -4,22 +4,22 @@
 import { resource } from "../../../playground/resource.ts";
 import type { TaskId } from "./handle-types.ts";
 
-/** What `orchestrate` in `resource-values.prompt.ts` wants alongside `taskId`. */
+/** What `orchestrate` in `resource-outputs.prompt.ts` wants alongside `taskId`. */
 export interface TaskInfo {
   title: string;
   description: string;
 }
 
 /**
- * A playground module beside `resource-values.prompt.ts`, modelling the
+ * A playground module beside `resource-outputs.prompt.ts`, modelling the
  * motivating case from `specs/resource-hierarchy.md` §A: one seeded row,
- * exposed as several named values so `taskId` and `taskInfo` can both be
+ * exposed as several named outputs so `taskId` and `taskInfo` can both be
  * filled from the one insert that produced them.
  */
 export const taskA = resource({
   group: "Tasks",
   label: "Task A — simple bug report",
-  values: { id: "Task ID", title: "Task Name", info: "Task Info" },
+  outputs: { id: "Task ID", title: "Task Name", info: "Task Info" },
   create: () => ({
     value: {
       id: `tsk_${"a"}` as TaskId,

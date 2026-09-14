@@ -178,7 +178,7 @@ describe("buildSourceTree", () => {
 
     expect(tree).toEqual([
       {
-        kind: "value",
+        kind: "output",
         uri: "a#taskA.id",
         label: "Task A",
         breadcrumb: "Task A / Task ID",
@@ -202,7 +202,7 @@ describe("buildSourceTree", () => {
 
     expect(tree).toEqual([
       {
-        kind: "value",
+        kind: "output",
         uri: "a#taskA.id",
         label: "Task A — Task ID",
         breadcrumb: "Task A / Task ID",
@@ -226,13 +226,13 @@ describe("buildSourceTree", () => {
         breadcrumb: "Task A",
         children: [
           {
-            kind: "value",
+            kind: "output",
             uri: "a#taskA.id",
             label: "Task ID",
             breadcrumb: "Task A / Task ID",
           },
           {
-            kind: "value",
+            kind: "output",
             uri: "a#taskA.title",
             label: "Task Name",
             breadcrumb: "Task A / Task Name",
@@ -266,7 +266,7 @@ describe("buildSourceTree", () => {
             breadcrumb: "Task A",
           },
           {
-            kind: "value",
+            kind: "output",
             uri: "a#taskA.id",
             label: "Task ID",
             breadcrumb: "Task A / Task ID",
