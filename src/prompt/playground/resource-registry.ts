@@ -61,7 +61,23 @@ interface PartitionedInputs {
   params: [string, StandardSchemaV1][];
 }
 
-/** Splits `target`'s `inputs` (if any) into dependencies and arguments. */
+/** What an invalid `inputs` entry's value looks like, for the error message. */
+function describeInvalidInput(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "an array";
+  const type = typeof value;
+  return type === "object" ? "a plain object" : `a ${type}`;
+}
+
+/**
+ * Splits `target`'s `inputs` (if any) into dependencies and arguments.
+ *
+ * Every entry must be a {@link Resource} or a Standard Schema — anything else
+ * (a plain value the author meant to wrap, a typo'd import) is an authoring
+ * mistake that would otherwise silently vanish from both `deps` and `params`,
+ * so `create()` runs with the entry simply missing rather than an error
+ * pointing at it.
+ */
 function partitionInputs(target: Resource<unknown>): PartitionedInputs {
   const inputs: ResourceInputs =
     "inputs" in target ? (target.inputs ?? {}) : {};
@@ -70,6 +86,13 @@ function partitionInputs(target: Resource<unknown>): PartitionedInputs {
   for (const [name, value] of Object.entries(inputs)) {
     if (isResource(value)) deps.push([name, value]);
     else if (isStandardSchema(value)) params.push([name, value]);
+    else {
+      const label = target.label ?? "resource";
+      throw new Error(
+        `Resource '${label}': input '${name}' must be another resource or a ` +
+          `Standard Schema (https://standardschema.dev), not ${describeInvalidInput(value)}.`,
+      );
+    }
   }
   return { deps, params };
 }

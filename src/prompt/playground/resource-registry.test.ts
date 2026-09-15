@@ -1031,6 +1031,27 @@ describe("resource arguments (specs/resource-arguments.md)", () => {
     ).rejects.toThrow(/server-scoped.*arguments/i);
   });
 
+  it("throws when an `inputs` entry is neither a resource nor a schema", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const bad = resource({
+          label: "bad",
+          inputs: { title: "not a resource or a schema" },
+          create: ({ title }) => ({ value: title }),
+        });`,
+    });
+
+    const sources = await reg.sources();
+    expect(() => reg.describe(sources)).toThrow(
+      /'bad': input 'title' must be another resource or a Standard Schema.*not a string/i,
+    );
+
+    const lease = reg.lease();
+    await expect(lease.acquire("x.playground.ts#bad")).rejects.toThrow(
+      /'bad': input 'title' must be another resource or a Standard Schema.*not a string/i,
+    );
+  });
+
   it("fails naming the URI when arguments are passed to a static resource", async () => {
     const { registry: reg } = registry({
       [p("x.playground.ts")]: `${importHelper}
