@@ -623,6 +623,11 @@ pre {
   color: var(--tree-text);
 }
 
+.tree-toolbar-btn-active {
+  background: var(--tree-hover);
+  color: var(--tree-text);
+}
+
 .tree-filter {
   flex: 1;
   display: flex;
@@ -1429,6 +1434,63 @@ pre {
   color: var(--panel-text-secondary);
 }
 
+/* The "same instance as ▲ X" link inside a chip note — reset to read as
+   text, not a button, until hovered/focused.
+   The underline is a `border-bottom`, not `text-decoration`: a `<button>`
+   can't actually become `display: inline` (browsers keep native form
+   controls as an atomic inline-block box regardless), and `text-decoration`
+   on that one box still gets positioned per descendant — so the chevron's
+   smaller font-size shifted *its* underline out of line with the label's.
+   A border belongs to the button's own box as a whole, drawn once beneath
+   everything inside it, chevron included, so there's nothing left to
+   misalign. */
+.pg-slot-instance-link {
+  display: inline-block;
+  border: none;
+  border-bottom: 1px solid currentcolor;
+  line-height: 1.3;
+  margin: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  font-size: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pg-slot-instance-link:hover,
+.pg-slot-instance-link:focus-visible {
+  color: var(--panel-text-primary);
+}
+
+.pg-slot-instance-link:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The chevron reads smaller than the label it points above. */
+.pg-slot-instance-link span {
+  font-size: 8px;
+}
+
+/* Briefly flags the row `scrollToRow` (SourceRow.tsx) just landed on, so
+   following a "same instance as ▲ X" link reads as "here it is", not just a
+   jump. Removed by a timeout, and safe to re-add before it fires — see
+   `scrollToRow`. */
+.pg-row-highlight {
+  animation: pg-row-flash 1.2s ease-out;
+  border-radius: 6px;
+}
+
+@keyframes pg-row-flash {
+  0% {
+    box-shadow: 0 0 0 4px var(--accent-faint);
+  }
+  100% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
 /* A read-only preview of a resource's already-known value, through the
    slot's own editor — rendered with `disabled` (a real ts-proppy editor
    prop, not an `inert` wrapper), so the value stays focusable, selectable,
@@ -1478,6 +1540,56 @@ pre {
 .pg-exec-error code {
   font-family: "Geist Mono", ui-monospace, monospace;
   font-size: 10.5px;
+}
+
+/* A resource's argument form, rendered beneath its chip by `SourceRow`
+   (specs/resource-arguments.md §I). `.pg-slot-stack` wraps the row and the
+   form so the two lay out as a column without disturbing `.pg-slot`'s own
+   (row) layout. */
+.pg-slot-stack {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The chip and its own argument form read as one continuous block, not two
+   stacked cards: the chip rounds only its top corners and drops its bottom
+   border, and the form (same background) is pulled up over that now-flat
+   edge — see `.pg-slot-stack .pg-args-form` below — rather than leaving a
+   gap and a doubled border line between them. */
+.pg-slot-stack .pg-slot-chip {
+  border-radius: 6px 6px 0 6px;
+}
+
+.pg-args-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: 12px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--exec-border);
+  border-radius: 0 6px 6px 0;
+  background: var(--panel-card-bg);
+}
+
+.pg-slot-stack .pg-args-form {
+  /* Overlaps the chip's own bottom edge by a hair (its border, were it not
+     already removed above) rather than merely closing the gap to 0. */
+  margin-top: -1px;
+  border-right: 1px solid var(--exec-border);
+  border-bottom: 1px solid var(--exec-border);
+  border-radius: 0 6px 6px 0;
+}
+
+.pg-args-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pg-args-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--panel-text-secondary);
 }
 
 .pg-exec-footer {
@@ -1533,6 +1645,32 @@ pre {
   font-size: 12px;
   color: var(--error-text);
   margin-top: 8px;
+}
+
+/* Sits above the Run button, inside `.pg-exec-footer` rather than the
+   scrolling `.pg-exec-body` — the spacing this needs is below it, toward
+   the button, and a little above it too, rather than the in-body
+   placement it replaced (which only ever needed the former). */
+.pg-exec-error-run {
+  margin-top: 0;
+  margin-bottom: 8px;
+  padding-top: 10px;
+}
+
+/* Cast onto the padding above, not the error text — a cue that
+   `.pg-exec-body` (just above this, in its own non-overlapping box) still
+   has more to scroll to, the same way a fixed header/footer commonly shadows
+   the scrolling content it sits over. Set by `PlaygroundExecution` from the
+   body's own scroll position, so it comes and goes as scrolling reaches (or
+   leaves) the bottom, not just once on mount. */
+.pg-exec-error-run-shadow {
+  box-shadow: 0 -6px 6px -6px rgba(0, 0, 0, 0.25);
+}
+
+@media (prefers-color-scheme: dark) {
+  .pg-exec-error-run-shadow {
+    box-shadow: 0 -6px 6px -6px rgba(0, 0, 0, 0.6);
+  }
 }
 
 /* Wide layout via container query — must appear after base exec styles so !important rules win */
@@ -3087,6 +3225,16 @@ pre {
   .trace-list-row-meta {
     display: none;
   }
+
+  /* Dropping the meta row also drops the 4px `gap` `.trace-list-row` would
+     otherwise put between it and the name row — even an empty meta row (all
+     columns hidden) still counts as a flex item and keeps that gap. Add it
+     back as bottom padding (not split top/bottom) so the name row lands at
+     the same offset from the top in both layouts — only the space below it
+     should grow. */
+  .trace-list-row {
+    padding-bottom: 12px;
+  }
 }
 
 /* ─── Trace table (sidebar, wide) ────────────────────────────────────────── */
@@ -3130,22 +3278,36 @@ pre {
   white-space: nowrap;
 }
 
-/* Date, spans, duration — sized for their own content, not a shared guess,
-   since a fixed-layout column's content can silently overflow into its
-   neighbor otherwise. */
-.trace-table th:nth-child(2),
-.trace-table td:nth-child(2) {
+/* Sized for each column's own content, not a shared guess, since a
+   fixed-layout column's content can silently overflow into its neighbor
+   otherwise. Targeted by column key rather than position since the column
+   picker lets the user reorder them. */
+.trace-table-col-startTime {
   width: 92px;
 }
 
-.trace-table th:nth-child(3),
-.trace-table td:nth-child(3) {
+.trace-table-col-spanCount {
   width: 40px;
 }
 
-.trace-table th:nth-child(4),
-.trace-table td:nth-child(4) {
+.trace-table-col-duration {
   width: 60px;
+}
+
+.trace-table-col-totalTokens {
+  width: 56px;
+}
+
+.trace-table-col-model {
+  width: 110px;
+}
+
+.trace-table-col-cost {
+  width: 64px;
+}
+
+.trace-table-col-annotations {
+  width: 90px;
 }
 
 .trace-table-sort-btn {
@@ -3201,6 +3363,84 @@ pre {
   gap: 6px;
   overflow: hidden;
   color: var(--tree-text);
+}
+
+/* ─── Column picker popover ──────────────────────────────────────────────── */
+
+.trace-column-picker {
+  background: var(--dropdown-bg);
+  border: 1px solid var(--dropdown-border);
+  border-radius: 10px;
+  box-shadow: var(--dropdown-shadow);
+  padding: 4px;
+  min-width: 170px;
+}
+
+.trace-column-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.trace-column-picker-row:hover {
+  background: var(--dropdown-option-hover);
+}
+
+.trace-column-picker-row-dragging {
+  opacity: 0.5;
+}
+
+.trace-column-picker-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--dropdown-text);
+  cursor: pointer;
+}
+
+.trace-column-picker-check input[type="checkbox"] {
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.trace-column-picker-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--dropdown-text-muted);
+}
+
+.trace-column-picker-grab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--dropdown-text-muted);
+  cursor: grab;
+}
+
+.trace-column-picker-grab:active {
+  cursor: grabbing;
+}
+
+/* ── Annotation count badges (table/card annotations column) ── */
+
+.trace-annotation-counts {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.trace-annotation-counts-empty {
+  color: var(--tree-text-secondary);
 }
 
 /* Status dots */

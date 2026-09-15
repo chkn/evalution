@@ -252,6 +252,19 @@ export interface ResourceInfo {
    * remaining entry.
    */
   siblings?: number;
+  /**
+   * The resource's declared arguments, as slots for the panel to render —
+   * one per schema-valued entry of its `inputs`, in declaration order.
+   * Absent when the resource takes none. Present with an unresolved (generic
+   * string) editor when the requirement is known but its shape is not —
+   * the checker-less degradation, same idiom as
+   * {@link NormalizedPrompt.executeParameters}.
+   *
+   * Only the resource itself carries this — a value source (`parent` set)
+   * shares its root resource's arguments rather than repeating them. See
+   * `specs/resource-arguments.md` §G.
+   */
+  parameters?: PropDefinition[];
 }
 
 /**
@@ -274,6 +287,17 @@ export interface PromptInputSources {
    * (`toolsContext.list_tasks.db`) → URIs of the resources that can fill it.
    */
   executeSlots: Record<string, string[]>;
+  /**
+   * Resource URI → (argument slot path → URIs of sources that can fill it).
+   *
+   * Separate from {@link functionSlots} / {@link executeSlots} and keyed by
+   * URI rather than folded into the slot path, because an argument slot is a
+   * property of the *resource*, not of the prompt: the same resource offers
+   * the same arguments in every prompt that can see it. Absent when no
+   * resource in scope declares arguments. See
+   * `specs/resource-arguments.md` §G.
+   */
+  resourceSlots?: Record<string, Record<string, string[]>>;
 }
 
 /**
@@ -300,9 +324,19 @@ export type ExecutionInput =
       /** The resource's {@link ResourceInfo.uri}. */
       uri: string;
       /**
-       * A serializable summary of what a past run's `create()` produced, so a
-       * trace can display the value it ran with even though replaying mints a
-       * new one. Recorded, never sent by the panel.
+       * Values for the resource's declared arguments, by parameter name.
+       * Absent when the resource takes none. Recursive — an argument may
+       * itself be a typed-in value, an object, another resource, or (later)
+       * a dataset cell — because those are exactly the variants this union
+       * already has. Never folded into `uri`: identity and binding change on
+       * different schedules. See `specs/resource-arguments.md` §C.
+       */
+      args?: Record<string, ExecutionInput>;
+      /**
+       * What this resource's `create()` produced. Recorded on every run
+       * (never sent by the panel); sent back only by a replay, so `create`
+       * can reconstruct rather than re-mint. See
+       * `specs/resource-arguments.md` §E.
        */
       receipt?: unknown;
     }

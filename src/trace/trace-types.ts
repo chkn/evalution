@@ -174,6 +174,18 @@ export interface TraceSummary extends TraceBase {
   providerId: string;
   /** Number of spans currently associated with the trace. */
   spanCount: number;
+  /**
+   * Sum of every LLM span's token usage (`llm.totalTokens`, falling back to
+   * `promptTokens + completionTokens` per span the way `SpanDetails` does).
+   * `undefined` if no span in the trace reports any token usage.
+   */
+  totalTokens?: number;
+  /** Sum of every LLM span's `llm.cost` (prompt + completion). `undefined` if no span reports a cost. */
+  cost?: number;
+  /** The model name, if every LLM span that reports one reports the same one. */
+  model?: string;
+  /** How many annotations of each kind are attached to the trace (trace-level or on any of its spans). */
+  annotationCounts: Record<AnnotationKind, number>;
 }
 
 /** A trace together with all of its spans. */

@@ -7,6 +7,7 @@ import type { CombinedSelection, FieldGroup } from "./combined-inputs";
 import { memberCount } from "./combined-inputs";
 import { ExecutionInputEditor } from "./ExecutionInputEditor";
 import type { SlotSelection } from "./execution-input-state";
+import { nestedField, type ResourceArgsContext } from "./resource-args-context";
 
 interface Props {
   /** The fan-out slot itself (e.g. `toolsContext`). */
@@ -27,6 +28,8 @@ interface Props {
    * edit to that row.
    */
   overwritten?: Record<string, string[]>;
+  /** Forwarded to each row's {@link ExecutionInputEditor} unchanged — a chip with an argument form under it is still a chip. */
+  argsContext?: ResourceArgsContext;
 }
 
 /**
@@ -43,6 +46,7 @@ export function CombinedInputEditor({
   resources,
   slots,
   overwritten,
+  argsContext,
 }: Props) {
   const totalMembers = memberCount(groups);
 
@@ -94,6 +98,16 @@ export function CombinedInputEditor({
               }
               resources={resources}
               slots={rowSlots(slots, propDef.name, group)}
+              // The row's identity for claiming an argument form (§I) has to
+              // agree with `computeClaims`, which only ever sees the
+              // *expanded* selection — so this uses the same representative
+              // member `rowSlots`/`droppedCandidates` already privilege,
+              // rather than the group's own synthetic name, which no
+              // expanded path actually has.
+              argsContext={
+                argsContext &&
+                nestedField(argsContext, `${group.members[0]}.${group.name}`)
+              }
             />
           </div>
         );

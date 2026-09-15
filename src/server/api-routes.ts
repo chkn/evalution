@@ -9,7 +9,10 @@ import {
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { resolveExecutionInputs } from "../prompt/execution-inputs.ts";
+import {
+  resolveExecutionInputs,
+  stampReceipts,
+} from "../prompt/execution-inputs.ts";
 import type {
   PromptProvider,
   ResolvedPromptInputs,
@@ -329,6 +332,13 @@ export function setupRoutes({
         return c.json({ error: err?.message ?? String(err) }, 400);
       }
       const { functionParams, executeValues } = resolved;
+      // What actually gets recorded on the trace: the request as sent, with
+      // each resource reference's receipt filled in from what this run's
+      // resolution produced — see `specs/resource-arguments.md` §K. A receipt
+      // arriving on a replay request already survived resolution above
+      // (`resolveInputs` passes it to `create`); this is what makes the *new*
+      // run's own receipt the one a later replay of *this* trace would see.
+      const recordedInputs = stampReceipts(inputs, resolved.receipts);
 
       const response = await tracer.startActiveSpan(prompt.name, async span => {
         const ctx = span.spanContext();
@@ -351,7 +361,7 @@ export function setupRoutes({
           await provider.execute(decodedId, functionParams, {
             traceId,
             executeValues,
-            inputs,
+            inputs: recordedInputs,
             // Run-scoped resources outlive this response: `execute` returns as
             // soon as the run is dispatched, so teardown hangs off completion
             // rather than off the HTTP request.

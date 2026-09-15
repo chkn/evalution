@@ -27,6 +27,7 @@ export type {
 export { LocalFileProvider } from "./file-provider-local.ts";
 export { MemoryFileProvider } from "./file-provider-memory.ts";
 export {
+  canonicalArgumentKey,
   collectInputSlots,
   type InputSlot,
   type InputSource,
@@ -34,6 +35,7 @@ export {
   type ResourceResolver,
   resolveExecutionInput,
   resolveExecutionInputs,
+  stampReceipts,
 } from "./prompt/execution-inputs.ts";
 export {
   FilePromptProvider,
@@ -49,14 +51,18 @@ export type {
   SlotMatchSource,
   TypeProbe,
   TypeProbeRequest,
+  TypeResolutionRequest,
+  TypeResolutionResult,
 } from "./prompt/file/prompt-file-type.ts";
 export { TSPromptFileType } from "./prompt/file/ts/ts-prompt-file-type.ts";
 export {
   type DynamicResourceDefinition,
   isResource,
+  isStandardSchema,
   type ResolvedResourceInputs,
   type Resource,
   type ResourceDefinition,
+  type ResourceInput,
   type ResourceInputs,
   type ResourceInstance,
   type ResourceOutputDefinition,
@@ -68,8 +74,10 @@ export {
   type PlaygroundModuleError,
   type RegisteredResource,
   type RegisteredSource,
+  type ResourceBinding,
   type ResourceLease,
   ResourceRegistry,
+  resourceParameterNames,
 } from "./prompt/playground/resource-registry.ts";
 export type {
   ExecuteOptions,

@@ -211,13 +211,52 @@ export class TursoTraceProvider extends BaseTraceProvider {
     // comparing `spans.trace_id` to `spans.id` instead of `traces.id`, so
     // every count came back 0. A `leftJoin` to a grouped subquery goes
     // through Drizzle's own qualification instead, and doubles as the
-    // zero-spans case (a trace with no matching row still gets counted, via
+    // zero-rows case (a trace with no matching row still gets counted, via
     // `coalesce`).
-    const spanCounts = this.db
-      .select({ traceId: spans.traceId, count: sql`count(*)`.as("count") })
+    //
+    // `tokens` mirrors `rollupSpans`' `spanTokens` (span-rollup.ts, used by
+    // `MemoryTraceProvider` — keep the two in sync): per span, `llm_total_tokens`
+    // if set, else `llm_prompt_tokens + llm_completion_tokens` (0 for a
+    // missing one of those), and NULL — excluded from the `sum`, like every
+    // NULL — when a span reports no token usage at all. `cost` sums
+    // `llm_cost_prompt + llm_cost_completion`, NULL (and so excluded) unless a
+    // span set both. `model` is the one model every model-reporting span
+    // agrees on (`model_count = 1`), else NULL.
+    const spanRollups = this.db
+      .select({
+        traceId: spans.traceId,
+        count: sql`count(*)`.as("count"),
+        tokens:
+          sql`sum(case when ${spans.llmTotalTokens} is not null or ${spans.llmPromptTokens} is not null or ${spans.llmCompletionTokens} is not null then coalesce(${spans.llmTotalTokens}, coalesce(${spans.llmPromptTokens}, 0) + coalesce(${spans.llmCompletionTokens}, 0)) else null end)`.as(
+            "tokens",
+          ),
+        cost: sql`sum(${spans.llmCostPrompt} + ${spans.llmCostCompletion})`.as(
+          "cost",
+        ),
+        modelCount: sql`count(distinct ${spans.llmModel})`.as("modelCount"),
+        model: sql`min(${spans.llmModel})`.as("model"),
+      })
       .from(spans)
       .groupBy(spans.traceId)
-      .as("span_counts");
+      .as("span_rollups");
+
+    const annotationCounts = this.db
+      .select({
+        traceId: annotations.traceId,
+        issue:
+          sql`sum(case when ${annotations.kind} = 'issue' then 1 else 0 end)`.as(
+            "issue",
+          ),
+        good: sql`sum(case when ${annotations.kind} = 'good' then 1 else 0 end)`.as(
+          "good",
+        ),
+        note: sql`sum(case when ${annotations.kind} = 'note' then 1 else 0 end)`.as(
+          "note",
+        ),
+      })
+      .from(annotations)
+      .groupBy(annotations.traceId)
+      .as("annotation_counts");
 
     const rows = await this.db
       .select({
@@ -227,10 +266,18 @@ export class TursoTraceProvider extends BaseTraceProvider {
         startTime: traces.startTime,
         endTime: traces.endTime,
         status: traces.status,
-        spanCount: sql<number>`coalesce(${spanCounts.count}, 0)`,
+        spanCount: sql<number>`coalesce(${spanRollups.count}, 0)`,
+        tokens: sql<number | null>`${spanRollups.tokens}`,
+        cost: sql<number | null>`${spanRollups.cost}`,
+        modelCount: sql<number>`coalesce(${spanRollups.modelCount}, 0)`,
+        model: sql<string | null>`${spanRollups.model}`,
+        annotIssue: sql<number>`coalesce(${annotationCounts.issue}, 0)`,
+        annotGood: sql<number>`coalesce(${annotationCounts.good}, 0)`,
+        annotNote: sql<number>`coalesce(${annotationCounts.note}, 0)`,
       })
       .from(traces)
-      .leftJoin(spanCounts, eq(spanCounts.traceId, traces.id))
+      .leftJoin(spanRollups, eq(spanRollups.traceId, traces.id))
+      .leftJoin(annotationCounts, eq(annotationCounts.traceId, traces.id))
       .orderBy(desc(traces.startTime));
 
     return rows.map(row => ({
@@ -241,6 +288,15 @@ export class TursoTraceProvider extends BaseTraceProvider {
       endTime: row.endTime ?? undefined,
       status: row.status,
       spanCount: Number(row.spanCount),
+      ...(row.tokens != null && { totalTokens: Number(row.tokens) }),
+      ...(row.cost != null && { cost: Number(row.cost) }),
+      ...(Number(row.modelCount) === 1 &&
+        row.model != null && { model: row.model }),
+      annotationCounts: {
+        issue: Number(row.annotIssue),
+        good: Number(row.annotGood),
+        note: Number(row.annotNote),
+      },
     }));
   }
 

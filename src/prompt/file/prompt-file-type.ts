@@ -139,6 +139,25 @@ export interface SlotMatchRequest {
 }
 
 /**
+ * Every type question one normalization pass asks, put to
+ * {@link PromptFileType.resolveTypes} together so they can share one checker.
+ */
+export interface TypeResolutionRequest {
+  /** Probes to evaluate. See {@link PromptFileType.resolveTypeProbes}. */
+  probes?: readonly TypeProbeRequest[];
+  /** Slot matches to decide. See {@link PromptFileType.resolveSlotMatches}. */
+  slotMatches?: readonly SlotMatchRequest[];
+}
+
+/** Answers to a {@link TypeResolutionRequest}, positional within each list. */
+export interface TypeResolutionResult {
+  /** One per probe request, with the same meaning as {@link PromptFileType.resolveTypeProbes}. */
+  probes: (PropDefinition | null | undefined)[];
+  /** One per slot match request, with the same meaning as {@link PromptFileType.resolveSlotMatches}. */
+  slotMatches: Record<string, string[]>[];
+}
+
+/**
  * Strategy object that knows how to parse, edit, and execute a specific
  * prompt file format.
  *
@@ -304,4 +323,17 @@ export interface PromptFileType {
   resolveSlotMatches?(
     requests: readonly SlotMatchRequest[],
   ): Promise<Record<string, string[]>[]>;
+
+  /**
+   * Answers probes and slot matches together: the same questions, with the
+   * same answers, as {@link resolveTypeProbes} and {@link resolveSlotMatches},
+   * but sharing whatever it costs to answer them. For a checker-backed file
+   * type that is a whole program build, so a caller with both kinds of
+   * question should prefer this.
+   *
+   * Optional. When omitted, callers ask the two separately.
+   *
+   * @param requests - See {@link TypeResolutionRequest}.
+   */
+  resolveTypes?(requests: TypeResolutionRequest): Promise<TypeResolutionResult>;
 }

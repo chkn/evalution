@@ -284,6 +284,26 @@ export function ModelIcon() {
   );
 }
 
+/** A tag — the annotations column in the trace list. */
+export function AnnotationsIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 3h9l9 9-9 9-9-9V3z" />
+      <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function MoreIcon() {
   return (
     <svg

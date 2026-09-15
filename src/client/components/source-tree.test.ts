@@ -167,26 +167,28 @@ describe("buildSourceTree", () => {
     ]);
   });
 
-  it("collapses a resource with siblings === 1 to its own label", () => {
+  it("collapses a resource with siblings === 1 to 'Resource → Value' too", () => {
     const resources = [
       res("a#taskA", { label: "Task A" }),
       val("a#taskA.id", "a#taskA", 1, { label: "Task ID" }),
     ];
-    // The resource's own uri doesn't fit, but its one declared value does —
-    // and since it never had a sibling, the value *is* the resource.
+    // The resource's own uri doesn't fit, but its one declared value does.
+    // The submenu that would have named the resource is gone either way —
+    // whether it had one output or several — so the label always carries
+    // both, not just the output's.
     const tree = buildSourceTree(resources, ["a#taskA.id"]);
 
     expect(tree).toEqual([
       {
         kind: "output",
         uri: "a#taskA.id",
-        label: "Task A",
+        label: "Task A → Task ID",
         breadcrumb: "Task A / Task ID",
       },
     ]);
   });
 
-  it("collapses a five-value resource narrowed to one match to 'Resource — Value'", () => {
+  it("collapses a five-value resource narrowed to one match to 'Resource → Value'", () => {
     const resources = [
       res("a#taskA", { label: "Task A" }),
       val("a#taskA.id", "a#taskA", 5, { label: "Task ID" }),
@@ -204,7 +206,7 @@ describe("buildSourceTree", () => {
       {
         kind: "output",
         uri: "a#taskA.id",
-        label: "Task A — Task ID",
+        label: "Task A → Task ID",
         breadcrumb: "Task A / Task ID",
       },
     ]);

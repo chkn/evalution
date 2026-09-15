@@ -858,6 +858,8 @@ function App() {
                       onSelect={t =>
                         handleSelectTrace(t.providerId, t.id, t.name)
                       }
+                      sidebarWidth={sidebarWidth}
+                      onResizeSidebar={w => sidebar.setSize("w", w)}
                     />
                   )}
                 </aside>

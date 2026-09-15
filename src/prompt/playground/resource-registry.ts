@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { FileProvider } from "../../file-provider.ts";
 import type { ResourceInfo, ResourceScope } from "../../shared/types.ts";
 import {
   isResource,
+  isStandardSchema,
   type Resource,
   type ResourceInputs,
   type ResourceOutputDefinition,
@@ -47,6 +50,48 @@ interface Instance {
   value: unknown;
   receipt?: unknown;
   dispose?: () => void | Promise<void>;
+  reset?: () => void | Promise<void>;
+}
+
+/** A resource's declared `inputs`, split into its two kinds of entry. See `specs/resource-arguments.md` §B. */
+interface PartitionedInputs {
+  /** Resource-valued entries: code-wired dependencies, resolved by identity. */
+  deps: [string, Resource<unknown>][];
+  /** Schema-valued entries: arguments, resolved per run and validated. */
+  params: [string, StandardSchemaV1][];
+}
+
+/** Splits `target`'s `inputs` (if any) into dependencies and arguments. */
+function partitionInputs(target: Resource<unknown>): PartitionedInputs {
+  const inputs: ResourceInputs =
+    "inputs" in target ? (target.inputs ?? {}) : {};
+  const deps: [string, Resource<unknown>][] = [];
+  const params: [string, StandardSchemaV1][] = [];
+  for (const [name, value] of Object.entries(inputs)) {
+    if (isResource(value)) deps.push([name, value]);
+    else if (isStandardSchema(value)) params.push([name, value]);
+  }
+  return { deps, params };
+}
+
+/**
+ * The names of `target`'s declared arguments — its schema-valued `inputs`
+ * entries — in declaration order. Empty when it takes none.
+ *
+ * The provider layer (which is where a checker lives, if one is available)
+ * uses this to know which parameters to probe or, lacking a checker, to
+ * report with an unresolved type — see `specs/resource-arguments.md` §G, §H.
+ */
+export function resourceParameterNames(target: Resource<unknown>): string[] {
+  return partitionInputs(target).params.map(([name]) => name);
+}
+
+/** Why a `scope: 'server'` resource that declares arguments is rejected. See `specs/resource-arguments.md` §D. */
+function serverScopedArgumentsError(label: string): string {
+  return (
+    `Resource '${label}' is server-scoped and declares arguments — a ` +
+    `server-scoped resource may not take arguments (specs/resource-arguments.md §D).`
+  );
 }
 
 /**
@@ -209,23 +254,225 @@ function isPlainSerializable(
 }
 
 /**
- * A handle on the resources created for one execution.
+ * A resource reference's arguments, as the lease sees them.
  *
- * Run-scoped instances live for exactly as long as this lease; server-scoped
- * ones are memoized on the registry and untouched by {@link release}.
+ * Built by `resolveExecutionInput` from an `ExecutionInput`'s `args` — the
+ * layer that knows how to turn one into a value — so the registry never has
+ * to know `ExecutionInput` exists. See `specs/resource-arguments.md` §D.
  */
+export interface ResourceBinding {
+  /**
+   * Canonical key for these arguments — identity for memoization. The stable
+   * JSON encoding of the *unresolved* arguments (object keys sorted, absent
+   * and `{}` both encoding to `""`), so a resolved argument that happens to
+   * be a live handle never has to be compared or hashed.
+   */
+  key: string;
+  /**
+   * Resolves the arguments, keyed by parameter name. Called at most once per
+   * (resource, key), lazily — a binding that turns out to hit the memo must
+   * not evaluate its arguments at all, and a failed `create` must not have
+   * side effects from arguments no one asked for.
+   */
+  resolve(): Promise<Record<string, unknown>>;
+  /** A past run's receipt, on a replay. Passed to `create`; never part of {@link key}. */
+  receipt?: unknown;
+}
+
+/**
+ * The `ResourceLease.receipts()` key for a source acquired with argument key
+ * `key`: `<uri>@<key>` when `key` is non-empty (the resource took
+ * arguments), or bare `<uri>` when it's `""` (it didn't) — so an existing
+ * unparameterized receipt's key is byte-identical to before arguments
+ * existed. Exported so `stampReceipts` (`execution-inputs.ts`) can compute
+ * the same key from the unresolved recipe when recording a fresh run's
+ * receipts onto its inputs. See `specs/resource-arguments.md` §D, §K.
+ */
+export function receiptKeyOf(uri: string, key: string): string {
+  return key ? `${uri}@${key}` : uri;
+}
+
+/**
+ * A minimal FIFO mutex: `acquire()` resolves with a `release` function once
+ * this caller's turn comes, in the order callers asked.
+ */
+class Mutex {
+  private locked = false;
+  private waiters: (() => void)[] = [];
+
+  acquire(): Promise<() => void> {
+    const release = () => {
+      const next = this.waiters.shift();
+      if (next) next();
+      else this.locked = false;
+    };
+    if (!this.locked) {
+      this.locked = true;
+      return Promise.resolve(release);
+    }
+    return new Promise<() => void>(resolve => {
+      this.waiters.push(() => resolve(release));
+    });
+  }
+}
+
+/**
+ * Serializes concurrent leases' first use of a `reset`-declaring server-scoped
+ * instance, one {@link Mutex} per (resource, argument key). See
+ * `specs/resource-arguments.md` §F.
+ */
+class ResetLockRegistry {
+  private mutexes = new Map<Resource<unknown>, Map<string, Mutex>>();
+
+  forLease(): LeaseResetLocks {
+    return new LeaseResetLocks(this);
+  }
+
+  /** The mutex for (resource, key), created on first use. */
+  mutex(target: Resource<unknown>, key: string): Mutex {
+    let byKey = this.mutexes.get(target);
+    if (!byKey) {
+      byKey = new Map();
+      this.mutexes.set(target, byKey);
+    }
+    let mutex = byKey.get(key);
+    if (!mutex) {
+      mutex = new Mutex();
+      byKey.set(key, mutex);
+    }
+    return mutex;
+  }
+}
+
+/**
+ * One lease's held reset locks.
+ *
+ * Held in ascending sort-key order for as long as the lease holds any: when a
+ * newly needed lock would sort *before* one already held, every held lock is
+ * released and the full set (previously held, plus the new one) is
+ * reacquired together in order. A lease therefore never holds locks out of
+ * order, which is what keeps two leases from taking two locks in opposite
+ * orders and deadlocking (`specs/resource-arguments.md` §F).
+ */
+class LeaseResetLocks {
+  private held: {
+    sortKey: string;
+    target: Resource<unknown>;
+    key: string;
+    release: () => void;
+  }[] = [];
+  private entered = new Map<Resource<unknown>, Set<string>>();
+  private readonly registry: ResetLockRegistry;
+
+  constructor(registry: ResetLockRegistry) {
+    this.registry = registry;
+  }
+
+  private hasEntered(target: Resource<unknown>, key: string): boolean {
+    return this.entered.get(target)?.has(key) ?? false;
+  }
+
+  private markEntered(target: Resource<unknown>, key: string): void {
+    let set = this.entered.get(target);
+    if (!set) {
+      set = new Set();
+      this.entered.set(target, set);
+    }
+    set.add(key);
+  }
+
+  /**
+   * Locks (resource, key) for this lease's lifetime, if not already locked by
+   * it. Returns whether this call is the one that newly entered it — the
+   * caller's cue to actually run `reset()`.
+   */
+  async enter(
+    target: Resource<unknown>,
+    key: string,
+    sortKey: string,
+  ): Promise<boolean> {
+    if (this.hasEntered(target, key)) return false;
+
+    const maxHeld = this.held.at(-1)?.sortKey;
+    if (maxHeld !== undefined && sortKey < maxHeld) {
+      const wanted = [
+        ...this.held.map(h => ({
+          sortKey: h.sortKey,
+          target: h.target,
+          key: h.key,
+        })),
+        { sortKey, target, key },
+      ].sort((a, b) =>
+        a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0,
+      );
+      for (const h of this.held) h.release();
+      this.held = [];
+      for (const w of wanted) {
+        const release = await this.registry.mutex(w.target, w.key).acquire();
+        this.held.push({ ...w, release });
+      }
+    } else {
+      const release = await this.registry.mutex(target, key).acquire();
+      this.held.push({ sortKey, target, key, release });
+    }
+
+    this.markEntered(target, key);
+    return true;
+  }
+
+  releaseAll(): void {
+    for (const h of this.held) h.release();
+    this.held = [];
+  }
+}
+
+/** Resources already warned about a `reset` that will never run, so the message appears once each. */
+const warnedRunScopedReset = new WeakSet<Resource<unknown>>();
+
+/** One link in a resource's dependency chain, for cycle detection and error messages. */
+interface ChainLink {
+  resource: Resource<unknown>;
+  label: string;
+}
+
+/**
+ * Carries the dependency chain across `create()`'s `await binding.resolve()`
+ * — the point where resolution leaves the registry's own call stack and
+ * re-enters it through `ResourceLease.acquire`, a public entry point that
+ * otherwise has no way to know it's being called from inside another
+ * resource's own creation.
+ *
+ * This is what lets `A`'s argument resolving back to `A` itself (or to `B`,
+ * which takes `A` as one of *its* arguments) be caught as the same kind of
+ * cycle a static `inputs` cycle is, rather than deadlocking on a promise
+ * awaiting its own settlement. See `specs/resource-arguments.md` §D.
+ */
+const chainContext = new AsyncLocalStorage<readonly ChainLink[]>();
+
+/** A handle on the resources created for one execution. */
 export interface ResourceLease {
   /**
    * Creates (or reuses) the value for `uri`, resolving its `inputs` first.
-   * Calling twice for the same resource within one lease returns the same
-   * value — which is why resolution takes every input together.
+   * Calling twice for the same resource (with the same `binding`'s `key`, if
+   * any) within one lease returns the same value — which is why resolution
+   * takes every input together.
+   *
+   * @param binding - The resource's arguments and replay receipt, if any. See
+   *   {@link ResourceBinding} and `specs/resource-arguments.md` §D.
    */
-  acquire(uri: string): Promise<unknown>;
-  /** A serializable summary of each resource acquired, keyed by `uri`. */
+  acquire(uri: string, binding?: ResourceBinding): Promise<unknown>;
+  /**
+   * A serializable summary of each resource acquired, keyed by `uri` — or by
+   * `` `${uri}@${key}` `` when it was acquired with arguments (`key` being
+   * the {@link ResourceBinding.key} that produced the instance).
+   */
   receipts(): Record<string, unknown>;
   /** Disposes this lease's run-scoped instances. Safe to call more than once. */
   release(): Promise<void>;
 }
+
+/** A resource's memoized instances, one per argument key (`""` for none). See `specs/resource-arguments.md` §D. */
+type InstancesByKey = Map<string, Promise<Instance> | Instance>;
 
 /**
  * Discovers **playground modules** and resolves the resources they export.
@@ -235,7 +482,7 @@ export interface ResourceLease {
  * scoped by **location, never by export name**:
  *
  * | Scope   | Location                                                 | In scope for              |
- * | ------- | -------------------------------------------------------- | ------------------------- |
+ * | ------- | -------------------------------------------------------- | -------------------------- |
  * | Prompt  | `*.playground.ts` in the same directory as a prompt file | prompts in that directory |
  * | Project | any `*.ts` under `.evalution/playground/`                | every prompt in the workspace |
  *
@@ -265,13 +512,12 @@ export class ResourceRegistry {
   private identities = new Map<Resource<unknown>, RegisteredResource>();
   /** Modules that threw at import time, by absolute path. */
   private moduleErrors: PlaygroundModuleError[] = [];
-  /** Memoized `scope: 'server'` instances, by the resource they belong to. */
-  private serverInstances = new Map<
-    Resource<unknown>,
-    Promise<Instance> | Instance
-  >();
+  /** Memoized `scope: 'server'` instances, by resource object then argument key. */
+  private serverInstances = new Map<Resource<unknown>, InstancesByKey>();
   /** The scan in flight, so concurrent callers don't each re-import. */
   private scanning: Promise<void> | null = null;
+  /** Serializes leases' first use of a resettable server-scoped instance. See {@link ResetLockRegistry}. */
+  private resetLocks = new ResetLockRegistry();
 
   constructor({
     fileProvider,
@@ -331,7 +577,8 @@ export class ResourceRegistry {
   /**
    * Describes `sources` for the UI, including a snapshot of the value itself
    * where one is already known and safe to show — a static `value` resource,
-   * or a `scope: 'server'` one this process has already created.
+   * or a `scope: 'server'` one this process has already created with no
+   * arguments.
    *
    * A run-scoped resource never qualifies: its instance lives only for the
    * run that created it, so there is nothing memoized to peek at, and
@@ -340,10 +587,21 @@ export class ResourceRegistry {
    * below) — an opaque handle survives the trip through `describe` as a chip
    * with no preview, same as before this existed. An output source previews the
    * same way, reading its own path off the memoized instance.
+   *
+   * A `scope: 'server'` resource that declares arguments is reported with
+   * {@link ResourceInfo.error} set rather than described normally — see
+   * `specs/resource-arguments.md` §D.
    */
   describe(sources: readonly RegisteredSource[]): ResourceInfo[] {
     return sources.map(s => {
-      const instance = this.peekInstance(s.resource.resource);
+      const { params } = partitionInputs(s.resource.resource);
+      const scope =
+        s.resource.resource.scope ?? defaultScope(s.resource.resource);
+      const invalidArgs = scope === "server" && params.length > 0;
+
+      const instance = invalidArgs
+        ? undefined
+        : this.peekInstance(s.resource.resource);
       const read = instance
         ? readOutputPath(instance.value, s.outputPath)
         : undefined;
@@ -357,9 +615,10 @@ export class ResourceRegistry {
       const info: ResourceInfo = {
         uri: s.uri,
         label: s.label,
-        scope: s.resource.resource.scope ?? defaultScope(s.resource.resource),
+        scope,
         value,
       };
+      if (invalidArgs) info.error = serverScopedArgumentsError(s.resource.uri);
       if (s.group.length > 0) info.group = [...s.group];
       if (s.outputPath.length > 0) {
         info.parent = s.resource.uri;
@@ -369,10 +628,10 @@ export class ResourceRegistry {
     });
   }
 
-  /** The memoized instance for `target`, if one has already settled. */
+  /** The memoized no-argument instance for `target`, if one has already settled. */
   private peekInstance(target: Resource<unknown>): Instance | undefined {
-    const cached = this.serverInstances.get(target);
-    return cached instanceof Promise ? undefined : cached;
+    const cached = this.serverInstances.get(target)?.get("");
+    return cached && !(cached instanceof Promise) ? cached : undefined;
   }
 
   /**
@@ -385,7 +644,9 @@ export class ResourceRegistry {
   async invalidate(): Promise<void> {
     this.resources = null;
     this.moduleErrors = [];
-    const pending = [...this.serverInstances.values()];
+    const pending = [...this.serverInstances.values()].flatMap(byKey => [
+      ...byKey.values(),
+    ]);
     this.serverInstances = new Map();
     await Promise.all(
       pending.map(async p => {
@@ -404,19 +665,34 @@ export class ResourceRegistry {
    * together by {@link ResourceLease.release}.
    */
   lease(): ResourceLease {
-    const runInstances = new Map<Resource<unknown>, Promise<Instance>>();
+    const runInstances = new Map<Resource<unknown>, InstancesByKey>();
     const acquired = new Map<string, { receipt?: unknown }>();
+    const resetLocks = this.resetLocks.forLease();
     let released = false;
 
-    const acquire = async (uri: string): Promise<unknown> => {
+    const acquire = async (
+      uri: string,
+      binding?: ResourceBinding,
+    ): Promise<unknown> => {
       const { rootUri, outputPath } = parseSourceUri(uri);
       const registered = (await this.byUri()).get(rootUri);
       if (!registered) throw new Error(`Resource '${uri}' not found`);
+      const key = binding?.key ?? "";
+      // A fresh top-level call has no ambient chain — `[]`, same as before
+      // arguments existed. Reached instead from inside another resource's own
+      // `create()` (its argument resolved back through here), the chain that
+      // creation is running under is picked up via {@link chainContext} rather
+      // than resetting to empty, which is what lets an argument cycle be
+      // caught the same way a static `inputs` cycle is.
+      const chain = chainContext.getStore() ?? [];
       const instance = await this.instantiate(
         registered.resource,
         rootUri,
         runInstances,
-        [],
+        chain,
+        key,
+        binding,
+        resetLocks,
       );
       const read = readOutputPath(instance.value, outputPath);
       if (!read.found) {
@@ -424,16 +700,16 @@ export class ResourceRegistry {
           `Resource '${rootUri}': no output at '${outputPath.join(".")}'`,
         );
       }
-      // An output source's receipt is the value itself when it's plain JSON
-      // data — that's what lets a trace say the run used `tsk_abc123` — and
-      // otherwise the registration's own receipt, same as a root source.
-      const receipt =
-        outputPath.length === 0
-          ? instance.receipt
-          : isPlainSerializable(read.value)
-            ? read.value
-            : instance.receipt;
-      acquired.set(uri, { receipt });
+      // A root reference and an output reference name the *same instance*, so
+      // both record that instance's receipt, full stop — the output's own
+      // value (even when it's plain JSON) is no longer substituted here.
+      // That was right when a receipt was only ever displayed, but the
+      // moment a receipt is fed back to `create` (§E), replaying an output
+      // reference must not hand it the output's bare value where `create`
+      // expects its own receipt shape. An author who wants the id shown in a
+      // trace puts it in the receipt, which is what makes this no loss.
+      const receipt = instance.receipt;
+      acquired.set(receiptKeyOf(uri, key), { receipt });
       return read.value;
     };
 
@@ -448,8 +724,11 @@ export class ResourceRegistry {
       release: async () => {
         if (released) return;
         released = true;
-        const pending = [...runInstances.values()];
+        const pending = [...runInstances.values()].flatMap(byKey => [
+          ...byKey.values(),
+        ]);
         runInstances.clear();
+        resetLocks.releaseAll();
         await Promise.all(
           pending.map(async p => {
             try {
@@ -466,21 +745,31 @@ export class ResourceRegistry {
   // #region Instantiation
 
   /**
-   * Creates (or reuses) the instance for `target`, resolving its `inputs` first.
+   * Creates (or reuses) the instance for `target`, resolving its `inputs`
+   * first — its dependencies, and, if `binding` is given, its arguments.
    *
    * Keyed on the resource **object**, not on its `uri`: a dependency is named
    * by reference, and a resource reached only that way (from a module the
    * discovery patterns don't cover) still has to resolve. `label` is what the
-   * resource is called in errors — its `uri` where it has one.
+   * resource is called in errors — its `uri` where it has one. Further keyed
+   * on `key` — {@link ResourceBinding.key}, or `""` for a resource with no
+   * arguments — so two references to one resource with different arguments
+   * resolve to two instances (`specs/resource-arguments.md` §D).
    *
    * `chain` is the dependency path taken to get here; it turns a cycle into a
-   * legible error instead of a stack overflow.
+   * legible error instead of a stack overflow. Cycles are detected on the
+   * resource object alone, ignoring `key`: a resource that recursively seeds
+   * itself with different arguments is not a case that exists, and erring
+   * toward rejecting it is the safe side.
    */
   private async instantiate(
     target: Resource<unknown>,
     label: string,
-    runInstances: Map<Resource<unknown>, Promise<Instance>>,
+    runInstances: Map<Resource<unknown>, InstancesByKey>,
     chain: readonly { resource: Resource<unknown>; label: string }[],
+    key: string,
+    binding: ResourceBinding | undefined,
+    resetLocks: LeaseResetLocks,
   ): Promise<Instance> {
     if (chain.some(c => c.resource === target)) {
       throw new Error(
@@ -493,16 +782,35 @@ export class ResourceRegistry {
     const scope = target.scope ?? defaultScope(target);
     const cache = scope === "server" ? this.serverInstances : runInstances;
 
-    let pending = cache.get(target);
+    let byKey = cache.get(target);
+    if (!byKey) {
+      byKey = new Map();
+      cache.set(target, byKey);
+    }
+
+    let pending = byKey.get(key);
     if (!pending) {
-      pending = this.create(target, label, scope, runInstances, [
-        ...chain,
-        { resource: target, label },
-      ]);
-      cache.set(target, pending);
+      const nextChain = [...chain, { resource: target, label }];
+      // Ambient for the duration of `create()` — including its `await
+      // binding.resolve()`, which is how an argument that resolves back
+      // through `ResourceLease.acquire` (a public entry point with no chain
+      // of its own) still sees this chain. See {@link chainContext}.
+      pending = chainContext.run(nextChain, () =>
+        this.create(
+          target,
+          label,
+          scope,
+          runInstances,
+          nextChain,
+          binding,
+          resetLocks,
+        ),
+      );
+      byKey.set(key, pending);
+      const settledByKey = byKey;
       // A failed create must not be memoized as the resource's value, or every
       // later run in this process inherits the failure.
-      pending.catch(() => cache.delete(target));
+      pending.catch(() => settledByKey.delete(key));
       // Once a server-scoped create settles, replace the pending promise with
       // the instance itself so `describe()` can peek it synchronously without
       // re-running `create()` — that's the whole point of memoizing it.
@@ -512,8 +820,8 @@ export class ResourceRegistry {
       if (scope === "server") {
         pending
           .then(instance => {
-            if (this.serverInstances.get(target) === pending) {
-              this.serverInstances.set(target, instance);
+            if (this.serverInstances.get(target)?.get(key) === pending) {
+              this.serverInstances.get(target)!.set(key, instance);
             }
           })
           // A rejection is already handled by the `.catch` above, on the same
@@ -522,21 +830,56 @@ export class ResourceRegistry {
           .catch(() => {});
       }
     }
-    return pending;
+
+    const instance = await pending;
+
+    if (scope === "server" && instance.reset) {
+      const sortKey = key ? `${label}@${key}` : label;
+      const isNewToThisLease = await resetLocks.enter(target, key, sortKey);
+      if (isNewToThisLease) await instance.reset();
+    } else if (
+      scope === "run" &&
+      instance.reset &&
+      !warnedRunScopedReset.has(target)
+    ) {
+      warnedRunScopedReset.add(target);
+      console.warn(
+        `⚠️ Resource '${label}' declares reset() but is run-scoped — it is ` +
+          `created fresh per run, so reset() will never be called. See ` +
+          `specs/resource-arguments.md §F.`,
+      );
+    }
+
+    return instance;
   }
 
   private async create(
     target: Resource<unknown>,
     label: string,
     scope: ResourceScope,
-    runInstances: Map<Resource<unknown>, Promise<Instance>>,
+    runInstances: Map<Resource<unknown>, InstancesByKey>,
     chain: readonly { resource: Resource<unknown>; label: string }[],
+    binding: ResourceBinding | undefined,
+    resetLocks: LeaseResetLocks,
   ): Promise<Instance> {
-    if ("value" in target) return target;
-    const inputs: ResourceInputs = target.inputs ?? {};
+    if ("value" in target) {
+      if (binding) {
+        throw new Error(
+          `Resource '${label}': static resources take no arguments`,
+        );
+      }
+      return target;
+    }
+
+    const { deps, params } = partitionInputs(target);
+
+    if (params.length > 0 && scope === "server") {
+      throw new Error(serverScopedArgumentsError(label));
+    }
+
     const resolved: Record<string, unknown> = {};
 
-    for (const [name, dep] of Object.entries(inputs)) {
+    for (const [name, dep] of deps) {
       // A dependency arrives as whichever object the depending module's own
       // import produced, which is not necessarily the one discovery
       // registered. `byIdentity` maps both onto one registration so the value
@@ -553,11 +896,37 @@ export class ResourceRegistry {
         );
       }
       resolved[name] = (
-        await this.instantiate(depTarget, depLabel, runInstances, chain)
+        await this.instantiate(
+          depTarget,
+          depLabel,
+          runInstances,
+          chain,
+          "",
+          undefined,
+          resetLocks,
+        )
       ).value;
     }
 
-    const instance = await target.create(resolved);
+    if (params.length > 0) {
+      // Lazy, and only evaluated here — never for a binding that hits the
+      // memo — because arguments must not be resolved (and a resource used
+      // as one of them must not be created) for a slot no one is actually
+      // filling from this call.
+      const argValues = (await binding?.resolve()) ?? {};
+      for (const [name, schema] of params) {
+        const result = await schema["~standard"].validate(argValues[name]);
+        if (result.issues) {
+          const message = result.issues.map(i => i.message).join(", ");
+          throw new Error(
+            `Resource '${label}': invalid value for '${name}' — ${message}`,
+          );
+        }
+        resolved[name] = result.value;
+      }
+    }
+
+    const instance = await target.create(resolved, binding?.receipt);
     if (!instance || typeof instance !== "object" || !("value" in instance)) {
       throw new Error(
         `Resource '${label}': create() must return { value, dispose? }`,
@@ -641,7 +1010,9 @@ export class ResourceRegistry {
         identities.set(value, registered);
         const alias = shared[key];
         if (isResource(alias)) identities.set(alias, registered);
-        if ("value" in value) this.serverInstances.set(value, value);
+        if ("value" in value) {
+          this.serverInstances.set(value, new Map([["", value]]));
+        }
       }
     }
 

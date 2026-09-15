@@ -63,11 +63,11 @@ function isBucket(entry: SourceNode | GroupBucket): entry is GroupBucket {
  *    own value doesn't fit this slot) left with exactly one selectable
  *    descendant *becomes* that descendant — its own submenu would have had
  *    nothing to disambiguate.
- * 3. **Label.** A resource collapsed because it only ever had one output
- *    (`siblings === 1`) keeps its own label; one collapsed because matching
- *    narrowed several outputs down to one keeps the composite `"Resource —
- *    Output"` label, since the submenu that would have named the output is
- *    gone.
+ * 3. **Label.** A resource collapsed to its one selectable output keeps the
+ *    composite `"Resource → Output"` label, whether it only ever had that
+ *    one output or matching narrowed several down to it — the submenu that
+ *    would have named the output is gone either way, so the label carries
+ *    the resource's own name too rather than just the output's.
  *
  * @param resources - Every source offered to the prompt (`ResourceInfo`
  *   entries: resources and their declared outputs), unfiltered.
@@ -107,6 +107,19 @@ function breadcrumbOf(group: readonly string[], ...rest: string[]): string {
   return [...group, ...rest].join(" / ");
 }
 
+/**
+ * `"Fresh App DB"` + `"client"` → `"Fresh App DB → client"` — the composite
+ * label for a resource named alongside one of its outputs, used both by the
+ * collapsed dropdown row below and by the chip `SourceRow` shows once that
+ * output is chosen.
+ */
+export function combinedLabel(
+  resourceLabel: string,
+  outputLabel: string,
+): string {
+  return `${resourceLabel} → ${outputLabel}`;
+}
+
 /** Prune + collapse one resource (and its declared outputs) for this slot. */
 function resolveResource(
   root: ResourceInfo,
@@ -129,17 +142,14 @@ function resolveResource(
     if (matchedOutputs.length === 0) return null; // nothing selectable here
     if (matchedOutputs.length === 1) {
       // Collapse: this resource's own row would have opened a submenu with
-      // nothing left to disambiguate, so the output stands in for it.
+      // nothing left to disambiguate, so the output stands in for it — its
+      // label names both, since the submenu that would have named the
+      // resource is gone too.
       const only = matchedOutputs[0];
-      const totalSiblings = only.siblings ?? outputs.length;
       return {
         kind: "output",
         uri: only.uri,
-        // The output *is* the resource when it was the resource's only
-        // declared output; otherwise the submenu that would have named it is
-        // gone, so the composite label carries the disambiguation instead.
-        label:
-          totalSiblings === 1 ? root.label : `${root.label} — ${only.label}`,
+        label: combinedLabel(root.label, only.label),
         breadcrumb: breadcrumbOf(group, root.label, only.label),
       };
     }

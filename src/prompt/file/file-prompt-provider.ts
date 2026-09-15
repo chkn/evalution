@@ -20,10 +20,14 @@ import {
   matchSourcesToSlots,
   resolveExecutionInputs,
 } from "../execution-inputs.ts";
+import { isResource, type Resource } from "../playground/resource.ts";
 import {
   DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
+  type PlaygroundModuleError,
+  type RegisteredResource,
   type RegisteredSource,
   ResourceRegistry,
+  resourceParameterNames,
 } from "../playground/resource-registry.ts";
 import type {
   ExecuteOptions,
@@ -38,6 +42,7 @@ import type {
   SlotMatchRequest,
   TypeProbe,
   TypeProbeRequest,
+  TypeResolutionResult,
 } from "./prompt-file-type.ts";
 import { TSPromptFileType } from "./ts/ts-prompt-file-type.ts";
 
@@ -46,6 +51,25 @@ const DEFAULT_IGNORE_PATTERNS = [
   "**/dist/**",
   "**/.git/**",
 ];
+
+/** A resource that takes arguments, with the sources that may fill them. */
+interface ResourceWithParameters {
+  resource: RegisteredResource;
+  /** Its schema-valued input names, in declaration order. */
+  names: string[];
+  /** Sources in scope for its own module, excluding any that depend on it. */
+  candidates: RegisteredSource[];
+}
+
+/** The resources available while normalizing a batch of prompts. */
+interface ResourceView {
+  /** Playground modules that failed to load. */
+  moduleErrors: PlaygroundModuleError[];
+  /** Per prompt, in order, the sources it can draw on. */
+  inScope: RegisteredSource[][];
+  /** Every resource that takes arguments. */
+  withParams: ResourceWithParameters[];
+}
 
 /**
  * Configuration options for the {@link FilePromptProvider}.
@@ -137,6 +161,132 @@ function resourceTypeExpression(
 }
 
 /**
+ * A type expression naming what `paramName` — a schema-valued entry of
+ * `resource`'s own `inputs` — validates to, for the file type to evaluate in
+ * the scope of the resource's *own* module.
+ *
+ * A resource's arguments are prompt-independent, so unlike
+ * {@link resourceTypeExpression} this is evaluated once per (resource,
+ * parameter) rather than once per (prompt, source): the injected alias lands
+ * in the resource's own file, self-referencing its own export, so it needs
+ * no import at all. `~standard.types` is Standard Schema's phantom
+ * (type-only, never populated at run time) property carrying the schema's
+ * inferred input/output types — reading `["output"]` off it is what turns a
+ * `z.string()` into the type `string` without this file knowing anything
+ * about zod, or any other validator, at all. See
+ * `specs/resource-arguments.md` §H.
+ */
+function resourceParameterTypeExpression(
+  resource: RegisteredResource,
+  paramName: string,
+): string {
+  // Evaluated in the resource's own file (see `withInjectedTypes`), so the
+  // export is already a same-module binding — `typeof <name>` reaches it
+  // directly, with no import of the file into itself.
+  //
+  // `DynamicResourceDefinition.inputs` is declared `inputs?: N` — optional —
+  // so `typeof <name>["inputs"]` is `N | undefined`, and indexing a union
+  // that includes `undefined` with a key `undefined` doesn't have silently
+  // resolves the *whole* expression to `any` rather than to an error.
+  // `NonNullable` strips that before the parameter is indexed.
+  const inputs = `NonNullable<typeof ${resource.key}["inputs"]>`;
+  return (
+    `${inputs}[${JSON.stringify(paramName)}] extends ` +
+    `{ "~standard": { types?: { output: infer O } } } ? O : never`
+  );
+}
+
+/**
+ * Whether `candidate` depends on `target`, directly or transitively, through
+ * *code-wired* `inputs` (dependencies, never arguments — those aren't static).
+ *
+ * Used to keep a resource off its own argument's source list, and off the
+ * list of any resource that would transitively create it — offering it there
+ * would let a user assemble in the picker exactly the cycle
+ * `ResourceRegistry`'s runtime check exists to reject, just with a worse
+ * error. See `specs/resource-arguments.md` §H.
+ */
+function dependsOn(
+  candidate: RegisteredResource,
+  target: RegisteredResource,
+  byResource: ReadonlyMap<Resource<unknown>, RegisteredResource>,
+  seen = new Set<RegisteredResource>(),
+): boolean {
+  if (candidate === target) return true;
+  if (seen.has(candidate)) return false;
+  seen.add(candidate);
+  const inputs =
+    "inputs" in candidate.resource ? (candidate.resource.inputs ?? {}) : {};
+  for (const value of Object.values(inputs)) {
+    if (!isResource(value)) continue;
+    const registered = byResource.get(value);
+    if (registered && dependsOn(registered, target, byResource, seen)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * A resource argument reported with the right name but no resolved type —
+ * the checker-less degradation `specs/resource-arguments.md` §B and §G both
+ * call for. Unlike an opaque *value* source, an argument is always plain
+ * data by construction (it's validated by a schema, never a live handle), so
+ * this deliberately isn't `kind: 'opaque'` — that would tell `SourceRow` the
+ * slot has no editor at all. A generic string editor is offered instead, and
+ * `ResourceRegistry`'s own validation (which needs no checker at all) catches
+ * a value the real type would have rejected.
+ */
+function unresolvedParameter(name: string): PropDefinition {
+  return {
+    name,
+    type: { kind: "primitive", syntax: "unknown", base: "string" },
+    optional: false,
+  };
+}
+
+/**
+ * A file type's slot-match answer (slot path → source uris) turned around into
+ * source uri → the slot paths it fits, or `undefined` when there is none.
+ */
+function invertSlotMatches(
+  byPath: Record<string, string[]> | undefined,
+): Map<string, Set<string>> | undefined {
+  if (!byPath || Object.keys(byPath).length === 0) return undefined;
+  const byUri = new Map<string, Set<string>>();
+  for (const [slotPath, uris] of Object.entries(byPath)) {
+    for (const uri of uris) {
+      const set = byUri.get(uri);
+      if (set) set.add(slotPath);
+      else byUri.set(uri, new Set([slotPath]));
+    }
+  }
+  return byUri;
+}
+
+/**
+ * `registered` as {@link InputSource}s for `matchSourcesToSlots`, carrying the
+ * checker's type matches (see {@link invertSlotMatches}) where it has any.
+ */
+function toInputSources(
+  registered: readonly RegisteredSource[],
+  byType: ReadonlyMap<string, ReadonlySet<string>> | undefined,
+): InputSource[] {
+  return registered.map(r => {
+    const fits = byType?.get(r.uri);
+    return {
+      uri: r.uri,
+      key: r.key,
+      for: r.for,
+      // Only claim a type opinion where the checker actually produced one:
+      // a resource the checker could not read must fall through to the name
+      // rule rather than silently matching nothing.
+      fitsType: fits ? (_type, path) => fits.has(path) : undefined,
+    };
+  });
+}
+
+/**
  * A {@link PromptProvider} that discovers and serves prompts from
  * files on the local file system (or any {@link FileProvider}).
  *
@@ -211,10 +361,12 @@ export class FilePromptProvider
   /**
    * Parse `files` and normalize every prompt in them.
    *
-   * The three asynchronous steps are deliberately sequenced rather than
-   * interleaved per prompt: parsing, probe resolution, and source matching
-   * each build a TypeScript program, and doing them once for the whole batch
-   * is the difference between one build and 3N of them.
+   * Two TypeScript program builds, however many prompts and resources: one to
+   * parse, and one that answers every type question normalization asks —
+   * execute parameter probes, which resources fit each prompt's slots, and the
+   * types and slots of resources' own arguments. Each build brings a fresh
+   * checker that re-derives every type the files depend on, so a question
+   * asked in a build of its own costs far more than the same question batched.
    */
   private async normalizeAll(files: string[]): Promise<NormalizedFilePrompt[]> {
     const playgroundFiles = await this.resources.modulePaths();
@@ -225,15 +377,43 @@ export class FilePromptProvider
     // Asked once and threaded through: both the shape of an execute parameter
     // and the slots it contributes are derived from the same probes.
     const probes = this.executeParameterProbes(parsed);
-    const executeParameters = await this.resolveExecuteParameters(
-      parsed,
-      probes,
+    const scope = await this.resourceScope(parsed);
+
+    const executeRequests = this.executeParameterRequests(parsed, probes);
+    const parameterRequests = scope
+      ? this.resourceParameterRequests(scope.withParams)
+      : [];
+    const promptSlotRequests = scope
+      ? this.promptSlotRequests(parsed, scope.inScope, probes)
+      : [];
+    const resourceSlotRequests = scope
+      ? this.resourceSlotRequests(scope.withParams)
+      : [];
+
+    const resolved = await this.resolveTypes(
+      [...executeRequests, ...parameterRequests],
+      [...promptSlotRequests, ...resourceSlotRequests],
     );
-    const inputSources = await this.resolveInputSources(
-      parsed,
+
+    const executeParameters = this.assembleExecuteParameters(
       probes,
-      executeParameters,
+      resolved.probes?.slice(0, executeRequests.length),
     );
+    const inputSources = scope
+      ? this.assembleInputSources(parsed, scope, executeParameters, {
+          typeMatches: this.assembleTypeMatches(
+            parsed,
+            resolved.slotMatches?.slice(0, promptSlotRequests.length),
+          ),
+          resourceParameters: this.assembleResourceParameters(
+            scope.withParams,
+            resolved.probes?.slice(executeRequests.length),
+          ),
+          resourceSlotMatches: resolved.slotMatches?.slice(
+            promptSlotRequests.length,
+          ),
+        })
+      : parsed.map(() => undefined);
 
     return parsed.map((p, i) => {
       const normalized = this.sdkAdapter.normalizePrompt(
@@ -249,51 +429,27 @@ export class FilePromptProvider
   }
 
   /**
-   * Ask the file type to work out the shape of what the SDK said it needs —
-   * the second half of the §E negotiation, with this provider as the only
-   * place the two meet.
-   *
-   * Every prompt's probes are resolved in one call so they all ride in one
-   * program build. A probe is written defensively enough not to need the parse
-   * result to decide whether to ask, which is what makes that batching
-   * possible.
+   * Put every type question to the file type at once, so they share one
+   * program build. A list comes back `undefined` when the file type cannot
+   * answer that kind of question at all, which callers degrade from rather
+   * than reading as "no answer".
    */
-  private async resolveExecuteParameters(
-    parsed: readonly ParsedFilePrompt[],
-    perPrompt: readonly TypeProbe[][],
-  ): Promise<((PropDefinition | null | undefined)[] | undefined)[]> {
-    const resolveProbes = this.fileType.resolveTypeProbes;
-
-    // Without a resolver the adapter still hears about its own probes — as a
-    // row of `undefined`s, which it reads as "declared but unresolved" rather
-    // than as "no requirement". Degrading to silence here is exactly the bug
-    // this machinery exists to prevent.
-    if (!resolveProbes) {
-      return perPrompt.map(probes =>
-        probes.length > 0 ? probes.map(() => undefined) : undefined,
-      );
+  private async resolveTypes(
+    probes: TypeProbeRequest[],
+    slotMatches: SlotMatchRequest[],
+  ): Promise<Partial<TypeResolutionResult>> {
+    const fileType = this.fileType;
+    if (fileType.resolveTypes) {
+      return fileType.resolveTypes({ probes, slotMatches });
     }
-
-    const requests: TypeProbeRequest[] = [];
-    parsed.forEach((prompt, i) => {
-      for (const probe of perPrompt[i]) {
-        requests.push({
-          probe,
-          filePath: this.absolutePathOf(prompt),
-          promptName: prompt.name,
-        });
-      }
-    });
-
-    const resolved = await resolveProbes.call(this.fileType, requests);
-
-    let cursor = 0;
-    return perPrompt.map(probes => {
-      if (probes.length === 0) return undefined;
-      const start = cursor;
-      cursor += probes.length;
-      return resolved.slice(start, cursor);
-    });
+    return {
+      probes: fileType.resolveTypeProbes
+        ? await fileType.resolveTypeProbes(probes)
+        : undefined,
+      slotMatches: fileType.resolveSlotMatches
+        ? await fileType.resolveSlotMatches(slotMatches)
+        : undefined,
+    };
   }
 
   /**
@@ -313,53 +469,117 @@ export class FilePromptProvider
   }
 
   /**
-   * Work out which resources can fill which of each prompt's input slots.
+   * Ask the file type to work out the shape of what the SDK said it needs —
+   * the second half of the §E negotiation, with this provider as the only
+   * place the two meet. Flattened across prompts, in order.
    *
-   * Three strategies, first match wins (see `matchSourcesToSlots`). The type
-   * strategy is delegated to the file type, which is where a checker lives;
-   * explicit and name matching are decided here, since neither needs one.
+   * A probe is written defensively enough not to need the parse result to
+   * decide whether to ask, which is what makes batching them possible.
    */
-  private async resolveInputSources(
+  private executeParameterRequests(
     parsed: readonly ParsedFilePrompt[],
-    probes: readonly TypeProbe[][],
-    executeParameters: readonly (
-      | (PropDefinition | null | undefined)[]
-      | undefined
-    )[],
-  ): Promise<(PromptInputSources | undefined)[]> {
+    perPrompt: readonly TypeProbe[][],
+  ): TypeProbeRequest[] {
+    return parsed.flatMap((prompt, i) =>
+      perPrompt[i].map(probe => ({
+        probe,
+        filePath: this.absolutePathOf(prompt),
+        promptName: prompt.name,
+      })),
+    );
+  }
+
+  /**
+   * Split the answers to {@link executeParameterRequests} back into one list
+   * per prompt.
+   *
+   * Without a resolver the adapter still hears about its own probes — as a
+   * row of `undefined`s, which it reads as "declared but unresolved" rather
+   * than as "no requirement". Degrading to silence here is exactly the bug
+   * this machinery exists to prevent.
+   */
+  private assembleExecuteParameters(
+    perPrompt: readonly TypeProbe[][],
+    resolved: readonly (PropDefinition | null | undefined)[] | undefined,
+  ): ((PropDefinition | null | undefined)[] | undefined)[] {
+    let cursor = 0;
+    return perPrompt.map(probes => {
+      if (probes.length === 0) return undefined;
+      const start = cursor;
+      cursor += probes.length;
+      return resolved
+        ? resolved.slice(start, cursor)
+        : probes.map(() => undefined);
+    });
+  }
+
+  /**
+   * The resources each prompt can draw on, or `undefined` when there are no
+   * playground resources (nor modules that failed to load) at all.
+   */
+  private async resourceScope(
+    parsed: readonly ParsedFilePrompt[],
+  ): Promise<ResourceView | undefined> {
     const all = await this.resources.all();
     const moduleErrors = await this.resources.errors();
-    if (all.length === 0 && moduleErrors.length === 0) {
-      return parsed.map(() => undefined);
-    }
+    if (all.length === 0 && moduleErrors.length === 0) return undefined;
 
     const inScope = await Promise.all(
       parsed.map(p => this.resources.inScopeFor(this.absolutePathOf(p))),
     );
 
-    // The type strategy, batched across every prompt into one program build.
-    const typeMatches = await this.resolveTypeMatches(
-      parsed,
-      inScope,
-      probes,
-      executeParameters,
+    // A resource's arguments are filled from the sources in scope for its
+    // *own* module — the same `inScopeFor` query a prompt's own slots use —
+    // minus anything that depends on it.
+    const byResource = new Map(all.map(r => [r.resource, r] as const));
+    const withParams: ResourceWithParameters[] = [];
+    for (const resource of all) {
+      const names = resourceParameterNames(resource.resource);
+      if (names.length === 0) continue;
+      const candidates = (
+        await this.resources.inScopeFor(resource.modulePath)
+      ).filter(s => !dependsOn(s.resource, resource, byResource));
+      withParams.push({ resource, names, candidates });
+    }
+
+    return { moduleErrors, inScope, withParams };
+  }
+
+  /**
+   * Work out which resources can fill which of each prompt's input slots.
+   *
+   * Three strategies, first match wins (see `matchSourcesToSlots`). The type
+   * strategy's answers come from the file type, which is where a checker
+   * lives; explicit and name matching are decided here, since neither needs
+   * one.
+   */
+  private assembleInputSources(
+    parsed: readonly ParsedFilePrompt[],
+    scope: ResourceView,
+    executeParameters: readonly (
+      | (PropDefinition | null | undefined)[]
+      | undefined
+    )[],
+    {
+      typeMatches,
+      resourceParameters,
+      resourceSlotMatches,
+    }: {
+      typeMatches: readonly (Map<string, Set<string>> | undefined)[];
+      resourceParameters: ReadonlyMap<string, PropDefinition[]>;
+      resourceSlotMatches: readonly Record<string, string[]>[] | undefined;
+    },
+  ): PromptInputSources[] {
+    // Prompt-independent, so worked out once rather than per prompt below.
+    const resourceSlots = this.assembleResourceSlots(
+      scope.withParams,
+      resourceParameters,
+      resourceSlotMatches,
     );
 
     return parsed.map((prompt, i) => {
-      const available = inScope[i];
-      const byType = typeMatches[i];
-
-      const sources: InputSource[] = available.map(r => ({
-        uri: r.uri,
-        key: r.key,
-        for: r.for,
-        // Only claim a type opinion where the checker actually produced one:
-        // a resource the checker could not read must fall through to the name
-        // rule rather than silently matching nothing.
-        fitsType: byType?.has(r.uri)
-          ? (_type, path) => byType.get(r.uri)!.has(path)
-          : undefined,
-      }));
+      const available = scope.inScope[i];
+      const sources = toInputSources(available, typeMatches[i]);
 
       const functionSlots = matchSourcesToSlots(
         collectInputSlots(prompt.functionParameters),
@@ -375,12 +595,30 @@ export class FilePromptProvider
         prompt.name,
       );
 
+      const describedResources = this.resources
+        .describe(available)
+        .map(info => {
+          const parameters = resourceParameters.get(info.uri);
+          return parameters ? { ...info, parameters } : info;
+        });
+
+      // Only a root resource (not one of its output values) carries its own
+      // argument slots — see `ResourceInfo.parameters`.
+      const promptResourceSlots: Record<string, Record<string, string[]>> = {};
+      for (const r of available) {
+        if (r.outputPath.length > 0) continue;
+        const slots = resourceSlots.get(r.uri);
+        if (slots && Object.keys(slots).length > 0) {
+          promptResourceSlots[r.uri] = slots;
+        }
+      }
+
       return {
         resources: [
-          ...this.resources.describe(available),
+          ...describedResources,
           // A playground module that threw is reported rather than hidden, so
           // a broken resource reads as broken instead of as absent.
-          ...moduleErrors.map(e => ({
+          ...scope.moduleErrors.map(e => ({
             uri: path.relative(this.rootDir, e.modulePath),
             label: path.basename(e.modulePath),
             scope: "run" as const,
@@ -389,72 +627,160 @@ export class FilePromptProvider
         ],
         functionSlots,
         executeSlots,
+        ...(Object.keys(promptResourceSlots).length > 0
+          ? { resourceSlots: promptResourceSlots }
+          : {}),
       };
     });
   }
 
   /**
+   * One probe per declared resource argument, flattened across resources in
+   * order.
+   *
+   * Asked once across every resource rather than once per prompt: a
+   * resource's arguments don't depend on which prompt is looking at it. See
+   * `specs/resource-arguments.md` §H.
+   */
+  private resourceParameterRequests(
+    withParams: readonly ResourceWithParameters[],
+  ): TypeProbeRequest[] {
+    return withParams.flatMap(({ resource, names }) =>
+      names.map(name => ({
+        probe: {
+          name,
+          expression: resourceParameterTypeExpression(resource, name),
+        },
+        filePath: resource.modulePath,
+        // No function or `prompts()` entry named this exists in a playground
+        // module, so `$config` never gets substituted — the expression above
+        // doesn't use it, and doesn't need to.
+        promptName: resource.key,
+      })),
+    );
+  }
+
+  /**
+   * The names and — where a checker is available — resolved types of every
+   * discovered resource's declared arguments, keyed by the resource's `uri`.
+   *
+   * Without a checker, the schema-valued keys are still enumerable at
+   * runtime — `resourceParameterNames` doesn't need one — so a resource with
+   * arguments still reports their names, each with an unresolved type and a
+   * plain string editor (see `unresolvedParameter`) rather than being absent. That degradation, and the resolved case
+   * both, are what let `ResourceInfo.parameters` (§G) exist at all.
+   */
+  private assembleResourceParameters(
+    withParams: readonly ResourceWithParameters[],
+    resolved: readonly (PropDefinition | null | undefined)[] | undefined,
+  ): Map<string, PropDefinition[]> {
+    let cursor = 0;
+    return new Map(
+      withParams.map(({ resource, names }): [string, PropDefinition[]] => {
+        const start = cursor;
+        cursor += names.length;
+        return [
+          resource.uri,
+          names.map(
+            (name, j) => resolved?.[start + j] ?? unresolvedParameter(name),
+          ),
+        ];
+      }),
+    );
+  }
+
+  /**
    * The §D.2 type strategy: hand the file type a type expression per resource
-   * and let its checker decide assignability.
+   * and let its checker decide assignability. Empty when no prompt has a
+   * source in scope, so there is nothing to ask.
    *
    * The expression reads the resource's produced type back off its own
    * `create()`, which is where the type came from — so there is no type string
    * on a resource to go stale under a rename, and no second mechanism to read.
    */
-  private async resolveTypeMatches(
+  private promptSlotRequests(
     parsed: readonly ParsedFilePrompt[],
     inScope: readonly RegisteredSource[][],
     probes: readonly TypeProbe[][],
-    executeParameters: readonly (
-      | (PropDefinition | null | undefined)[]
-      | undefined
-    )[],
-  ): Promise<(Map<string, Set<string>> | undefined)[]> {
-    const resolveSlotMatches = this.fileType.resolveSlotMatches;
-    if (!resolveSlotMatches) return parsed.map(() => undefined);
-
-    const requests: SlotMatchRequest[] = parsed.map((prompt, i) => {
+  ): SlotMatchRequest[] {
+    const requests = parsed.map((prompt, i) => {
       const filePath = this.absolutePathOf(prompt);
-      const extraSlots: Record<string, string> = {};
-      // Execute parameters are roots too, but their types live in the probe
-      // expression rather than in the prompt's signature. Only the probes that
-      // actually resolved contribute one: an unresolved probe has no shape to
-      // match resources against, and asking for it again would just fail
-      // again, more expensively.
-      probes[i].forEach((probe, j) => {
-        if (executeParameters[i]?.[j])
-          extraSlots[probe.name] = probe.expression;
-      });
       return {
         filePath,
         promptName: prompt.name,
-        extraSlots,
+        // Execute parameters are roots too, but their types live in the probe
+        // expression rather than in the prompt's signature. A probe that
+        // doesn't resolve, or says "no requirement", contributes no slots.
+        extraSlots: Object.fromEntries(
+          probes[i].map(probe => [probe.name, probe.expression]),
+        ),
         sources: inScope[i].map(r => ({
           key: r.uri,
           expression: resourceTypeExpression(filePath, r),
         })),
       };
     });
+    return requests.every(r => r.sources.length === 0) ? [] : requests;
+  }
 
-    if (requests.every(r => r.sources.length === 0)) {
-      return parsed.map(() => undefined);
-    }
+  /**
+   * Turn each prompt's answer to {@link promptSlotRequests} (slot path →
+   * source uris) around into source uri → the slot paths it fits.
+   */
+  private assembleTypeMatches(
+    parsed: readonly ParsedFilePrompt[],
+    matched: readonly Record<string, string[]>[] | undefined,
+  ): (Map<string, Set<string>> | undefined)[] {
+    return parsed.map((_, i) => invertSlotMatches(matched?.[i]));
+  }
 
-    const matched = await resolveSlotMatches.call(this.fileType, requests);
+  /**
+   * Which sources can fill which of each resource's own argument slots — the
+   * §H "resourceSlots" half of matching, asked once across every resource
+   * (arguments are prompt-independent) against each one's candidates.
+   */
+  private resourceSlotRequests(
+    withParams: readonly ResourceWithParameters[],
+  ): SlotMatchRequest[] {
+    return withParams.map(({ resource, names, candidates }) => ({
+      filePath: resource.modulePath,
+      promptName: resource.key,
+      sources: candidates.map(s => ({
+        key: s.uri,
+        expression: resourceTypeExpression(resource.modulePath, s),
+      })),
+      extraSlots: Object.fromEntries(
+        names.map(name => [
+          name,
+          resourceParameterTypeExpression(resource, name),
+        ]),
+      ),
+    }));
+  }
 
-    return parsed.map((_, i) => {
-      const byPath = matched[i];
-      if (!byPath || Object.keys(byPath).length === 0) return undefined;
-      const byUri = new Map<string, Set<string>>();
-      for (const [slotPath, uris] of Object.entries(byPath)) {
-        for (const uri of uris) {
-          const set = byUri.get(uri);
-          if (set) set.add(slotPath);
-          else byUri.set(uri, new Set([slotPath]));
-        }
-      }
-      return byUri;
-    });
+  /**
+   * Which sources can fill which of each resource's own argument slots, keyed
+   * by the resource's `uri` — by the same three strategies a prompt's own
+   * slots use (see {@link assembleInputSources}), with the file type's answers
+   * to {@link resourceSlotRequests} as the type strategy.
+   */
+  private assembleResourceSlots(
+    withParams: readonly ResourceWithParameters[],
+    parameters: ReadonlyMap<string, PropDefinition[]>,
+    matched: readonly Record<string, string[]>[] | undefined,
+  ): Map<string, Record<string, string[]>> {
+    return new Map(
+      withParams.map(
+        ({ resource, candidates }, i): [string, Record<string, string[]>] => [
+          resource.uri,
+          matchSourcesToSlots(
+            collectInputSlots(parameters.get(resource.uri) ?? []),
+            toInputSources(candidates, invertSlotMatches(matched?.[i])),
+            resource.key,
+          ),
+        ],
+      ),
+    );
   }
 
   private absolutePathOf(prompt: ParsedFilePrompt): string {
@@ -533,7 +859,7 @@ export class FilePromptProvider
     try {
       const { functionParams, executeValues } = await resolveExecutionInputs(
         inputs,
-        uri => lease.acquire(uri),
+        (uri, binding) => lease.acquire(uri, binding),
       );
       return {
         functionParams,

@@ -2,13 +2,15 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it, vi } from "vitest";
-import type { PropDefinition } from "../shared/types.ts";
+import type { ExecutionInput, PropDefinition } from "../shared/types.ts";
 import {
+  canonicalArgumentKey,
   collectInputSlots,
   type InputSource,
   matchSourcesToSlots,
   resolveExecutionInput,
   resolveExecutionInputs,
+  stampReceipts,
 } from "./execution-inputs.ts";
 
 const str = (name: string, optional = false): PropDefinition => ({
@@ -244,5 +246,220 @@ describe("resolveExecutionInputs", () => {
 
     expect(created).toHaveBeenCalledTimes(1);
     expect(functionParams[0]).toBe(executeValues.toolsContext.db);
+  });
+
+  it("resolves a resource used both as an argument and as a prompt input to one instance per run", async () => {
+    const created = vi.fn(async (uri: string) => ({ uri }));
+    const memo = new Map<string, Promise<unknown>>();
+    const resolveResource = (uri: string) => {
+      const existing = memo.get(uri);
+      if (existing) return existing;
+      const pending = created(uri);
+      memo.set(uri, pending);
+      return pending;
+    };
+
+    const dbRef: ExecutionInput = { kind: "resource", uri: "pg.ts#db" };
+    const { functionParams, executeValues } = await resolveExecutionInputs(
+      {
+        // `db` filling a prompt slot directly...
+        functionInputs: [dbRef],
+        // ...and filling an argument of a different resource.
+        executeInputs: {
+          seeded: {
+            kind: "resource",
+            uri: "pg.ts#seeded",
+            args: { db: dbRef },
+          },
+        },
+      },
+      resolveResource,
+    );
+
+    expect(created).toHaveBeenCalledTimes(2); // db, seeded — not db twice
+    expect(functionParams[0]).toBe(await memo.get("pg.ts#db"));
+    expect(executeValues.seeded).toEqual({ uri: "pg.ts#seeded" });
+  });
+});
+
+describe("canonicalArgumentKey", () => {
+  it("encodes absent args and an empty object identically", () => {
+    expect(canonicalArgumentKey(undefined)).toBe("");
+    expect(canonicalArgumentKey({})).toBe("");
+  });
+
+  it("is insensitive to key order", () => {
+    const a = canonicalArgumentKey({
+      title: { kind: "value", value: { kind: "primitive", value: "x" } },
+      status: { kind: "value", value: { kind: "primitive", value: "y" } },
+    });
+    const b = canonicalArgumentKey({
+      status: { kind: "value", value: { kind: "primitive", value: "y" } },
+      title: { kind: "value", value: { kind: "primitive", value: "x" } },
+    });
+    expect(a).toBe(b);
+  });
+
+  it("differs for genuinely different arguments", () => {
+    const a = canonicalArgumentKey({
+      title: { kind: "value", value: { kind: "primitive", value: "x" } },
+    });
+    const b = canonicalArgumentKey({
+      title: { kind: "value", value: { kind: "primitive", value: "y" } },
+    });
+    expect(a).not.toBe(b);
+  });
+});
+
+describe("resource arguments and receipts on resolveExecutionInput (specs/resource-arguments.md §C, §D)", () => {
+  it("builds a binding whose key matches canonicalArgumentKey and resolves nested args recursively", async () => {
+    const resolveResource = vi.fn(async (uri: string, binding?: any) => ({
+      uri,
+      args: binding ? await binding.resolve() : undefined,
+    }));
+
+    const args = {
+      title: {
+        kind: "value" as const,
+        value: { kind: "primitive" as const, value: "Todo app" },
+      },
+      owner: { kind: "resource" as const, uri: "pg.ts#owner" },
+    };
+    const result: any = await resolveExecutionInput(
+      { kind: "resource", uri: "pg.ts#seeded", args },
+      resolveResource,
+    );
+
+    expect(resolveResource).toHaveBeenCalledWith(
+      "pg.ts#seeded",
+      expect.objectContaining({ key: canonicalArgumentKey(args) }),
+    );
+    expect(result.args).toEqual({
+      title: "Todo app",
+      owner: { uri: "pg.ts#owner", args: undefined },
+    });
+  });
+
+  it("calls the resolver with no binding at all for a reference with neither args nor a receipt", async () => {
+    const resolveResource = vi.fn(async (uri: string) => uri);
+    await resolveExecutionInput(
+      { kind: "resource", uri: "pg.ts#db" },
+      resolveResource,
+    );
+    expect(resolveResource).toHaveBeenCalledWith("pg.ts#db");
+    expect(resolveResource).toHaveBeenCalledTimes(1);
+    expect(resolveResource.mock.calls[0]).toHaveLength(1);
+  });
+
+  it("passes a recorded receipt through to the resolver on a replay", async () => {
+    const resolveResource = vi.fn(
+      async (_uri: string, binding?: any) => binding?.receipt,
+    );
+    const result = await resolveExecutionInput(
+      { kind: "resource", uri: "pg.ts#seeded", receipt: { taskId: "tsk_abc" } },
+      resolveResource,
+    );
+    expect(result).toEqual({ taskId: "tsk_abc" });
+  });
+});
+
+describe("stampReceipts", () => {
+  it("sets a receipt on a resource reference by its uri when it has no arguments", () => {
+    const stamped = stampReceipts(
+      { functionInputs: [{ kind: "resource", uri: "pg.ts#db" }] },
+      { "pg.ts#db": "db-receipt" },
+    );
+    expect(stamped.functionInputs?.[0]).toMatchObject({
+      kind: "resource",
+      uri: "pg.ts#db",
+      receipt: "db-receipt",
+    });
+  });
+
+  it("sets a receipt keyed by uri@key when the reference has arguments", () => {
+    const args = {
+      title: {
+        kind: "value" as const,
+        value: { kind: "primitive" as const, value: "Todo app" },
+      },
+    };
+    const key = canonicalArgumentKey(args);
+    const stamped = stampReceipts(
+      {
+        executeInputs: {
+          seeded: { kind: "resource", uri: "pg.ts#seeded", args },
+        },
+      },
+      { [`pg.ts#seeded@${key}`]: { taskId: "tsk_abc" } },
+    );
+    expect(stamped.executeInputs?.seeded).toMatchObject({
+      receipt: { taskId: "tsk_abc" },
+    });
+  });
+
+  it("stamps a resource nested inside an object input", () => {
+    const stamped = stampReceipts(
+      {
+        executeInputs: {
+          toolsContext: {
+            kind: "object",
+            properties: { db: { kind: "resource", uri: "pg.ts#db" } },
+          },
+        },
+      },
+      { "pg.ts#db": "db-receipt" },
+    );
+    expect(stamped.executeInputs?.toolsContext).toEqual({
+      kind: "object",
+      properties: {
+        db: {
+          kind: "resource",
+          uri: "pg.ts#db",
+          args: undefined,
+          receipt: "db-receipt",
+        },
+      },
+    });
+  });
+
+  it("stamps a resource nested inside another resource's own args", () => {
+    const args = { owner: { kind: "resource" as const, uri: "pg.ts#owner" } };
+    const stamped = stampReceipts(
+      {
+        functionInputs: [{ kind: "resource", uri: "pg.ts#seeded", args }],
+      },
+      { "pg.ts#owner": "owner-receipt" },
+    );
+    const seeded = stamped.functionInputs?.[0] as Extract<
+      ExecutionInput,
+      { kind: "resource" }
+    >;
+    expect(seeded.args?.owner).toMatchObject({ receipt: "owner-receipt" });
+  });
+
+  it("drops a replayed receipt that this run didn't reproduce", () => {
+    const stamped = stampReceipts(
+      {
+        functionInputs: [
+          { kind: "resource", uri: "pg.ts#db", receipt: "old-receipt" },
+        ],
+      },
+      {},
+    );
+    expect(stamped.functionInputs?.[0]).toStrictEqual({
+      kind: "resource",
+      uri: "pg.ts#db",
+    });
+  });
+
+  it("leaves inputs untouched when no receipts were produced", () => {
+    const inputs = {
+      functionInputs: [{ kind: "resource" as const, uri: "pg.ts#db" }],
+    };
+    expect(stampReceipts(inputs, undefined)).toBe(inputs);
+    expect(stampReceipts(inputs, {})).not.toBe(inputs);
+    expect(stampReceipts(inputs, {}).functionInputs?.[0]).toMatchObject({
+      uri: "pg.ts#db",
+    });
   });
 });

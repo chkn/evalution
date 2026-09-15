@@ -20,7 +20,10 @@ import type {
   ParsePromptsOptions,
   PromptFileType,
   SlotMatchRequest,
+  TypeProbe,
   TypeProbeRequest,
+  TypeResolutionRequest,
+  TypeResolutionResult,
 } from "../prompt-file-type.ts";
 import type { PromptProgram } from "./prompt-program.ts";
 import { createPromptProgram } from "./prompt-program.ts";
@@ -112,128 +115,71 @@ export default prompts(
   }
 
   /**
-   * Evaluates each probe by injecting it into its prompt file as a type alias
-   * and asking the checker what that alias resolves to.
+   * Evaluates probes and slot matches by injecting each expression into the
+   * file it concerns as a type alias and asking the checker what it resolves
+   * to.
    *
-   * All the probes ride in **one** program build: resolving them one prompt at
-   * a time would throw away the source-file reuse a program build depends on,
-   * and an extra alias is cheap where an extra program is not.
+   * Everything rides in **one** program build. A build brings a fresh checker
+   * that re-derives every type the files depend on — for a config that infers
+   * tool types, hundreds of milliseconds — while an extra alias in an existing
+   * build is nearly free.
    */
-  async resolveTypeProbes(
-    requests: readonly TypeProbeRequest[],
-  ): Promise<(PropDefinition | null | undefined)[]> {
-    if (requests.length === 0) return [];
-
-    const results: (PropDefinition | null | undefined)[] = requests.map(
-      () => undefined,
-    );
+  async resolveTypes({
+    probes = [],
+    slotMatches = [],
+  }: TypeResolutionRequest): Promise<TypeResolutionResult> {
+    const result: TypeResolutionResult = {
+      probes: probes.map(() => undefined),
+      slotMatches: slotMatches.map(() => ({})),
+    };
+    if (probes.length === 0 && slotMatches.length === 0) return result;
 
     await this.withInjectedTypes(
-      requests.map(req => ({
-        filePath: req.filePath,
-        promptName: req.promptName,
-        expressions: { probe: req.probe.expression },
-      })),
+      [
+        ...probes.map(req => ({
+          filePath: req.filePath,
+          promptName: req.promptName,
+          expressions: { probe: req.probe.expression },
+        })),
+        ...slotMatches.map(req => ({
+          filePath: req.filePath,
+          promptName: req.promptName,
+          expressions: slotMatchExpressions(req),
+        })),
+      ],
       (index, resolve, program, sourceFile) => {
-        const type = resolve("probe");
-        if (!type) return;
-        // `never` is a defensively-written probe saying "this prompt has no
-        // such requirement". Reported as `null` rather than left `undefined`,
-        // which would be indistinguishable from a failure to evaluate — and a
-        // caller must not degrade a definite "no" into a placeholder.
-        if (type.flags & ts.TypeFlags.Never) {
-          results[index] = null;
-          return;
+        if (index < probes.length) {
+          result.probes[index] = evaluateProbe(
+            probes[index].probe,
+            resolve,
+            program,
+            sourceFile,
+          );
+        } else {
+          const i = index - probes.length;
+          result.slotMatches[i] = matchSlots(
+            slotMatches[i],
+            resolve,
+            program,
+            sourceFile,
+          );
         }
-        const built = buildPropTypeFromType(
-          type,
-          program.typeChecker,
-          sourceFile,
-        );
-        const { syntax } = requests[index].probe;
-        const def: PropDefinition = {
-          name: requests[index].probe.name,
-          type: syntax ? { ...built, syntax } : built,
-          optional: false,
-        };
-        if (requests[index].probe.description) {
-          def.description = requests[index].probe.description;
-        }
-        results[index] = def;
       },
     );
 
-    return results;
+    return result;
+  }
+
+  async resolveTypeProbes(
+    requests: readonly TypeProbeRequest[],
+  ): Promise<(PropDefinition | null | undefined)[]> {
+    return (await this.resolveTypes({ probes: requests })).probes;
   }
 
   async resolveSlotMatches(
     requests: readonly SlotMatchRequest[],
   ): Promise<Record<string, string[]>[]> {
-    if (requests.length === 0) return [];
-
-    const sourceAlias = (key: string) => `src_${aliasSafe(key)}`;
-    const slotAlias = (name: string) => `slot_${aliasSafe(name)}`;
-
-    const results: Record<string, string[]>[] = requests.map(() => ({}));
-
-    await this.withInjectedTypes(
-      requests.map(req => ({
-        filePath: req.filePath,
-        promptName: req.promptName,
-        expressions: {
-          ...Object.fromEntries(
-            req.sources.map(src => [sourceAlias(src.key), src.expression]),
-          ),
-          ...Object.fromEntries(
-            Object.entries(req.extraSlots ?? {}).map(([name, expression]) => [
-              slotAlias(name),
-              expression,
-            ]),
-          ),
-        },
-      })),
-      (index, resolve, program, sourceFile) => {
-        const request = requests[index];
-        const { typeChecker } = program;
-
-        // Root slots: the prompt function's own parameters, plus any extra
-        // roots the caller named (execute parameters, whose types are nowhere
-        // in the signature).
-        const roots = new Map<string, ts.Type>();
-        const fn = findPromptFunctionLike(sourceFile, request.promptName);
-        for (const parameter of fn?.parameters ?? []) {
-          if (!ts.isIdentifier(parameter.name)) continue;
-          roots.set(
-            parameter.name.text,
-            typeChecker.getTypeAtLocation(parameter),
-          );
-        }
-        for (const name of Object.keys(request.extraSlots ?? {})) {
-          const type = resolve(slotAlias(name));
-          if (type && !(type.flags & ts.TypeFlags.Never)) roots.set(name, type);
-        }
-
-        const sourceTypes = new Map<string, ts.Type>();
-        for (const src of request.sources) {
-          const type = resolve(sourceAlias(src.key));
-          // A source whose type will not resolve matches nothing here; the
-          // caller still has the name rule to fall back on.
-          if (!type || type.flags & (ts.TypeFlags.Never | ts.TypeFlags.Any)) {
-            continue;
-          }
-          sourceTypes.set(src.key, type);
-        }
-        if (sourceTypes.size === 0) return;
-
-        results[index] = matchByAssignability(
-          collectSlotTypes(roots, typeChecker, sourceFile),
-          sourceTypes,
-          typeChecker,
-        );
-      },
-    );
-
-    return results;
+    return (await this.resolveTypes({ slotMatches: requests })).slotMatches;
   }
 
   /**
@@ -809,6 +755,98 @@ export default prompts(
 }
 
 /** Make an arbitrary key safe to embed in a TypeScript identifier. */
+function sourceAlias(key: string): string {
+  return `src_${aliasSafe(key)}`;
+}
+
+function slotAlias(name: string): string {
+  return `slot_${aliasSafe(name)}`;
+}
+
+/** The aliases a slot match needs injected: one per source, one per extra root. */
+function slotMatchExpressions(
+  request: SlotMatchRequest,
+): Record<string, string> {
+  return {
+    ...Object.fromEntries(
+      request.sources.map(src => [sourceAlias(src.key), src.expression]),
+    ),
+    ...Object.fromEntries(
+      Object.entries(request.extraSlots ?? {}).map(([name, expression]) => [
+        slotAlias(name),
+        expression,
+      ]),
+    ),
+  };
+}
+
+/** What a probe's injected alias resolved to, reported three-valued. */
+function evaluateProbe(
+  probe: TypeProbe,
+  resolve: (name: string) => ts.Type | undefined,
+  program: PromptProgram,
+  sourceFile: ts.SourceFile,
+): PropDefinition | null | undefined {
+  const type = resolve("probe");
+  if (!type) return undefined;
+  // `never` is a defensively-written probe saying "this prompt has no such
+  // requirement". Reported as `null` rather than left `undefined`, which would
+  // be indistinguishable from a failure to evaluate — and a caller must not
+  // degrade a definite "no" into a placeholder.
+  if (type.flags & ts.TypeFlags.Never) return null;
+  const built = buildPropTypeFromType(type, program.typeChecker, sourceFile);
+  const def: PropDefinition = {
+    name: probe.name,
+    type: probe.syntax ? { ...built, syntax: probe.syntax } : built,
+    optional: false,
+  };
+  if (probe.description) def.description = probe.description;
+  return def;
+}
+
+/** Which of a request's sources fit which of its slots, by assignability. */
+function matchSlots(
+  request: SlotMatchRequest,
+  resolve: (name: string) => ts.Type | undefined,
+  program: PromptProgram,
+  sourceFile: ts.SourceFile,
+): Record<string, string[]> {
+  const { typeChecker } = program;
+
+  // Root slots: the prompt function's own parameters, plus any extra roots the
+  // caller named (execute parameters, whose types are nowhere in the
+  // signature). An extra root that doesn't resolve, or resolves to `never`,
+  // contributes no slots.
+  const roots = new Map<string, ts.Type>();
+  const fn = findPromptFunctionLike(sourceFile, request.promptName);
+  for (const parameter of fn?.parameters ?? []) {
+    if (!ts.isIdentifier(parameter.name)) continue;
+    roots.set(parameter.name.text, typeChecker.getTypeAtLocation(parameter));
+  }
+  for (const name of Object.keys(request.extraSlots ?? {})) {
+    const type = resolve(slotAlias(name));
+    if (type && !(type.flags & ts.TypeFlags.Never)) roots.set(name, type);
+  }
+
+  const sourceTypes = new Map<string, ts.Type>();
+  for (const src of request.sources) {
+    const type = resolve(sourceAlias(src.key));
+    // A source whose type will not resolve matches nothing here; the caller
+    // still has the name rule to fall back on.
+    if (!type || type.flags & (ts.TypeFlags.Never | ts.TypeFlags.Any)) {
+      continue;
+    }
+    sourceTypes.set(src.key, type);
+  }
+  if (sourceTypes.size === 0) return {};
+
+  return matchByAssignability(
+    collectSlotTypes(roots, typeChecker, sourceFile),
+    sourceTypes,
+    typeChecker,
+  );
+}
+
 function aliasSafe(key: string): string {
   return key.replace(/[^A-Za-z0-9_$]/g, "_");
 }

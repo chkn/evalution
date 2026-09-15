@@ -49,6 +49,7 @@ import type {
   NormalizedPromptUpdates,
 } from "../../shared/types";
 import { getModelCatalog, updatePromptProperties } from "../api";
+import { applyOptimisticUpdates } from "./optimistic-updates";
 import PlaygroundEditor from "./PlaygroundEditor";
 import PlaygroundExecution from "./PlaygroundExecution";
 import { PromptLinkIcon } from "./trace/icons.tsx";
@@ -84,28 +85,6 @@ function stableKey(value: unknown): string {
 
 function promptKey(prompt: NormalizedPrompt): string {
   return stableKey(prompt);
-}
-
-function applyOptimisticUpdates(
-  prompt: NormalizedPrompt,
-  updates: NormalizedPromptUpdates,
-): NormalizedPrompt {
-  let next = prompt;
-
-  if ("system" in updates) {
-    next = { ...next };
-    if (updates.system == null) {
-      delete next.system;
-    } else {
-      next.system = updates.system;
-    }
-  }
-
-  if ("messages" in updates) {
-    next = { ...next, messages: updates.messages ?? [] };
-  }
-
-  return next;
 }
 
 function PlaygroundContent({

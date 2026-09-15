@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { ResourceScope } from "../../shared/types.ts";
 
 /**
@@ -16,8 +17,9 @@ export const RESOURCE_TAG = Symbol.for("evalution.playground.resource");
  * teardown to run when the value's scope ends.
  *
  * @typeParam T - The type of the created value.
+ * @typeParam R - The type of {@link receipt}. See {@link DynamicResourceDefinition.create}.
  */
-export interface ResourceInstance<T> {
+export interface ResourceInstance<T, R = unknown> {
   /** The created value, passed to whatever slot selected this resource. */
   value: T;
   /**
@@ -28,21 +30,46 @@ export interface ResourceInstance<T> {
   /**
    * A serializable summary of what was produced (a seeded row's id, say), so a
    * trace can display the value a past run used even though replaying it mints
-   * a new one. Omit for values with no meaningful summary.
+   * a new one. Handed back to `create()` on a replay — see
+   * `specs/resource-arguments.md` §E — so a resource that wants replay to
+   * reconstruct rather than re-mint should record here whatever it needs to do
+   * that. Omit for values with no meaningful summary.
    */
-  receipt?: unknown;
+  receipt?: R;
+  /**
+   * Returns this instance to its between-runs state. Called on a
+   * `scope: 'server'` instance before the first run within a lease that uses
+   * it; never on a `scope: 'run'` one, since that is created fresh per run
+   * already. See `specs/resource-arguments.md` §F.
+   */
+  reset?: () => void | Promise<void>;
 }
+
+/**
+ * One thing a resource takes: another resource, resolved by reference in
+ * code, or a value validated by a
+ * [Standard Schema](https://standardschema.dev), resolved per run from the
+ * execute panel, a dataset column, or a recorded trace.
+ *
+ * Which kind an entry is decides *when* it is bound, not how `create()` reads
+ * it — see {@link ResolvedResourceInputs} and `specs/resource-arguments.md`
+ * §B.
+ */
+export type ResourceInput = Resource<any> | StandardSchemaV1;
 
 /**
  * Everything a resource needs in order to be created, keyed by the name its
  * `create()` receives each entry under.
  *
- * Dependencies are given as the resource *objects* themselves rather than as
- * string keys: the registry resolves them by identity, so `create`'s argument
- * is typed from the dependency and there is no key-collision problem across
- * the many files a `.evalution/playground/` directory may hold.
+ * A dependency (a {@link Resource}) is given as the resource *object* itself
+ * rather than as a string key: the registry resolves it by identity, so
+ * `create`'s argument is typed from the dependency and there is no
+ * key-collision problem across the many files a `.evalution/playground/`
+ * directory may hold. An argument (a `StandardSchemaV1`) is instead resolved
+ * per run, and validated against its schema before `create` sees it. See
+ * `specs/resource-arguments.md` §B.
  */
-export type ResourceInputs = Record<string, Resource<any>>;
+export type ResourceInputs = Record<string, ResourceInput>;
 
 /**
  * One named output a resource exposes as its own entry in the picker, read
@@ -50,11 +77,12 @@ export type ResourceInputs = Record<string, Resource<any>>;
  * produces.
  *
  * A resource exposing `outputs` still produces one value from one `create()`
- * — `ResourceRegistry.instantiate` memoizes by resource *object* within a
- * lease, so picking one output for one slot and another for a different slot
- * creates the underlying value once, not twice. Declaring a key here is
- * opt-in: it is the author saying which paths are worth offering on their
- * own, the same judgement {@link DynamicResourceDefinition.label} already is.
+ * — `ResourceRegistry.instantiate` memoizes by resource *object* (and, once a
+ * resource takes arguments, by argument key too) within a lease, so picking
+ * one output for one slot and another for a different slot creates the
+ * underlying value once, not twice. Declaring a key here is opt-in: it is the
+ * author saying which paths are worth offering on their own, the same
+ * judgement {@link DynamicResourceDefinition.label} already is.
  * See `specs/resource-hierarchy.md` §A.
  */
 export interface ResourceOutputDefinition {
@@ -67,9 +95,17 @@ export interface ResourceOutputDefinition {
   for?: string | readonly string[];
 }
 
-/** The resolved values `create()` receives, one per entry in {@link ResourceInputs}. */
+/**
+ * The resolved values `create()` receives, one per entry in
+ * {@link ResourceInputs} — a dependency's own produced type, or an
+ * argument's validated output type.
+ */
 export type ResolvedResourceInputs<N extends ResourceInputs> = {
-  [K in keyof N]: N[K] extends Resource<infer T> ? T : never;
+  [K in keyof N]: N[K] extends Resource<infer T>
+    ? T
+    : N[K] extends StandardSchemaV1<unknown, infer O>
+      ? O
+      : never;
 };
 
 /**
@@ -79,6 +115,7 @@ export type ResolvedResourceInputs<N extends ResourceInputs> = {
 export interface DynamicResourceDefinition<
   T,
   N extends ResourceInputs = Record<string, never>,
+  R = unknown,
 > {
   /** Human-readable label shown on the chip in the execute panel. */
   label?: string;
@@ -92,7 +129,9 @@ export interface DynamicResourceDefinition<
    *
    * A `'run'`-scoped resource may depend on a `'server'`-scoped one, but not
    * the reverse: a long-lived value must not close over a per-run one. The
-   * registry rejects that at load time.
+   * registry rejects that at load time. A `'server'`-scoped resource may not
+   * declare arguments (a schema-valued entry in {@link inputs}) — see
+   * `specs/resource-arguments.md` §D.
    */
   scope?: ResourceScope;
   /**
@@ -122,17 +161,33 @@ export interface DynamicResourceDefinition<
   outputs?: Partial<
     Record<keyof T & string, string | ResourceOutputDefinition>
   >;
-  /** Produces the value. See {@link ResourceInstance}. */
+  /**
+   * Produces the value.
+   *
+   * `receipt` is `undefined` on a fresh run and the recorded receipt of a
+   * past run's `create()` on a replay. Honouring it — reusing the identity it
+   * names rather than minting a new one — is what lets a replay be compared
+   * against the run it replays; see `specs/resource-arguments.md` §E. It is
+   * advisory: nothing enforces that it was honoured, and ignoring it is
+   * simply today's behaviour.
+   *
+   * @param inputs - See {@link ResolvedResourceInputs}.
+   * @param receipt - A past run's receipt, on a replay. See
+   *   {@link ResourceInstance.receipt}.
+   */
   create(
     inputs: ResolvedResourceInputs<N>,
-  ): ResourceInstance<T> | Promise<ResourceInstance<T>>;
+    receipt?: R,
+  ): ResourceInstance<T, R> | Promise<ResourceInstance<T, R>>;
 }
 
 /**
  * A resource whose value is already known — a literal rather than something
  * `create()` computes. Scoped as `'server'` always (see
  * {@link DynamicResourceDefinition.scope}): there is nothing to create per
- * run, so the same value is handed out for the life of the process.
+ * run, so the same value is handed out for the life of the process. Since
+ * there is no `create()`, a static resource has no `inputs` and therefore no
+ * arguments.
  */
 export interface StaticResourceDefinition<T> {
   /** Human-readable label shown on the chip in the execute panel. */
@@ -167,7 +222,8 @@ export interface StaticResourceDefinition<T> {
 export type ResourceDefinition<
   T,
   N extends ResourceInputs = Record<string, never>,
-> = DynamicResourceDefinition<T, N> | StaticResourceDefinition<T>;
+  R = unknown,
+> = DynamicResourceDefinition<T, N, R> | StaticResourceDefinition<T>;
 
 /**
  * A named value produced by code at run time, in-process, with a lifecycle.
@@ -177,7 +233,7 @@ export type ResourceDefinition<
  *
  * @typeParam T - The type of value this resource produces.
  */
-export type Resource<T> = ResourceDefinition<T, any> & {
+export type Resource<T> = ResourceDefinition<T, any, any> & {
   /** @internal Identifies this object to the playground-module loader. */
   readonly [RESOURCE_TAG]: true;
 };
@@ -192,6 +248,12 @@ export type Resource<T> = ResourceDefinition<T, any> & {
  * handle is the limiting case: it cannot be typed in, and it cannot be sent
  * over the wire either, so the panel offers the *reference* and the value is
  * created server-side at run time.
+ *
+ * A resource may also declare **arguments** — schema-valued entries in
+ * {@link ResourceInputs} — so that a `create()` which needs data (not just
+ * other resources) can take it per run from the execute panel, a dataset
+ * column, or another resource, instead of it being typed into the source
+ * file. See `specs/resource-arguments.md` §B.
  *
  * Resources live in **playground modules** — `*.playground.ts` beside a prompt
  * file (in scope for prompts in that directory), or any `.ts` under
@@ -221,19 +283,20 @@ export type Resource<T> = ResourceDefinition<T, any> & {
  * });
  * ```
  *
- * @example A per-run value that depends on the handle above.
+ * @example A per-run value that depends on the handle above and takes arguments.
  * ```ts
  * // src/agents/odin/odin.playground.ts
  * import { resource } from 'evalution';
+ * import { z } from 'zod';
  * import { db } from '../../../.evalution/playground/db.js';
  *
- * export const seededRootTask = resource<TaskId>({
- *   label: 'Freshly seeded root task',
- *   inputs: { db },
- *   async create({ db }) {
- *     const id = makeNanoId('tsk_');
- *     await db.insert(tasks).values({ id });
- *     return { value: id, receipt: id };
+ * export const seededTask = resource({
+ *   label: 'Freshly seeded task',
+ *   inputs: { db, title: z.string(), status: z.enum(['triaged', 'open', 'done']).default('triaged') },
+ *   async create({ db, title, status }, receipt) {
+ *     const id = receipt?.taskId ?? makeNanoId('tsk_');
+ *     await db.insert(tasks).values({ id, title, status });
+ *     return { value: { taskId: id, title, status }, receipt: { taskId: id } };
  *   },
  * });
  * ```
@@ -241,7 +304,7 @@ export type Resource<T> = ResourceDefinition<T, any> & {
  * @param definition - See {@link ResourceDefinition}.
  * @returns The resource, to be exported under the name it should be known by.
  */
-// Overloaded rather than typed with the `ResourceDefinition<T, N>` union
+// Overloaded rather than typed with the `ResourceDefinition<T, N, R>` union
 // directly: a caller's `export const db = resource({ create: ... })` needs
 // `create` still present on `db`'s own inferred type, not erased behind
 // `Resource<T>`. The checker-based slot matcher reads a resource's type back
@@ -255,9 +318,10 @@ export function resource<T>(
 export function resource<
   T,
   const N extends ResourceInputs = Record<string, never>,
+  R = unknown,
 >(
-  definition: DynamicResourceDefinition<T, N>,
-): DynamicResourceDefinition<T, N> & { readonly [RESOURCE_TAG]: true };
+  definition: DynamicResourceDefinition<T, N, R>,
+): DynamicResourceDefinition<T, N, R> & { readonly [RESOURCE_TAG]: true };
 export function resource(definition: ResourceDefinition<any, any>): unknown {
   return { ...definition, [RESOURCE_TAG]: true };
 }
@@ -268,5 +332,21 @@ export function isResource(value: unknown): value is Resource<unknown> {
     typeof value === "object" &&
     value !== null &&
     (value as Record<PropertyKey, unknown>)[RESOURCE_TAG] === true
+  );
+}
+
+/**
+ * Whether `value` is a [Standard Schema](https://standardschema.dev) —
+ * the other kind of {@link ResourceInput} entry, distinguished from a
+ * {@link Resource} by carrying `~standard` rather than the internal resource tag.
+ * No checker is involved: the two are structurally distinct at runtime, so
+ * partitioning an `inputs` map needs nothing but this and {@link isResource}.
+ */
+export function isStandardSchema(value: unknown): value is StandardSchemaV1 {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "~standard" in value &&
+    typeof (value as StandardSchemaV1)["~standard"] === "object"
   );
 }

@@ -3,6 +3,7 @@
 
 import type { Span, Trace, TraceSummary } from "../shared/types.ts";
 import { mergeSpans } from "./span-merge.ts";
+import { rollupSpans } from "./span-rollup.ts";
 import type { TraceIngestor } from "./trace-ingestor.ts";
 import { BaseTraceProvider } from "./trace-sink.ts";
 
@@ -27,15 +28,22 @@ export class MemoryTraceProvider extends BaseTraceProvider {
   }
 
   async getAllTraces(): Promise<TraceSummary[]> {
-    const summaries = Array.from(this.traces.values()).map(t => ({
-      id: t.id,
-      providerId: this.id,
-      name: t.name,
-      startTime: t.startTime,
-      endTime: t.endTime,
-      status: t.status,
-      spanCount: this.spansByTrace.get(t.id)?.length ?? 0,
-    }));
+    const summaries = Array.from(this.traces.values()).map(t => {
+      const spans = this.spansByTrace.get(t.id) ?? [];
+      return {
+        id: t.id,
+        providerId: this.id,
+        name: t.name,
+        startTime: t.startTime,
+        endTime: t.endTime,
+        status: t.status,
+        spanCount: spans.length,
+        ...rollupSpans(spans),
+        // This provider has no annotation store (it doesn't implement
+        // `createAnnotation`/`listAnnotations`), so there's never anything to count.
+        annotationCounts: { issue: 0, good: 0, note: 0 },
+      };
+    });
     summaries.sort((a, b) => b.startTime - a.startTime);
     return summaries;
   }

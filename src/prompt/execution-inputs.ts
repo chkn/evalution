@@ -7,6 +7,10 @@ import type {
   PropDefinition,
   PropType,
 } from "../shared/types.ts";
+import {
+  type ResourceBinding,
+  receiptKeyOf,
+} from "./playground/resource-registry.ts";
 
 /**
  * One place an input can be plugged in: a prompt's parameter, or any slot
@@ -145,8 +149,53 @@ export function matchSourcesToSlots(
   return matches;
 }
 
-/** How an {@link ExecutionInput} of kind `resource` is turned into a value. */
-export type ResourceResolver = (uri: string) => Promise<unknown>;
+/**
+ * How an {@link ExecutionInput} of kind `resource` is turned into a value.
+ *
+ * `binding` is passed when the resource has arguments and/or a replay
+ * receipt to hand back — see {@link ResourceBinding} and
+ * `specs/resource-arguments.md` §D. A resolver that ignores it (as any
+ * resolver predating arguments does) still gets the resource's plain value,
+ * unparameterized, the same as before.
+ */
+export type ResourceResolver = (
+  uri: string,
+  binding?: ResourceBinding,
+) => Promise<unknown>;
+
+/**
+ * The stable JSON encoding of a resource reference's `args` — object keys
+ * sorted recursively, computed over the *unresolved* recipe so a resolved
+ * argument that turns out to be a live handle never has to be compared or
+ * hashed. Absent `args` and `{}` both encode to `""`, which is what makes an
+ * existing argument-free reference key identically to before this existed.
+ *
+ * This is the lease's memoization key for one (resource, arguments) pair —
+ * see `specs/resource-arguments.md` §D.
+ */
+export function canonicalArgumentKey(
+  args: Record<string, ExecutionInput> | undefined,
+): string {
+  if (!args || Object.keys(args).length === 0) return "";
+  return stableStringify(args);
+}
+
+/** `JSON.stringify`, but with every object's keys sorted first. */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  const keys = Object.keys(value).sort();
+  return `{${keys
+    .map(
+      k =>
+        `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`,
+    )
+    .join(",")}}`;
+}
 
 /**
  * Turn one {@link ExecutionInput} into the concrete value to pass to a prompt.
@@ -182,7 +231,31 @@ export async function resolveExecutionInput(
           `Cannot resolve resource '${input.uri}': this provider does not offer resources.`,
         );
       }
-      return resolveResource(input.uri);
+      // No binding at all — not even one carrying an empty `args` — for a
+      // reference with neither arguments nor a receipt, so a lease sees
+      // exactly the call it would have seen before either existed.
+      if (!input.args && input.receipt === undefined) {
+        return resolveResource(input.uri);
+      }
+      const binding: ResourceBinding = {
+        key: canonicalArgumentKey(input.args),
+        // Recursion is free: an argument is itself an `ExecutionInput`, so
+        // resolving the whole `args` map is exactly resolving an `object`
+        // input's `properties` — see the `object` case above. Evaluated
+        // lazily, only once the lease has decided this binding doesn't hit
+        // its memo (see `ResourceBinding.resolve`).
+        resolve: async () => {
+          const entries = await Promise.all(
+            Object.entries(input.args ?? {}).map(
+              async ([k, v]) =>
+                [k, await resolveExecutionInput(v, resolveResource)] as const,
+            ),
+          );
+          return Object.fromEntries(entries);
+        },
+        receipt: input.receipt,
+      };
+      return resolveResource(input.uri, binding);
     }
 
     case "dataset":
@@ -223,5 +296,63 @@ export async function resolveExecutionInputs(
   return {
     functionParams,
     executeValues: Object.fromEntries(executeEntries),
+  };
+}
+
+/**
+ * Returns `inputs` with every resource reference's `receipt` set from
+ * `receipts` — the shape `ResourceLease.receipts()` /
+ * `ResolvedPromptInputs.receipts` produce — so the inputs recorded on a
+ * trace carry what this run's resources actually produced.
+ *
+ * A receipt is looked up by the same key `ResourceRegistry` records it
+ * under: the reference's own `uri`, or `` `${uri}@${key}` `` where `key` is
+ * {@link canonicalArgumentKey} of its (already-unresolved) `args` — so a
+ * fresh run's receipt lands on the exact reference that produced it, however
+ * many differently-bound references to the same resource a request has.
+ * Nested references (an argument that is itself a resource, a resource
+ * inside an `object` input) are stamped too. See
+ * `specs/resource-arguments.md` §K.
+ *
+ * @param inputs - The unresolved inputs a request was sent with.
+ * @param receipts - What the run's resolution produced, if anything did.
+ */
+export function stampReceipts(
+  inputs: {
+    functionInputs?: readonly ExecutionInput[];
+    executeInputs?: Record<string, ExecutionInput>;
+  },
+  receipts: Record<string, unknown> | undefined,
+): {
+  functionInputs?: readonly ExecutionInput[];
+  executeInputs?: Record<string, ExecutionInput>;
+} {
+  if (!receipts) return inputs;
+
+  const stampAll = (map: Record<string, ExecutionInput>) =>
+    Object.fromEntries(Object.entries(map).map(([k, v]) => [k, stamp(v)]));
+
+  const stamp = (input: ExecutionInput): ExecutionInput => {
+    switch (input.kind) {
+      case "resource": {
+        // Built fresh rather than spread from `input`, so a replay's incoming
+        // receipt never outlives a run whose `create` didn't produce one.
+        const stamped: ExecutionInput = { kind: "resource", uri: input.uri };
+        if (input.args) stamped.args = stampAll(input.args);
+        const receipt =
+          receipts[receiptKeyOf(input.uri, canonicalArgumentKey(input.args))];
+        if (receipt !== undefined) stamped.receipt = receipt;
+        return stamped;
+      }
+      case "object":
+        return { ...input, properties: stampAll(input.properties) };
+      default:
+        return input;
+    }
+  };
+
+  return {
+    functionInputs: inputs.functionInputs?.map(stamp),
+    executeInputs: inputs.executeInputs && stampAll(inputs.executeInputs),
   };
 }

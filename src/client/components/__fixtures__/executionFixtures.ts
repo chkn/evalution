@@ -138,6 +138,63 @@ export const SEEDED_TASK: ResourceInfo = {
 };
 
 /**
+ * A resource that takes arguments (`specs/resource-arguments.md` §B) — the
+ * motivating `seededTask` example, with a `title` (string) and a `status`
+ * (enum, defaulted) parameter.
+ */
+export const SEEDED_TASK_PARAM: PropDefinition = {
+  name: "title",
+  type: { kind: "primitive", syntax: "string", base: "string" },
+  optional: false,
+};
+export const SEEDED_TASK_STATUS_PARAM: PropDefinition = {
+  name: "status",
+  type: {
+    kind: "union",
+    syntax: '"triaged" | "open" | "done"',
+    types: [
+      { kind: "constant", syntax: '"triaged"', value: "triaged" },
+      { kind: "constant", syntax: '"open"', value: "open" },
+      { kind: "constant", syntax: '"done"', value: "done" },
+    ],
+  },
+  optional: false,
+};
+export const PARAMETERIZED_SEEDED_TASK: ResourceInfo = {
+  uri: "seeded-task.playground.ts#seededTask",
+  label: "Seeded task",
+  scope: "run",
+  parameters: [SEEDED_TASK_PARAM, SEEDED_TASK_STATUS_PARAM],
+};
+
+/** A plain string resource, assignable to {@link PARAMETERIZED_SEEDED_TASK}'s `title` argument. */
+export const TITLE_GENERATOR: ResourceInfo = {
+  uri: "seeded-task.playground.ts#titleGenerator",
+  label: "Title generator",
+  scope: "run",
+};
+
+/**
+ * A second parameterized resource whose own argument happens to be named
+ * `taskId` — the exact same name as a top-level prompt parameter a test
+ * might also be filling from {@link PARAMETERIZED_SEEDED_TASK}. Regression
+ * fixture for the name-collision bug a bare-label "who owns this form" check
+ * fell into: two rows named `taskId` at different depths in the tree are not
+ * the same row.
+ */
+export const SEEDED_RUN_TASK_ID_PARAM: PropDefinition = {
+  name: "taskId",
+  type: { kind: "primitive", syntax: "TaskId", base: "string" },
+  optional: false,
+};
+export const SEEDED_RUN: ResourceInfo = {
+  uri: "seeded-task.playground.ts#seededRun",
+  label: "Seeded run",
+  scope: "run",
+  parameters: [SEEDED_RUN_TASK_ID_PARAM],
+};
+
+/**
  * A static `value` resource the server already knows, so the panel can
  * preview it — unlike {@link SEEDED_TASK}, which only exists once a run
  * creates it.
@@ -215,10 +272,12 @@ export function sourcesFor(
   slots: Record<string, string[]>,
   resources: ResourceInfo[],
   which: "functionSlots" | "executeSlots" = "functionSlots",
+  resourceSlots?: Record<string, Record<string, string[]>>,
 ): PromptInputSources {
   return {
     resources,
     functionSlots: which === "functionSlots" ? slots : {},
     executeSlots: which === "executeSlots" ? slots : {},
+    ...(resourceSlots ? { resourceSlots } : {}),
   };
 }

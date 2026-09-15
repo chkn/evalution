@@ -233,4 +233,140 @@ describe("TursoTraceProvider row round-tripping", () => {
       { id: "a", spanCount: 1 },
     ]);
   });
+
+  it("rolls up tokens, cost, model, and annotation counts across a trace's spans", async () => {
+    client = await makeMigratedClient();
+    const provider = new TursoTraceProvider({ client });
+
+    // Trace "a": two LLM spans agreeing on model, one reporting totalTokens
+    // directly and the other only prompt/completion — both should count.
+    await provider.recordSpanStart({
+      id: "a:root",
+      traceId: "a",
+      name: "root",
+      kind: "LLM",
+      startTime: 1,
+    });
+    await provider.recordSpanEnd({
+      id: "a:root",
+      traceId: "a",
+      name: "root",
+      kind: "LLM",
+      startTime: 1,
+      endTime: 2,
+      status: "ok",
+      llm: {
+        model: "gpt-4o",
+        totalTokens: 12,
+        cost: { prompt: 0.004, completion: 0.006 },
+      },
+    });
+    await provider.recordSpanStart({
+      id: "a:child",
+      traceId: "a",
+      parentId: "a:root",
+      name: "child",
+      kind: "LLM",
+      startTime: 1,
+    });
+    await provider.recordSpanEnd({
+      id: "a:child",
+      traceId: "a",
+      parentId: "a:root",
+      name: "child",
+      kind: "LLM",
+      startTime: 1,
+      endTime: 2,
+      status: "ok",
+      llm: { model: "gpt-4o", promptTokens: 3, completionTokens: 4 },
+    });
+    await provider.createAnnotation({
+      traceId: "a",
+      kind: "issue",
+      note: "bad tool call",
+      source: "user",
+    });
+    await provider.createAnnotation({
+      traceId: "a",
+      kind: "issue",
+      note: "also this",
+      source: "user",
+    });
+    await provider.createAnnotation({
+      traceId: "a",
+      kind: "good",
+      note: "nice recovery",
+      source: "claude-code",
+    });
+
+    // Trace "b": two LLM spans disagreeing on model, neither reporting cost.
+    await provider.recordSpanStart({
+      id: "b:root",
+      traceId: "b",
+      name: "root",
+      kind: "LLM",
+      startTime: 3,
+    });
+    await provider.recordSpanEnd({
+      id: "b:root",
+      traceId: "b",
+      name: "root",
+      kind: "LLM",
+      startTime: 3,
+      endTime: 4,
+      status: "ok",
+      llm: { model: "gpt-4o", totalTokens: 5 },
+    });
+    await provider.recordSpanStart({
+      id: "b:child",
+      traceId: "b",
+      parentId: "b:root",
+      name: "child",
+      kind: "LLM",
+      startTime: 3,
+    });
+    await provider.recordSpanEnd({
+      id: "b:child",
+      traceId: "b",
+      parentId: "b:root",
+      name: "child",
+      kind: "LLM",
+      startTime: 3,
+      endTime: 4,
+      status: "ok",
+      llm: { model: "claude-opus-4-5", totalTokens: 6 },
+    });
+
+    // Trace "c": a lone tool span — no LLM data, no annotations at all.
+    await provider.recordSpanStart({
+      id: "c:root",
+      traceId: "c",
+      name: "root",
+      kind: "TOOL",
+      startTime: 5,
+    });
+
+    const summaries = await provider.getAllTraces();
+    const byId = Object.fromEntries(summaries.map(s => [s.id, s]));
+
+    expect(byId.a).toMatchObject({
+      totalTokens: 19, // 12 + (3 + 4)
+      cost: 0.01, // 0.004 + 0.006
+      model: "gpt-4o",
+      annotationCounts: { issue: 2, good: 1, note: 0 },
+    });
+    // `toMatchObject` treats an absent key as a mismatch against an
+    // explicit `undefined`, and these fields are omitted rather than
+    // present-but-undefined (see the `...(x != null && {...})` spreads in
+    // `getAllTraces`) — assert them individually instead.
+    expect(byId.b.totalTokens).toBe(11); // 5 + 6
+    expect(byId.b.cost).toBeUndefined();
+    expect(byId.b.model).toBeUndefined(); // spans disagree
+    expect(byId.b.annotationCounts).toEqual({ issue: 0, good: 0, note: 0 });
+
+    expect(byId.c.totalTokens).toBeUndefined();
+    expect(byId.c.cost).toBeUndefined();
+    expect(byId.c.model).toBeUndefined();
+    expect(byId.c.annotationCounts).toEqual({ issue: 0, good: 0, note: 0 });
+  });
 });

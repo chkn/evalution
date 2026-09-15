@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { LocalFileProvider } from "../../file-provider-local.ts";
 import { MemoryFileProvider } from "../../file-provider-memory.ts";
 import { resolveExecutionInputs } from "../execution-inputs.ts";
@@ -609,7 +609,14 @@ describe("resource outputs (specs/resource-hierarchy.md §A, §C)", () => {
     );
   });
 
-  it("uses the value itself as the receipt when it's plain, and the registration's receipt otherwise", async () => {
+  it("records the instance's own receipt for an output reference too, not the output's bare value (specs/resource-arguments.md §E)", async () => {
+    // A root reference and an output reference name the *same* instance, so
+    // both must record that instance's receipt — even where the output's own
+    // value happens to be plain JSON, which is what the pre-arguments
+    // behaviour substituted instead. That behaviour is reverted because a
+    // receipt is now fed back to `create()` on a replay, and handing it the
+    // output's bare string where it expects its own receipt shape would be
+    // wrong.
     const { registry: reg } = registry({
       [p("tasks.playground.ts")]: `${importHelper}
         class Handle { query() {} }
@@ -626,7 +633,7 @@ describe("resource outputs (specs/resource-hierarchy.md §A, §C)", () => {
     await lease.acquire("tasks.playground.ts#taskA.id");
     await lease.acquire("tasks.playground.ts#taskA.handle");
     expect(lease.receipts()).toEqual({
-      "tasks.playground.ts#taskA.id": "tsk_a",
+      "tasks.playground.ts#taskA.id": "taskA-receipt",
       "tasks.playground.ts#taskA.handle": "taskA-receipt",
     });
   });
@@ -804,5 +811,494 @@ describe("duplicate module instances", () => {
     expect(direct).toEqual({ tag: "fresh", created: 1 });
     expect(viaNeeds).toBe("tsk_fresh_1");
     await lease.release();
+  });
+});
+
+/**
+ * A minimal inline Standard Schema, embedded as source text so fixture
+ * modules can declare arguments without depending on a real validator
+ * library — `MemoryFileProvider` imports through a `data:` URL, which cannot
+ * resolve a bare specifier like `"zod"`.
+ */
+const schemaHelper = `
+  function str(opts) {
+    opts = opts || {};
+    return {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        validate: (value) => {
+          if (value === undefined && "default" in opts) return { value: opts.default };
+          if (typeof value !== "string") return { issues: [{ message: "expected a string" }] };
+          return { value };
+        },
+      },
+    };
+  }
+`;
+
+describe("resource arguments (specs/resource-arguments.md)", () => {
+  it("runs create() once for two acquisitions with equal arguments, and twice for different ones", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        ${schemaHelper}
+        globalThis.__creates = 0;
+        export const seeded = resource({
+          inputs: { title: str() },
+          create: ({ title }) => {
+            globalThis.__creates++;
+            return { value: title };
+          },
+        });`,
+    });
+
+    const lease = reg.lease();
+    const bindingFor = (title: string) => ({
+      key: JSON.stringify({ title }),
+      resolve: async () => ({ title }),
+    });
+
+    const a1 = await lease.acquire(
+      "x.playground.ts#seeded",
+      bindingFor("Todo app"),
+    );
+    const a2 = await lease.acquire(
+      "x.playground.ts#seeded",
+      bindingFor("Todo app"),
+    );
+    const b = await lease.acquire(
+      "x.playground.ts#seeded",
+      bindingFor("Other app"),
+    );
+
+    expect(a1).toBe("Todo app");
+    expect(a2).toBe("Todo app");
+    expect(b).toBe("Other app");
+    expect((globalThis as any).__creates).toBe(2);
+    await lease.release();
+  });
+
+  it("treats absent args and {} as the same key, and an unparameterized acquire as before this existed", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        globalThis.__creates = 0;
+        export const thing = resource({
+          create: () => {
+            globalThis.__creates++;
+            return { value: globalThis.__creates };
+          },
+        });`,
+    });
+
+    const lease = reg.lease();
+    const noBinding = await lease.acquire("x.playground.ts#thing");
+    const emptyKey = await lease.acquire("x.playground.ts#thing", {
+      key: "",
+      resolve: async () => ({}),
+    });
+    expect(noBinding).toBe(emptyKey);
+    expect((globalThis as any).__creates).toBe(1);
+    await lease.release();
+  });
+
+  it("passes resolved dependencies and validated arguments to create in one object", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        ${schemaHelper}
+        const db = resource({ create: () => ({ value: { tag: "the-db" } }) });
+        export const seeded = resource({
+          inputs: { db, title: str() },
+          create: ({ db, title }) => ({ value: db.tag + ":" + title }),
+        });
+        export { db };`,
+    });
+
+    const lease = reg.lease();
+    const result = await lease.acquire("x.playground.ts#seeded", {
+      key: JSON.stringify({ title: "hi" }),
+      resolve: async () => ({ title: "hi" }),
+    });
+    expect(result).toBe("the-db:hi");
+    await lease.release();
+  });
+
+  it("fails naming the resource and the parameter when a value fails its schema, before create runs", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        ${schemaHelper}
+        globalThis.__creates = 0;
+        export const seeded = resource({
+          inputs: { title: str() },
+          create: ({ title }) => { globalThis.__creates++; return { value: title }; },
+        });`,
+    });
+
+    const lease = reg.lease();
+    await expect(
+      lease.acquire("x.playground.ts#seeded", {
+        key: JSON.stringify({ title: 42 }),
+        resolve: async () => ({ title: 42 }),
+      }),
+    ).rejects.toThrow(
+      "Resource 'x.playground.ts#seeded': invalid value for 'title'",
+    );
+    expect((globalThis as any).__creates).toBe(0);
+  });
+
+  it("applies a schema's default when the panel sends nothing", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        ${schemaHelper}
+        export const seeded = resource({
+          inputs: { status: str({ default: "triaged" }) },
+          create: ({ status }) => ({ value: status }),
+        });`,
+    });
+
+    const lease = reg.lease();
+    const value = await lease.acquire("x.playground.ts#seeded", {
+      key: "",
+      resolve: async () => ({}),
+    });
+    expect(value).toBe("triaged");
+    await lease.release();
+  });
+
+  it("does not resolve arguments at all for a binding that hits the memo", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        ${schemaHelper}
+        export const seeded = resource({
+          inputs: { title: str() },
+          create: ({ title }) => ({ value: title }),
+        });`,
+    });
+
+    const lease = reg.lease();
+    const resolve = vi.fn(async () => ({ title: "Todo app" }));
+    await lease.acquire("x.playground.ts#seeded", { key: "k1", resolve });
+    await lease.acquire("x.playground.ts#seeded", { key: "k1", resolve });
+    expect(resolve).toHaveBeenCalledTimes(1);
+    await lease.release();
+  });
+
+  it("keys receipts by uri with no arguments and by uri@key with them", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        ${schemaHelper}
+        export const plain = resource({
+          create: () => ({ value: "p", receipt: "p-receipt" }),
+        });
+        export const seeded = resource({
+          inputs: { title: str() },
+          create: ({ title }) => ({ value: title, receipt: "tsk_" + title }),
+        });`,
+    });
+
+    const lease = reg.lease();
+    await lease.acquire("x.playground.ts#plain");
+    await lease.acquire("x.playground.ts#seeded", {
+      key: JSON.stringify({ title: "hi" }),
+      resolve: async () => ({ title: "hi" }),
+    });
+    expect(lease.receipts()).toEqual({
+      "x.playground.ts#plain": "p-receipt",
+      [`x.playground.ts#seeded@${JSON.stringify({ title: "hi" })}`]: "tsk_hi",
+    });
+    await lease.release();
+  });
+
+  it("reports a server-scoped resource declaring arguments with an error, and throws if args reach it anyway", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        ${schemaHelper}
+        export const bad = resource({
+          scope: "server",
+          inputs: { title: str() },
+          create: ({ title }) => ({ value: title }),
+        });`,
+    });
+
+    const [described] = reg.describe(await reg.sources());
+    expect(described.error).toMatch(/server-scoped.*arguments/i);
+
+    const lease = reg.lease();
+    await expect(
+      lease.acquire("x.playground.ts#bad", {
+        key: JSON.stringify({ title: "x" }),
+        resolve: async () => ({ title: "x" }),
+      }),
+    ).rejects.toThrow(/server-scoped.*arguments/i);
+  });
+
+  it("fails naming the URI when arguments are passed to a static resource", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const apiKey = resource({ value: "secret" });`,
+    });
+
+    const lease = reg.lease();
+    await expect(
+      lease.acquire("x.playground.ts#apiKey", {
+        key: JSON.stringify({ x: 1 }),
+        resolve: async () => ({ x: 1 }),
+      }),
+    ).rejects.toThrow(
+      /x\.playground\.ts#apiKey.*static resources take no arguments/i,
+    );
+  });
+
+  it("fails with a cycle error naming both when an argument names the resource itself", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        ${schemaHelper}
+        export const self = resource({
+          inputs: { title: str() },
+          create: ({ title }) => ({ value: title }),
+        });`,
+    });
+
+    const lease = reg.lease();
+    const selfBinding = {
+      key: "k",
+      resolve: async () => ({
+        title: await lease.acquire("x.playground.ts#self", selfBinding),
+      }),
+    };
+    await expect(
+      lease.acquire("x.playground.ts#self", selfBinding),
+    ).rejects.toThrow(/cycle/i);
+  });
+
+  it("fails with the lifetime error when a server-scoped resource is given a run-scoped resource as an argument", async () => {
+    // Reached the same way any `inputs` dependency is: an argument that
+    // resolves to a resource goes through the same `ResourceLease.acquire`
+    // path, so the existing server/run scope check fires without anything
+    // argument-specific needing to know about it (specs/resource-arguments.md §D).
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const perRun = resource({ create: () => ({ value: 1 }) });
+        export const longLived = resource({
+          scope: "server",
+          inputs: { perRun },
+          create: ({ perRun }) => ({ value: perRun }),
+        });`,
+    });
+
+    const lease = reg.lease();
+    await expect(
+      lease.acquire("x.playground.ts#longLived", {
+        key: "",
+        resolve: async () => ({}),
+      }),
+    ).rejects.toThrow(/run-scoped/);
+  });
+});
+
+describe("receipt round trip (specs/resource-arguments.md §E)", () => {
+  it("passes undefined to create on a fresh run and the recorded receipt on a replay", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        globalThis.__receiptsSeen = [];
+        export const seeded = resource({
+          create: (_inputs, receipt) => {
+            globalThis.__receiptsSeen.push(receipt);
+            return { value: receipt?.taskId ?? "tsk_new", receipt: { taskId: receipt?.taskId ?? "tsk_new" } };
+          },
+        });`,
+    });
+
+    const fresh = reg.lease();
+    const freshValue = await fresh.acquire("x.playground.ts#seeded");
+    await fresh.release();
+    expect(freshValue).toBe("tsk_new");
+
+    const replay = reg.lease();
+    const replayValue = await replay.acquire("x.playground.ts#seeded", {
+      key: "",
+      resolve: async () => ({}),
+      receipt: { taskId: "tsk_abc123" },
+    });
+    await replay.release();
+    expect(replayValue).toBe("tsk_abc123");
+    expect((globalThis as any).__receiptsSeen).toEqual([
+      undefined,
+      { taskId: "tsk_abc123" },
+    ]);
+  });
+
+  it("does not widen the memo key — two references with equal receipts still resolve to one instance", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        globalThis.__creates = 0;
+        export const seeded = resource({
+          create: (_inputs, receipt) => {
+            globalThis.__creates++;
+            return { value: "v", receipt: receipt ?? "r" };
+          },
+        });`,
+    });
+
+    const lease = reg.lease();
+    const binding = { key: "", resolve: async () => ({}), receipt: "r" };
+    await lease.acquire("x.playground.ts#seeded", binding);
+    await lease.acquire("x.playground.ts#seeded", binding);
+    expect((globalThis as any).__creates).toBe(1);
+    await lease.release();
+  });
+
+  it("still runs, mints, and records a new receipt when create ignores the one it was handed", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        let n = 0;
+        export const seeded = resource({
+          create: () => ({ value: ++n, receipt: "receipt-" + n }),
+        });`,
+    });
+
+    const lease = reg.lease();
+    const value = await lease.acquire("x.playground.ts#seeded", {
+      key: "",
+      resolve: async () => ({}),
+      receipt: "ignored",
+    });
+    expect(value).toBe(1);
+    expect(lease.receipts()).toEqual({ "x.playground.ts#seeded": "receipt-1" });
+    await lease.release();
+  });
+});
+
+describe("resource reset (specs/resource-arguments.md §F)", () => {
+  it("calls reset once per lease, before the value is used, on a server-scoped instance", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        globalThis.__resets = 0;
+        globalThis.__creates = 0;
+        export const db = resource({
+          scope: "server",
+          create: () => {
+            globalThis.__creates++;
+            return { value: "db", reset: async () => { globalThis.__resets++; } };
+          },
+        });`,
+    });
+
+    const first = reg.lease();
+    await first.acquire("x.playground.ts#db");
+    await first.acquire("x.playground.ts#db"); // same lease, same instance: no extra reset
+    await first.release();
+    expect((globalThis as any).__creates).toBe(1);
+    expect((globalThis as any).__resets).toBe(1);
+
+    const second = reg.lease();
+    await second.acquire("x.playground.ts#db");
+    await second.release();
+    expect((globalThis as any).__creates).toBe(1); // memoized: still one create()
+    expect((globalThis as any).__resets).toBe(2); // reset again for the new lease
+  });
+
+  it("never calls reset on a run-scoped instance", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        globalThis.__resets = 0;
+        export const thing = resource({
+          create: () => ({ value: 1, reset: async () => { globalThis.__resets++; } }),
+        });`,
+    });
+
+    const lease = reg.lease();
+    await lease.acquire("x.playground.ts#thing");
+    await lease.release();
+    expect((globalThis as any).__resets).toBe(0);
+  });
+
+  it("makes a second lease's acquire of a resettable instance wait for the first to release", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        globalThis.__order = [];
+        export const db = resource({
+          scope: "server",
+          create: () => ({
+            value: "db",
+            reset: async () => { globalThis.__order.push("reset"); },
+          }),
+        });`,
+    });
+
+    const first = reg.lease();
+    await first.acquire("x.playground.ts#db");
+    (globalThis as any).__order.push("first-acquired");
+
+    let secondAcquired = false;
+    const second = reg.lease();
+    const secondAcquire = second.acquire("x.playground.ts#db").then(() => {
+      secondAcquired = true;
+      (globalThis as any).__order.push("second-acquired");
+    });
+
+    // Give the second lease a chance to run if it (wrongly) didn't wait.
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(secondAcquired).toBe(false);
+
+    await first.release();
+    await secondAcquire;
+    expect(secondAcquired).toBe(true);
+    expect((globalThis as any).__order).toEqual([
+      "reset",
+      "first-acquired",
+      "reset",
+      "second-acquired",
+    ]);
+    await second.release();
+  });
+
+  it("acquires two resettable instances in sorted-URI order regardless of request order, without deadlocking", async () => {
+    const { registry: reg } = registry({
+      [p("a.playground.ts")]: `${importHelper}
+        export const res = resource({ scope: "server", create: () => ({ value: "a", reset: async () => {} }) });`,
+      [p("b.playground.ts")]: `${importHelper}
+        export const res = resource({ scope: "server", create: () => ({ value: "b", reset: async () => {} }) });`,
+    });
+
+    // Lease one wants a.ts then b.ts; lease two wants b.ts then a.ts. Neither
+    // request order should be able to deadlock the other — sorted acquisition
+    // means both leases end up holding (or waiting for) the same two locks in
+    // the same relative order.
+    const leaseOne = reg.lease();
+    const leaseTwo = reg.lease();
+
+    const oneDone = (async () => {
+      await leaseOne.acquire("a.playground.ts#res");
+      await leaseOne.acquire("b.playground.ts#res");
+      await leaseOne.release();
+    })();
+    const twoDone = (async () => {
+      await leaseTwo.acquire("b.playground.ts#res");
+      await leaseTwo.acquire("a.playground.ts#res");
+      await leaseTwo.release();
+    })();
+
+    await Promise.race([
+      Promise.all([oneDone, twoDone]),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("deadlocked")), 2000),
+      ),
+    ]);
+  });
+
+  it("warns at first use rather than resetting a run-scoped resource's declared reset", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const thing = resource({ create: () => ({ value: 1, reset: async () => {} }) });`,
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const lease = reg.lease();
+      await lease.acquire("x.playground.ts#thing");
+      await lease.release();
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/run-scoped/i));
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

@@ -176,6 +176,80 @@ describe("resource-to-slot matching (§D)", () => {
   });
 });
 
+describe("resource arguments (specs/resource-arguments.md §G, §H)", () => {
+  async function project() {
+    const provider = new FilePromptProvider({
+      rootDir: fixturesDir,
+      includePatterns: ["seeded-task.prompt.ts"],
+      playgroundIncludePatterns: ["seeded-task.playground.ts"],
+      sdk: new VercelAISDK(),
+    });
+    return provider.getAllPrompts();
+  }
+
+  it("reports one resolved PropDefinition per schema-valued input, in declaration order", async () => {
+    const [prompt] = await project();
+    const seededTask = prompt.inputSources!.resources.find(
+      r => r.uri === "seeded-task.playground.ts#seededTask",
+    )!;
+
+    expect(seededTask.parameters?.map(p => p.name)).toEqual([
+      "title",
+      "status",
+    ]);
+    expect(seededTask.parameters![0].type.kind).toBe("primitive");
+    expect((seededTask.parameters![0].type as any).base).toBe("string");
+  });
+
+  it("reports no parameters for a resource whose inputs hold only resources", async () => {
+    const [prompt] = await project();
+    const titleGenerator = prompt.inputSources!.resources.find(
+      r => r.uri === "seeded-task.playground.ts#titleGenerator",
+    )!;
+    expect(titleGenerator.parameters).toBeUndefined();
+  });
+
+  it("does not report parameters on an output value source, only on the root resource", async () => {
+    const [prompt] = await project();
+    const taskIdOutput = prompt.inputSources!.resources.find(
+      r => r.uri === "seeded-task.playground.ts#seededTask.taskId",
+    )!;
+    expect(taskIdOutput.parameters).toBeUndefined();
+  });
+
+  it("offers a string-producing resource on a string argument's slot via resourceSlots", async () => {
+    const [prompt] = await project();
+    const slots = prompt.inputSources!.resourceSlots;
+    expect(slots?.["seeded-task.playground.ts#seededTask"]?.title).toContain(
+      "seeded-task.playground.ts#titleGenerator",
+    );
+  });
+
+  it("honours an explicit `for` on a resource argument even when a checker is available", async () => {
+    const [prompt] = await project();
+    const slots =
+      prompt.inputSources!.resourceSlots?.[
+        "seeded-task.playground.ts#seededTask"
+      ];
+    expect(slots?.status).toContain("seeded-task.playground.ts#statusPicker");
+    expect(slots?.title ?? []).not.toContain(
+      "seeded-task.playground.ts#statusPicker",
+    );
+  });
+
+  it("does not offer a resource as an input to its own arguments", async () => {
+    const [prompt] = await project();
+    const titleSlot =
+      prompt.inputSources!.resourceSlots?.[
+        "seeded-task.playground.ts#seededTask"
+      ]?.title ?? [];
+    expect(titleSlot).not.toContain("seeded-task.playground.ts#seededTask");
+    expect(titleSlot).not.toContain(
+      "seeded-task.playground.ts#seededTask.taskId",
+    );
+  });
+});
+
 describe("execute parameters (§E)", () => {
   it("derives toolsContext covering exactly the tools that declare a context", async () => {
     const prompts = await fileType().parsePrompts(
@@ -300,6 +374,38 @@ describe("probe batching", () => {
       // Every probe rides in one build; resolving per prompt would throw away
       // the source-file reuse that makes a rebuild cheap.
       expect(spy.mock.calls.length - before).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("normalizes in two builds: one to parse, one for every type question", async () => {
+    const spy = vi.spyOn(promptProgram, "createPromptProgram");
+    try {
+      const provider = new FilePromptProvider({
+        rootDir: fixturesDir,
+        includePatterns: ["seeded-task.prompt.ts"],
+        playgroundIncludePatterns: ["seeded-task.playground.ts"],
+        sdk: new VercelAISDK(),
+      });
+      const [prompt] = await provider.getAllPrompts();
+
+      // Every kind of question was asked and answered by the checker: resource
+      // arguments resolved to real types, and resource slots matched by type…
+      const seededTask = prompt.inputSources!.resources.find(
+        r => r.uri === "seeded-task.playground.ts#seededTask",
+      )!;
+      expect(seededTask.parameters![0].type.kind).toBe("primitive");
+      expect(
+        prompt.inputSources!.resourceSlots?.[
+          "seeded-task.playground.ts#seededTask"
+        ]?.title,
+      ).toContain("seeded-task.playground.ts#titleGenerator");
+
+      // …yet execute probes, prompt slots, resource arguments and resource
+      // slots all shared one checker. Each extra build re-derives every type
+      // the prompt depends on, which is most of a save's latency.
+      expect(spy).toHaveBeenCalledTimes(2);
     } finally {
       spy.mockRestore();
     }
