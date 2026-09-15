@@ -20,6 +20,7 @@ const COPYRIGHT = "Copyright (c) 2026 Alexander Corrado";
 // REUSE-IgnoreStart  (the strings below contain the SPDX token literally)
 const LINE = id => `// SPDX-License-Identifier: ${id}\n// ${COPYRIGHT}\n`;
 const HASH = id => `# SPDX-License-Identifier: ${id}\n# ${COPYRIGHT}\n`;
+const DASH = id => `-- SPDX-License-Identifier: ${id}\n-- ${COPYRIGHT}\n`;
 const BLOCK = id =>
   `/* SPDX-License-Identifier: ${id} */\n/* ${COPYRIGHT} */\n`;
 const XML = id =>
@@ -44,6 +45,8 @@ function styleFor(file) {
       return HASH;
     case "css":
       return BLOCK;
+    case "sql":
+      return DASH;
     case "svg":
     case "html":
       return XML;

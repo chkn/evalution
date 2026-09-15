@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (c) 2026 Alexander Corrado
+
 CREATE TABLE `annotations` (
 	`id` text PRIMARY KEY,
 	`trace_id` text NOT NULL,
