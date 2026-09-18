@@ -2,7 +2,13 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import { isMissingPackage, missingPackageMessage } from "./sdk-adapter.ts";
+import { GeminiInteractionsSDK } from "./gemini-interactions-sdk.ts";
+import {
+  assertUpdateStyle,
+  isMissingPackage,
+  missingPackageMessage,
+} from "./sdk-adapter.ts";
+import { VercelAISDK } from "./vercel-ai-sdk/index.ts";
 
 /** The error Node throws when a bare specifier resolves to nothing. */
 function moduleNotFound(message: string): Error {
@@ -42,8 +48,46 @@ describe("isMissingPackage", () => {
   });
 });
 
+describe("isMissingPackage through wrappers", () => {
+  it("recognizes a missing package wrapped by a loader", () => {
+    const wrapped = new Error("There was an error when loading a module", {
+      cause: moduleNotFound("Cannot find package 'ai' imported from /x.js"),
+    });
+    expect(isMissingPackage(wrapped, "ai")).toBe(true);
+    expect(isMissingPackage(wrapped, "@google/genai")).toBe(false);
+  });
+});
+
 describe("missingPackageMessage", () => {
   it("names the package and how to install it", () => {
     expect(missingPackageMessage("ai")).toContain("npm install ai");
+  });
+});
+
+describe("assertUpdateStyle", () => {
+  it("accepts updates in the adapter's own style", () => {
+    expect(() =>
+      assertUpdateStyle({ style: "chat", system: null }, "chat"),
+    ).not.toThrow();
+  });
+
+  it("rejects updates written for another style", () => {
+    expect(() =>
+      assertUpdateStyle({ style: "questions", questions: null }, "chat"),
+    ).toThrow(/"questions" updates to a "chat" prompt/);
+  });
+});
+
+describe("chat adapters", () => {
+  it.each([
+    ["VercelAISDK", new VercelAISDK()],
+    ["GeminiInteractionsSDK", new GeminiInteractionsSDK()],
+  ])("%s refuses to denormalize questions-style updates", (_, sdk) => {
+    expect(() =>
+      sdk.denormalizeUpdates({
+        style: "questions",
+        state: { kind: "primitive", value: "x" },
+      }),
+    ).toThrow(/"questions" updates/);
   });
 });

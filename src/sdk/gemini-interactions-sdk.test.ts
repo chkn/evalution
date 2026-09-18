@@ -3,6 +3,11 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  activeCatalogIndex,
+  literalDefinition,
+  type ValueCatalog,
+} from "ts-proppy";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalFileProvider } from "../file-provider-local.ts";
 import { TSPromptFileType } from "../prompt/file/ts/ts-prompt-file-type.ts";
@@ -104,10 +109,9 @@ describe("GeminiInteractionsSDK", () => {
       expect(normalized.model).toEqual({
         kind: "object",
         properties: {
-          key: { kind: "primitive", value: "model" },
-          value: { kind: "primitive", value: "gemini-3-flash-preview" },
+          model: { kind: "primitive", value: "gemini-3-flash-preview" },
         },
-        displayValue: '"gemini-3-flash-preview"',
+        displayValue: "gemini-3-flash-preview",
       });
       expect(normalized.system).toEqual({
         kind: "primitive",
@@ -267,11 +271,11 @@ describe("GeminiInteractionsSDK", () => {
   describe("denormalizeUpdates", () => {
     it("maps model, system, messages to SDK property names", () => {
       const updates: NormalizedPromptUpdates = {
+        style: "chat",
         model: {
           kind: "object",
           properties: {
-            key: { kind: "primitive", value: "model" },
-            value: { kind: "primitive", value: "gemini-2.5-pro" },
+            model: { kind: "primitive", value: "gemini-2.5-pro" },
           },
         },
         system: { kind: "primitive", value: "Be concise." },
@@ -337,6 +341,7 @@ describe("GeminiInteractionsSDK", () => {
         },
       };
       const updates: NormalizedPromptUpdates = {
+        style: "chat",
         modelParameters: {
           temperature: { kind: "primitive", value: 0.5 },
           max_output_tokens: null,
@@ -361,7 +366,7 @@ describe("GeminiInteractionsSDK", () => {
         },
       };
       const raw = sdk.denormalizeUpdates(
-        { modelParameters: { temperature: null } },
+        { style: "chat", modelParameters: { temperature: null } },
         currentValues,
       );
       expect(raw.generation_config).toBeNull();
@@ -369,7 +374,10 @@ describe("GeminiInteractionsSDK", () => {
 
     it("creates generation_config from scratch when none exists", () => {
       const raw = sdk.denormalizeUpdates(
-        { modelParameters: { temperature: { kind: "primitive", value: 0.9 } } },
+        {
+          style: "chat",
+          modelParameters: { temperature: { kind: "primitive", value: 0.9 } },
+        },
         {},
       );
       expect(raw.generation_config).toEqual({
@@ -379,19 +387,17 @@ describe("GeminiInteractionsSDK", () => {
     });
 
     it("handles null values for removal", () => {
-      const raw = sdk.denormalizeUpdates({ system: null });
+      const raw = sdk.denormalizeUpdates({ style: "chat", system: null });
       expect(raw.system_instruction).toBeNull();
     });
 
     it("only includes keys that are present in updates", () => {
       const raw = sdk.denormalizeUpdates(
         {
+          style: "chat",
           model: {
             kind: "object",
-            properties: {
-              key: { kind: "primitive", value: "model" },
-              value: { kind: "primitive", value: "test" },
-            },
+            properties: { model: { kind: "primitive", value: "test" } },
           },
         },
         {},
@@ -417,38 +423,180 @@ describe("GeminiInteractionsSDK", () => {
     });
   });
 
-  describe("getModelCatalog", () => {
-    it("returns a non-empty model list", async () => {
-      const catalog = await sdk.getModelCatalog();
-      expect(catalog.models.length).toBeGreaterThan(0);
-      expect(catalog.models[0].id).toContain("gemini");
-      expect(catalog.models[0].values.model).toBeDefined();
+  describe("model variants", () => {
+    const text = (value: string): PropValue => ({ kind: "primitive", value });
+    const agent: PropValue = {
+      kind: "object",
+      properties: { agent: text("deep-research-preview-04-2026") },
+    };
+
+    it("normalizes an agent config into an agent fragment, with agent settings", () => {
+      const prompt = makeParsedPrompt({
+        agent: text("deep-research-preview-04-2026"),
+        agent_config: {
+          kind: "object",
+          properties: { thinking_summaries: text("auto") },
+        },
+      });
+      prompt.extractedProps.definitions = [
+        ...prompt.extractedProps.definitions.filter(
+          d => d.name !== "agent_config",
+        ),
+        {
+          name: "agent_config",
+          optional: true,
+          type: {
+            kind: "object",
+            syntax: "DeepResearchAgentConfig",
+            properties: [
+              {
+                name: "thinking_summaries",
+                optional: true,
+                type: { kind: "primitive", syntax: "string" },
+              },
+            ],
+          },
+        },
+      ];
+      const normalized = sdk.normalizePrompt(prompt);
+      expect(normalized.model).toMatchObject({
+        properties: { agent: text("deep-research-preview-04-2026") },
+      });
+      expect(normalized.modelParameters.map(p => p.def.name)).toEqual([
+        "thinking_summaries",
+      ]);
     });
 
-    it("shapes model and agent entries with their own config key", async () => {
-      const catalog = await sdk.getModelCatalog();
-      const entryFor = (id: string) => catalog.models.find(m => m.id === id);
-
-      // A model entry writes `model:`; an agent entry writes `agent:`. The key
-      // is what denormalizeUpdates reads back out to pick the config property.
-      expect(entryFor("gemini-3.7-flash")?.values.model).toEqual({
-        kind: "object",
-        properties: {
-          key: { kind: "primitive", value: "model" },
-          value: { kind: "primitive", value: "gemini-3.7-flash" },
+    it("switching a model config to an agent drops the model and its generation_config", () => {
+      const raw = sdk.denormalizeUpdates(
+        { style: "chat", model: agent },
+        {
+          model: text("gemini-3.5-flash"),
+          generation_config: {
+            kind: "object",
+            properties: { temperature: { kind: "primitive", value: 0.2 } },
+          },
         },
-        displayValue: "gemini-3.7-flash",
+      );
+      expect(raw).toEqual({
+        agent: text("deep-research-preview-04-2026"),
+        model: null,
+        generation_config: null,
       });
+    });
 
-      const agent = entryFor("deep-research-preview-04-2026");
-      expect(agent?.values.model).toBeUndefined();
-      expect(agent?.values.agent).toEqual({
-        kind: "object",
-        properties: {
-          key: { kind: "primitive", value: "agent" },
-          value: { kind: "primitive", value: "deep-research-preview-04-2026" },
+    it("keeps the variant's own settings when the ID changes within it", () => {
+      const raw = sdk.denormalizeUpdates(
+        {
+          style: "chat",
+          model: {
+            kind: "object",
+            properties: { model: text("gemini-2.5-pro") },
+          },
         },
-        displayValue: "deep-research-preview-04-2026",
+        {
+          model: text("gemini-3.5-flash"),
+          generation_config: { kind: "object", properties: {} },
+        },
+      );
+      expect(raw).toEqual({ model: text("gemini-2.5-pro") });
+    });
+
+    it("writes settings into the agent's config for an agent", () => {
+      const raw = sdk.denormalizeUpdates(
+        {
+          style: "chat",
+          modelParameters: { thinking_summaries: text("none") },
+        },
+        { agent: text("deep-research-preview-04-2026") },
+      );
+      expect(raw).toEqual({
+        agent_config: {
+          kind: "object",
+          properties: { thinking_summaries: text("none") },
+        },
+      });
+    });
+  });
+
+  describe("getModelDefinition", () => {
+    it("offers Models and Agents catalogs of config fragments", async () => {
+      const def = await sdk.getModelDefinition({});
+      const [models, agents] = def.catalogs!;
+      expect(models.label).toBe("Models");
+      expect(agents.label).toBe("Agents");
+
+      const presets = (catalog: ValueCatalog) =>
+        catalog.groups.flatMap(g => g.presets ?? []);
+      expect(
+        presets(models).find(p => p.label === "Gemini 3.7 Flash")?.value,
+      ).toMatchObject({
+        kind: "object",
+        properties: { model: { kind: "primitive", value: "gemini-3.7-flash" } },
+      });
+      expect(
+        presets(agents).find(p => p.label === "Deep Research Preview")?.value,
+      ).toMatchObject({
+        properties: {
+          agent: { kind: "primitive", value: "deep-research-preview-04-2026" },
+        },
+      });
+    });
+
+    it("narrows each catalog's free-form entry to its own variant", async () => {
+      const def = await sdk.getModelDefinition({});
+      const [models, agents] = def.catalogs!;
+      const agentValue: PropValue = {
+        kind: "object",
+        properties: { agent: { kind: "primitive", value: "my-agent" } },
+      };
+      expect(literalDefinition(models, def)?.type).toMatchObject({
+        properties: [{ name: "model" }],
+      });
+      expect(literalDefinition(agents, def)?.type).toMatchObject({
+        properties: [{ name: "agent" }],
+      });
+      expect(activeCatalogIndex(def.catalogs!, def, agentValue)).toBe(1);
+    });
+
+    it("reads each variant's ID type from the installed SDK when probed", async () => {
+      const def = await sdk.getModelDefinition({
+        model: {
+          name: "model",
+          optional: false,
+          type: {
+            kind: "union",
+            syntax: "",
+            types: [
+              {
+                kind: "object",
+                syntax: "",
+                properties: [
+                  {
+                    name: "model",
+                    optional: false,
+                    type: {
+                      kind: "union",
+                      syntax: "Model_2",
+                      types: [
+                        { kind: "constant", syntax: "'a'", value: "a" },
+                        {
+                          kind: "primitive",
+                          syntax: "string & {}",
+                          base: "string",
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      });
+      const literal = literalDefinition(def.catalogs![0], def)!;
+      expect(literal.type).toMatchObject({
+        properties: [{ type: { syntax: "Model_2" } }],
       });
     });
   });

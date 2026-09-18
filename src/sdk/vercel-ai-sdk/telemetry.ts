@@ -133,6 +133,32 @@ interface RunState {
   step?: Span;
   /** Open tool spans keyed by `toolCallId`, so concurrent tools stay distinct. */
   readonly tools: Map<string, Span>;
+  /** Whether the call declared a structured output, so step text is JSON. */
+  readonly structuredOutput: boolean;
+}
+
+/**
+ * Whether a call's `onStart` event declares a structured output
+ * (`Output.object`, `Output.array`, …) rather than the default text. The event
+ * shape varies across operations, so this reads it defensively.
+ */
+function isStructuredOutput(event: unknown): boolean {
+  const output = (event as { output?: unknown } | undefined)?.output;
+  if (!output || typeof output !== "object") return false;
+  const name = (output as { name?: unknown }).name;
+  return typeof name === "string" && name !== "text";
+}
+
+/**
+ * A step's text as the data it encodes, when the call declared a structured
+ * output. Text that doesn't parse (a truncated response, say) is kept as is.
+ */
+function parseStructured(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 /**
@@ -251,7 +277,14 @@ export class VercelAISDKTelemetry
         : undefined,
     };
 
-    this.runs.set(event.callId, { traceId, root: span, tools: new Map() });
+    this.runs.set(event.callId, {
+      traceId,
+      root: span,
+      tools: new Map(),
+      // Anything but the default text output means the model's text is the
+      // JSON encoding of data (`Output.object`, `Output.array`, …).
+      structuredOutput: isStructuredOutput(event),
+    });
 
     // The root span's `recordSpanStart` creates the `running` trace; no
     // separate pre-creation step is needed.
@@ -264,7 +297,7 @@ export class VercelAISDKTelemetry
     const run = this.runs.get(event.callId);
     if (!run) return;
 
-    const messages = toSpanMessages(event.messages, event.instructions);
+    const input = toSpanMessages(event.messages, event.instructions);
     const span: Span = {
       id: crypto.randomUUID(),
       traceId: run.traceId,
@@ -275,7 +308,7 @@ export class VercelAISDKTelemetry
       llm: {
         provider: event.provider,
         model: event.modelId,
-        messages,
+        input,
       },
     };
     run.step = span;
@@ -351,7 +384,7 @@ export class VercelAISDKTelemetry
         ...(startSpan.llm ?? {}),
         provider: event.model.provider,
         model: event.model.modelId,
-        output: event.text,
+        output: run.structuredOutput ? parseStructured(event.text) : event.text,
         promptTokens: event.usage.inputTokens,
         completionTokens: event.usage.outputTokens,
         totalTokens: event.usage.totalTokens,

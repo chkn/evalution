@@ -182,14 +182,14 @@ export function setupRoutes({
     }
   });
 
-  // GET /api/providers/:providerId/models
-  app.get("/api/providers/:providerId/models", async c => {
+  // GET /api/providers/:providerId/model-definition
+  app.get("/api/providers/:providerId/model-definition", async c => {
     const { providerId } = c.req.param();
     const provider = promptProviders.get(providerId);
     if (!provider) {
       return c.json({ error: "Provider not found" }, 404);
     }
-    return c.json((await provider.getModelCatalog?.()) ?? { providers: {} });
+    return c.json((await provider.getModelDefinition?.()) ?? null);
   });
 
   // GET /api/providers/:providerId/model-parameters
@@ -360,6 +360,7 @@ export function setupRoutes({
         try {
           await provider.execute(decodedId, functionParams, {
             traceId,
+            rootSpanId,
             executeValues,
             inputs: recordedInputs,
             // Run-scoped resources outlive this response: `execute` returns as

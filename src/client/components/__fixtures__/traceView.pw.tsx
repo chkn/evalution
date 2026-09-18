@@ -47,7 +47,7 @@ const TRACE = {
       llm: {
         provider: "openai",
         model: "gpt-4o",
-        messages: [{ role: "user", content: "Hello **world**" }],
+        input: [{ role: "user", content: "Hello **world**" }],
         output: "Hi there!",
         promptTokens: 3,
         completionTokens: 5,
@@ -388,7 +388,7 @@ test("chat section hides tool-role messages, since the adjacent TOOL span alread
             endTime: 1100,
             status: "ok",
             llm: {
-              messages: [
+              input: [
                 { role: "user", content: "search for cats" },
                 { role: "tool", content: "raw-tool-output-marker" },
               ],
@@ -481,7 +481,7 @@ test("chat section does not repeat an earlier turn's messages in a later turn", 
             endTime: 1050,
             status: "ok",
             llm: {
-              messages: [{ role: "user", content: "first question" }],
+              input: [{ role: "user", content: "first question" }],
               output: "first answer",
             },
           },
@@ -497,7 +497,7 @@ test("chat section does not repeat an earlier turn's messages in a later turn", 
             llm: {
               // Folds turn1's `output` back in as an assistant message, the
               // way a real multi-turn agent loop resends full history.
-              messages: [
+              input: [
                 { role: "user", content: "first question" },
                 { role: "assistant", content: "first answer" },
                 { role: "user", content: "second question" },
@@ -701,7 +701,7 @@ test("renders an image content part as an <img>, validated through toSafeImageSr
             endTime: 1100,
             status: "ok",
             llm: {
-              messages: [
+              input: [
                 {
                   role: "user",
                   content: [
@@ -825,7 +825,7 @@ async function mockManyTurnsTrace(page: Page, n: number) {
             endTime: i * 100 + 50,
             status: "ok",
             llm: {
-              messages: [{ role: "user", content: `question ${i}` }],
+              input: [{ role: "user", content: `question ${i}` }],
               output: `answer ${i}`,
             },
           })),

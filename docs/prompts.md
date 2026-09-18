@@ -15,7 +15,7 @@ Prompts are stored as regular source files in your codebase. Evalution can load 
 
 ## The `prompts()` helper
 
-Evalution provides a runtime package for each supported AI SDK (currently only the Vercel AI SDK). The package exports a `prompts` function that serves as a helper for defining prompts that integrate with Evalution.
+Evalution provides a runtime package for each supported AI SDK: `@evalution/vercel-ai-sdk` for the Vercel AI SDK, and `@evalution/typesafe-sdk` for TypeSafe (see [below](#typesafe-system-one-prompts)). The package exports a `prompts` function that serves as a helper for defining prompts that integrate with Evalution.
 
 Using the helper brings these benefits:
 - Type safety
@@ -142,6 +142,48 @@ Generally, the `prompts()` helper is recommended, however both forms are support
 | Trace linking                | automatic                      | manual                |
 | Stable global ID             | automatic                      | manual                |
 | Return types                 | typed against the AI SDK       | annotate it yourself  |
+
+## TypeSafe System One prompts
+
+A [TypeSafe](https://docs.typesafe.ai/) System One model answers a set of named, typed questions about a *state* instead of continuing a conversation. Its prompts use the same shape, with `@evalution/typesafe-sdk`'s `prompts()` helper:
+
+```ts
+// triage.prompt.ts
+import { choice, noul, score } from "@typesafe-ai/sdk";
+import { prompts } from "@evalution/typesafe-sdk";
+
+type Ticket = { subject: string; body: string };
+
+export default prompts({ id: "support-triage" }, () => ({
+  triage: (ticket: Ticket, product: string) => ({
+    state: { ticket },
+    questions: {
+      refund_requested: noul(`Does the customer ask for a refund for ${product}?`),
+      team: choice("Which team should handle this?", {
+        billing: "Payments and refunds",
+        technical: null,
+      }),
+      frustration: score("How frustrated is the customer?", ["Calm", "Frustrated", "Very angry"]),
+    },
+  }),
+}));
+```
+
+Use a `type` alias rather than an `interface` for data you put in the state: the SDK types state as JSON, and TypeScript only checks an alias's properties against that.
+
+Configure the provider with `sdk: new TypeSafeSDK()`, and set `TYPESAFE_API_KEY` to run prompts. The playground edits the state and the questions directly — each question through the SDK's own question types, with `${…}` completion from the prompt's parameters — and shows each run's answers as charts.
+
+At run time, wrap your client with `instrument()` so calls made with these prompts are traced and linked back to them. Answer types are still inferred from each prompt's questions:
+
+```ts
+import { TypeSafeClient } from "@typesafe-ai/sdk";
+import { instrument } from "@evalution/typesafe-sdk";
+import triagePrompts from "./triage.prompt.ts";
+
+const client = instrument(new TypeSafeClient());
+const { answers } = await client.systemOne(triagePrompts().triage(ticket, "Pro plan"));
+answers.team.choice; // "billing" | "technical"
+```
 
 ## See also
 

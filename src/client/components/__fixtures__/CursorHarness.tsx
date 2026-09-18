@@ -40,6 +40,7 @@ export function makePrompt(content: string): NormalizedPrompt {
     providerId: "test",
     name: "test",
     functionParameters: [],
+    style: "chat",
     modelEditable: true,
     system: { kind: "template", value: [""] },
     systemEditable: true,
@@ -77,7 +78,7 @@ export function CursorHarness({
       <PlaygroundEditor
         prompt={prompt}
         onUpdate={handleUpdate}
-        modelCatalog={{ models: [] }}
+        modelDefinition={null}
       />
       {reloadContent !== undefined && (
         <button

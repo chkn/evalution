@@ -19,16 +19,42 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { SpanMessage } from "../../../shared/types";
+import { spanMessages } from "../../../trace/trace-types";
 import { formatDuration } from "./format.ts";
 import { ChevronIcon, StopwatchIcon, WrenchIcon } from "./icons.tsx";
 import { JsonView } from "./JsonView.tsx";
 import { MessageList } from "./MessageList.tsx";
+import { renderOutput } from "./output-renderers.tsx";
 import type { Row } from "./rows.ts";
-import { newMessagesByTurn, spanDuration } from "./rows.ts";
+import { hasOutput, newMessagesByTurn, spanDuration } from "./rows.ts";
+
+/**
+ * A span's output as a chat bubble: text renders as the Markdown assistant
+ * message it is, anything else (structured output, a model whose answer is
+ * data) in the same bubble, through a renderer picked by its shape.
+ */
+function OutputBubble({ output }: { output: unknown }) {
+  if (typeof output === "string") {
+    return (
+      <MessageList
+        messages={[{ role: "assistant", content: output }]}
+        variant="bubble"
+      />
+    );
+  }
+  return (
+    <div className="message-list-bubble">
+      <div className="chat-bubble chat-bubble-role-assistant">
+        <div className="chat-bubble-role">assistant</div>
+        <div className="chat-bubble-content">{renderOutput(output)}</div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Renders one `LLM` span's turn as bare chat bubbles (no surrounding card).
- * `newMessages` is the caller-computed suffix of `span.llm.messages` that
+ * `newMessages` is the caller-computed suffix of the span's input messages that
  * hasn't already been rendered by an earlier turn — see {@link ChatFlow}. Tool
  * (role `"tool"`) messages are dropped here — the adjacent `TOOL` span's
  * card already shows that call's arguments/result.
@@ -51,21 +77,30 @@ function ChatLLMBlock({
 }) {
   const { span } = row;
   const visibleMessages = newMessages.filter(m => m.role !== "tool");
+  // A model that isn't given a message list records its input as JSON, shown
+  // where the messages would go.
+  const input = span.llm?.input;
+  const jsonInput = input !== undefined && !spanMessages(span.llm);
   return (
     <div
       className={`chat-turn${span.status === "error" ? " chat-turn-error" : ""}${selected ? " chat-turn-selected" : ""}`}
       data-span-id={span.id}
       onClick={onSelect}
     >
+      {jsonInput && (
+        <div className="message-list-bubble">
+          <div className="chat-bubble chat-bubble-role-user">
+            <div className="chat-bubble-role">input</div>
+            <div className="chat-bubble-content">
+              <JsonView data={input} />
+            </div>
+          </div>
+        </div>
+      )}
       {visibleMessages.length > 0 && (
         <MessageList messages={visibleMessages} variant="bubble" />
       )}
-      {span.llm?.output && (
-        <MessageList
-          messages={[{ role: "assistant", content: span.llm.output }]}
-          variant="bubble"
-        />
-      )}
+      {hasOutput(span.llm) && <OutputBubble output={span.llm?.output} />}
       {span.errorMessage && (
         <pre className="span-details-error">{span.errorMessage}</pre>
       )}
@@ -167,7 +202,7 @@ function ChatToolBlock({
  * `AGENT`/`EMBEDDING`/`DEFAULT` spans are structural — their `LLM`/`TOOL`
  * descendants are what actually render a chat block.
  *
- * Each `LLM` span's `llm.messages` is the *full* conversation sent to the model,
+ * Each `LLM` span's input messages are the *full* conversation sent to the model,
  * so a later turn's `messages` re-includes everything already shown by
  * earlier turns (system prompt, prior user/assistant turns, prior tool
  * results, prior `output`). To avoid repeating those, each turn only renders

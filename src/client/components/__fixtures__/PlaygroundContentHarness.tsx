@@ -28,6 +28,7 @@ function makePrompt(
     providerId: "test",
     name: "test",
     functionParameters,
+    style: "chat",
     modelEditable: true,
     systemEditable: true,
     messages,

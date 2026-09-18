@@ -383,9 +383,9 @@ describe("PromptParser", () => {
       );
 
       // Each element is an editable object rather than an opaque blob.
-      expect(threadMsgs.type.elementType.kind).toBe("object");
-      if (threadMsgs.type.elementType.kind !== "object") return;
-      expect(threadMsgs.type.elementType.properties).toEqual([
+      expect(threadMsgs.type.element.type.kind).toBe("object");
+      if (threadMsgs.type.element.type.kind !== "object") return;
+      expect(threadMsgs.type.element.type.properties).toEqual([
         {
           name: "excerpt",
           type: { kind: "primitive", syntax: "string", base: "string" },

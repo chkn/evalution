@@ -3,6 +3,7 @@
 
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import type { PropDefinition } from "ts-proppy";
 import { describe, expect, it, vi } from "vitest";
 import { LocalFileProvider } from "../../../file-provider-local.ts";
 import { MemoryFileProvider } from "../../../file-provider-memory.ts";
@@ -257,7 +258,7 @@ describe("execute parameters (§E)", () => {
       fixturesDir,
     );
     const sdk = new VercelAISDK();
-    const probes = sdk.getExecuteParameterProbes(prompts[0], "typescript");
+    const probes = sdk.getPromptProbes(prompts[0], "typescript");
     const [resolved] = await fileType().resolveTypeProbes(
       probes.map(probe => ({
         probe,
@@ -267,9 +268,10 @@ describe("execute parameters (§E)", () => {
     );
 
     expect(resolved).toBeTruthy();
-    expect(resolved!.name).toBe("toolsContext");
-    expect(resolved!.type.kind).toBe("object");
-    const tools = (resolved!.type as any).properties.map((p: any) => p.name);
+    const def = resolved as PropDefinition;
+    expect(def.name).toBe("toolsContext");
+    expect(def.type.kind).toBe("object");
+    const tools = (def.type as any).properties.map((p: any) => p.name);
     // `plain` declares no `contextSchema`, so it drops out on its own — no
     // filtering logic of ours is involved.
     expect(tools.sort()).toEqual(["lookup"]);
@@ -281,7 +283,7 @@ describe("execute parameters (§E)", () => {
       fixturesDir,
     );
     const sdk = new VercelAISDK();
-    const probes = sdk.getExecuteParameterProbes(prompts[0], "typescript");
+    const probes = sdk.getPromptProbes(prompts[0], "typescript");
     const resolved = await fileType().resolveTypeProbes(
       probes.map(probe => ({
         probe,
@@ -316,7 +318,7 @@ describe("execute parameters (§E)", () => {
   it("returns no probes for a language it does not speak", () => {
     const sdk = new VercelAISDK();
     const prompts = { name: "x", extractedProps: { definitions: [] } } as any;
-    expect(sdk.getExecuteParameterProbes(prompts, "yaml")).toEqual([]);
+    expect(sdk.getPromptProbes(prompts, "yaml")).toEqual([]);
   });
 });
 
@@ -365,7 +367,7 @@ describe("probe batching", () => {
       const before = spy.mock.calls.length;
       await ft.resolveTypeProbes(
         prompts.map(p => ({
-          probe: { name: "probe", expression: "$config" },
+          probe: { kind: "type", name: "probe", expression: "$config" },
           filePath: path.join(fixturesDir, p.metadata.relativeFilePath),
           promptName: p.name,
         })),

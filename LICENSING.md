@@ -15,6 +15,7 @@ those files win.
 | **Host** evalution as a network service (SaaS)                            | AGPL-3.0 §13: offer the full source — **including any providers loaded through its config** — to your users. |
 | Write a provider/extension and distribute it separately                   | Free. License it however you like (see below).            |
 | Use `@evalution/vercel-ai-sdk` in your own project                        | MIT. Use it anywhere, including closed-source.             |
+| Use `@evalution/typesafe-sdk` in your own project                         | MIT. Use it anywhere, including closed-source.             |
 
 ## The core: AGPL-3.0-only + a section 7 addendum
 
@@ -69,6 +70,18 @@ permissively licensed code:
   same dual-licensed `trace-sink.ts` file as the `TraceSink` interface — it
   has no AGPL-only dependencies of its own, so this holds without further
   bookkeeping.)
+
+## The TypeSafe adapter: MIT
+
+[`packages/typesafe-sdk`](./packages/typesafe-sdk) (`@evalution/typesafe-sdk`)
+is **MIT** ([`LICENSE`](./packages/typesafe-sdk/LICENSE)) on the same terms as
+the Vercel AI SDK adapter above: no runtime dependency on the core
+(`peerDependencies` on `@typesafe-ai/sdk` and `@opentelemetry/api` only), and
+the only core files it bundles —
+[`src/trace/prompt-tracer.ts`](./src/trace/prompt-tracer.ts) and
+[`src/sdk/typesafe-sdk/telemetry.ts`](./src/sdk/typesafe-sdk/telemetry.ts),
+with the dual-licensed `src/trace/` files the latter imports — are
+**dual-licensed `MIT OR AGPL-3.0-only`** and self-contained.
 
 ## Contributing
 

@@ -194,7 +194,7 @@ describe("OTelTraceIngestor", () => {
     await ingestor.drainPendingHandlers();
     const llm = (await provider.getTrace(traceId))?.spans[0].llm;
     expect(llm?.output).toBe("Hello from the model!");
-    expect(llm?.messages).toEqual([{ role: "user", content: "Say hi" }]);
+    expect(llm?.input).toEqual([{ role: "user", content: "Say hi" }]);
     expect(llm?.promptTokens).toBe(10);
     expect(llm?.completionTokens).toBe(20);
     expect(llm?.totalTokens).toBe(30);

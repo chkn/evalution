@@ -13,6 +13,7 @@ export default defineConfig({
       "typescript",
       "ai",
       "@google/genai",
+      "@typesafe-ai/sdk",
       "chokidar",
       "minimatch",
       // Native (napi) module: its binding loader `require`s a per-platform

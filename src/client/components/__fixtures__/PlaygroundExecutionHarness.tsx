@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type {
+  NormalizedChatPrompt,
   NormalizedPrompt,
   PromptInputSources,
   PropDefinition,
@@ -11,13 +12,14 @@ import PlaygroundExecution from "../PlaygroundExecution";
 function makePrompt(
   functionParameters: PropDefinition[],
   id = "test",
-  extra: Partial<NormalizedPrompt> = {},
+  extra: Partial<NormalizedChatPrompt> = {},
 ): NormalizedPrompt {
   return {
     id,
     providerId: "test",
     name: "test",
     functionParameters,
+    style: "chat",
     modelEditable: true,
     systemEditable: true,
     messages: [],

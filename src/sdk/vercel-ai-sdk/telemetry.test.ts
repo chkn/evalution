@@ -81,7 +81,7 @@ describe("Evalution", () => {
     expect(root?.prompt?.id).toBe("mod#greet");
     expect(root?.prompt?.functionParameters).toEqual(["Ada"]);
     const step = trace?.spans.find(s => s.parentId);
-    expect(step?.llm?.messages).toEqual([{ role: "user", content: "Hi Ada" }]);
+    expect(step?.llm?.input).toEqual([{ role: "user", content: "Hi Ada" }]);
     expect(step?.llm?.totalTokens).toBe(8);
   });
 
@@ -119,7 +119,7 @@ describe("Evalution", () => {
 
     const trace = await provider.getTrace(traceId);
     const step = trace?.spans.find(s => s.parentId);
-    expect(step?.llm?.messages).toEqual([
+    expect(step?.llm?.input).toEqual([
       {
         role: "user",
         content: [
@@ -500,5 +500,54 @@ describe("Evalution", () => {
     expect(traces).toHaveLength(1);
     const trace = await provider.getTrace(traces[0].id);
     expect(trace?.spans[0].prompt).toBeUndefined();
+  });
+
+  it.each([
+    [
+      "an object",
+      { name: "object" },
+      '{"sentiment":"positive"}',
+      { sentiment: "positive" },
+    ],
+    ["an array", { name: "array" }, "[1,2]", [1, 2]],
+    [
+      "text",
+      { name: "text" },
+      '{"looks":"like json"}',
+      '{"looks":"like json"}',
+    ],
+    [
+      "no output spec",
+      undefined,
+      '{"looks":"like json"}',
+      '{"looks":"like json"}',
+    ],
+    ["unparseable structured text", { name: "object" }, "{ trunc", "{ trunc"],
+  ])("records step output for %s", async (_, outputSpec, text, expected) => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-structured";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#classify", name: "classify" })
+      .withTraceId(traceId);
+    const callId = "call-structured";
+
+    await integration.onStart?.({
+      ...startEvent(callId),
+      output: outputSpec,
+    } as any);
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [{ role: "user", content: "Classify this" }],
+    } as any);
+    await integration.onStepEnd?.(stepEndEvent(callId, text));
+    await integration.onEnd?.({ callId, text } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.parentId);
+    expect(step?.llm?.output).toEqual(expected);
   });
 });

@@ -53,6 +53,9 @@
       "includes": ["**/*.test.ts", "**/*.pw.tsx", "**/__fixtures__/**"],
       "linter": {
         "rules": {
+          "correctness": {
+            "noUnusedFunctionParameters": "off"
+          },
           "suspicious": {
             "noTemplateCurlyInString": "off"
           }

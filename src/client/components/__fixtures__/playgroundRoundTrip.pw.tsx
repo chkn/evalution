@@ -10,11 +10,16 @@ import { PlaygroundRoundTripHarness } from "./PlaygroundRoundTripHarness";
 // echoes the posted updates after a short latency, with messages rebuilt as
 // fresh objects — mirroring the real provider, which writes the source file and
 // re-parses, so the echo is structurally distinct from what the client holds.
-async function mockApi(page: Page, updateLatencyMs = 80) {
+async function mockApi(
+  page: Page,
+  updateLatencyMs = 80,
+  onUpdate?: (updates: any) => void,
+) {
   await page.route("**/api/**", async route => {
     const url = route.request().url();
     if (url.includes("/update")) {
       const updates = route.request().postDataJSON();
+      onUpdate?.(updates);
       await new Promise(r => setTimeout(r, updateLatencyMs));
       const messages = (updates.messages ?? []).map((m: any) => ({
         role: m.role,
@@ -26,6 +31,7 @@ async function mockApi(page: Page, updateLatencyMs = 80) {
           providerId: "prov",
           name: "test",
           functionParameters: [],
+          style: "chat",
           modelEditable: true,
           systemEditable: true,
           messages,
@@ -36,8 +42,8 @@ async function mockApi(page: Page, updateLatencyMs = 80) {
       });
       return;
     }
-    if (url.includes("/models")) {
-      await route.fulfill({ json: { models: [] } });
+    if (url.includes("/model-definition")) {
+      await route.fulfill({ json: null });
       return;
     }
     if (url.includes("/model-parameters")) {
@@ -63,6 +69,38 @@ test("typing into a freshly added message (real round-trip) keeps order", async 
   await editor.pressSequentially("Hi there", { delay: 30 });
 
   await expect(editor).toHaveText("Hi there");
+});
+
+test("a pending message save doesn't undo an added message", async ({
+  mount,
+  page,
+}) => {
+  const savedCounts: number[] = [];
+  await mockApi(page, 20, updates => {
+    if (updates.messages) savedCounts.push(updates.messages.length);
+  });
+
+  const component = await mount(
+    <PlaygroundRoundTripHarness
+      initialMessages={[
+        { role: "user", content: { kind: "primitive", value: "Hi" } },
+      ]}
+    />,
+  );
+
+  const editor = component.locator('[data-message-index="0"] .token-editor');
+  await editor.click();
+  await editor.pressSequentially("!");
+  await expect(editor).toHaveText("Hi!");
+
+  // Well inside the 600 ms debounce that keystroke armed.
+  await component.getByText("Add message").click();
+
+  // Past the debounce window: a timer left armed would now save the list as it
+  // was before the addition, dropping the new message server-side.
+  await page.waitForTimeout(1000);
+
+  expect(savedCounts.at(-1)).toBe(2);
 });
 
 test("adding a message focuses the new editor", async ({ mount, page }) => {

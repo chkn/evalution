@@ -29,7 +29,7 @@ CREATE TABLE `spans` (
 	`llm_total_tokens` integer,
 	`llm_cost_prompt` real,
 	`llm_cost_completion` real,
-	`llm_messages` text,
+	`llm_input` text,
 	`llm_output` text,
 	`llm_parameters` text,
 	`attributes` text,

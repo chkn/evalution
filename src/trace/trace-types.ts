@@ -65,7 +65,12 @@ export interface SpanImagePart {
   mediaType?: string;
 }
 
-export type SpanMessageRole = string; // known values: "user" | "assistant" | "system" | "tool"
+export type SpanMessageRole =
+  | "user"
+  | "assistant"
+  | "system"
+  | "tool"
+  | (string & {});
 
 /** One segment of a multi-part {@link SpanMessage} content. */
 export type SpanContentPart = SpanTextPart | SpanImagePart;
@@ -92,8 +97,18 @@ export interface LLMSpanDetails {
   modelParameters?: Record<string, unknown>;
 
   // -- prompt info --
-  messages?: SpanMessage[];
-  output?: string;
+  /**
+   * What the model was given: a message list for a chat model, or any JSON
+   * for a model that takes something else (a System One call records
+   * `{ state, questions }`). Array-ness is the discriminant — see
+   * {@link spanMessages}.
+   */
+  input?: SpanMessage[] | { [key: string]: unknown };
+  /**
+   * What it returned: text for a chat model, or JSON for structured output
+   * and for any model whose answer is data rather than prose.
+   */
+  output?: unknown;
 
   // -- usage info --
   promptTokens?: number;
@@ -107,6 +122,19 @@ export interface LLMSpanDetails {
     prompt: number;
     completion: number;
   };
+}
+
+/**
+ * The message list of a chat call, or `undefined` for any other input.
+ *
+ * A chat call's {@link LLMSpanDetails.input} is always a message list, and
+ * anything else is wrapped in an object, so being an array is what makes it
+ * one.
+ */
+export function spanMessages(
+  llm: LLMSpanDetails | undefined,
+): SpanMessage[] | undefined {
+  return Array.isArray(llm?.input) ? llm.input : undefined;
 }
 
 export interface ToolSpanDetails {

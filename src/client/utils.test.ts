@@ -30,7 +30,11 @@ describe("defaultValueForType", () => {
     const type: PropType = {
       kind: "array",
       syntax: "string[]",
-      elementType: { kind: "primitive", syntax: "string" },
+      element: {
+        name: "",
+        type: { kind: "primitive", syntax: "string" },
+        optional: false,
+      },
     };
     expect(defaultValueForType(type)).toEqual({ kind: "array", elements: [] });
   });

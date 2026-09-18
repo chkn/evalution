@@ -42,13 +42,18 @@ export {
   type FilePromptProviderOptions,
 } from "./prompt/file/file-prompt-provider.ts";
 export type {
+  FactoriesProbe,
   FilePromptMetadata,
   NormalizedFilePrompt,
   ParsedFilePrompt,
   ParsePromptsOptions,
+  ProbeResult,
+  ProbeResults,
+  ProjectProbeRequest,
   PromptFileType,
   SlotMatchRequest,
   SlotMatchSource,
+  TypeExpressionProbe,
   TypeProbe,
   TypeProbeRequest,
   TypeResolutionRequest,
@@ -85,11 +90,22 @@ export type {
   ResolvedPromptInputs,
 } from "./prompt/prompt-provider.ts";
 export { GeminiInteractionsSDK } from "./sdk/gemini-interactions-sdk.ts";
-export type {
-  ExecuteConfigOptions,
-  ExecutionHandle,
-  SDKAdapter,
+export {
+  assertUpdateStyle,
+  type ExecuteConfigOptions,
+  type ExecutionHandle,
+  type SDKAdapter,
 } from "./sdk/sdk-adapter.ts";
+export {
+  TypeSafeSDK,
+  type TypeSafeSDKOptions,
+} from "./sdk/typesafe-sdk/index.ts";
+export {
+  PROMPT_IDENTITY,
+  type SystemOneCallOptions,
+  type SystemOneCallRecord,
+  TypeSafeTelemetry,
+} from "./sdk/typesafe-sdk/telemetry.ts";
 export { VercelAISDK } from "./sdk/vercel-ai-sdk/index.ts";
 export {
   type PerPromptTelemetry,
@@ -107,30 +123,31 @@ export type {
   AnnotationSource,
   CalleeBinding,
   ChangeEventType,
+  ChatPromptUpdates,
   ExecuteRequest,
   ExecuteResponse,
   ExecutionInput,
   ExtractedProps,
   InputLayout,
   LLMSpanDetails,
-  ModelCatalog,
-  ModelGroupInfo,
-  ModelInfo,
-  ModelPropValue,
-  ModelValueType,
+  NormalizedChatPrompt,
   NormalizedMessage,
   NormalizedParameter,
   NormalizedPrompt,
+  NormalizedPromptBase,
   NormalizedPromptUpdates,
+  NormalizedQuestionsPrompt,
   NormalizedToolCall,
   ParsedPrompt,
   PromptChangeEvent,
   PromptID,
   PromptInputSources,
   PromptProviderInfo,
+  PromptStyle,
   PropDefinition,
   PropType,
   PropValue,
+  QuestionsPromptUpdates,
   ResourceInfo,
   ResourceScope,
   SourceSpan,
@@ -139,6 +156,7 @@ export type {
   SpanImagePart,
   SpanKind,
   SpanMessage,
+  SpanMessageRole,
   SpanTextPart,
   ToolSpanDetails,
   Trace,
@@ -149,6 +167,10 @@ export type {
   TraceStreamEvent,
   TraceSummary,
   TraceWithSpans,
+  ValueCatalog,
+  ValueCatalogGroup,
+  ValueCatalogPreset,
+  ValueFactory,
 } from "./shared/types.ts";
 export {
   createLocalTursoClient,
@@ -189,4 +211,5 @@ export {
 } from "./trace/trace-ingestor.ts";
 export type { TraceProvider } from "./trace/trace-provider.ts";
 export { BaseTraceProvider, type TraceSink } from "./trace/trace-sink.ts";
+export { spanMessages } from "./trace/trace-types.ts";
 export { TursoTraceProvider } from "./trace/turso-trace-provider.ts";

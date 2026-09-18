@@ -167,3 +167,60 @@ describe("readLLM token fallbacks", () => {
     expect(llm?.totalTokens).toBe(10);
   });
 });
+
+describe("readLLM input and output", () => {
+  it("reads the message list as the input and text as the output", () => {
+    const llm = readLLM({
+      "gen_ai.input.messages": JSON.stringify([
+        { role: "user", content: "hi" },
+      ]),
+      "gen_ai.output.messages": JSON.stringify([{ content: "hello" }]),
+    });
+    expect(llm).toEqual({
+      input: [{ role: "user", content: "hi" }],
+      output: "hello",
+    });
+  });
+
+  it("parses the output when gen_ai.output.type is json", () => {
+    const llm = readLLM({
+      "ai.response.text": JSON.stringify({ answer: 42 }),
+      "gen_ai.output.type": "json",
+    });
+    expect(llm?.output).toEqual({ answer: 42 });
+  });
+
+  it("keeps JSON-looking text as text when no output type says otherwise", () => {
+    const text = JSON.stringify({ answer: 42 });
+    expect(readLLM({ "ai.response.text": text })?.output).toBe(text);
+  });
+
+  it("keeps json-typed output that doesn't parse as text", () => {
+    const llm = readLLM({
+      "ai.response.text": "{ truncated",
+      "gen_ai.output.type": "json",
+    });
+    expect(llm?.output).toBe("{ truncated");
+  });
+});
+
+describe("readLLM JSON input and output", () => {
+  it("reads evalution.llm.input and evalution.llm.output as JSON", () => {
+    const llm = readLLM({
+      "gen_ai.provider.name": "typesafe",
+      "evalution.llm.input": JSON.stringify({ state: "hi", questions: {} }),
+      "evalution.llm.output": JSON.stringify({
+        spam: { type: "noul", noul: 0.1 },
+      }),
+    });
+    expect(llm).toMatchObject({
+      provider: "typesafe",
+      input: { state: "hi", questions: {} },
+      output: { spam: { type: "noul", noul: 0.1 } },
+    });
+  });
+
+  it("ignores malformed JSON attributes", () => {
+    expect(readLLM({ "evalution.llm.output": "{ nope" })).toBeUndefined();
+  });
+});

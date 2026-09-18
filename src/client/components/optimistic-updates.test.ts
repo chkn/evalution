@@ -2,7 +2,10 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import type { NormalizedPrompt } from "../../shared/types";
+import type {
+  NormalizedChatPrompt,
+  NormalizedPrompt,
+} from "../../shared/types";
 import { applyOptimisticUpdates } from "./optimistic-updates";
 
 const PROMPT: NormalizedPrompt = {
@@ -14,6 +17,7 @@ const PROMPT: NormalizedPrompt = {
     callee: "openai",
     args: [{ kind: "primitive", value: "gpt-4o" }],
   },
+  style: "chat",
   modelEditable: true,
   system: { kind: "primitive", value: "Be brief." },
   systemEditable: true,
@@ -21,7 +25,7 @@ const PROMPT: NormalizedPrompt = {
   messagesEditable: true,
   modelParameters: [],
   functionParameters: [],
-} as unknown as NormalizedPrompt;
+} as unknown as NormalizedChatPrompt;
 
 describe("applyOptimisticUpdates", () => {
   it("applies a model change immediately", () => {
@@ -34,14 +38,17 @@ describe("applyOptimisticUpdates", () => {
       ],
       args: [{ kind: "primitive" as const, value: "claude-opus-5" }],
     };
-    const next = applyOptimisticUpdates(PROMPT, { model } as any);
+    const next = applyOptimisticUpdates(PROMPT, {
+      style: "chat",
+      model,
+    } as any);
     expect(next.model).toEqual(model);
     expect(next).not.toBe(PROMPT);
     expect(PROMPT.model).toMatchObject({ callee: "openai" });
   });
 
   it("removes the model on null", () => {
-    const next = applyOptimisticUpdates(PROMPT, { model: null });
+    const next = applyOptimisticUpdates(PROMPT, { style: "chat", model: null });
     expect("model" in next).toBe(false);
   });
 
@@ -50,15 +57,67 @@ describe("applyOptimisticUpdates", () => {
     const messages = [
       { role: "user", content: { kind: "primitive" as const, value: "hi" } },
     ];
-    const next = applyOptimisticUpdates(PROMPT, { system, messages });
+    const next = applyOptimisticUpdates(PROMPT, {
+      style: "chat",
+      system,
+      messages,
+    }) as NormalizedChatPrompt;
     expect(next.system).toEqual(system);
     expect(next.messages).toEqual(messages);
   });
 
   it("leaves the prompt untouched for updates it cannot predict", () => {
     const next = applyOptimisticUpdates(PROMPT, {
+      style: "chat",
       modelParameters: { temperature: { kind: "primitive", value: 0.5 } },
     });
     expect(next).toBe(PROMPT);
+  });
+
+  it("ignores updates written for another style", () => {
+    const next = applyOptimisticUpdates(PROMPT, {
+      style: "questions",
+      questions: { kind: "object", properties: {} },
+    });
+    expect(next).toBe(PROMPT);
+  });
+
+  it("applies state and questions changes to a questions prompt", () => {
+    const prompt: NormalizedPrompt = {
+      style: "questions",
+      id: "q.prompt.ts#q",
+      name: "q",
+      functionParameters: [],
+      modelEditable: true,
+      modelParameters: [],
+      state: {
+        def: {
+          name: "state",
+          optional: false,
+          type: { kind: "primitive", syntax: "string" },
+        },
+      },
+      stateEditable: true,
+      questions: {
+        def: {
+          name: "questions",
+          optional: false,
+          type: { kind: "primitive", syntax: "Questions" },
+        },
+      },
+      questionsEditable: true,
+    };
+    const state = { kind: "primitive" as const, value: "hello" };
+    const questions = { kind: "object" as const, properties: {} };
+    const next = applyOptimisticUpdates(prompt, {
+      style: "questions",
+      state,
+      questions,
+    });
+    expect(next).toMatchObject({
+      state: { value: state },
+      questions: { value: questions },
+    });
+    expect(prompt.state.value).toBeUndefined();
   });
 });

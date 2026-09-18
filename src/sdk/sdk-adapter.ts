@@ -5,13 +5,16 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { PropDefinition, PropValue } from "ts-proppy";
-import type { TypeProbe } from "../prompt/file/prompt-file-type.ts";
 import type {
-  ModelCatalog,
-  ModelPropValue,
+  ProbeResult,
+  ProbeResults,
+  TypeProbe,
+} from "../prompt/file/prompt-file-type.ts";
+import type {
   NormalizedPrompt,
   NormalizedPromptUpdates,
   ParsedPrompt,
+  PromptStyle,
 } from "../shared/types.ts";
 import type { setupGlobalOTelPipeline } from "../trace/otel-global-pipeline.ts";
 import type { PromptSpanInfo } from "../trace/prompt-tracer.ts";
@@ -22,6 +25,12 @@ import type { TraceSink } from "../trace/trace-sink.ts";
 export interface ExecuteConfigOptions {
   /** The ID to use for the trace created by this execution, if any. */
   traceId?: string;
+  /**
+   * The ID the route gave this execution's root span, if any. An adapter that
+   * records its own spans names the root span with this, so the span the
+   * client selects when a run starts is the one that actually arrives.
+   */
+  rootSpanId?: string;
   /**
    * The prompt's identity (id, name, inputs). Used to name and link the
    * trace when the config wasn't built by the `prompts()` helper (which would
@@ -79,10 +88,17 @@ export interface SDKAdapter {
   promptsHelperImport: string;
 
   /**
-   * Returns model catalog information: the set of known providers and a
-   * curated list of popular models for this SDK.
+   * Returns the definition of this SDK's model slot: its type, and the
+   * catalogs (providers, presets, free-form entries) the playground's model
+   * picker offers.
+   *
+   * A per-SDK call rather than something copied onto every prompt, since the
+   * suggestions a checker derives can run to hundreds of model IDs.
+   *
+   * @param project - What {@link getProjectProbes} resolved to, by probe name.
+   *   Substitute a fallback for any `undefined` result.
    */
-  getModelCatalog(): Promise<ModelCatalog>;
+  getModelDefinition(project: ProbeResults): Promise<PropDefinition>;
 
   /**
    * Returns the list of model parameters that can be edited in the playground
@@ -134,24 +150,29 @@ export interface SDKAdapter {
    * Stays synchronous: the expensive, asynchronous work of resolving probes
    * happens in the provider, which passes the results back in.
    *
+   * The adapter also chooses the prompt's {@link PromptStyle},
+   * which decides the editor the playground renders it in.
+   *
    * @param prompt - The raw parsed prompt.
-   * @param executeParameters - What this prompt's
-   *   {@link getExecuteParameterProbes} resolved to, in the order the probes
-   *   were returned: a {@link PropDefinition}, `null` for "no such
-   *   requirement", or `undefined` for "could not be evaluated". Absent when
-   *   the file type cannot evaluate probes at all — which an adapter should
-   *   treat the same as `undefined`, declaring the parameter with an
-   *   unresolved type rather than omitting it.
+   * @param promptProbes - What this prompt's {@link getPromptProbes} resolved
+   *   to, in the order the probes were returned — see {@link ProbeResult}.
+   *   Absent when the file type cannot evaluate probes at all, which an
+   *   adapter should treat the same as `undefined`: declaring a parameter with
+   *   an unresolved type rather than omitting it.
+   * @param project - What {@link getProjectProbes} resolved to, by probe name.
+   *   An adapter substitutes its own fallback for any `undefined` result.
    */
   normalizePrompt(
     prompt: ParsedPrompt,
-    executeParameters?: readonly (PropDefinition | null | undefined)[],
+    promptProbes?: readonly ProbeResult[],
+    project?: ProbeResults,
   ): NormalizedPrompt;
 
   /**
-   * Returns the type expressions to evaluate in order to discover this
-   * prompt's **execute parameters** — the named values this SDK needs at run
-   * time that the prompt function's signature cannot express.
+   * Returns the type expressions to evaluate for one prompt — chiefly to
+   * discover its **execute parameters**, the named values this SDK needs at
+   * run time that the prompt function's signature cannot express. Resolved
+   * per prompt, so an expression may reference `$config`.
    *
    * The file type declares the language and this method is asked *in* it, so
    * the decision of whether the expression can be written at all belongs here,
@@ -163,15 +184,30 @@ export interface SDKAdapter {
    * @param prompt - The parsed prompt to probe.
    * @param language - The file type's {@link PromptFileType.language}.
    */
-  getExecuteParameterProbes?(
-    prompt: ParsedPrompt,
-    language: string,
-  ): TypeProbe[];
+  getPromptProbes?(prompt: ParsedPrompt, language: string): TypeProbe[];
+
+  /**
+   * Returns the probes to evaluate about the project as a whole — the SDK's
+   * own types, as installed — rather than about any one prompt. They are
+   * resolved once per program build, in a virtual module at the project root
+   * (so they see the project's module resolution), and cached; `$config` has
+   * no meaning here.
+   *
+   * Optional, and like {@link getPromptProbes}, return `[]` for a language
+   * this adapter does not speak.
+   *
+   * @param language - The file type's {@link PromptFileType.language}.
+   */
+  getProjectProbes?(language: string): TypeProbe[];
 
   /**
    * Convert {@link NormalizedPromptUpdates} (what the UI sends back) into the
    * raw property-name-keyed updates that {@link PromptFileType.updateProperty}
    * and friends operate on.
+   *
+   * Throws on updates of a {@link PromptStyle} this adapter never
+   * produces: they were written against a different editor, and guessing at
+   * property names for them would corrupt the file.
    *
    * @param updates - Updates expressed in the normalized vocabulary.
    * @returns A `Record` keyed by the SDK's actual property names. Values may
@@ -180,7 +216,7 @@ export interface SDKAdapter {
   denormalizeUpdates(
     updates: NormalizedPromptUpdates,
     currentValues?: Record<string, PropValue>,
-  ): Record<string, ModelPropValue | null>;
+  ): Record<string, PropValue | null>;
 }
 
 // ─── Generic helpers ──────────────────────────────────────────────────────────
@@ -221,10 +257,33 @@ export function findPackageDts(
  * failure when lazily importing one.
  */
 export function isMissingPackage(err: unknown, packageName: string): boolean {
-  return (
-    (err as NodeJS.ErrnoException)?.code === "ERR_MODULE_NOT_FOUND" &&
-    (err as Error)?.message?.includes(`'${packageName}'`)
-  );
+  // A loader (vitest, a bundler's runtime) may wrap the resolution error;
+  // look through its causes.
+  for (let e = err; e; e = (e as Error).cause) {
+    if (
+      (e as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND" &&
+      (e as Error).message?.includes(`'${packageName}'`)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Throws unless `updates` are in the style the adapter produces. For use at
+ * the top of {@link SDKAdapter.denormalizeUpdates}; narrows `updates` to that
+ * style's update type.
+ */
+export function assertUpdateStyle<S extends NormalizedPromptUpdates["style"]>(
+  updates: NormalizedPromptUpdates,
+  style: S,
+): asserts updates is Extract<NormalizedPromptUpdates, { style: S }> {
+  if (updates.style !== style) {
+    throw new Error(
+      `Cannot apply "${String(updates.style)}" updates to a "${style}" prompt`,
+    );
+  }
 }
 
 /**

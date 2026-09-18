@@ -7,7 +7,13 @@
  * {@link Row} list linearly.
  */
 
-import type { Span, SpanKind, SpanMessage } from "../../../shared/types";
+import type {
+  LLMSpanDetails,
+  Span,
+  SpanKind,
+  SpanMessage,
+} from "../../../shared/types";
+import { spanMessages } from "../../../trace/trace-types";
 
 export interface Row {
   span: Span;
@@ -100,9 +106,14 @@ export function barGeometry(
   };
 }
 
+/** Whether an LLM span recorded any output — empty text counts as none. */
+export function hasOutput(llm: LLMSpanDetails | undefined): boolean {
+  return llm?.output !== undefined && llm.output !== "";
+}
+
 /**
  * For `ChatFlow`'s linear thread: maps each `LLM` row's span id to the
- * suffix of its `messages` not already shown by an earlier turn. An `LLM`
+ * suffix of its input messages not already shown by an earlier turn. An `LLM`
  * span's `messages` is the *full* conversation sent to the model, so a later
  * turn's `messages` re-includes everything already rendered by earlier
  * turns — not just their `messages`, but also their `output`, which the next
@@ -115,11 +126,11 @@ export function newMessagesByTurn(rows: Row[]): Map<string, SpanMessage[]> {
   let shownCount = 0;
   for (const row of rows) {
     if (row.span.kind !== "LLM") continue;
-    const allMessages = row.span.llm?.messages ?? [];
+    const allMessages = spanMessages(row.span.llm) ?? [];
     result.set(row.span.id, allMessages.slice(shownCount));
     shownCount = Math.max(
       shownCount,
-      allMessages.length + (row.span.llm?.output ? 1 : 0),
+      allMessages.length + (hasOutput(row.span.llm) ? 1 : 0),
     );
   }
   return result;

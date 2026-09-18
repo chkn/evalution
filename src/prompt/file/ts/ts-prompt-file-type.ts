@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import path from "node:path";
-import type { PropDefinition, PropValue } from "ts-proppy";
+import type { PropDefinition, PropValue, ValueFactory } from "ts-proppy";
 import {
   addProperty as applyAdd,
   removeProperty as applyRemove,
@@ -10,14 +10,16 @@ import {
   buildPropTypeFromType,
   extractPropertiesFromObjectLiteral,
   extractPropertiesFromParameters,
+  resolveBindings,
 } from "ts-proppy";
 import ts from "typescript";
 import type { FileProvider } from "../../../file-provider.ts";
 import { LocalFileProvider } from "../../../file-provider-local.ts";
-import type { CalleeBinding, ModelPropValue } from "../../../shared/types.ts";
 import type {
   ParsedFilePrompt,
   ParsePromptsOptions,
+  ProbeResult,
+  ProbeResults,
   PromptFileType,
   SlotMatchRequest,
   TypeProbe,
@@ -84,6 +86,15 @@ export default prompts(
   /** Kept between parses so TypeScript can reuse unchanged source files. */
   private previousProgram?: ts.Program;
 
+  /**
+   * Project probe results, keyed by root and probes, with the fingerprint of
+   * the modules they were computed against.
+   */
+  private projectCache = new Map<
+    string,
+    { fingerprint: string; results: ProbeResults }
+  >();
+
   constructor(fileProvider: FileProvider = new LocalFileProvider()) {
     this.fileProvider = fileProvider;
   }
@@ -127,24 +138,64 @@ export default prompts(
   async resolveTypes({
     probes = [],
     slotMatches = [],
+    project,
   }: TypeResolutionRequest): Promise<TypeResolutionResult> {
     const result: TypeResolutionResult = {
       probes: probes.map(() => undefined),
       slotMatches: slotMatches.map(() => ({})),
     };
-    if (probes.length === 0 && slotMatches.length === 0) return result;
 
+    // Project probes don't depend on any prompt, and the modules they read
+    // don't change while those modules' package manifests don't, so a cached
+    // answer is as good as a fresh one.
+    let projectProbes: readonly TypeProbe[] = [];
+    let cacheKey: string | undefined;
+    let fingerprint: string | undefined;
+    if (project && project.probes.length > 0) {
+      cacheKey = `${project.rootDir}\0${JSON.stringify(project.probes)}`;
+      fingerprint = moduleFingerprint(project.rootDir, project.probes);
+      const cached = this.projectCache.get(cacheKey);
+      if (cached && cached.fingerprint === fingerprint) {
+        result.project = { ...cached.results };
+      } else {
+        projectProbes = project.probes;
+        result.project = Object.fromEntries(
+          project.probes.map(p => [p.name, undefined]),
+        );
+      }
+    } else if (project) {
+      result.project = {};
+    }
+
+    if (
+      probes.length === 0 &&
+      slotMatches.length === 0 &&
+      projectProbes.length === 0
+    ) {
+      return result;
+    }
+
+    const projectFile = project
+      ? path.join(project.rootDir, PROJECT_PROBE_MODULE)
+      : "";
+    let projectBuilt = false;
     await this.withInjectedTypes(
       [
         ...probes.map(req => ({
           filePath: req.filePath,
           promptName: req.promptName,
-          expressions: { probe: req.probe.expression },
+          expressions: probeExpressions(req.probe),
         })),
         ...slotMatches.map(req => ({
           filePath: req.filePath,
           promptName: req.promptName,
           expressions: slotMatchExpressions(req),
+        })),
+        ...projectProbes.map(probe => ({
+          filePath: projectFile,
+          promptName: "",
+          expressions: probeExpressions(probe),
+          virtual: true,
         })),
       ],
       (index, resolve, program, sourceFile) => {
@@ -155,10 +206,20 @@ export default prompts(
             program,
             sourceFile,
           );
-        } else {
+        } else if (index < probes.length + slotMatches.length) {
           const i = index - probes.length;
           result.slotMatches[i] = matchSlots(
             slotMatches[i],
+            resolve,
+            program,
+            sourceFile,
+          );
+        } else {
+          projectBuilt = true;
+          const probe =
+            projectProbes[index - probes.length - slotMatches.length];
+          result.project![probe.name] = evaluateProbe(
+            probe,
             resolve,
             program,
             sourceFile,
@@ -167,12 +228,22 @@ export default prompts(
       },
     );
 
+    // Only answers the project probes themselves produced are worth keeping.
+    // A failed build — or one whose program didn't include the virtual project
+    // module — is "could not evaluate", which the next call should retry.
+    if (projectBuilt && cacheKey && fingerprint) {
+      this.projectCache.set(cacheKey, {
+        fingerprint,
+        results: { ...result.project },
+      });
+    }
+
     return result;
   }
 
   async resolveTypeProbes(
     requests: readonly TypeProbeRequest[],
-  ): Promise<(PropDefinition | null | undefined)[]> {
+  ): Promise<ProbeResult[]> {
     return (await this.resolveTypes({ probes: requests })).probes;
   }
 
@@ -200,6 +271,11 @@ export default prompts(
       filePath: string;
       promptName: string;
       expressions: Record<string, string>;
+      /**
+       * The file doesn't exist: it is created, empty, for these aliases alone.
+       * Its location still decides how its imports resolve.
+       */
+      virtual?: boolean;
     }[],
     visit: (
       index: number,
@@ -223,10 +299,14 @@ export default prompts(
     const sources = new Map<string, string>();
     for (const [filePath, indices] of byFile) {
       let sourceCode: string;
-      try {
-        sourceCode = await this.fileProvider.readFile(filePath);
-      } catch {
-        continue;
+      if (requests[indices[0]].virtual) {
+        sourceCode = "export {};\n";
+      } else {
+        try {
+          sourceCode = await this.fileProvider.readFile(filePath);
+        } catch {
+          continue;
+        }
       }
       const sourceFile = ts.createSourceFile(
         filePath,
@@ -369,7 +449,7 @@ export default prompts(
   async updateProperty(
     filePath: string,
     propDef: PropDefinition,
-    value: ModelPropValue,
+    value: PropValue,
     promptId?: string,
   ): Promise<void> {
     if (!propDef.valueSpan) {
@@ -379,7 +459,7 @@ export default prompts(
     let sourceCode = await this.fileProvider.readFile(filePath);
 
     // Resolve binding-array candidates and augment any matching destructure.
-    const adjusted = resolveBindingsAndAugment(sourceCode, value);
+    const adjusted = resolveBindings(sourceCode, value, filePath);
     sourceCode = adjusted.sourceCode;
     const resolvedValue = adjusted.value;
 
@@ -422,11 +502,11 @@ export default prompts(
     filePath: string,
     promptName: string,
     propertyName: string,
-    value: ModelPropValue,
+    value: PropValue,
   ): Promise<void> {
     let sourceCode = await this.fileProvider.readFile(filePath);
 
-    const adjusted = resolveBindingsAndAugment(sourceCode, value);
+    const adjusted = resolveBindings(sourceCode, value, filePath);
     sourceCode = adjusted.sourceCode;
     const resolvedValue = adjusted.value;
 
@@ -780,15 +860,99 @@ function slotMatchExpressions(
   };
 }
 
-/** What a probe's injected alias resolved to, reported three-valued. */
+/** The name of the virtual module project probes are evaluated in. */
+const PROJECT_PROBE_MODULE = "__evalution_project_probes__.ts";
+
+/** The alias for a `factories` probe's `produces` type, checked before its modules. */
+const PRODUCES_ALIAS = "produces";
+
+/** The alias for a `factories` probe's `i`th module. */
+function factoryAlias(i: number): string {
+  return `factories_${i}`;
+}
+
+/**
+ * The aliases a probe needs injected. A `factories` probe gets one per module,
+ * so a module that isn't installed only empties its own alias.
+ *
+ * Each alias is a mapped type over the module's exports keeping those whose
+ * call produces the probe's type. The `0 extends 1 & X` guards drop `any` — an
+ * uninstalled module types as `any`, and so would a call returning it.
+ */
+function probeExpressions(probe: TypeProbe): Record<string, string> {
+  if (probe.kind === "type") return { probe: probe.expression };
+  return Object.fromEntries([
+    [PRODUCES_ALIAS, probe.produces],
+    ...probe.modules.map((module, i) => {
+      const m = `typeof import(${JSON.stringify(module)})`;
+      return [
+        factoryAlias(i),
+        `0 extends 1 & ${m} ? never : { [K in keyof ${m} as ${m}[K] extends (...args: any) => infer R ` +
+          `? 0 extends 1 & R ? never : [R] extends [${probe.produces}] ? K : never ` +
+          `: never]: ${m}[K] }`,
+      ];
+    }),
+  ]);
+}
+
+/**
+ * A fingerprint of the installed packages `probes` read, so cached results can
+ * be kept exactly as long as nothing was installed, removed or upgraded: each
+ * package's manifest path and modification time, as found walking up from
+ * `rootDir`.
+ */
+function moduleFingerprint(
+  rootDir: string,
+  probes: readonly TypeProbe[],
+): string {
+  const specifiers = new Set<string>();
+  const addImports = (text: string) => {
+    for (const m of text.matchAll(/import\(\s*["']([^"']+)["']\s*\)/g)) {
+      specifiers.add(m[1]);
+    }
+  };
+  for (const probe of probes) {
+    if (probe.kind === "type") addImports(probe.expression);
+    else {
+      for (const module of probe.modules) specifiers.add(module);
+      addImports(probe.produces);
+    }
+  }
+
+  const parts: string[] = [];
+  for (const specifier of [...specifiers].sort()) {
+    if (specifier.startsWith(".")) continue;
+    const segments = specifier.split("/");
+    const pkg = specifier.startsWith("@")
+      ? segments.slice(0, 2).join("/")
+      : segments[0];
+    let found = "missing";
+    for (let dir = rootDir; ; dir = path.dirname(dir)) {
+      const manifest = path.join(dir, "node_modules", pkg, "package.json");
+      if (ts.sys.fileExists(manifest)) {
+        found = `${manifest}@${ts.sys.getModifiedTime?.(manifest)?.getTime() ?? 0}`;
+        break;
+      }
+      if (path.dirname(dir) === dir) break;
+    }
+    parts.push(`${pkg}=${found}`);
+  }
+  return parts.join(";");
+}
+
+/** What a probe's injected aliases resolved to, reported three-valued. */
 function evaluateProbe(
   probe: TypeProbe,
   resolve: (name: string) => ts.Type | undefined,
   program: PromptProgram,
   sourceFile: ts.SourceFile,
-): PropDefinition | null | undefined {
+): ProbeResult {
+  if (probe.kind === "factories") {
+    return evaluateFactories(probe, resolve, program, sourceFile);
+  }
   const type = resolve("probe");
-  if (!type) return undefined;
+  // `any` is what an unresolvable import turns into, not an answer.
+  if (!type || type.flags & ts.TypeFlags.Any) return undefined;
   // `never` is a defensively-written probe saying "this prompt has no such
   // requirement". Reported as `null` rather than left `undefined`, which would
   // be indistinguishable from a failure to evaluate — and a caller must not
@@ -802,6 +966,54 @@ function evaluateProbe(
   };
   if (probe.description) def.description = probe.description;
   return def;
+}
+
+/**
+ * The factories a `factories` probe's aliases found: each surviving export,
+ * described as a `function`-kind definition bound to an import from its
+ * module. `undefined` when no alias resolved at all (nothing was evaluated).
+ */
+function evaluateFactories(
+  probe: Extract<TypeProbe, { kind: "factories" }>,
+  resolve: (name: string) => ts.Type | undefined,
+  { typeChecker }: PromptProgram,
+  sourceFile: ts.SourceFile,
+): ValueFactory[] | undefined {
+  // Without the type to produce (its package isn't installed), every export
+  // would match `any`: that is "could not evaluate", not a list of factories.
+  const produces = resolve(PRODUCES_ALIAS);
+  if (!produces || produces.flags & ts.TypeFlags.Any) return undefined;
+
+  const factories: ValueFactory[] = [];
+  let evaluated = false;
+  probe.modules.forEach((from, i) => {
+    const type = resolve(factoryAlias(i));
+    if (!type) return;
+    evaluated = true;
+    if (type.flags & (ts.TypeFlags.Never | ts.TypeFlags.Any)) return;
+    for (const symbol of typeChecker.getPropertiesOfType(type)) {
+      const exportType = typeChecker.getTypeOfSymbolAtLocation(
+        symbol,
+        sourceFile,
+      );
+      const built = buildPropTypeFromType(exportType, typeChecker, sourceFile);
+      if (built.kind !== "function") continue;
+      const def: PropDefinition = {
+        name: symbol.name,
+        type: built,
+        optional: false,
+      };
+      const description = ts
+        .displayPartsToString(symbol.getDocumentationComment(typeChecker))
+        .trim();
+      if (description) def.description = description;
+      factories.push({
+        def,
+        binding: { kind: "import", spec: { name: symbol.name, from } },
+      });
+    }
+  });
+  return evaluated ? factories : undefined;
 }
 
 /** Which of a request's sources fit which of its slots, by assignability. */
@@ -977,252 +1189,6 @@ function getPropertyFunction(
     if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) return init;
   }
   return null;
-}
-
-/**
- * Resolve binding-array candidates against the file's structure.
- *
- * For each `functionCall` in `value`, walk its `binding` candidates in order
- * and pick the first one that matches the source:
- * - `parameter` candidates match when the file contains the named
- *   `enclosingCall` (e.g. `prompts(({...}) => ...)`) whose first parameter is
- *   a destructured object. The callee is added to that destructure (if not
- *   already present) and the value's `binding` is stripped — the new
- *   functionCall reads its callee from the closure parameter, not a top-level
- *   import.
- * - `import` candidates always match. They collapse the binding to that
- *   single import so ts-proppy's emitter adds the corresponding top-level
- *   import.
- *
- * Returns the (possibly) adjusted source code along with a plain
- * {@link PropValue} ready for ts-proppy.
- */
-function resolveBindingsAndAugment(
-  sourceCode: string,
-  value: ModelPropValue,
-): { sourceCode: string; value: PropValue } {
-  const sourceFile = ts.createSourceFile(
-    "helper-adjust.ts",
-    sourceCode,
-    ts.ScriptTarget.Latest,
-    true,
-  );
-
-  // Per-target list of callee names to introduce (deduped, position-sorted
-  // later). A target is either an existing destructure to augment or a factory
-  // whose (empty) parameter list needs a fresh destructure created.
-  const targetAdditions = new Map<DestructureTarget, Set<string>>();
-
-  const resolveCandidate = (
-    _fc: Extract<ModelPropValue, { kind: "functionCall" }>,
-    candidates: CalleeBinding[],
-  ): { binding?: CalleeBinding; viaDestructure?: DestructureTarget } => {
-    for (const c of candidates) {
-      if (c.kind === "parameter") {
-        const dest = findEnclosingCallDestructure(sourceFile, c.enclosingCall);
-        if (dest) return { viaDestructure: dest };
-      } else if (c.kind === "import") {
-        return { binding: c };
-      }
-    }
-    return {};
-  };
-
-  const adjusted = mapFunctionCalls(value, fc => {
-    if (!fc.binding) return fc as Extract<PropValue, { kind: "functionCall" }>;
-    const candidates: CalleeBinding[] = Array.isArray(fc.binding)
-      ? fc.binding
-      : [fc.binding];
-    const result = resolveCandidate(fc, candidates);
-    if (result.viaDestructure) {
-      const set =
-        targetAdditions.get(result.viaDestructure) ?? new Set<string>();
-      set.add(fc.callee);
-      targetAdditions.set(result.viaDestructure, set);
-      const { binding: _drop, ...rest } = fc;
-      return rest as Extract<PropValue, { kind: "functionCall" }>;
-    }
-    if (result.binding) {
-      return { ...fc, binding: result.binding } as Extract<
-        PropValue,
-        { kind: "functionCall" }
-      >;
-    }
-    const { binding: _none, ...rest } = fc;
-    return rest as Extract<PropValue, { kind: "functionCall" }>;
-  });
-
-  // Build the textual edits, then apply them from latest position to earliest so
-  // earlier spans remain valid through the edits.
-  const edits = [...targetAdditions.entries()]
-    .map(([target, names]) => {
-      const existing = new Set<string>();
-      for (const el of target.pattern?.elements ?? []) {
-        if (ts.isIdentifier(el.name)) existing.add(el.name.text);
-      }
-      const toAdd = [...names].filter(n => !existing.has(n));
-      if (toAdd.length === 0) return null;
-
-      if (target.pattern) {
-        // Augment an existing destructure: insert before the `}`.
-        const isEmpty = target.pattern.elements.length === 0;
-        return {
-          end: target.pattern.getEnd(),
-          apply: (src: string) => {
-            let offset = target.pattern!.getEnd() - 1; // position of `}`
-            while (src[offset - 1] === " ") offset--;
-            const insertion =
-              (isEmpty ? " " : ", ") + toAdd.join(", ") + (isEmpty ? " " : "");
-            return src.slice(0, offset) + insertion + src.slice(offset);
-          },
-        };
-      }
-
-      // Create a destructure in the factory's empty parameter list: turn
-      // `() => …` into `({ a, b }) => …`.
-      const openParen = target.paramOpenParen;
-      return {
-        end: openParen + 1,
-        apply: (src: string) =>
-          src.slice(0, openParen + 1) +
-          `{ ${toAdd.join(", ")} }` +
-          src.slice(openParen + 1),
-      };
-    })
-    .filter((e): e is NonNullable<typeof e> => e !== null)
-    .sort((a, b) => b.end - a.end);
-
-  let nextSource = sourceCode;
-  for (const edit of edits) nextSource = edit.apply(nextSource);
-
-  return { sourceCode: nextSource, value: adjusted };
-}
-
-/**
- * A place to introduce a destructured callee for a `parameter` binding: either
- * an existing object binding pattern to augment, or a factory whose empty
- * parameter list needs a destructure created at `paramOpenParen` (the offset of
- * its `(`).
- */
-type DestructureTarget =
-  | { pattern: ts.ObjectBindingPattern; paramOpenParen?: undefined }
-  | { pattern?: undefined; paramOpenParen: number };
-
-/**
- * Find where to bind a callee against the destructured first parameter of a
- * call matching `enclosingCall` at the top level of `sourceFile`.
- *
- * Returns the existing object binding pattern when the factory already
- * destructures its first parameter, or — when the factory takes no parameters
- * yet (e.g. a freshly-created `() => …` skeleton) — a target describing where to
- * create one. Returns null when no matching call exists or when its first
- * parameter is present but is not an object binding pattern.
- *
- * When `enclosingCall.import` is provided, the callee identifier must resolve
- * to a named import matching that spec.
- */
-function findEnclosingCallDestructure(
-  sourceFile: ts.SourceFile,
-  enclosingCall?: { callee: string; import?: { name: string; from: string } },
-): DestructureTarget | null {
-  if (!enclosingCall) return null;
-
-  const importOk = enclosingCall.import
-    ? sourceFileHasNamedImport(
-        sourceFile,
-        enclosingCall.import.name,
-        enclosingCall.import.from,
-      )
-    : true;
-  if (!importOk) return null;
-
-  let found: DestructureTarget | null = null;
-  const visit = (node: ts.Node): void => {
-    if (found) return;
-    if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === enclosingCall.callee
-    ) {
-      // The factory is the first function argument — it may follow a leading
-      // module-id string (`prompts('id', factory)`).
-      const factory = node.arguments.find(
-        (arg): arg is ts.ArrowFunction | ts.FunctionExpression =>
-          ts.isArrowFunction(arg) || ts.isFunctionExpression(arg),
-      );
-      if (factory) {
-        const param = factory.parameters[0];
-        if (param?.name && ts.isObjectBindingPattern(param.name)) {
-          found = { pattern: param.name };
-          return;
-        }
-        if (!param) {
-          // No parameter yet: create a destructure inside the empty `()`.
-          const openParen = sourceFile.text.indexOf(
-            "(",
-            factory.getStart(sourceFile),
-          );
-          if (openParen >= 0) {
-            found = { paramOpenParen: openParen };
-            return;
-          }
-        }
-        // A non-destructure parameter (e.g. `(providers) => …`) isn't a target —
-        // fall through so an `import` candidate can match instead.
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-  return found;
-}
-
-function sourceFileHasNamedImport(
-  sourceFile: ts.SourceFile,
-  name: string,
-  from: string,
-): boolean {
-  for (const stmt of sourceFile.statements) {
-    if (!ts.isImportDeclaration(stmt)) continue;
-    if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
-    if (stmt.moduleSpecifier.text !== from) continue;
-    const clause = stmt.importClause;
-    if (!clause?.namedBindings || !ts.isNamedImports(clause.namedBindings))
-      continue;
-    for (const el of clause.namedBindings.elements) {
-      if (el.name.text === name) return true;
-    }
-  }
-  return false;
-}
-
-/** Walk a ModelPropValue tree, transforming each functionCall via `fn`. */
-function mapFunctionCalls(
-  value: ModelPropValue,
-  fn: (
-    fc: Extract<ModelPropValue, { kind: "functionCall" }>,
-  ) => Extract<PropValue, { kind: "functionCall" }>,
-): PropValue {
-  switch (value.kind) {
-    case "functionCall": {
-      const mappedArgs = value.args.map(a => mapFunctionCalls(a, fn));
-      return fn({ ...value, args: mappedArgs as ModelPropValue[] });
-    }
-    case "object": {
-      const properties: Record<string, PropValue> = {};
-      for (const [k, v] of Object.entries(value.properties))
-        properties[k] = mapFunctionCalls(v, fn);
-      return { ...value, properties };
-    }
-    case "array":
-    case "tuple":
-      return {
-        ...value,
-        elements: value.elements.map(el => mapFunctionCalls(el, fn)),
-      } as PropValue;
-    default:
-      return value as PropValue;
-  }
 }
 
 function findReturnObjectInFunctionLike(

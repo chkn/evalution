@@ -20,7 +20,8 @@
     "LICENSING.md"
   ],
   "workspaces": [
-    "packages/vercel-ai-sdk"
+    "packages/vercel-ai-sdk",
+    "packages/typesafe-sdk"
   ],
   "engines": {
     "node": ">=22.18.0"
@@ -34,7 +35,7 @@
     "dev:server": "node src/cli/index.ts",
     "dev:server:debug": "node --inspect src/cli/index.ts",
     "dev:client": "vite --mode development",
-    "typecheck": "concurrently 'tsc --noEmit' 'tsc --noEmit -p tsconfig.client.json' 'tsc --noEmit -p packages/vercel-ai-sdk'",
+    "typecheck": "concurrently 'tsc --noEmit' 'tsc --noEmit -p tsconfig.client.json' 'tsc --noEmit -p packages/vercel-ai-sdk' 'tsc --noEmit -p packages/typesafe-sdk'",
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run",
@@ -60,19 +61,23 @@
     "hono": "^4.12.23",
     "minimatch": "^10.2.4",
     "protobufjs": "^7.5.3",
-    "ts-proppy": "0.2.3",
+    "ts-proppy": "0.3.0",
     "ws": "^8.21.0"
   },
   "peerDependencies": {
     "@google/genai": ">=2.0.0-0",
     "ai": ">=3.4.0-0",
-    "typescript": ">=5.3.3-0 <7.0.0-0"
+    "typescript": ">=5.3.3-0 <7.0.0-0",
+    "@typesafe-ai/sdk": ">=0.6.0-0"
   },
   "peerDependenciesMeta": {
     "ai": {
       "optional": true
     },
     "@google/genai": {
+      "optional": true
+    },
+    "@typesafe-ai/sdk": {
       "optional": true
     }
   },
@@ -88,9 +93,10 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@types/ws": "^8.18.1",
+    "@typesafe-ai/sdk": "^0.6.0",
     "@vitejs/plugin-react": "^4.2.1",
     "@vitest/coverage-v8": "^1.1.0",
-    "ai": "^7.0.4",
+    "ai": "^7.0.105",
     "concurrently": "^9.2.1",
     "drizzle-kit": "1.0.0-rc.4",
     "lucide-react": "^1.43.0",
@@ -116,7 +122,8 @@
     "prompt",
     "typescript",
     "playground",
-    "vercel-ai-sdk"
+    "vercel-ai-sdk",
+    "typesafe"
   ],
   "author": "Alex Corrado <chkn@hey.com>",
   "license": "AGPL-3.0-only",

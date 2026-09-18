@@ -44,11 +44,11 @@ function NewVariantIcon() {
 */
 import type {
   ExecuteResponse,
-  ModelCatalog,
   NormalizedPrompt,
   NormalizedPromptUpdates,
+  PropDefinition,
 } from "../../shared/types";
-import { getModelCatalog, updatePromptProperties } from "../api";
+import { getModelDefinition, updatePromptProperties } from "../api";
 import { applyOptimisticUpdates } from "./optimistic-updates";
 import PlaygroundEditor from "./PlaygroundEditor";
 import PlaygroundExecution from "./PlaygroundExecution";
@@ -64,8 +64,6 @@ interface Props {
    */
   onExecuted?: (result: ExecuteResponse & { label: string }) => void;
 }
-
-const EMPTY_MODEL_CATALOG: ModelCatalog = { models: [] };
 
 function stableKey(value: unknown): string {
   if (Array.isArray(value)) {
@@ -95,8 +93,9 @@ function PlaygroundContent({
 }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [modelCatalog, setModelCatalog] =
-    useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
+  const [modelDefinition, setModelDefinition] = useState<PropDefinition | null>(
+    null,
+  );
   const promptRef = useRef(prompt);
 
   useEffect(() => {
@@ -109,8 +108,8 @@ function PlaygroundContent({
 
   useEffect(() => {
     if (prompt.providerId) {
-      getModelCatalog(prompt.providerId)
-        .then(setModelCatalog)
+      getModelDefinition(prompt.providerId)
+        .then(setModelDefinition)
         .catch(() => {});
     }
   }, [prompt.providerId]);
@@ -179,7 +178,7 @@ function PlaygroundContent({
           <PlaygroundEditor
             prompt={prompt}
             onUpdate={handleUpdate}
-            modelCatalog={modelCatalog}
+            modelDefinition={modelDefinition}
           />
         </div>
         <div className="pg-exec-col">

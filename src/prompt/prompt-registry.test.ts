@@ -16,6 +16,7 @@ function stubProvider(
     async getAllPrompts() {
       return prompts.map(p => ({
         functionParameters: [],
+        style: "chat",
         modelEditable: true,
         systemEditable: true,
         messages: [],

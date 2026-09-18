@@ -27,6 +27,7 @@ export function PlaygroundRoundTripHarness({
     providerId: "prov",
     name: "test",
     functionParameters: [],
+    style: "chat",
     modelEditable: true,
     systemEditable: true,
     messages: initialMessages,

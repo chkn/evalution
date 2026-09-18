@@ -28,6 +28,7 @@ async function mockApi(page: Page, updateLatencyMs = 80) {
           providerId: "prov",
           name: "test",
           functionParameters: [],
+          style: "chat",
           modelEditable: true,
           systemEditable: true,
           messages,
@@ -38,8 +39,8 @@ async function mockApi(page: Page, updateLatencyMs = 80) {
       });
       return;
     }
-    if (url.includes("/models")) {
-      await route.fulfill({ json: { models: [] } });
+    if (url.includes("/model-definition")) {
+      await route.fulfill({ json: null });
       return;
     }
     if (url.includes("/model-parameters")) {

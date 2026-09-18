@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type { PropValue } from "ts-proppy";
-import type { ModelPropValue, SpanKind } from "./types.ts";
+import type { SpanKind } from "./types.ts";
 
 export function otelOperationToSpanKind(operationName: any): SpanKind {
   switch (operationName) {
@@ -30,56 +30,34 @@ export function isEditable(value: PropValue): boolean {
   );
 }
 
+/**
+ * Whether the UI should offer to edit a slot, which takes two answers: the
+ * SDK's (`capable` — does it take an arbitrary value here?) and the value's
+ * own (is its current shape one the editor can round-trip?). An empty slot
+ * has no shape to object to.
+ */
+export function canEdit(
+  capable: boolean,
+  value: PropValue | undefined,
+): boolean {
+  return capable && (value === undefined || isEditable(value));
+}
+
 export function isPropValue(a: unknown): a is PropValue {
   return !!a && typeof a === "object" && "kind" in a;
 }
 
-export function propValueEquals(
-  a: unknown,
-  b: PropValue | ModelPropValue | undefined,
-): boolean {
-  if (b === undefined) return a === undefined;
-  if (!isPropValue(a)) return false;
-  switch (b.kind) {
-    case "primitive":
-    case "template":
-      return a.kind === b.kind && a.value === b.value;
-    case "functionCall":
-      return (
-        a.kind === "functionCall" &&
-        a.callee === b.callee &&
-        a.args.length === b.args.length &&
-        a.args.every((arg, i) => propValueEquals(arg, b.args[i]))
-      );
-    case "lambda":
-      return (
-        a.kind === "lambda" &&
-        a.parameters.join(",") === b.parameters.join(",") &&
-        a.body === b.body
-      );
-    case "object": {
-      if (a.kind !== "object") return false;
-      const aKeys = Object.keys(a.properties);
-      const bKeys = Object.keys(b.properties);
-      return (
-        aKeys.length === bKeys.length &&
-        aKeys.every(
-          k =>
-            k in b.properties &&
-            propValueEquals(a.properties[k], b.properties[k]),
-        )
-      );
-    }
-    case "array":
-    case "tuple":
-      return (
-        a.kind === b.kind &&
-        a.elements.length === b.elements.length &&
-        a.elements.every((el, i) => propValueEquals(el, b.elements[i]))
-      );
-    case "raw":
-      return a.kind === "raw" && a.sourceText === b.sourceText;
-    default:
-      return false;
+/** `text` parsed as JSON, or `undefined` if it isn't valid JSON. */
+export function tryParseJson(text: unknown): unknown {
+  if (typeof text !== "string") return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
   }
+}
+
+/** `v` parsed as JSON if it's a JSON-string, or `v` itself otherwise (not a string, or not valid JSON). */
+export function parseJsonOrRaw(v: unknown): unknown {
+  return tryParseJson(v) ?? v;
 }

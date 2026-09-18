@@ -1,16 +1,16 @@
 ---
 name: update-model-catalog
-description: Refresh the hardcoded LLM model lists (OpenAI, Anthropic, Google) in the SDK adapters' getModelCatalog(). Use when asked to update, add, or check model IDs — "add the latest models", "is this model list current", "add <model> to the picker".
+description: Refresh the curated LLM model presets (OpenAI, Anthropic, Google) in the SDK adapters' model definitions. Use when asked to update, add, or check model IDs — "add the latest models", "is this model list current", "add <model> to the picker".
 ---
 
 # Updating the model catalogs
 
-The model pickers are hardcoded lists in `getModelCatalog()`. There are **two** catalogs, and **both are in scope on every refresh** — a Google model added to one belongs in the other too (subject to the per-file notes below). Never update just one.
+The model pickers offer curated presets with friendly names. They are polish, not the only way to reach a model: every model ID the *installed* provider package's types know is also offered as a suggestion when typing a custom one, and the Vercel adapter only shows providers that are installed. There are **two** preset lists, and **both are in scope on every refresh** — a Google model added to one belongs in the other too (subject to the per-file notes below). Never update just one.
 
 | File | Scope | Shape |
 |---|---|---|
-| `src/sdk/vercel-ai-sdk/index.ts` | OpenAI + Anthropic + Google | `model(group, label, provider, modelId)` helper |
-| `src/sdk/gemini-interactions-sdk.ts` | Google only, via the Interactions API | `catalogEntry(key, label, id)` helper |
+| `src/sdk/vercel-ai-sdk/model-definition.ts` | OpenAI + Anthropic + Google | `CURATED_MODELS`, via `model(provider, label, modelId)` |
+| `src/sdk/gemini-interactions-sdk.ts` | Google only, via the Interactions API | `CURATED_MODELS` and `CURATED_AGENTS`, `{ label, id }` entries |
 
 ## Rule: only official provider docs
 
@@ -38,9 +38,9 @@ Both catalogs are pure data — **prune as readily as you add.** Removing an ent
 
 Watch for the silent supersede: an ID that simply *vanishes* from the official page is as stale as one wearing a deprecation badge. Preview IDs are the usual case — `gemini-3.1-flash-lite-preview` became `gemini-3.1-flash-lite`, and `deep-research-pro-preview-12-2025` became `deep-research-preview-04-2026`. Diff the existing list against the page in both directions.
 
-**`vercel-ai-sdk/index.ts`** — add rows to `models:` via the `model()` helper. It derives both the provider-function value (`openai("gpt-5.6-sol")`) and the gateway string (`"openai/gpt-5.6-sol"`) from one ID, so one entry per model. Groups stay in order OpenAI → Anthropic → Google, separated by blank lines. A new group also needs a `customValueTemplates` entry under `groups`.
+**`vercel-ai-sdk/model-definition.ts`** — add rows to `CURATED_MODELS` via the `model()` helper. One entry offers both the provider-function preset (`openai("gpt-5.6-sol")`) and the gateway-string preset (`"openai/gpt-5.6-sol"`). Groups stay in order OpenAI → Anthropic → Google, separated by blank lines. A provider needs an entry in `PROVIDERS` (package and label) to be offered at all; presets for it appear only when its package is installed.
 
-**`gemini-interactions-sdk.ts`** — add rows via `catalogEntry(key, label, id)`, where `key` is `MODEL_KEY` or `AGENT_KEY`. That key is the point of the helper: this API is driven by either a `model:` or an `agent:` property, and the entry carries which one it writes so `denormalizeUpdates` can read it back. Agents (Deep Research and friends) are real products here, so check the docs' agent list too, not just the models. The supported set is **not** the whole Gemini lineup — verify against https://ai.google.dev/gemini-api/docs/interactions, which enumerates exactly what the API accepts. Keep models before agents in the array; a test asserts `models[0].values.model` is defined.
+**`gemini-interactions-sdk.ts`** — add `{ label, id }` rows to `CURATED_MODELS` or `CURATED_AGENTS`. This API is driven by either a `model:` or an `agent:` property, and the picker's value is that fragment of the config (`{ model: "…" }` or `{ agent: "…" }`), so which list an ID goes in decides which one it writes. Agents (Deep Research and friends) are real products here, so check the docs' agent list too, not just the models. The supported set is **not** the whole Gemini lineup — verify against https://ai.google.dev/gemini-api/docs/interactions, which enumerates exactly what the API accepts.
 
 Shared conventions:
 
@@ -51,11 +51,9 @@ Shared conventions:
 
 ```bash
 npm run typecheck
-npx vitest run src/sdk/vercel-ai-sdk/index.test.ts src/sdk/gemini-interactions-sdk.test.ts src/server/service-worker.test.ts
+npx vitest run src/sdk/vercel-ai-sdk/model-definition.test.ts src/sdk/gemini-interactions-sdk.test.ts src/server/service-worker.test.ts
 ```
 
-No new test is needed for a pure data-table refresh — the existing catalog tests cover the shape. A change to the `model()` helper or the catalog *structure* does need one.
+No new test is needed for a pure data-table refresh — the existing tests cover the shape. A change to the `model()` helper or the definition *structure* does need one.
 
-**If a catalog test fails after you prune an entry:** `gemini-interactions-sdk.test.ts` pins the generated shape of one model entry and one agent entry by looking them up by ID, so removing either one breaks it. That is a stale fixture, not a regression — repoint the test at another entry of the same kind (a model entry for the model case, an agent entry for the agent case) and keep the assertions as they are. Don't delete the test, and don't keep a dead model in the catalog just to satisfy it.
-
-Finish by reporting three lists: IDs added, IDs removed (with the reason — deprecated, retired, or superseded by X), and IDs verified still active. Include the date you fetched the docs.
+**If a test fails after you prune an entry:** `model-definition.test.ts` keeps a `FORMER_CATALOG` list asserting every preset it names is still offered, and `gemini-interactions-sdk.test.ts` looks up one model and one agent preset by label. That is a stale fixture, not a regression — remove the pruned entry from `FORMER_CATALOG`, or repoint the Gemini test at another entry of the same kind, and keep the assertions as they are. Don't keep a dead model in the list just to satisfy a test.

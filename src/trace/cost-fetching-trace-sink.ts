@@ -20,6 +20,12 @@ interface OpenRouterModelsResponse {
 }
 
 /**
+ * FIXME: OpenRouter doesn't list pricing for `jev-*` models, so it's
+ * hardcoded here instead. Revisit once/if they're listed upstream.
+ */
+const HARDCODED_PRICES: PriceTable = new Map([["jev", [0.042 / 1_000_000, 0]]]);
+
+/**
  * Lowercases a model id and spells version dots as dashes, so OpenRouter's
  * `claude-sonnet-4.5` and a provider SDK's `claude-sonnet-4-5` meet.
  */
@@ -110,26 +116,31 @@ export class CostFetchingTraceSink implements TraceSink {
   }
 
   private async withCost(span: Span): Promise<Span> {
+    const llm = span.llm;
     if (
       !this.fetchPricing ||
       span.kind !== "LLM" ||
-      !span.llm?.model ||
-      (span.llm.promptTokens === undefined &&
-        span.llm.completionTokens === undefined)
+      !llm?.model ||
+      (llm.promptTokens === undefined && llm.completionTokens === undefined)
     ) {
       return span;
     }
 
+    // Fetch and cache prices from OpenRouter if we haven't already.
     this.prices ??= this.fetchPrices();
-    const rates = findPrice(await this.prices, span.llm.model);
+
+    // First check the OpenRouter prices, and then fallback to our hardcoded list.
+    const rates =
+      findPrice(await this.prices, llm.model) ??
+      findPrice(HARDCODED_PRICES, llm.model);
     if (!rates) return span;
 
-    const promptCost = (span.llm.promptTokens ?? 0) * rates[0];
-    const completionCost = (span.llm.completionTokens ?? 0) * rates[1];
+    const promptCost = (llm.promptTokens ?? 0) * rates[0];
+    const completionCost = (llm.completionTokens ?? 0) * rates[1];
     return {
       ...span,
       llm: {
-        ...span.llm,
+        ...llm,
         cost: { prompt: promptCost, completion: completionCost },
       },
     };

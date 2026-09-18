@@ -7,7 +7,11 @@ import { valueToSourceText } from "ts-proppy";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryFileProvider } from "../../file-provider-memory.ts";
 import { VercelAISDK } from "../../sdk/vercel-ai-sdk/index.ts";
-import type { NormalizedPrompt, PropValue } from "../../shared/types.ts";
+import type {
+  NormalizedChatPrompt,
+  NormalizedPrompt,
+  PropValue,
+} from "../../shared/types.ts";
 import { FilePromptProvider } from "./file-prompt-provider.ts";
 
 /** Virtual root all in-memory prompt files live under. */
@@ -191,10 +195,11 @@ export function myPrompt() {
 
     const promptId = `${filePath}#myPrompt`;
     const updatedPrompt = await provider.updatePromptProperties(promptId, {
+      style: "chat",
       system: { kind: "primitive", value: "New value" },
     });
 
-    expect(updatedPrompt.system).toEqual({
+    expect((updatedPrompt as NormalizedChatPrompt).system).toEqual({
       kind: "primitive",
       value: "New value",
     });
@@ -220,6 +225,7 @@ export function myPrompt() {
 
     const promptId = `${filePath}#myPrompt`;
     const updatedPrompt = await provider.updatePromptProperties(promptId, {
+      style: "chat",
       model: { kind: "primitive", value: "openai/gpt-4o" },
     });
 
@@ -247,6 +253,7 @@ export function myPrompt() {
 
     await expect(
       provider.updatePromptProperties(promptId, {
+        style: "chat",
         system: { kind: "primitive", value: "New" },
       }),
     ).rejects.toThrow("not editable");
@@ -256,6 +263,7 @@ export function myPrompt() {
     const { provider } = setup();
     await expect(
       provider.updatePromptProperties("/fake/path.ts#fake", {
+        style: "chat",
         system: { kind: "primitive", value: "New" },
       }),
     ).rejects.toThrow("Prompt not found");
@@ -277,6 +285,7 @@ export function myPrompt() {
     const promptId = `${filePath}#myPrompt`;
 
     const updated = await provider.updatePromptProperties(promptId, {
+      style: "chat",
       modelParameters: { temperature: { kind: "primitive", value: 0.7 } },
     });
     const tempValue = getParameter(updated, "temperature");
@@ -337,12 +346,16 @@ export function myPrompt() {
 
     // First update
     await provider.updatePromptProperties(promptId, {
+      style: "chat",
       system: { kind: "primitive", value: "Updated" },
     });
 
     // Verify fresh data
     const prompt = await provider.getPrompt(promptId);
-    expect(prompt!.system).toEqual({ kind: "primitive", value: "Updated" });
+    expect((prompt as NormalizedChatPrompt).system).toEqual({
+      kind: "primitive",
+      value: "Updated",
+    });
   });
 
   it("should call callback on file changes", async () => {
@@ -463,6 +476,7 @@ export function myPrompt() {
     const cleanup = provider.watch!(e => events.push(e));
 
     await provider.updatePromptProperties(`${p("test.prompt.ts")}#myPrompt`, {
+      style: "chat",
       system: { kind: "primitive", value: "Updated locally" },
     });
     // The watch callback re-parses asynchronously before emitting.
@@ -550,6 +564,58 @@ export function regularPrompt() {
       const prompts = await customProvider.getAllPrompts();
       expect(prompts).toHaveLength(1);
       expect(prompts[0].name).toBe("customPrompt");
+    });
+
+    it("keeps the default ignores when custom ignorePatterns are given", async () => {
+      const fileProvider = new MemoryFileProvider({
+        [p("node_modules/pkg/dep.prompt.ts")]: `
+export function dep() { return { model: 'openai/gpt-4o', system: 'Dep' }; }
+`,
+        [p("skip.jev.prompt.ts")]: `
+export function skipped() { return { model: 'openai/gpt-4o', system: 'Skip' }; }
+`,
+        [p("valid.prompt.ts")]: `
+export function valid() { return { model: 'openai/gpt-4o', system: 'Valid' }; }
+`,
+      });
+      const provider = new FilePromptProvider({
+        rootDir: ROOT,
+        fileProvider,
+        ignorePatterns: ["**/*.jev.prompt.ts"],
+        sdk: new VercelAISDK(),
+      });
+
+      const prompts = await provider.getAllPrompts();
+      expect(prompts.map(p => p.name)).toEqual(["valid"]);
+
+      const events: unknown[] = [];
+      const cleanup = provider.watch(e => events.push(e));
+      await fileProvider.writeFile(
+        p("node_modules/pkg/dep.prompt.ts"),
+        `export function dep() { return { model: 'openai/gpt-4o', system: 'Changed' }; }`,
+      );
+      await tick();
+      cleanup();
+      expect(events).toEqual([]);
+    });
+
+    it("scans a default-ignored directory an include pattern names", async () => {
+      const provider = new FilePromptProvider({
+        rootDir: ROOT,
+        fileProvider: new MemoryFileProvider({
+          [p("dist/built.prompt.ts")]: `
+export function built() { return { model: 'openai/gpt-4o', system: 'Built' }; }
+`,
+          [p("dist/node_modules/dep.prompt.ts")]: `
+export function dep() { return { model: 'openai/gpt-4o', system: 'Dep' }; }
+`,
+        }),
+        includePatterns: ["dist/**/*.prompt.ts"],
+        sdk: new VercelAISDK(),
+      });
+
+      const prompts = await provider.getAllPrompts();
+      expect(prompts.map(p => p.name)).toEqual(["built"]);
     });
   });
 });

@@ -8,19 +8,20 @@ import {
   findTypeDeclaration,
 } from "ts-proppy";
 import ts from "typescript";
-import type { TypeProbe } from "../../prompt/file/prompt-file-type.ts";
-import { isEditable } from "../../shared/helpers.ts";
+import type {
+  ProbeResult,
+  ProbeResults,
+  TypeExpressionProbe,
+  TypeProbe,
+} from "../../prompt/file/prompt-file-type.ts";
 import {
   CONFIG_FILE_RELATIVE_PATH,
   type SetupTask,
 } from "../../shared/setup-task.ts";
 import type {
-  CalleeBinding,
-  ModelInfo,
-  ModelPropValue,
+  NormalizedChatPrompt,
   NormalizedMessage,
   NormalizedParameter,
-  NormalizedPrompt,
   NormalizedPromptUpdates,
   NormalizedToolCall,
   ParsedPrompt,
@@ -28,6 +29,7 @@ import type {
 import { setupGlobalOTelPipeline } from "../../trace/otel-global-pipeline.ts";
 import type { TraceIngestor } from "../../trace/trace-ingestor.ts";
 import {
+  assertUpdateStyle,
   type ExecuteConfigOptions,
   type ExecutionHandle,
   findPackageDts,
@@ -35,6 +37,11 @@ import {
   missingPackageMessage,
   type SDKAdapter,
 } from "../sdk-adapter.ts";
+import {
+  MODEL_PROJECT_PROBES,
+  PROMPTS_HELPER_CALL,
+  vercelModelDefinition,
+} from "./model-definition.ts";
 import {
   isPerPromptTelemetry,
   isVercelAISDKTelemetry,
@@ -109,7 +116,11 @@ const FALLBACK_CALL_SETTINGS_PARAMS: PropDefinition[] = [
     type: {
       kind: "array",
       syntax: "string[]",
-      elementType: { kind: "primitive", syntax: "string" },
+      element: {
+        name: "",
+        type: { kind: "primitive", syntax: "string" },
+        optional: false,
+      },
     },
     optional: true,
   },
@@ -126,54 +137,6 @@ const FALLBACK_CALL_SETTINGS_PARAMS: PropDefinition[] = [
     optional: true,
   },
 ];
-
-/** The `prompts()` factory from `@evalution/vercel-ai-sdk`. */
-const PROMPTS_HELPER_CALL = {
-  callee: "prompts",
-  import: { name: "prompts", from: "@evalution/vercel-ai-sdk" },
-} as const;
-
-/** Build the binding-candidate array for a provider function call. */
-function providerBinding(provider: string): CalleeBinding[] {
-  return [
-    { kind: "parameter", enclosingCall: PROMPTS_HELPER_CALL },
-    { kind: "import", spec: { name: provider, from: `@ai-sdk/${provider}` } },
-  ];
-}
-
-/** Build a {@link ModelInfo} entry from group, label, provider, and model ID. */
-function model(
-  group: string,
-  label: string,
-  provider: string,
-  modelId: string,
-): ModelInfo {
-  const id = `${provider}/${modelId}`;
-  return {
-    id,
-    label,
-    group,
-    values: {
-      function: {
-        kind: "functionCall",
-        callee: provider,
-        args: [{ kind: "primitive", value: modelId }],
-        binding: providerBinding(provider),
-      },
-      string: { kind: "primitive", value: id },
-    },
-  };
-}
-
-/** Build a custom-value template entry for a provider (used in `groups.{provider}.customValueTemplates.function`). */
-function customValueTemplate(provider: string): ModelPropValue {
-  return {
-    kind: "functionCall",
-    callee: provider,
-    args: [{ kind: "primitive", value: "$input" }],
-    binding: providerBinding(provider),
-  };
-}
 
 /** Starter contents of `.evalution/config.ts` for the Vercel AI SDK. */
 const CONFIG_FILE_CONTENTS = `import type { EvalutionConfig } from 'evalution';
@@ -254,71 +217,12 @@ export class VercelAISDK implements SDKAdapter {
     ],
   };
 
-  getModelCatalog() {
-    // FIXME: Can we read this from the SDK instead of hardcoding it?
-    return Promise.resolve({
-      modelValueTypes: {
-        function: {
-          label: "Provider",
-          description: 'Call provider function (e.g. openai("gpt-4o"))',
-        },
-        string: {
-          label: "Gateway",
-          description: 'Use a gateway model string (e.g. "openai/gpt-4o")',
-        },
-      },
-      groups: {
-        OpenAI: {
-          customValueTemplates: { function: customValueTemplate("openai") },
-        },
-        Anthropic: {
-          customValueTemplates: { function: customValueTemplate("anthropic") },
-        },
-        Google: {
-          customValueTemplates: { function: customValueTemplate("google") },
-        },
-      },
-      models: [
-        model("OpenAI", "GPT-5.6 Sol", "openai", "gpt-5.6-sol"),
-        model("OpenAI", "GPT-5.6 Terra", "openai", "gpt-5.6-terra"),
-        model("OpenAI", "GPT-5.6 Luna", "openai", "gpt-5.6-luna"),
-        model("OpenAI", "GPT-5.3 Codex", "openai", "gpt-5.3-codex"),
-        model("OpenAI", "GPT-5.5 Pro", "openai", "gpt-5.5-pro"),
-        model("OpenAI", "GPT-5.5", "openai", "gpt-5.5"),
-        model("OpenAI", "GPT-5.4 Pro", "openai", "gpt-5.4-pro"),
-        model("OpenAI", "GPT-5.4", "openai", "gpt-5.4"),
-        model("OpenAI", "GPT-5.4 mini", "openai", "gpt-5.4-mini"),
-        model("OpenAI", "GPT-5.4 nano", "openai", "gpt-5.4-nano"),
+  getProjectProbes(language: string): TypeProbe[] {
+    return language === "typescript" ? MODEL_PROJECT_PROBES : [];
+  }
 
-        model("Anthropic", "Claude Fable 5", "anthropic", "claude-fable-5"),
-        model("Anthropic", "Claude Opus 5", "anthropic", "claude-opus-5"),
-        model("Anthropic", "Claude Sonnet 5", "anthropic", "claude-sonnet-5"),
-        model("Anthropic", "Claude Opus 4.8", "anthropic", "claude-opus-4-8"),
-        model("Anthropic", "Claude Haiku 4.5", "anthropic", "claude-haiku-4-5"),
-
-        model("Google", "Gemini 3.7 Flash", "google", "gemini-3.7-flash"),
-        model("Google", "Gemini 3.6 Flash", "google", "gemini-3.6-flash"),
-        model("Google", "Gemini 3.5 Flash", "google", "gemini-3.5-flash"),
-        model(
-          "Google",
-          "Gemini 3.5 Flash-Lite",
-          "google",
-          "gemini-3.5-flash-lite",
-        ),
-        model(
-          "Google",
-          "Gemini 3.1 Pro Preview",
-          "google",
-          "gemini-3.1-pro-preview",
-        ),
-        model(
-          "Google",
-          "Gemini 3.1 Flash-Lite",
-          "google",
-          "gemini-3.1-flash-lite",
-        ),
-      ],
-    });
+  async getModelDefinition(project: ProbeResults): Promise<PropDefinition> {
+    return vercelModelDefinition(project);
   }
 
   getModelParameters(rootDir: string): PropDefinition[] {
@@ -349,7 +253,8 @@ export class VercelAISDK implements SDKAdapter {
    * The per-tool context object that `generateText` requires whenever a tool
    * declares a `contextSchema`.
    */
-  private static readonly TOOLS_CONTEXT_PROBE: TypeProbe = {
+  private static readonly TOOLS_CONTEXT_PROBE: TypeExpressionProbe = {
+    kind: "type",
     name: "toolsContext",
     description:
       "Per-tool context required by tools that declare a contextSchema.",
@@ -373,10 +278,7 @@ export class VercelAISDK implements SDKAdapter {
     syntax: TOOLS_CONTEXT_SYNTAX,
   };
 
-  getExecuteParameterProbes(
-    _prompt: ParsedPrompt,
-    language: string,
-  ): TypeProbe[] {
+  getPromptProbes(_prompt: ParsedPrompt, language: string): TypeProbe[] {
     // The expression above is plainly TypeScript; an adapter should say so
     // rather than emit it for a language that cannot evaluate it.
     if (language !== "typescript") return [];
@@ -504,8 +406,8 @@ export class VercelAISDK implements SDKAdapter {
 
   normalizePrompt(
     prompt: ParsedPrompt,
-    resolvedProbes?: readonly (PropDefinition | null | undefined)[],
-  ): NormalizedPrompt {
+    resolvedProbes?: readonly ProbeResult[],
+  ): NormalizedChatPrompt {
     const { definitions, values } = prompt.extractedProps;
     const modelValue = values?.[MODEL_KEY];
     const systemValue = values?.[SYSTEM_KEY];
@@ -513,18 +415,12 @@ export class VercelAISDK implements SDKAdapter {
 
     const modelParameters: NormalizedParameter[] = definitions
       .filter(d => !RESERVED_KEYS.has(d.name))
-      .map(def => {
-        const value = values?.[def.name];
-        return {
-          def,
-          value,
-          editable: value ? isEditable(value) : true,
-        };
-      });
+      .map(def => ({ def, value: values?.[def.name] }));
 
     const executeParameters = this.executeParametersFor(prompt, resolvedProbes);
 
     return {
+      style: "chat",
       id: prompt.id,
       providerId: prompt.providerId,
       globalId: prompt.globalId,
@@ -533,11 +429,14 @@ export class VercelAISDK implements SDKAdapter {
       metadata: prompt.metadata,
       treePath: prompt.treePath,
       model: modelValue,
-      modelEditable: modelValue ? isEditable(modelValue) : true,
+      // Capabilities of the SDK: `generateText` takes any model, system
+      // message and message list. Whether a particular value parsed into an
+      // editable shape is the editor's question, not this adapter's.
+      modelEditable: true,
       system: systemValue,
-      systemEditable: systemValue ? isEditable(systemValue) : true,
+      systemEditable: true,
       messages: extractMessages(messagesValue),
-      messagesEditable: messagesValue ? isEditable(messagesValue) : true,
+      messagesEditable: true,
       modelParameters,
       executeParameters,
       // `toolsContext` fans out per tool because the AI SDK resolves tools
@@ -567,10 +466,10 @@ export class VercelAISDK implements SDKAdapter {
    */
   private executeParametersFor(
     prompt: ParsedPrompt,
-    resolvedProbes?: readonly (PropDefinition | null | undefined)[],
+    resolvedProbes?: readonly ProbeResult[],
   ): PropDefinition[] | undefined {
     const resolved = resolvedProbes?.[0];
-    if (resolved) return [resolved];
+    if (resolved && !Array.isArray(resolved)) return [resolved];
     // `null` is a definite "this prompt needs no context" — never degrade it.
     if (resolved === null) return undefined;
 
@@ -592,8 +491,9 @@ export class VercelAISDK implements SDKAdapter {
   denormalizeUpdates(
     updates: NormalizedPromptUpdates,
     _currentValues?: Record<string, PropValue>,
-  ): Record<string, ModelPropValue | null> {
-    const out: Record<string, ModelPropValue | null> = {};
+  ): Record<string, PropValue | null> {
+    assertUpdateStyle(updates, "chat");
+    const out: Record<string, PropValue | null> = {};
     if (MODEL_KEY in updates) out[MODEL_KEY] = updates.model ?? null;
     if (SYSTEM_KEY in updates) out[SYSTEM_KEY] = updates.system ?? null;
     if (MESSAGES_KEY in updates) {

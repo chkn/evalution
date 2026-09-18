@@ -49,6 +49,7 @@ function makePrompt(
     providerId: "test",
     name: "test",
     functionParameters,
+    style: "chat",
     modelEditable: true,
     system: { kind: "primitive", value: "" },
     systemEditable: true,
@@ -80,7 +81,7 @@ export function InterpolationHarness({
     <PlaygroundEditor
       prompt={prompt}
       onUpdate={handleUpdate}
-      modelCatalog={{ models: [] }}
+      modelDefinition={null}
     />
   );
 }

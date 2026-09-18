@@ -14,8 +14,17 @@
 
 import type { SpanStatus } from "@opentelemetry/api";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { otelOperationToSpanKind } from "../shared/helpers.ts";
-import { SPAN_KIND_ATTRIBUTE } from "./prompt-tracer.ts";
+import {
+  otelOperationToSpanKind,
+  parseJsonOrRaw,
+  tryParseJson,
+} from "../shared/helpers.ts";
+import {
+  PROMPT_ID_ATTRIBUTE,
+  PROMPT_INPUTS_ATTRIBUTE,
+  PROMPT_PROVIDER_ID_ATTRIBUTE,
+  SPAN_KIND_ATTRIBUTE,
+} from "./prompt-tracer.ts";
 import type {
   LLMSpanDetails,
   PromptID,
@@ -126,20 +135,15 @@ function toMessageContent(
  * throwing.
  */
 export function parseMessages(v: unknown): SpanMessage[] | undefined {
-  if (typeof v !== "string") return undefined;
-  try {
-    const parsed = JSON.parse(v);
-    if (!Array.isArray(parsed)) return undefined;
-    return parsed.flatMap((msg: unknown) => {
-      if (!msg || typeof msg !== "object") return [];
-      const m = msg as Record<string, unknown>;
-      const role = str(m.role) ?? "unknown";
-      const content = toMessageContent(m.content);
-      return content !== undefined ? [{ role, content }] : [];
-    });
-  } catch {
-    return undefined;
-  }
+  const parsed = tryParseJson(v);
+  if (!Array.isArray(parsed)) return undefined;
+  return parsed.flatMap((msg: unknown) => {
+    if (!msg || typeof msg !== "object") return [];
+    const m = msg as Record<string, unknown>;
+    const role = str(m.role) ?? "unknown";
+    const content = toMessageContent(m.content);
+    return content !== undefined ? [{ role, content }] : [];
+  });
 }
 
 /**
@@ -149,30 +153,35 @@ export function parseMessages(v: unknown): SpanMessage[] | undefined {
  * they are only ever surfaced via {@link parseMessages} on the input side.
  */
 export function parseOutput(v: unknown): string | undefined {
-  if (typeof v !== "string") return undefined;
-  try {
-    const parsed = JSON.parse(v);
-    if (!Array.isArray(parsed)) return undefined;
-    return parsed
-      .flatMap((msg: unknown) => {
-        if (!msg || typeof msg !== "object") return [];
-        const m = msg as Record<string, unknown>;
-        const content = m.content;
-        if (typeof content === "string") return [content];
-        if (Array.isArray(content)) {
-          return content
-            .filter(
-              (c): c is Record<string, unknown> => !!c && typeof c === "object",
-            )
-            .filter(c => c.type === "text")
-            .map(c => str(c.text) ?? "");
-        }
-        return [];
-      })
-      .join("\n");
-  } catch {
-    return undefined;
-  }
+  const parsed = tryParseJson(v);
+  if (!Array.isArray(parsed)) return undefined;
+  return parsed
+    .flatMap((msg: unknown) => {
+      if (!msg || typeof msg !== "object") return [];
+      const m = msg as Record<string, unknown>;
+      const content = m.content;
+      if (typeof content === "string") return [content];
+      if (Array.isArray(content)) {
+        return content
+          .filter(
+            (c): c is Record<string, unknown> => !!c && typeof c === "object",
+          )
+          .filter(c => c.type === "text")
+          .map(c => str(c.text) ?? "");
+      }
+      return [];
+    })
+    .join("\n");
+}
+
+/** A JSON-string attribute holding an object or array, or `undefined`. */
+function parseJsonObject(
+  v: unknown,
+): { [key: string]: unknown } | SpanMessage[] | undefined {
+  const parsed = tryParseJson(v);
+  return parsed && typeof parsed === "object"
+    ? (parsed as { [key: string]: unknown })
+    : undefined;
 }
 
 /**
@@ -203,12 +212,25 @@ export function readLLM(
   // Input/output: the OTel GenAI semconv uses `gen_ai.{input,output}.messages`,
   // but the Vercel AI SDK instead emits `ai.prompt.messages` (a JSON message
   // array) and `ai.response.text` (a plain string). Support both.
+  // A model that isn't given messages records its input (and its output) as
+  // JSON under `evalution.llm.*`.
+  const jsonInput = parseJsonObject(attributes["evalution.llm.input"]);
   const messages = parseMessages(
     attributes["gen_ai.input.messages"] ?? attributes["ai.prompt.messages"],
   );
-  const output =
+  const input = jsonInput ?? messages;
+  const jsonOutput = tryParseJson(attributes["evalution.llm.output"]);
+  const text =
     parseOutput(attributes["gen_ai.output.messages"]) ??
     str(attributes["ai.response.text"]);
+  // `gen_ai.output.type` says the model produced data, not prose, so its text
+  // is that data's JSON encoding. Kept as text if it doesn't parse.
+  const output =
+    jsonOutput !== undefined
+      ? jsonOutput
+      : text !== undefined && attributes["gen_ai.output.type"] === "json"
+        ? parseJsonOrRaw(text)
+        : text;
 
   const paramEntries = PARAM_ATTRIBUTES.map(
     key => [key.replace("gen_ai.request.", ""), attributes[key]] as const,
@@ -226,8 +248,8 @@ export function readLLM(
     !model &&
     !promptTokens &&
     !completionTokens &&
-    !messages &&
-    !output &&
+    !input &&
+    (output === undefined || output === "") &&
     !modelParameters
   ) {
     return undefined;
@@ -236,8 +258,8 @@ export function readLLM(
   return {
     ...(provider && { provider }),
     ...(model && { model }),
-    ...(messages && { messages }),
-    ...(output && { output }),
+    ...(input && { input }),
+    ...(output !== undefined && output !== "" && { output }),
     ...(promptTokens !== undefined && { promptTokens }),
     ...(completionTokens !== undefined && { completionTokens }),
     ...(totalTokens !== undefined && { totalTokens }),
@@ -258,34 +280,21 @@ export function readLLM(
 export function readInputs(
   attributes: Record<string, unknown>,
 ): Pick<PromptID, "functionInputs" | "executeInputs" | "parameterDefinitions"> {
-  const raw = str(attributes["evalution.prompt.inputs"]);
+  const raw = str(attributes[PROMPT_INPUTS_ATTRIBUTE]);
   if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    return {
-      ...(Array.isArray(parsed.functionInputs) && {
-        functionInputs: parsed.functionInputs,
-      }),
-      ...(parsed.executeInputs && typeof parsed.executeInputs === "object"
-        ? { executeInputs: parsed.executeInputs }
-        : {}),
-      ...(Array.isArray(parsed.parameterDefinitions) && {
-        parameterDefinitions: parsed.parameterDefinitions,
-      }),
-    };
-  } catch {
-    return {};
-  }
-}
-
-function parseJsonOrRaw(v: unknown): unknown {
-  if (typeof v !== "string") return v;
-  try {
-    return JSON.parse(v);
-  } catch {
-    return v;
-  }
+  const parsed = tryParseJson(raw) as any;
+  if (!parsed || typeof parsed !== "object") return {};
+  return {
+    ...(Array.isArray(parsed.functionInputs) && {
+      functionInputs: parsed.functionInputs,
+    }),
+    ...(parsed.executeInputs && typeof parsed.executeInputs === "object"
+      ? { executeInputs: parsed.executeInputs }
+      : {}),
+    ...(Array.isArray(parsed.parameterDefinitions) && {
+      parameterDefinitions: parsed.parameterDefinitions,
+    }),
+  };
 }
 
 /**
@@ -342,8 +351,8 @@ export function llmAndPrompt(
   // Store the prompt reference exactly as emitted: `id` is global unless a
   // provider id scopes it. Resolution to a concrete prompt happens later, when
   // a trace is served, so the stored (possibly global) id stays stable.
-  const id = str(attributes["evalution.prompt.id"]);
-  const providerId = str(attributes["evalution.prompt.provider.id"]);
+  const id = str(attributes[PROMPT_ID_ATTRIBUTE]);
+  const providerId = str(attributes[PROMPT_PROVIDER_ID_ATTRIBUTE]);
   const prompt: PromptID | undefined = id
     ? { id, ...(providerId && { providerId }), ...readInputs(attributes) }
     : undefined;

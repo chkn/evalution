@@ -3,6 +3,7 @@
 
 import type { SetupStep, SetupTask } from "../shared/setup-task.ts";
 import type { SDKAdapter } from "./sdk-adapter.ts";
+import { TypeSafeSDK } from "./typesafe-sdk/index.ts";
 import { VercelAISDK } from "./vercel-ai-sdk/index.ts";
 
 /**
@@ -23,7 +24,10 @@ export interface SDKAdapterClass {
  * to onboarding means giving its adapter a static `setupTask` and listing it
  * here.
  */
-export const AI_SDK_REGISTRY: readonly SDKAdapterClass[] = [VercelAISDK];
+export const AI_SDK_REGISTRY: readonly SDKAdapterClass[] = [
+  VercelAISDK,
+  TypeSafeSDK,
+];
 
 /** Look up a {@link SetupTask} by its id, or `undefined` if none matches. */
 export function findSetupTask(taskId: string): SetupTask | undefined {

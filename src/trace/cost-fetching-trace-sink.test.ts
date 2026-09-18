@@ -188,6 +188,54 @@ describe("CostFetchingTraceSink", () => {
     }
   });
 
+  it("falls back to a hardcoded price for jev-* models when pricing fetch fails", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ error: "boom" }, 500));
+    const sink = new CostFetchingTraceSink({ fetch: fetchMock });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const stored = await sink.recordSpanEnd(
+        llmSpan({
+          llm: { model: "jev-7b", promptTokens: 1000, completionTokens: 500 },
+        }),
+      );
+
+      expect(stored.llm?.cost?.prompt).toBeCloseTo((0.042 / 1_000_000) * 1000);
+      expect(stored.llm?.cost?.completion).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("falls back to a hardcoded price for jev-* models OpenRouter doesn't list", async () => {
+    const fetchMock = openRouterFetchMock([
+      { id: "openai/gpt-4o", prompt: "0.000005", completion: "0.00001" },
+    ]);
+    const sink = new CostFetchingTraceSink({ fetch: fetchMock });
+
+    const stored = await sink.recordSpanEnd(
+      llmSpan({
+        llm: { model: "jev-7b", promptTokens: 1000, completionTokens: 500 },
+      }),
+    );
+
+    expect(stored.llm?.cost?.prompt).toBeCloseTo((0.042 / 1_000_000) * 1000);
+    expect(stored.llm?.cost?.completion).toBe(0);
+  });
+
+  it("prefers OpenRouter's own price for a jev-* model over the hardcoded fallback", async () => {
+    const fetchMock = openRouterFetchMock([
+      { id: "jev/jev-7b", prompt: "0.00001", completion: "0.00002" },
+    ]);
+    const sink = new CostFetchingTraceSink({ fetch: fetchMock });
+
+    const stored = await sink.recordSpanEnd(
+      llmSpan({ llm: { model: "jev-7b", promptTokens: 1000 } }),
+    );
+
+    expect(stored.llm?.cost?.prompt).toBeCloseTo(0.00001 * 1000);
+  });
+
   it("does not touch non-LLM spans or LLM spans without usage", async () => {
     const fetchMock = openRouterFetchMock([]);
     const sink = new CostFetchingTraceSink({ fetch: fetchMock });

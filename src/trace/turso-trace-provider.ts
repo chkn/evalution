@@ -19,7 +19,6 @@ import type {
   LLMSpanDetails,
   Span,
   SpanKind,
-  SpanMessage,
   Trace,
   TraceSummary,
 } from "./trace-types.ts";
@@ -74,8 +73,9 @@ function spanToRow(span: Span) {
     llmTotalTokens: span.llm?.totalTokens ?? null,
     llmCostPrompt: span.llm?.cost?.prompt ?? null,
     llmCostCompletion: span.llm?.cost?.completion ?? null,
-    llmMessages: span.llm?.messages ? JSON.stringify(span.llm.messages) : null,
-    llmOutput: span.llm?.output ?? null,
+    llmInput: span.llm?.input ? JSON.stringify(span.llm.input) : null,
+    llmOutput:
+      span.llm?.output !== undefined ? JSON.stringify(span.llm.output) : null,
     llmParameters: span.llm?.modelParameters
       ? JSON.stringify(span.llm.modelParameters)
       : null,
@@ -98,10 +98,10 @@ function rowToSpan(row: typeof spans.$inferSelect): Span {
       row.llmCostCompletion != null && {
         cost: { prompt: row.llmCostPrompt, completion: row.llmCostCompletion },
       }),
-    ...(row.llmMessages && {
-      messages: parseJson<SpanMessage[]>(row.llmMessages),
+    ...(row.llmInput && {
+      input: parseJson<NonNullable<LLMSpanDetails["input"]>>(row.llmInput),
     }),
-    ...(row.llmOutput && { output: row.llmOutput }),
+    ...(row.llmOutput != null && { output: parseJson(row.llmOutput) }),
     ...(row.llmParameters && {
       modelParameters: parseJson<Record<string, unknown>>(row.llmParameters),
     }),

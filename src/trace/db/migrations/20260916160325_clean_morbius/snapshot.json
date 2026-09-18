@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "025af179-5059-4ca8-9f56-435c38be2ffb",
+  "id": "cc9d01ee-ab64-4f06-8b9c-f9faa9557b91",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -254,7 +254,7 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "llm_messages",
+      "name": "llm_input",
       "entityType": "columns",
       "table": "spans"
     },

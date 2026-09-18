@@ -113,7 +113,7 @@ describe("newMessagesByTurn", () => {
         kind: "LLM",
         startTime: 0,
         llm: {
-          messages: [
+          input: [
             { role: "system", content: "be helpful" },
             { role: "user", content: "hi" },
           ],
@@ -123,7 +123,7 @@ describe("newMessagesByTurn", () => {
         kind: "LLM",
         startTime: 1,
         llm: {
-          messages: [
+          input: [
             { role: "system", content: "be helpful" },
             { role: "user", content: "hi" },
             { role: "assistant", content: "hello!" },
@@ -150,7 +150,7 @@ describe("newMessagesByTurn", () => {
         kind: "LLM",
         startTime: 0,
         llm: {
-          messages: [{ role: "user", content: "first question" }],
+          input: [{ role: "user", content: "first question" }],
           output: "first answer",
         },
       }),
@@ -158,7 +158,7 @@ describe("newMessagesByTurn", () => {
         kind: "LLM",
         startTime: 1,
         llm: {
-          messages: [
+          input: [
             { role: "user", content: "first question" },
             { role: "assistant", content: "first answer" },
             { role: "user", content: "second question" },

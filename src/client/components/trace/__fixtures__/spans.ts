@@ -28,7 +28,7 @@ export const otelSpan: Span = {
   llm: {
     provider: "openai",
     model: "gpt-4o",
-    messages: [{ role: "user", content: "hi" }],
+    input: [{ role: "user", content: "hi" }],
     output: "hello",
     promptTokens: 3,
     completionTokens: 5,
@@ -53,7 +53,7 @@ export const nativeSpan: Span = {
   llm: {
     provider: "anthropic",
     model: "claude-opus-5",
-    messages: [{ role: "user", content: "hi" }],
+    input: [{ role: "user", content: "hi" }],
     output: "hello",
     promptTokens: 4,
     completionTokens: 6,
@@ -74,7 +74,7 @@ export const otlpSpan: Span = {
   llm: {
     provider: "google",
     model: "gemini-3",
-    messages: [
+    input: [
       {
         role: "user",
         content: [

@@ -6,8 +6,8 @@ import type { Page } from "@playwright/test";
 import { InterpolationHarness } from "./InterpolationHarness";
 
 async function mockApiRoutes(page: Page) {
-  await page.route("**/models", route =>
-    route.fulfill({ json: { models: [] } }),
+  await page.route("**/model-definition", route =>
+    route.fulfill({ json: null }),
   );
   await page.route("**/model-parameters", route => route.fulfill({ json: [] }));
   await page.route("**/update", async route => {
@@ -17,6 +17,7 @@ async function mockApiRoutes(page: Page) {
         id: "test",
         name: "test",
         functionParameters: [],
+        style: "chat",
         modelEditable: true,
         system: body.system ?? { kind: "primitive", value: "" },
         systemEditable: true,
@@ -78,7 +79,7 @@ test("backticks survive further edits after the span (round-trips through fromHT
   await expect(editor).toContainText("`code` more");
 });
 
-test("a function-call message content renders as a single interpolation token instead of blank", async ({
+test("a function-call message content is shown read-only instead of blank", async ({
   mount,
   page,
 }) => {
@@ -95,11 +96,12 @@ test("a function-call message content renders as a single interpolation token in
       }}
     />,
   );
-  const editor = component.locator(".token-editor").nth(1);
-
-  await expect(editor.locator(".te-token")).toHaveText(
-    '${buildOdinPrompt("taskId", "taskInfo")}',
-  );
+  // A call with no known binding can't be written back, so it isn't offered
+  // for editing — but its source is still shown.
+  await expect(component.locator(".token-editor")).toHaveCount(1);
+  await expect(
+    component.locator('[data-message-index="0"] [data-readonly="true"]'),
+  ).toHaveText('buildOdinPrompt("taskId", "taskInfo")');
 });
 
 test("an object message content also renders as a single interpolation token", async ({

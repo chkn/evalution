@@ -2,24 +2,31 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import fs from "node:fs";
-import type { PropDefinition, PropValue } from "ts-proppy";
+import type {
+  PropDefinition,
+  PropType,
+  PropValue,
+  ValueCatalog,
+} from "ts-proppy";
 import {
   extractPropertiesFromDeclaration,
   findTypeDeclaration,
   valueToSourceText,
 } from "ts-proppy";
 import ts from "typescript";
-import { isEditable } from "../shared/helpers.ts";
 import type {
-  ModelInfo,
-  ModelPropValue,
+  ProbeResults,
+  TypeProbe,
+} from "../prompt/file/prompt-file-type.ts";
+import type {
+  NormalizedChatPrompt,
   NormalizedMessage,
   NormalizedParameter,
-  NormalizedPrompt,
   NormalizedPromptUpdates,
   ParsedPrompt,
 } from "../shared/types.ts";
 import {
+  assertUpdateStyle,
   findPackageDts,
   isMissingPackage,
   missingPackageMessage,
@@ -38,6 +45,7 @@ const AGENT_KEY = "agent";
 const SYSTEM_KEY = "system_instruction";
 const INPUT_KEY = "input";
 const GENERATION_CONFIG_KEY = "generation_config";
+const AGENT_CONFIG_KEY = "agent_config";
 
 // Fallback parameter definitions for GenerationConfig from @google/genai@1.50.0
 // (GenerationConfig_2 in dist/genai.d.ts — the Interactions-API variant).
@@ -75,7 +83,11 @@ const FALLBACK_GENERATION_CONFIG_PARAMS: PropDefinition[] = [
     type: {
       kind: "array",
       syntax: "string[]",
-      elementType: { kind: "primitive", syntax: "string" },
+      element: {
+        name: "",
+        type: { kind: "primitive", syntax: "string" },
+        optional: false,
+      },
     },
     optional: true,
   },
@@ -109,47 +121,111 @@ const FALLBACK_GENERATION_CONFIG_PARAMS: PropDefinition[] = [
   },
 ];
 
+/** A model or agent ID with its display name. */
+interface CuratedID {
+  label: string;
+  id: string;
+}
+
 /**
- * Build a {@link ModelInfo} entry from the key it sets, a label, and an ID.
- *
- * `interactions.create` is driven by either a `model:` or an `agent:` ID, so
- * each catalog entry carries the key it writes alongside the ID itself —
- * {@link GeminiInteractionsSDK.denormalizeUpdates} reads that key back out to
- * decide which property to set on the config.
+ * The models `interactions.create` accepts — a subset of the full Gemini
+ * lineup. See https://ai.google.dev/gemini-api/docs/interactions
  */
-function catalogEntry(
-  key: typeof MODEL_KEY | typeof AGENT_KEY,
-  label: string,
-  id: string,
-): ModelInfo {
+const CURATED_MODELS: readonly CuratedID[] = [
+  { label: "Gemini 3.7 Flash", id: "gemini-3.7-flash" },
+  { label: "Gemini 3.6 Flash", id: "gemini-3.6-flash" },
+  { label: "Gemini 3.5 Flash", id: "gemini-3.5-flash" },
+  { label: "Gemini 3.5 Flash-Lite", id: "gemini-3.5-flash-lite" },
+  { label: "Gemini 3.1 Pro Preview", id: "gemini-3.1-pro-preview" },
+  { label: "Gemini 3.1 Flash-Lite", id: "gemini-3.1-flash-lite" },
+  { label: "Gemini 3 Flash Preview", id: "gemini-3-flash-preview" },
+  { label: "Gemini 2.5 Pro", id: "gemini-2.5-pro" },
+  { label: "Gemini 2.5 Flash", id: "gemini-2.5-flash" },
+  { label: "Gemini 2.5 Flash-Lite", id: "gemini-2.5-flash-lite" },
+];
+
+/** The agents `interactions.create` accepts. */
+const CURATED_AGENTS: readonly CuratedID[] = [
+  { label: "Deep Research Preview", id: "deep-research-preview-04-2026" },
+  {
+    label: "Deep Research Max Preview",
+    id: "deep-research-max-preview-04-2026",
+  },
+];
+
+/** Which of the two request shapes a config is. */
+type Variant = typeof MODEL_KEY | typeof AGENT_KEY;
+
+/** Each variant's own settings, which are invalid under the other. */
+const VARIANT_CONFIG_KEY: Record<Variant, string> = {
+  model: GENERATION_CONFIG_KEY,
+  agent: AGENT_CONFIG_KEY,
+};
+
+const STRING: PropType = {
+  kind: "primitive",
+  syntax: "string",
+  base: "string",
+};
+
+/** One variant's fragment of the config, `{ model: … }` or `{ agent: … }`. */
+function variantType(key: Variant, idType: PropType = STRING): PropType {
   return {
-    id,
-    label,
-    group: "Google",
-    values: {
-      [key]: {
-        kind: "object",
-        properties: {
-          key: { kind: "primitive", value: key },
-          value: { kind: "primitive", value: id },
-        },
-        displayValue: id,
-      },
-    },
+    kind: "object",
+    syntax: `{ ${key}: ${key === MODEL_KEY ? "Model" : "AgentOption"} }`,
+    properties: [{ name: key, type: idType, optional: false }],
   };
 }
 
-/** Build a custom-value template entry for `groups.Google.customValueTemplates`. */
-function customValueTemplate(
-  key: typeof MODEL_KEY | typeof AGENT_KEY,
-): ModelPropValue {
+/** The model slot's type when it couldn't be resolved. */
+const FALLBACK_MODEL_TYPE: PropType = {
+  kind: "union",
+  syntax: "{ model: Model } | { agent: AgentOption }",
+  types: [variantType(MODEL_KEY), variantType(AGENT_KEY)],
+};
+
+/** Probe name for the model slot's type, as reported in project results. */
+const MODEL_PROBE = "model";
+
+/**
+ * The model slot as a union of two config fragments: each variant's own ID
+ * key, read off the SDK's own request types.
+ */
+const MODEL_PROJECT_PROBES: TypeProbe[] = [
+  {
+    kind: "type",
+    name: MODEL_PROBE,
+    expression:
+      'Pick<import("@google/genai").Interactions.CreateModelInteraction, "model"> | ' +
+      'Pick<import("@google/genai").Interactions.CreateAgentInteraction, "agent">',
+    syntax: "{ model: Model } | { agent: AgentOption }",
+  },
+];
+
+/** The variant member of a resolved model type, by the key it carries. */
+function memberFor(type: PropType, key: Variant): PropType {
+  const members = type.kind === "union" ? type.types : [type];
+  return (
+    members.find(
+      m => m.kind === "object" && m.properties.some(p => p.name === key),
+    ) ?? variantType(key)
+  );
+}
+
+function fragment(key: Variant, id: string): PropValue {
   return {
     kind: "object",
-    properties: {
-      key: { kind: "primitive", value: key },
-      value: { kind: "primitive", value: "$input" },
-    },
+    properties: { [key]: { kind: "primitive", value: id } },
+    displayValue: id,
   };
+}
+
+/** Which variant a model fragment is, if it is one. */
+function variantOf(value: PropValue | null | undefined): Variant | undefined {
+  if (value?.kind !== "object") return undefined;
+  if (MODEL_KEY in value.properties) return MODEL_KEY;
+  if (AGENT_KEY in value.properties) return AGENT_KEY;
+  return undefined;
 }
 
 /**
@@ -160,69 +236,57 @@ function customValueTemplate(
 export class GeminiInteractionsSDK implements SDKAdapter {
   readonly promptsHelperImport = "FIXME";
 
-  getModelCatalog() {
-    return Promise.resolve({
-      modelValueTypes: {
-        model: { label: "Models", description: "Models" },
-        agent: { label: "Agents", description: "Agents" },
-      },
-      groups: {
-        Google: {
-          customValueTemplates: {
-            model: customValueTemplate(MODEL_KEY),
-            agent: customValueTemplate(AGENT_KEY),
-          },
-        },
-      },
-      // Only the models and agents `interactions.create` actually accepts —
-      // a subset of the full Gemini lineup. See
-      // https://ai.google.dev/gemini-api/docs/interactions
-      models: [
-        catalogEntry(MODEL_KEY, "Gemini 3.7 Flash", "gemini-3.7-flash"),
-        catalogEntry(MODEL_KEY, "Gemini 3.6 Flash", "gemini-3.6-flash"),
-        catalogEntry(MODEL_KEY, "Gemini 3.5 Flash", "gemini-3.5-flash"),
-        catalogEntry(
-          MODEL_KEY,
-          "Gemini 3.5 Flash-Lite",
-          "gemini-3.5-flash-lite",
-        ),
-        catalogEntry(
-          MODEL_KEY,
-          "Gemini 3.1 Pro Preview",
-          "gemini-3.1-pro-preview",
-        ),
-        catalogEntry(
-          MODEL_KEY,
-          "Gemini 3.1 Flash-Lite",
-          "gemini-3.1-flash-lite",
-        ),
-        catalogEntry(
-          MODEL_KEY,
-          "Gemini 3 Flash Preview",
-          "gemini-3-flash-preview",
-        ),
-        catalogEntry(MODEL_KEY, "Gemini 2.5 Pro", "gemini-2.5-pro"),
-        catalogEntry(MODEL_KEY, "Gemini 2.5 Flash", "gemini-2.5-flash"),
-        catalogEntry(
-          MODEL_KEY,
-          "Gemini 2.5 Flash-Lite",
-          "gemini-2.5-flash-lite",
-        ),
-
-        catalogEntry(
-          AGENT_KEY,
-          "Deep Research Preview",
-          "deep-research-preview-04-2026",
-        ),
-        catalogEntry(
-          AGENT_KEY,
-          "Deep Research Max Preview",
-          "deep-research-max-preview-04-2026",
-        ),
-      ],
-    });
+  getProjectProbes(language: string): TypeProbe[] {
+    return language === "typescript" ? MODEL_PROJECT_PROBES : [];
   }
 
+  /**
+   * One model row whose value is an honest config fragment —
+   * `{ model: "gemini-3.5-flash" }` or `{ agent: "deep-research-…" }` —
+   * because `interactions.create` takes one or the other, never both. The
+   * **Models** and **Agents** catalogs each narrow their free-form entry to
+   * their own variant.
+   */
+  async getModelDefinition(project: ProbeResults): Promise<PropDefinition> {
+    const resolved = project[MODEL_PROBE];
+    const type =
+      resolved && !Array.isArray(resolved)
+        ? resolved.type
+        : FALLBACK_MODEL_TYPE;
+    const catalog = (
+      key: Variant,
+      label: string,
+      ids: readonly CuratedID[],
+    ): ValueCatalog => ({
+      label,
+      groups: [
+        {
+          label: "Google",
+          icon: "Google",
+          presets: ids.map(({ label, id }) => ({
+            label,
+            value: fragment(key, id),
+          })),
+        },
+      ],
+      literal: { name: "model", type: memberFor(type, key), optional: false },
+    });
+    return {
+      name: "model",
+      type,
+      optional: false,
+      catalogs: [
+        catalog(MODEL_KEY, "Models", CURATED_MODELS),
+        catalog(AGENT_KEY, "Agents", CURATED_AGENTS),
+      ],
+    };
+  }
+
+  // FIXME: These are always `GenerationConfig_2`'s fields, which only apply to
+  // the model variant. For an agent, `normalizePrompt` reads settings from the
+  // prompt's own `agent_config` and `denormalizeUpdates` writes them there, but
+  // "Add setting" still offers generation config fields. This API has no way
+  // to know the variant; it would need the prompt (or both variants' fields).
   getModelParameters(rootDir: string): PropDefinition[] {
     try {
       const dtsPath = findPackageDts(
@@ -267,52 +331,42 @@ export class GeminiInteractionsSDK implements SDKAdapter {
     return undefined;
   }
 
-  normalizePrompt(prompt: ParsedPrompt): NormalizedPrompt {
+  normalizePrompt(prompt: ParsedPrompt): NormalizedChatPrompt {
     const { definitions, values } = prompt.extractedProps;
     const systemValue = values?.[SYSTEM_KEY];
     const inputValue = values?.[INPUT_KEY];
     const modelValue = values?.[MODEL_KEY];
     const agentValue = values?.[AGENT_KEY];
 
-    let model: PropValue | undefined;
-    let modelEditable = false;
-    if (modelValue) {
-      model = {
-        kind: "object",
-        properties: {
-          key: { kind: "primitive", value: "model" },
-          value: modelValue,
-        },
-        displayValue: valueToSourceText(modelValue),
-      };
-      modelEditable = isEditable(modelValue);
-    } else if (agentValue) {
-      model = {
-        kind: "object",
-        properties: {
-          key: { kind: "primitive", value: "agent" },
-          value: agentValue,
-        },
-        displayValue: valueToSourceText(agentValue),
-      };
-      modelEditable = isEditable(agentValue);
-    }
+    // The model row is the fragment of the config that picks the variant.
+    const variant: Variant = !modelValue && agentValue ? AGENT_KEY : MODEL_KEY;
+    const idValue = variant === MODEL_KEY ? modelValue : agentValue;
+    const model: PropValue | undefined = idValue && {
+      kind: "object",
+      properties: { [variant]: idValue },
+      displayValue:
+        idValue.kind === "primitive"
+          ? String(idValue.value)
+          : valueToSourceText(idValue),
+    };
 
-    const genConfigDef = definitions.find(
-      d => d.name === GENERATION_CONFIG_KEY,
-    );
-    const genConfigValue = values?.[GENERATION_CONFIG_KEY];
-    const genConfigProps =
-      genConfigValue?.kind === "object" ? genConfigValue.properties : {};
-    const genConfigSubDefs: PropDefinition[] =
-      genConfigDef?.type.kind === "object" ? genConfigDef.type.properties : [];
+    // Settings come from the variant in effect: `generation_config` for a
+    // model, `agent_config` for an agent.
+    const configKey = VARIANT_CONFIG_KEY[variant];
+    const configDef = definitions.find(d => d.name === configKey);
+    const configValue = values?.[configKey];
+    const configProps =
+      configValue?.kind === "object" ? configValue.properties : {};
+    const configSubDefs: PropDefinition[] =
+      configDef?.type.kind === "object" ? configDef.type.properties : [];
 
-    const modelParameters: NormalizedParameter[] = genConfigSubDefs.map(def => {
-      const value = genConfigProps[def.name];
-      return { def, value, editable: value ? isEditable(value) : true };
-    });
+    const modelParameters: NormalizedParameter[] = configSubDefs.map(def => ({
+      def,
+      value: configProps[def.name],
+    }));
 
     return {
+      style: "chat",
       id: prompt.id,
       providerId: prompt.providerId,
       name: prompt.name,
@@ -320,11 +374,12 @@ export class GeminiInteractionsSDK implements SDKAdapter {
       metadata: prompt.metadata,
       treePath: prompt.treePath,
       model,
-      modelEditable,
+      // Capabilities of `interactions.create`, not verdicts on these values.
+      modelEditable: true,
       system: systemValue,
-      systemEditable: systemValue ? isEditable(systemValue) : true,
+      systemEditable: true,
       messages: extractMessages(inputValue),
-      messagesEditable: inputValue ? isEditable(inputValue) : true,
+      messagesEditable: true,
       modelParameters,
     };
   }
@@ -332,22 +387,36 @@ export class GeminiInteractionsSDK implements SDKAdapter {
   denormalizeUpdates(
     updates: NormalizedPromptUpdates,
     currentValues?: Record<string, PropValue>,
-  ): Record<string, ModelPropValue | null> {
-    const out: Record<string, ModelPropValue | null> = {};
-    if ("model" in updates) {
-      // Only null-out keys that actually exist in the file to avoid
-      // "Property not found" errors from updatePromptProperties
-      if (currentValues && MODEL_KEY in currentValues) out[MODEL_KEY] = null;
-      if (currentValues && AGENT_KEY in currentValues) out[AGENT_KEY] = null;
+  ): Record<string, PropValue | null> {
+    assertUpdateStyle(updates, "chat");
+    const out: Record<string, PropValue | null> = {};
+    // Only null-out keys that actually exist in the file, to avoid "Property
+    // not found" errors from updatePromptProperties.
+    const remove = (key: string) => {
+      if (currentValues && key in currentValues) out[key] = null;
+    };
+    const currentVariant: Variant | undefined =
+      currentValues && MODEL_KEY in currentValues
+        ? MODEL_KEY
+        : currentValues && AGENT_KEY in currentValues
+          ? AGENT_KEY
+          : undefined;
+    let variant = currentVariant ?? MODEL_KEY;
 
-      const modelUpdate = updates.model;
-      if (
-        modelUpdate?.kind === "object" &&
-        modelUpdate.properties.key?.kind === "primitive"
-      ) {
-        const key = String(modelUpdate.properties.key.value);
-        const value = modelUpdate.properties.value;
-        out[key] = value;
+    if ("model" in updates) {
+      const next = variantOf(updates.model);
+      if (!next) {
+        remove(MODEL_KEY);
+        remove(AGENT_KEY);
+      } else if (updates.model?.kind === "object") {
+        const other: Variant = next === MODEL_KEY ? AGENT_KEY : MODEL_KEY;
+        out[next] = updates.model.properties[next];
+        remove(other);
+        // The other variant's settings are invalid under this one.
+        if (currentVariant && currentVariant !== next) {
+          remove(VARIANT_CONFIG_KEY[other]);
+        }
+        variant = next;
       }
     }
     if ("system" in updates) out[SYSTEM_KEY] = updates.system ?? null;
@@ -356,17 +425,20 @@ export class GeminiInteractionsSDK implements SDKAdapter {
         updates.messages == null ? null : messagesToValue(updates.messages);
     }
     if (updates.modelParameters) {
-      const current = currentValues?.[GENERATION_CONFIG_KEY];
+      const configKey = VARIANT_CONFIG_KEY[variant];
+      const current =
+        variant === currentVariant ? currentValues?.[configKey] : undefined;
       const merged: Record<string, PropValue> =
         current?.kind === "object" ? { ...current.properties } : {};
       for (const [name, value] of Object.entries(updates.modelParameters)) {
         if (value === null) delete merged[name];
         else merged[name] = value;
       }
-      out[GENERATION_CONFIG_KEY] =
-        Object.keys(merged).length > 0
-          ? { kind: "object", properties: merged }
-          : null;
+      if (Object.keys(merged).length > 0) {
+        out[configKey] = { kind: "object", properties: merged };
+      } else {
+        remove(configKey);
+      }
     }
     return out;
   }

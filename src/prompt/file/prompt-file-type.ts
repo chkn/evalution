@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { PropDefinition } from "ts-proppy";
+import type { PropDefinition, ValueFactory } from "ts-proppy";
 import type {
-  ModelPropValue,
   NormalizedPrompt,
   ParsedPrompt,
+  PropValue,
 } from "../../shared/types.ts";
 import type { TSPromptFileType } from "./ts/ts-prompt-file-type.ts";
 
@@ -32,9 +32,9 @@ export interface ParsedFilePrompt extends ParsedPrompt {
  * {@link FilePromptMetadata}. This is the public-facing prompt type returned
  * by {@link FilePromptProvider}.
  */
-export interface NormalizedFilePrompt extends NormalizedPrompt {
+export type NormalizedFilePrompt = NormalizedPrompt & {
   metadata: FilePromptMetadata;
-}
+};
 
 /** Options accepted by {@link PromptFileType.parsePrompts}. */
 export interface ParsePromptsOptions {
@@ -51,32 +51,37 @@ export interface ParsePromptsOptions {
 }
 
 /**
- * A type expression for a {@link PromptFileType} to evaluate on an
+ * A type question for a {@link PromptFileType} to answer on an
  * {@link SDKAdapter}'s behalf.
  *
  * Neither side can answer alone. Knowing that a Vercel AI SDK config's tools
  * imply a `toolsContext` is SDK semantics; *evaluating* that mapping is a
- * TypeScript capability. So the adapter contributes the expression and the
- * file type contributes the checker.
+ * TypeScript capability. So the adapter says what to look for and the file
+ * type contributes the checker.
  */
-export interface TypeProbe {
+export type TypeProbe = TypeExpressionProbe | FactoriesProbe;
+
+/** A probe that resolves a type expression to a {@link PropDefinition}. */
+export interface TypeExpressionProbe {
+  kind: "type";
   /**
-   * Name of the execute parameter this probe describes — the key the resolved
-   * {@link PropDefinition} is emitted under.
+   * The name the result is reported under — for an execute parameter, its
+   * name, and the name of the resolved {@link PropDefinition}.
    */
   name: string;
   /**
    * Source text of a type expression, in the file type's
-   * {@link PromptFileType.language}, that resolves to the parameter's type.
+   * {@link PromptFileType.language}, that resolves to the type.
    *
-   * The token `$config` stands for the type of whatever the prompt returns,
-   * and the file type substitutes a way to name it — which shape a prompt file
-   * uses is the file type's knowledge, not the adapter's.
+   * In a prompt probe, the token `$config` stands for the type of whatever the
+   * prompt returns, and the file type substitutes a way to name it — which
+   * shape a prompt file uses is the file type's knowledge, not the adapter's.
+   * A project probe has no prompt, so `$config` resolves to `never` there.
    *
    * Write it defensively: a probe that cannot find what it is looking for
-   * should resolve to `never` (which means "this prompt has no such
-   * requirement"), never fail to compile. That is what lets an adapter emit a
-   * probe without first inspecting the parse result.
+   * should resolve to `never` (which means "there is no such thing"), never
+   * fail to compile. That is what lets an adapter emit a probe without first
+   * inspecting the parse result.
    *
    * For instance, the Vercel AI SDK derives its `toolsContext` from whichever
    * of a config's tools declare a `contextSchema`, with the `never` branch
@@ -93,8 +98,55 @@ export interface TypeProbe {
    * useless as a label. The resolved *shape* is unaffected.
    */
   syntax?: string;
-  /** Documentation shown beside the parameter in the UI. */
+  /** Documentation shown beside the resolved definition in the UI. */
   description?: string;
+}
+
+/**
+ * A probe that resolves to the {@link ValueFactory}s among some modules'
+ * exports: every export that can be called to produce a value assignable to
+ * {@link produces}.
+ *
+ * The adapter says *what* to look for; the file type knows *how* to ask in its
+ * language. A module that isn't installed contributes nothing rather than
+ * failing the probe.
+ */
+export interface FactoriesProbe {
+  kind: "factories";
+  /** The name the result is reported under. */
+  name: string;
+  /** Module specifiers whose exports to consider, e.g. `"@ai-sdk/openai"`. */
+  modules: string[];
+  /**
+   * A type expression, in the file type's language, naming what a factory's
+   * call must produce, e.g. `import("ai").LanguageModel`.
+   */
+  produces: string;
+}
+
+/**
+ * What one probe resolved to: a {@link PropDefinition} for a `type` probe or
+ * the {@link ValueFactory}s found by a `factories` probe; `null` for a definite
+ * "no such thing" (the expression evaluated to `never`); or `undefined` for
+ * "could not be evaluated".
+ */
+export type ProbeResult = PropDefinition | ValueFactory[] | null | undefined;
+
+/**
+ * Project probe results, keyed by probe name. See
+ * {@link SDKAdapter.getProjectProbes}.
+ */
+export type ProbeResults = Record<string, ProbeResult>;
+
+/** The project-scoped half of a {@link TypeResolutionRequest}. */
+export interface ProjectProbeRequest {
+  /**
+   * The project root. Probes are evaluated in a virtual module there, so they
+   * see the project's own module resolution — the *installed* SDK versions.
+   */
+  rootDir: string;
+  /** The probes to evaluate. */
+  probes: readonly TypeProbe[];
 }
 
 /** A {@link TypeProbe} together with the prompt it is being asked about. */
@@ -145,6 +197,12 @@ export interface SlotMatchRequest {
 export interface TypeResolutionRequest {
   /** Probes to evaluate. See {@link PromptFileType.resolveTypeProbes}. */
   probes?: readonly TypeProbeRequest[];
+  /**
+   * Probes about the project rather than any one prompt, evaluated once. A
+   * file type may cache their results for as long as the modules they
+   * reference are unchanged.
+   */
+  project?: ProjectProbeRequest;
   /** Slot matches to decide. See {@link PromptFileType.resolveSlotMatches}. */
   slotMatches?: readonly SlotMatchRequest[];
 }
@@ -152,7 +210,12 @@ export interface TypeResolutionRequest {
 /** Answers to a {@link TypeResolutionRequest}, positional within each list. */
 export interface TypeResolutionResult {
   /** One per probe request, with the same meaning as {@link PromptFileType.resolveTypeProbes}. */
-  probes: (PropDefinition | null | undefined)[];
+  probes: ProbeResult[];
+  /**
+   * The project probes' results, by probe name. Every requested probe has an
+   * entry, `undefined` when it could not be evaluated.
+   */
+  project?: ProbeResults;
   /** One per slot match request, with the same meaning as {@link PromptFileType.resolveSlotMatches}. */
   slotMatches: Record<string, string[]>[];
 }
@@ -225,7 +288,7 @@ export interface PromptFileType {
   updateProperty(
     filePath: string,
     propDef: PropDefinition,
-    value: ModelPropValue,
+    value: PropValue,
     promptId?: string,
   ): Promise<void>;
 
@@ -247,7 +310,7 @@ export interface PromptFileType {
     filePath: string,
     promptName: string,
     propertyName: string,
-    value: ModelPropValue,
+    value: PropValue,
   ): Promise<void>;
 
   /**
@@ -279,7 +342,8 @@ export interface PromptFileType {
    * three-valued, because "there is no such requirement" and "I could not tell
    * you" are different answers and callers must treat them differently:
    *
-   * - a {@link PropDefinition} — resolved to a type;
+   * - a {@link PropDefinition} (a `type` probe) or a list of
+   *   {@link ValueFactory}s (a `factories` probe) — resolved;
    * - `null` — resolved, and this prompt has no such requirement (the
    *   expression evaluated to `never`);
    * - `undefined` — could not be evaluated.
@@ -297,7 +361,7 @@ export interface PromptFileType {
    */
   resolveTypeProbes?(
     requests: readonly TypeProbeRequest[],
-  ): Promise<(PropDefinition | null | undefined)[]>;
+  ): Promise<ProbeResult[]>;
 
   /**
    * Decides, for each request, which of its sources can supply which of the

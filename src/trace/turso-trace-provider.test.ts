@@ -103,6 +103,37 @@ describe("TursoTraceProvider row round-tripping", () => {
     await client?.close();
   });
 
+  it.each([
+    ["text", "It's a cat."],
+    ["text that looks like JSON", '{"not":"parsed"}'],
+    ["an object", { team: { type: "choice", choice: "billing" } }],
+    ["an array", [1, "two", { three: 3 }]],
+    ["a number", 0.93],
+  ])("round-trips %s as the output", async (_, output) => {
+    client = await makeMigratedClient();
+    const provider = new TursoTraceProvider({ client });
+    const span = {
+      id: "t1:root",
+      traceId: "t1",
+      name: "root",
+      kind: "LLM" as const,
+      startTime: 1,
+    };
+    await provider.recordSpanStart(span);
+    await provider.recordSpanEnd({
+      ...span,
+      endTime: 2,
+      status: "ok",
+      llm: { input: { state: "hi", questions: {} }, output },
+    });
+
+    const loaded = await provider.getTrace("t1");
+    expect(loaded?.spans[0].llm).toEqual({
+      input: { state: "hi", questions: {} },
+      output,
+    });
+  });
+
   it("round-trips LLM details, tool details, prompt reference, and multi-part content", async () => {
     client = await makeMigratedClient();
     const provider = new TursoTraceProvider({ client });
@@ -129,7 +160,7 @@ describe("TursoTraceProvider row round-tripping", () => {
         completionTokens: 7,
         totalTokens: 12,
         cost: { prompt: 0.004, completion: 0.006 },
-        messages: [
+        input: [
           {
             role: "user",
             content: [
@@ -177,7 +208,7 @@ describe("TursoTraceProvider row round-tripping", () => {
       completionTokens: 7,
       totalTokens: 12,
       cost: { prompt: 0.004, completion: 0.006 },
-      messages: [
+      input: [
         {
           role: "user",
           content: [

@@ -100,6 +100,13 @@
   /* Delete button */
   --delete-hover-bg: #fef2f2;
   --delete-hover-text: #ef4444;
+
+  /* ts-proppy's built-in remove buttons (record/array/tuple editors) —
+     transparent by default like our own .pg-delete-msg, red foreground. */
+  --proppy-danger-bg: transparent;
+  --proppy-danger-border: transparent;
+  --proppy-danger-color: var(--delete-hover-text);
+  --proppy-text-secondary: var(--panel-text-secondary);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -208,9 +215,9 @@
     --proppy-text-primary: #f8f8fa;
     --proppy-text-muted: #6e7280;
     --proppy-text-secondary: #9aa3b8;
-    --proppy-danger-bg: rgba(220, 38, 38, 0.12);
-    --proppy-danger-border: rgba(220, 38, 38, 0.3);
-    --proppy-danger-color: #f87171;
+    --proppy-danger-bg: transparent;
+    --proppy-danger-border: transparent;
+    --proppy-danger-color: var(--delete-hover-text);
   }
 }
 
@@ -1386,7 +1393,7 @@ pre {
   box-sizing: border-box;
   border: 1px solid var(--exec-border);
   border-radius: 6px;
-  background: var(--panel-card-bg);
+  background: none;
   color: var(--panel-text-secondary);
   font: inherit;
   appearance: none;
@@ -1394,11 +1401,13 @@ pre {
   cursor: pointer;
   transition:
     border-color 0.1s,
-    box-shadow 0.1s;
+    box-shadow 0.1s,
+    background 0.1s;
 }
 
 .pg-slot-source-wrap:hover {
   color: var(--panel-text);
+  background: var(--tree-hover);
 }
 
 .pg-slot-source-wrap:focus-visible {
@@ -1409,6 +1418,7 @@ pre {
 
 .pg-slot-source-icon {
   font-size: 13px;
+  font-weight: 700;
   line-height: 1;
   pointer-events: none;
 }
@@ -1762,15 +1772,15 @@ pre {
   overflow: hidden;
 }
 
-/* Model picker */
-.pg-model-picker {
+/* Model picker: ts-proppy's catalog editor, styled by class (see ModelRow) */
+.pg-model-row {
   position: relative;
-  padding: 0;
   flex: 1;
   min-width: 200px;
 }
 
-.pg-model-picker-trigger {
+.pg-catalog .proppy-catalog-trigger,
+.pg-model-row-pending {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1778,36 +1788,52 @@ pre {
   height: 30px;
   box-sizing: border-box;
   padding: 0 9px;
-  border: 1px solid var(--prompt-header-border);
+  border: 1px solid var(--pill-border);
   border-radius: 7px;
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--pill-bg);
   cursor: pointer;
   font-family: inherit;
   text-align: left;
   transition: background 0.1s;
 }
 
-.pg-model-picker-trigger:hover {
-  background: rgba(0, 0, 0, 0.08);
+.pg-model-row-pending {
+  flex: 1;
+  min-width: 200px;
+  cursor: default;
 }
 
-@media (prefers-color-scheme: dark) {
-  .pg-model-picker-trigger {
-    background: rgba(255, 255, 255, 0.05);
-  }
-  .pg-model-picker-trigger:hover {
-    background: rgba(255, 255, 255, 0.09);
-  }
+.pg-catalog .proppy-catalog-trigger:hover:not(:disabled),
+.pg-catalog .proppy-catalog-trigger[aria-expanded="true"] {
+  background: var(--pill-hover-bg);
 }
 
-.pg-model-picker-label {
+.pg-catalog .proppy-catalog-trigger:disabled {
+  cursor: default;
+}
+
+.pg-catalog .proppy-catalog-label,
+.pg-model-row-pending .proppy-catalog-label {
   font-size: 13px;
   font-weight: 500;
   color: var(--prompt-header-text);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.pg-model-picker-source {
+.pg-catalog .proppy-catalog-label.placeholder,
+.pg-model-row-pending .proppy-catalog-label.placeholder {
+  color: var(--panel-text-secondary);
+  font-weight: 400;
+}
+
+.pg-catalog .proppy-catalog-label-annotation {
+  color: var(--panel-text-secondary);
+  font-weight: 400;
+}
+
+.pg-catalog .proppy-catalog-source {
   font-size: 11px;
   color: var(--panel-text-secondary);
   white-space: nowrap;
@@ -1817,24 +1843,28 @@ pre {
   flex: 1;
 }
 
-.pg-model-picker-trigger svg:last-child {
+.pg-catalog .proppy-catalog-chevron {
   margin-left: auto;
   flex-shrink: 0;
+  font-size: 20px;
+  line-height: 1;
+  color: #9ca3af;
+  transform: translateY(-0.1em);
 }
 
-/* Dropdown (rendered as a portal on document.body) */
-.pg-model-picker-dropdown {
+.pg-catalog .proppy-catalog-menu {
   background: var(--dropdown-bg);
   border: 1px solid var(--dropdown-border);
   border-radius: 10px;
   box-shadow: var(--dropdown-shadow);
   max-height: 380px;
+  max-width: min(520px, calc(100vw - 32px));
   overflow-y: auto;
-  padding: 4px 0;
+  padding: 0 0 4px;
 }
 
-/* Mode toggle (segmented control) */
-.pg-mode-toggle {
+/* Catalog toggle (segmented control) */
+.pg-catalog .proppy-catalog-modes {
   display: flex;
   gap: 2px;
   padding: 8px 10px;
@@ -1843,7 +1873,7 @@ pre {
   border-radius: 10px 10px 0 0;
 }
 
-.pg-mode-btn {
+.pg-catalog .proppy-catalog-mode {
   flex: 1;
   padding: 5px 12px;
   border: none;
@@ -1859,25 +1889,25 @@ pre {
     color 0.1s;
 }
 
-.pg-mode-btn:hover {
+.pg-catalog .proppy-catalog-mode:hover {
   background: var(--dropdown-option-hover);
 }
 
-.pg-mode-btn.active {
+.pg-catalog .proppy-catalog-mode.active {
   background: var(--dropdown-mode-active-bg);
   color: white;
 }
 
 /* Provider groups */
-.pg-provider-group {
+.pg-catalog .proppy-catalog-group {
   padding: 4px 0;
 }
 
-.pg-provider-group + .pg-provider-group {
+.pg-catalog .proppy-catalog-group + .proppy-catalog-group {
   border-top: 1px solid var(--dropdown-mode-border);
 }
 
-.pg-provider-group-header {
+.pg-catalog .proppy-catalog-group-header {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1889,9 +1919,13 @@ pre {
   letter-spacing: 0.04em;
 }
 
-/* Model option */
-.pg-model-option {
-  display: flex;
+/* Presets: check, label and source line up in fixed columns across rows, so
+   labels form one column and values form another beside it (rather than
+   each row sizing its label to its own text and pushing the value to a
+   ragged position). */
+.pg-catalog .proppy-catalog-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 180px) 1fr;
   align-items: center;
   gap: 4px;
   width: 100%;
@@ -1906,30 +1940,34 @@ pre {
   transition: background 0.08s;
 }
 
-.pg-model-option:hover {
+.pg-catalog .proppy-catalog-option:hover,
+.pg-catalog .proppy-catalog-custom:hover {
   background: var(--dropdown-option-hover);
 }
 
-.pg-model-option.selected {
+.pg-catalog .proppy-catalog-option.selected {
   background: var(--dropdown-option-selected);
 }
 
-.pg-model-option-check {
+.pg-catalog .proppy-catalog-check {
   width: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   color: var(--dropdown-text);
+  font-size: 12px;
 }
 
-.pg-model-option-label {
+.pg-catalog .proppy-catalog-option-label {
   font-weight: 450;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.pg-model-option-source {
-  flex: 1;
-  text-align: right;
+.pg-catalog .proppy-catalog-option-source {
+  text-align: left;
   font-size: 11px;
   color: var(--dropdown-text-faint);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1938,57 +1976,28 @@ pre {
   text-overflow: ellipsis;
 }
 
-/* Custom model input rows */
-.pg-custom-model-row,
-.pg-custom-gateway-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px 5px 12px;
-}
-
-.pg-custom-gateway-row {
-  border-top: 1px solid var(--dropdown-mode-border);
-  padding-top: 8px;
-  padding-bottom: 8px;
-}
-
-.pg-custom-model-row input,
-.pg-custom-gateway-row input {
-  flex: 1;
-  min-width: 0;
-  padding: 4px 8px;
-  border: 1px solid var(--dropdown-border);
-  border-radius: 5px;
-  font-size: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--dropdown-text);
-  background: var(--dropdown-bg);
-  outline: none;
-}
-
-.pg-custom-model-row input:focus,
-.pg-custom-gateway-row input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(165, 180, 252, 0.25);
-}
-
-.pg-custom-model-use {
-  padding: 4px 10px;
-  border: 1px solid var(--dropdown-border);
-  border-radius: 5px;
-  background: var(--dropdown-bg);
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--dropdown-text-muted);
+/* "Custom openai(…)" row: inserts a call edited below the trigger */
+.pg-catalog .proppy-catalog-custom {
+  display: block;
+  width: 100%;
+  padding: 6px 12px 6px 34px;
+  border: none;
+  background: none;
   cursor: pointer;
-  font-family: inherit;
-  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--dropdown-text-muted);
+  text-align: left;
 }
 
-.pg-custom-model-use:hover {
-  background: var(--dropdown-option-hover);
-  border-color: var(--dropdown-border);
+/* Free-form entry (Gateway model string) */
+.pg-catalog .proppy-catalog-literal {
+  border-top: 1px solid var(--dropdown-mode-border);
+  padding: 8px 12px;
+}
+
+.pg-catalog .proppy-catalog-call {
+  margin-top: 6px;
 }
 
 /* ─── SourcePicker: nested resource menu (specs/resource-hierarchy.md §E) ──── */
@@ -2165,7 +2174,7 @@ pre {
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--panel-text-muted);
+  color: var(--delete-hover-text);
   font-size: 17px;
   line-height: 1;
   padding: 2px 4px;
@@ -2173,9 +2182,17 @@ pre {
   font-family: inherit;
 }
 
-.pg-delete-msg:hover {
-  color: var(--delete-hover-text);
-  background: var(--delete-hover-bg);
+.pg-delete-msg-spacer {
+  visibility: hidden;
+}
+
+/* ts-proppy's RecordEditor left-pads a non-complex entry's value (e.g. a
+   plain text description) by 8px so it reads as nested under its key. That
+   padding has no matching offset on the key input above it, so once a value
+   editor gets a visible bordered box (like .pg-entry-text) the two boxes'
+   left edges no longer line up. Zero it so entries stay left-aligned. */
+[data-proppy-editor="record"] > div > div:last-child {
+  padding-left: 0 !important;
 }
 
 /* Property card (wraps ParameterEditor) */
@@ -2318,6 +2335,13 @@ pre {
     background 0.12s,
     border-color 0.12s;
   white-space: nowrap;
+}
+
+.pg-pill-chevron {
+  font-size: 20px;
+  line-height: 1;
+  color: #9ca3af;
+  transform: translateY(-0.1em);
 }
 
 .pg-pill-btn:hover:not(:disabled) {
@@ -5401,4 +5425,385 @@ pre {
 }
 .copy-box-btn:hover {
   background: rgba(52, 120, 246, 0.12);
+}
+
+/* ─── Questions editor (System One prompts) ──────────────────────────────── */
+
+.pg-state-card + .pg-msg-header {
+  padding-top: 22px;
+}
+
+.pg-question-card {
+  padding-bottom: 14px;
+}
+
+.pg-questions > .pg-question-card:first-child .pg-msg-header {
+  padding-top: 2px;
+}
+
+.pg-questions-editor .pg-card-hint {
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--panel-text-secondary);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--panel-text-secondary);
+  cursor: help;
+}
+
+.pg-question-card .pg-msg-header {
+  gap: 8px;
+}
+
+.pg-question-id {
+  flex: 1;
+  min-width: 80px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--panel-text);
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+}
+
+.pg-question-id:hover,
+.pg-question-id:focus {
+  border-color: var(--panel-card-border);
+}
+
+.pg-question-id[aria-invalid="true"] {
+  border-color: var(--error-border);
+}
+
+.pg-add-question {
+  position: relative;
+}
+
+/* Instructions and criteria: text first, JSON on request */
+.pg-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.pg-entry > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.pg-entry-text.token-editor {
+  padding: 5px 8px;
+  min-height: 24px;
+  border: 1px solid var(--panel-card-border);
+  border-radius: 5px;
+  background: var(--input-bg);
+  box-sizing: border-box;
+}
+
+.pg-entry-text.token-editor:focus {
+  background: var(--input-focus-bg);
+  border-color: var(--panel-text-secondary);
+}
+
+.pg-entry-toggle {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--panel-card-border);
+  border-radius: 5px;
+  background: none;
+  color: var(--panel-text-secondary);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.pg-score-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pg-score-level {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pg-score-level-number {
+  flex-shrink: 0;
+  width: 18px;
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--panel-text-secondary);
+  text-align: right;
+}
+
+.pg-score-level-editor {
+  flex: 1;
+  min-width: 0;
+}
+
+.pg-add-level-btn {
+  align-self: flex-start;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  color: var(--panel-text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.pg-noul-criteria {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pg-noul-outcome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pg-noul-outcome-label {
+  flex-shrink: 0;
+  width: 72px;
+  font-size: 12px;
+  color: var(--panel-text-secondary);
+}
+
+.pg-noul-outcome > :last-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.pg-state-card .pg-entry-text:empty::before {
+  content: "Text, or a parameter…";
+  color: var(--panel-text-secondary);
+  opacity: 0.7;
+}
+
+/* ─── System One answers (trace output) ──────────────────────────────────── */
+/* One sequential hue in two validated ordinal steps: emphasis for the answer,
+   muted for the rest of the distribution. */
+
+.s1-answers {
+  --s1-emphasis: #2a78d6;
+  --s1-muted: #86b6ef;
+  --s1-track: #eef0f3;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: min(360px, 100%);
+}
+
+@media (prefers-color-scheme: dark) {
+  .s1-answers {
+    --s1-emphasis: #5598e7;
+    --s1-muted: #1c5cab;
+    --s1-track: rgba(255, 255, 255, 0.08);
+  }
+}
+
+.s1-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: -10px;
+}
+
+.s1-toggle {
+  padding: 1px 8px;
+  border: 1px solid var(--panel-card-border);
+  border-radius: 5px;
+  background: none;
+  color: var(--panel-text-secondary);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.s1-question {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.s1-question-id {
+  margin: 0;
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--panel-text);
+}
+
+.s1-emphasis {
+  background: var(--s1-emphasis);
+}
+
+.s1-muted {
+  background: var(--s1-muted);
+}
+
+.s1-value,
+.s1-caption,
+.s1-column-value {
+  font-size: 12px;
+  color: var(--panel-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.s1-caption {
+  min-height: 16px;
+}
+
+/* noul: a meter */
+.s1-noul {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.s1-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--s1-track);
+  overflow: hidden;
+}
+
+.s1-fill {
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+}
+
+/* choice: bars from a shared baseline */
+.s1-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.s1-choice-row {
+  display: grid;
+  grid-template-columns: minmax(60px, 30%) 1fr 36px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 4px;
+  outline-offset: 2px;
+}
+
+.s1-choice-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--panel-text-secondary);
+}
+
+.s1-choice-row.chosen .s1-choice-label {
+  color: var(--panel-text);
+  font-weight: 600;
+}
+
+.s1-bar-slot {
+  display: block;
+  height: 12px;
+}
+
+.s1-bar {
+  display: block;
+  height: 12px;
+  min-width: 2px;
+  border-radius: 0 4px 4px 0;
+}
+
+.s1-choice-row .s1-value {
+  text-align: right;
+}
+
+.s1-choice-row:hover .s1-bar,
+.s1-choice-row:focus-visible .s1-bar,
+.s1-column-slot:hover .s1-column,
+.s1-column-slot:focus-visible .s1-column {
+  filter: brightness(1.08);
+}
+
+/* score: level columns, an axis with the expected-score marker, level labels */
+.s1-columns,
+.s1-levels {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 2px;
+}
+
+.s1-columns {
+  height: 56px;
+}
+
+.s1-column-slot {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  border-radius: 4px;
+}
+
+.s1-column {
+  display: block;
+  width: min(24px, 60%);
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+}
+
+.s1-axis {
+  position: relative;
+  height: 1px;
+  background: var(--panel-card-border);
+}
+
+.s1-marker {
+  position: absolute;
+  top: -5px;
+  width: 11px;
+  height: 11px;
+  margin-left: -5.5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--panel-card-bg);
+}
+
+.s1-level {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  padding-top: 4px;
+  text-align: center;
+}
+
+.s1-level-number {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--panel-text-secondary);
+}
+
+.s1-level-description {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--panel-text-secondary);
 }

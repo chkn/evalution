@@ -4,7 +4,6 @@
 import type {
   AddPromptContext,
   ExecutionInput,
-  ModelCatalog,
   NormalizedPrompt,
   NormalizedPromptUpdates,
   PromptChangeEvent,
@@ -19,6 +18,8 @@ import type { PromptFileType } from "./file/prompt-file-type.ts";
 export interface ExecuteOptions {
   /** The ID to use for the trace created by this execution, if any. */
   traceId?: string;
+  /** The ID of this execution's root span. See `ExecuteConfigOptions.rootSpanId`. */
+  rootSpanId?: string;
   /**
    * Named values the SDK needs to execute the prompt's config, keyed by
    * execute-parameter name. Forwarded to the SDK adapter, which knows how they
@@ -164,12 +165,12 @@ export interface PromptProvider<
   setupTraceIngestion?(): Promise<TraceIngestor | undefined>;
 
   /**
-   * Returns the model catalog (known providers and popular models) for this
-   * provider's underlying SDK.
+   * Returns the definition of the model slot for this provider's underlying
+   * SDK, catalogs included. See `SDKAdapter.getModelDefinition`.
    *
    * Optional — providers that do not expose model info may omit it.
    */
-  getModelCatalog?(): Promise<ModelCatalog>;
+  getModelDefinition?(): Promise<PropDefinition>;
 
   /**
    * Returns the list of editable model parameters exposed by this provider's

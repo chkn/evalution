@@ -17,6 +17,11 @@ SPDX-License-Identifier = "AGPL-3.0-only"
 
 # …except inside the MIT adapter package (last matching rule wins).
 [[annotations]]
-path = ["packages/vercel-ai-sdk/**/*.json", "packages/vercel-ai-sdk/**/*.md"]
+path = [
+  "packages/vercel-ai-sdk/**/*.json",
+  "packages/vercel-ai-sdk/**/*.md",
+  "packages/typesafe-sdk/**/*.json",
+  "packages/typesafe-sdk/**/*.md",
+]
 SPDX-FileCopyrightText = "2026 Alexander Corrado"
 SPDX-License-Identifier = "MIT"

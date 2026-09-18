@@ -7,8 +7,8 @@ import { CursorHarness } from "./CursorHarness";
 import { getCursorOffset } from "./cursorTestUtils";
 
 async function mockApiRoutes(page: Page) {
-  await page.route("**/models", route =>
-    route.fulfill({ json: { models: [] } }),
+  await page.route("**/model-definition", route =>
+    route.fulfill({ json: null }),
   );
   await page.route("**/model-parameters", route => route.fulfill({ json: [] }));
   await page.route("**/update", async route => {
@@ -21,6 +21,7 @@ async function mockApiRoutes(page: Page) {
         id: "test",
         name: "test",
         functionParameters: [],
+        style: "chat",
         modelEditable: true,
         system,
         systemEditable: true,

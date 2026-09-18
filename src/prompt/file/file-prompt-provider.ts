@@ -38,6 +38,8 @@ import type {
   FilePromptMetadata,
   NormalizedFilePrompt,
   ParsedFilePrompt,
+  ProbeResult,
+  ProbeResults,
   PromptFileType,
   SlotMatchRequest,
   TypeProbe,
@@ -46,11 +48,24 @@ import type {
 } from "./prompt-file-type.ts";
 import { TSPromptFileType } from "./ts/ts-prompt-file-type.ts";
 
-const DEFAULT_IGNORE_PATTERNS = [
-  "**/node_modules/**",
-  "**/dist/**",
-  "**/.git/**",
-];
+/** Directories never scanned unless an include pattern names them. */
+const DEFAULT_IGNORED_DIRS = ["node_modules", "dist", ".git"];
+
+/**
+ * The ignore patterns to scan `includePatterns` with: the user's own
+ * `ignorePatterns` plus a `**\/<dir>/**` pattern for each default ignored
+ * directory — except those an include pattern names as a path segment (e.g.
+ * `dist/**\/*.prompt.ts`), so opting a directory back in is explicit.
+ */
+function withDefaultIgnores(
+  includePatterns: readonly string[],
+  ignorePatterns: readonly string[],
+): string[] {
+  const defaults = DEFAULT_IGNORED_DIRS.filter(
+    dir => !includePatterns.some(p => p.split("/").includes(dir)),
+  ).map(dir => `**/${dir}/**`);
+  return [...defaults, ...ignorePatterns];
+}
 
 /** A resource that takes arguments, with the sources that may fill them. */
 interface ResourceWithParameters {
@@ -89,7 +104,11 @@ export interface FilePromptProviderOptions {
    */
   includePatterns?: readonly string[];
   /**
-   * Glob patterns to exclude when scanning for prompt files. Defaults to ['\*\*\/node_modules/\*\*', '\*\*\/dist/\*\*', '\*\*\/.git/**'].
+   * Glob patterns to exclude when scanning for prompt files and playground
+   * modules. These are added to the built-in ignores — `node_modules`, `dist`
+   * and `.git` directories — rather than replacing them. A built-in ignore is
+   * skipped for any directory an include pattern names explicitly, so
+   * `includePatterns: ['dist/**\/*.prompt.ts']` still scans `dist`.
    */
   ignorePatterns?: readonly string[];
 
@@ -245,6 +264,11 @@ function unresolvedParameter(name: string): PropDefinition {
   };
 }
 
+/** Whether a probe resolved to a definition (rather than factories, or nothing). */
+function isDefinition(result: ProbeResult): result is PropDefinition {
+  return !!result && !Array.isArray(result);
+}
+
 /**
  * A file type's slot-match answer (slot path → source uris) turned around into
  * source uri → the slot paths it fits, or `undefined` when there is none.
@@ -317,6 +341,7 @@ export class FilePromptProvider
   private includePatterns: readonly string[];
   private ignorePatterns: readonly string[];
   private playgroundIncludePatterns: readonly string[];
+  private playgroundIgnorePatterns: readonly string[];
   private sdkAdapter: SDKAdapter;
   private resources: ResourceRegistry;
 
@@ -326,7 +351,7 @@ export class FilePromptProvider
     fileProvider = new LocalFileProvider(),
     fileType,
     includePatterns,
-    ignorePatterns = DEFAULT_IGNORE_PATTERNS,
+    ignorePatterns = [],
     playgroundIncludePatterns = DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
     sdk,
   }: FilePromptProviderOptions) {
@@ -336,14 +361,21 @@ export class FilePromptProvider
     this.fileProvider = fileProvider;
     this.fileType = fileType;
     this.includePatterns = includePatterns ?? fileType.defaultIncludePatterns;
-    this.ignorePatterns = ignorePatterns;
+    this.ignorePatterns = withDefaultIgnores(
+      this.includePatterns,
+      ignorePatterns,
+    );
     this.playgroundIncludePatterns = playgroundIncludePatterns;
+    this.playgroundIgnorePatterns = withDefaultIgnores(
+      playgroundIncludePatterns,
+      ignorePatterns,
+    );
     this.sdkAdapter = sdk;
     this.resources = new ResourceRegistry({
       fileProvider,
       rootDir,
       includePatterns: playgroundIncludePatterns,
-      ignorePatterns,
+      ignorePatterns: this.playgroundIgnorePatterns,
     });
   }
 
@@ -376,10 +408,10 @@ export class FilePromptProvider
 
     // Asked once and threaded through: both the shape of an execute parameter
     // and the slots it contributes are derived from the same probes.
-    const probes = this.executeParameterProbes(parsed);
+    const probes = this.promptProbes(parsed);
     const scope = await this.resourceScope(parsed);
 
-    const executeRequests = this.executeParameterRequests(parsed, probes);
+    const executeRequests = this.promptProbeRequests(parsed, probes);
     const parameterRequests = scope
       ? this.resourceParameterRequests(scope.withParams)
       : [];
@@ -393,9 +425,11 @@ export class FilePromptProvider
     const resolved = await this.resolveTypes(
       [...executeRequests, ...parameterRequests],
       [...promptSlotRequests, ...resourceSlotRequests],
+      this.projectProbes(),
     );
+    const project = this.projectResults(resolved.project);
 
-    const executeParameters = this.assembleExecuteParameters(
+    const executeParameters = this.assemblePromptProbes(
       probes,
       resolved.probes?.slice(0, executeRequests.length),
     );
@@ -419,6 +453,7 @@ export class FilePromptProvider
       const normalized = this.sdkAdapter.normalizePrompt(
         p,
         executeParameters[i],
+        project,
       );
       return {
         ...normalized,
@@ -437,10 +472,17 @@ export class FilePromptProvider
   private async resolveTypes(
     probes: TypeProbeRequest[],
     slotMatches: SlotMatchRequest[],
+    project?: TypeProbe[],
   ): Promise<Partial<TypeResolutionResult>> {
     const fileType = this.fileType;
     if (fileType.resolveTypes) {
-      return fileType.resolveTypes({ probes, slotMatches });
+      return fileType.resolveTypes({
+        probes,
+        slotMatches,
+        ...(project?.length && {
+          project: { rootDir: this.rootDir, probes: project },
+        }),
+      });
     }
     return {
       probes: fileType.resolveTypeProbes
@@ -453,30 +495,60 @@ export class FilePromptProvider
   }
 
   /**
-   * What the SDK says each prompt needs at run time, one list per prompt.
+   * What the SDK wants to know about the project as a whole — the installed
+   * SDK's own types — asked in the file type's language.
+   */
+  private projectProbes(): TypeProbe[] {
+    return this.sdkAdapter.getProjectProbes?.(this.fileType.language) ?? [];
+  }
+
+  /**
+   * The project probes' results, with an `undefined` ("could not evaluate")
+   * for every probe the file type didn't answer, so an adapter always sees
+   * each probe it asked for.
+   */
+  private projectResults(resolved: ProbeResults | undefined): ProbeResults {
+    return Object.fromEntries(
+      this.projectProbes().map(p => [p.name, resolved?.[p.name]]),
+    );
+  }
+
+  /**
+   * Resolve just the project probes — for adapter methods that need them
+   * outside a normalization pass, like the model definition. Cheap after the
+   * first call: the file type caches them.
+   */
+  async resolveProjectProbes(): Promise<ProbeResults> {
+    const probes = this.projectProbes();
+    if (probes.length === 0) return {};
+    const resolved = await this.resolveTypes([], [], probes);
+    return this.projectResults(resolved.project);
+  }
+
+  /**
+   * What the SDK says it wants to know about each prompt — chiefly what it
+   * needs at run time — one list per prompt.
    *
    * The file type declares the language and the adapter is asked *in* it, so
    * an adapter that cannot write the expression says so by returning nothing
    * rather than emitting a variant per language and hoping.
    */
-  private executeParameterProbes(
-    parsed: readonly ParsedFilePrompt[],
-  ): TypeProbe[][] {
-    const getProbes = this.sdkAdapter.getExecuteParameterProbes;
+  private promptProbes(parsed: readonly ParsedFilePrompt[]): TypeProbe[][] {
+    const getProbes = this.sdkAdapter.getPromptProbes;
     if (!getProbes) return parsed.map(() => []);
     const language = this.fileType.language;
     return parsed.map(p => getProbes.call(this.sdkAdapter, p, language));
   }
 
   /**
-   * Ask the file type to work out the shape of what the SDK said it needs —
+   * Ask the file type to answer what the SDK asked about each prompt —
    * the second half of the §E negotiation, with this provider as the only
    * place the two meet. Flattened across prompts, in order.
    *
    * A probe is written defensively enough not to need the parse result to
    * decide whether to ask, which is what makes batching them possible.
    */
-  private executeParameterRequests(
+  private promptProbeRequests(
     parsed: readonly ParsedFilePrompt[],
     perPrompt: readonly TypeProbe[][],
   ): TypeProbeRequest[] {
@@ -490,18 +562,18 @@ export class FilePromptProvider
   }
 
   /**
-   * Split the answers to {@link executeParameterRequests} back into one list
-   * per prompt.
+   * Split the answers to {@link promptProbeRequests} back into one list per
+   * prompt.
    *
    * Without a resolver the adapter still hears about its own probes — as a
    * row of `undefined`s, which it reads as "declared but unresolved" rather
    * than as "no requirement". Degrading to silence here is exactly the bug
    * this machinery exists to prevent.
    */
-  private assembleExecuteParameters(
+  private assemblePromptProbes(
     perPrompt: readonly TypeProbe[][],
-    resolved: readonly (PropDefinition | null | undefined)[] | undefined,
-  ): ((PropDefinition | null | undefined)[] | undefined)[] {
+    resolved: readonly ProbeResult[] | undefined,
+  ): (ProbeResult[] | undefined)[] {
     let cursor = 0;
     return perPrompt.map(probes => {
       if (probes.length === 0) return undefined;
@@ -556,10 +628,7 @@ export class FilePromptProvider
   private assembleInputSources(
     parsed: readonly ParsedFilePrompt[],
     scope: ResourceView,
-    executeParameters: readonly (
-      | (PropDefinition | null | undefined)[]
-      | undefined
-    )[],
+    executeParameters: readonly (ProbeResult[] | undefined)[],
     {
       typeMatches,
       resourceParameters,
@@ -586,9 +655,7 @@ export class FilePromptProvider
         sources,
         prompt.name,
       );
-      const execDefs = (executeParameters[i] ?? []).filter(
-        (d): d is PropDefinition => !!d,
-      );
+      const execDefs = (executeParameters[i] ?? []).filter(isDefinition);
       const executeSlots = matchSourcesToSlots(
         collectInputSlots(execDefs),
         sources,
@@ -648,6 +715,7 @@ export class FilePromptProvider
     return withParams.flatMap(({ resource, names }) =>
       names.map(name => ({
         probe: {
+          kind: "type" as const,
           name,
           expression: resourceParameterTypeExpression(resource, name),
         },
@@ -672,7 +740,7 @@ export class FilePromptProvider
    */
   private assembleResourceParameters(
     withParams: readonly ResourceWithParameters[],
-    resolved: readonly (PropDefinition | null | undefined)[] | undefined,
+    resolved: readonly ProbeResult[] | undefined,
   ): Map<string, PropDefinition[]> {
     let cursor = 0;
     return new Map(
@@ -681,9 +749,10 @@ export class FilePromptProvider
         cursor += names.length;
         return [
           resource.uri,
-          names.map(
-            (name, j) => resolved?.[start + j] ?? unresolvedParameter(name),
-          ),
+          names.map((name, j) => {
+            const result = resolved?.[start + j];
+            return isDefinition(result) ? result : unresolvedParameter(name);
+          }),
         ];
       }),
     );
@@ -712,7 +781,9 @@ export class FilePromptProvider
         // expression rather than in the prompt's signature. A probe that
         // doesn't resolve, or says "no requirement", contributes no slots.
         extraSlots: Object.fromEntries(
-          probes[i].map(probe => [probe.name, probe.expression]),
+          probes[i].flatMap(probe =>
+            probe.kind === "type" ? [[probe.name, probe.expression]] : [],
+          ),
         ),
         sources: inScope[i].map(r => ({
           key: r.uri,
@@ -838,8 +909,10 @@ export class FilePromptProvider
     return (await this.getPrompt(promptId))!;
   }
 
-  getModelCatalog() {
-    return this.sdkAdapter.getModelCatalog();
+  async getModelDefinition(): Promise<PropDefinition> {
+    return this.sdkAdapter.getModelDefinition(
+      await this.resolveProjectProbes(),
+    );
   }
 
   getModelParameters() {
@@ -877,7 +950,13 @@ export class FilePromptProvider
   async execute(
     promptId: string,
     params: any[],
-    { traceId, executeValues, inputs, onSettled }: ExecuteOptions = {},
+    {
+      traceId,
+      rootSpanId,
+      executeValues,
+      inputs,
+      onSettled,
+    }: ExecuteOptions = {},
   ): Promise<void> {
     const [filePath, promptName] = this.parsePromptId(promptId);
     const config = await this.fileType.loadConfig(filePath, promptName, params);
@@ -893,6 +972,7 @@ export class FilePromptProvider
     // rather than guess whether they still line up.
     const handle = await this.sdkAdapter.executeConfig(config, {
       traceId,
+      rootSpanId,
       executeValues,
       identity: {
         id: promptId,
@@ -1039,7 +1119,7 @@ export class FilePromptProvider
   watch(callback: (event: PromptChangeEvent) => void): () => void {
     const unwatchPlayground = this.fileProvider.watch(
       this.playgroundIncludePatterns,
-      { cwd: this.rootDir, ignored: this.ignorePatterns },
+      { cwd: this.rootDir, ignored: this.playgroundIgnorePatterns },
       async () => {
         // A changed playground module invalidates every prompt that could be
         // offered its resources, and the change stream is keyed by prompt id —

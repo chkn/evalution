@@ -23,6 +23,26 @@ describe("AI SDK registry", () => {
     }
   });
 
+  it("offers TypeSafe, installing the SDK and helper before writing a config", () => {
+    const task = findSetupTask("typesafe-sdk");
+    expect(task?.label).toBe("TypeSafe");
+    expect(task?.steps.map(s => s.kind)).toEqual([
+      "install_package",
+      "install_package",
+      "create_config",
+    ]);
+    const [sdk, helper, config] = task!.steps;
+    expect(sdk.kind === "install_package" && sdk.package).toBe(
+      "@typesafe-ai/sdk",
+    );
+    expect(helper.kind === "install_package" && helper.package).toBe(
+      "@evalution/typesafe-sdk",
+    );
+    if (config.kind !== "create_config") throw new Error("no config step");
+    expect(config.contents).toContain("new TypeSafeSDK()");
+    expect(config.contents).toContain("TYPESAFE_API_KEY");
+  });
+
   it("gives every task a unique id with unique step ids", () => {
     const taskIds = AI_SDK_REGISTRY.map(c => c.setupTask.id);
     expect(new Set(taskIds).size).toBe(taskIds.length);

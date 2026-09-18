@@ -118,6 +118,11 @@ export class LocalFileProvider implements FileProvider {
     watcher.on("unlink", fp => {
       if (matches(fp)) callback("remove", fp);
     });
+    // Without a listener an error (e.g. EMFILE on a huge tree) is rethrown and
+    // crashes the process; losing live updates is better than losing the server.
+    watcher.on("error", err => {
+      console.warn(`file watcher error in ${cwd}:`, err);
+    });
 
     return () => {
       watcher.close();

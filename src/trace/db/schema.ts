@@ -41,7 +41,7 @@ export const traces = sqliteTable(
 /**
  * One {@link Span}. LLM fields that are cheap, fixed-shape, and worth
  * querying/summing directly (model, token counts, cost) are promoted to
- * columns; the rest (messages, output, parameters, free-form attributes,
+ * columns; the rest (input, output, parameters, free-form attributes,
  * prompt reference, tool call) are JSON blobs — `attributes` is legitimately
  * NULL for a native-telemetry span, which carries no OTel attribute bag at
  * all (see `specs/trace-workshopping.md` "Key findings that shape the
@@ -76,8 +76,12 @@ export const spans = sqliteTable(
     llmTotalTokens: integer("llm_total_tokens"),
     llmCostPrompt: real("llm_cost_prompt"),
     llmCostCompletion: real("llm_cost_completion"),
-    /** JSON `SpanMessage[]`. */
-    llmMessages: text("llm_messages"),
+    /** JSON `LLMSpanDetails["input"]`: a `SpanMessage[]`, or any JSON object. */
+    llmInput: text("llm_input"),
+    /**
+     * JSON `LLMSpanDetails["output"]`. Always encoded, even when it is text,
+     * so a string output and an object output read back unambiguously.
+     */
     llmOutput: text("llm_output"),
     /** JSON `Record<string, unknown>`. */
     llmParameters: text("llm_parameters"),

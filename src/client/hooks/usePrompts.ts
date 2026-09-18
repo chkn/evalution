@@ -9,6 +9,11 @@ function samePrompt(a: NormalizedPrompt, b: NormalizedPrompt): boolean {
   return a.id === b.id && a.providerId === b.providerId;
 }
 
+/**
+ * Fetches every provider's prompts. `loading` covers only the initial fetch:
+ * refetches (e.g. on server change events) keep the current list until the new
+ * one arrives, so the sidebar doesn't blank out on every edit.
+ */
 export function usePrompts() {
   const [prompts, setPrompts] = useState<NormalizedPrompt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -16,7 +21,6 @@ export function usePrompts() {
 
   const fetchPrompts = useCallback(async () => {
     try {
-      setLoading(true);
       setError(null);
       setPrompts(await getPrompts());
     } catch (err: any) {

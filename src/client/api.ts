@@ -8,7 +8,6 @@ import type {
   AnnotationKind,
   ExecuteRequest,
   ExecuteResponse,
-  ModelCatalog,
   NormalizedPrompt,
   NormalizedPromptUpdates,
   PromptProviderInfo,
@@ -97,10 +96,11 @@ export async function getPrompts(): Promise<NormalizedPrompt[]> {
   return res.json();
 }
 
-export async function getModelCatalog(
+/** The SDK's model slot for a provider, catalogs included, or `null` if it has none. */
+export async function getModelDefinition(
   providerId: string,
-): Promise<ModelCatalog> {
-  const res = await fetch(`/api/providers/${providerId}/models`);
+): Promise<PropDefinition | null> {
+  const res = await fetch(`/api/providers/${providerId}/model-definition`);
   await throwIfError(res);
   return res.json();
 }

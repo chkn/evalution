@@ -1,0 +1,39 @@
+{
+  "name": "@evalution/typesafe-sdk",
+  "version": "1.0.5",
+  "description": "Helpers for integrating TypeSafe System One prompts with Evalution",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "prepare": "npm run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@typesafe-ai/sdk": ">=0.6.0-0"
+  },
+  "devDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-trace-base": "^2.7.0",
+    "@typesafe-ai/sdk": "^0.6.0",
+    "tsdown": "^0.22.1",
+    "typescript": "^5.3.3"
+  },
+  "keywords": [
+    "evalution",
+    "typesafe",
+    "system-one",
+    "ai",
+    "prompt"
+  ],
+  "license": "MIT"
+}

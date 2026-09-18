@@ -13,7 +13,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createLocalTursoClient } from "./local-turso-client.ts";
@@ -83,6 +83,15 @@ describe("foreign key enforcement", () => {
     await db.delete(traces).where(eq(traces.id, "t1"));
 
     expect(await db.select().from(annotations)).toHaveLength(0);
+  });
+});
+
+describe("initial migration", () => {
+  it("creates the span cascade trigger", async () => {
+    const rows = await db.all<{ name: string }>(
+      sql`SELECT name FROM sqlite_master WHERE type = 'trigger'`,
+    );
+    expect(rows.map(r => r.name)).toContain("trg_spans_cascade_delete_trace");
   });
 });
 

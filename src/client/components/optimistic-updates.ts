@@ -4,7 +4,6 @@
 import type {
   NormalizedPrompt,
   NormalizedPromptUpdates,
-  PropValue,
 } from "../../shared/types";
 
 /**
@@ -13,36 +12,52 @@ import type {
  * Saving re-parses and re-type-checks the prompt file on the server, which can
  * take a second or more, so the editor shows the edit immediately and the
  * server's normalized prompt replaces it once it arrives.
+ *
+ * Updates written for a different style than the prompt's are left for the
+ * server to reject rather than guessed at.
  */
 export function applyOptimisticUpdates(
   prompt: NormalizedPrompt,
   updates: NormalizedPromptUpdates,
 ): NormalizedPrompt {
+  if (prompt.style !== updates.style) return prompt;
+
   let next: NormalizedPrompt | undefined;
+  const edit = () => (next ??= { ...prompt });
 
   if ("model" in updates) {
-    next ??= { ...prompt };
+    const target = edit();
     if (updates.model == null) {
-      delete next.model;
+      delete target.model;
     } else {
       // A catalog value may still carry candidate bindings; they only matter
       // when writing source, and the server's response replaces this value.
-      next.model = updates.model as PropValue;
+      target.model = updates.model;
     }
   }
 
-  if ("system" in updates) {
-    next ??= { ...prompt };
-    if (updates.system == null) {
-      delete next.system;
-    } else {
-      next.system = updates.system;
+  if (prompt.style === "chat" && updates.style === "chat") {
+    if ("system" in updates) {
+      const target = edit() as typeof prompt;
+      if (updates.system == null) delete target.system;
+      else target.system = updates.system;
     }
-  }
-
-  if ("messages" in updates) {
-    next ??= { ...prompt };
-    next.messages = updates.messages ?? [];
+    if ("messages" in updates) {
+      const target = edit() as typeof prompt;
+      target.messages = updates.messages ?? [];
+    }
+  } else if (prompt.style === "questions" && updates.style === "questions") {
+    if ("state" in updates) {
+      const target = edit() as typeof prompt;
+      target.state = { ...prompt.state, value: updates.state ?? undefined };
+    }
+    if ("questions" in updates) {
+      const target = edit() as typeof prompt;
+      target.questions = {
+        ...prompt.questions,
+        value: updates.questions ?? undefined,
+      };
+    }
   }
 
   return next ?? prompt;
