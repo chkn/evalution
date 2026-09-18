@@ -29,9 +29,7 @@ async function doSetup(): Promise<OTelTraceIngestor> {
   const { AsyncLocalStorageContextManager } = await import(
     "@opentelemetry/context-async-hooks"
   );
-  const { BasicTracerProvider } = await import(
-    "@opentelemetry/sdk-trace-base"
-  );
+  const { BasicTracerProvider } = await import("@opentelemetry/sdk-trace-base");
 
   const ingestor = new OTelTraceIngestor();
   const tracerProvider = new BasicTracerProvider({

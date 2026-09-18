@@ -868,8 +868,7 @@ export class ResourceRegistry {
       warnedRunScopedReset.add(target);
       console.warn(
         `⚠️ Resource '${label}' declares reset() but is run-scoped — it is ` +
-          `created fresh per run, so reset() will never be called. See ` +
-          `specs/resource-arguments.md §F.`,
+          `created fresh per run, so reset() will never be called.`,
       );
     }
 
