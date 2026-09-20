@@ -344,6 +344,8 @@ export class FilePromptProvider
   private playgroundIgnorePatterns: readonly string[];
   private sdkAdapter: SDKAdapter;
   private resources: ResourceRegistry;
+  /** Tail of the in-flight mutation chain per file (see {@link mutateFile}). */
+  private fileMutations = new Map<string, Promise<void>>();
 
   constructor({
     id = "fs" + (defaultIDCounter++ ? defaultIDCounter : ""),
@@ -858,55 +860,95 @@ export class FilePromptProvider
     return path.join(this.rootDir, prompt.metadata.relativeFilePath);
   }
 
+  /**
+   * Runs `mutate` once every earlier mutation of `filePath` has settled.
+   *
+   * Every edit is a read-modify-write of the whole file — parse it, splice the
+   * new value into the spans that parse reported, write it back. Two that
+   * overlap (the editor saves faster than a save completes) leave the second
+   * reading a file the first is in the middle of writing: a write truncates
+   * before it fills, so that read can land on an empty or partial file, whose
+   * parse finds no prompt of that name and reports "Prompt not found". Editing
+   * one file at a time is enough to keep each edit's read and write adjacent;
+   * edits to different files still run concurrently.
+   */
+  private mutateFile<T>(
+    filePath: string,
+    mutate: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.fileMutations.get(filePath) ?? Promise.resolve();
+    // `then(mutate, mutate)`: a failed edit must not stall the ones behind it.
+    const result = previous.then(mutate, mutate);
+    const settled = result.then(
+      () => {},
+      () => {},
+    );
+    this.fileMutations.set(filePath, settled);
+    // Drop the entry once the chain drains, so the map doesn't grow with every
+    // file ever edited — but only if nothing queued behind this one.
+    settled.then(() => {
+      if (this.fileMutations.get(filePath) === settled)
+        this.fileMutations.delete(filePath);
+    });
+    return result;
+  }
+
   async updatePromptProperties(
     promptId: string,
     updates: NormalizedPromptUpdates,
   ): Promise<NormalizedFilePrompt> {
     const [filePath, promptName] = this.parsePromptId(promptId);
-    const parsed = (
-      await this.fileType
-        .parsePrompts([filePath], this.rootDir)
-        .catch(() => [] as ParsedFilePrompt[])
-    ).find(p => p.name === promptName);
-    if (!parsed) {
-      throw new Error("Prompt not found");
-    }
+    return this.mutateFile(filePath, async () => {
+      const parsed = (
+        await this.fileType
+          .parsePrompts([filePath], this.rootDir)
+          .catch(() => [] as ParsedFilePrompt[])
+      ).find(p => p.name === promptName);
+      if (!parsed) {
+        throw new Error("Prompt not found");
+      }
 
-    const { definitions, values } = parsed.extractedProps;
-    const rawUpdates = this.sdkAdapter.denormalizeUpdates(updates, values);
+      const { definitions, values } = parsed.extractedProps;
+      const rawUpdates = this.sdkAdapter.denormalizeUpdates(updates, values);
 
-    for (const [propertyName, value] of Object.entries(rawUpdates)) {
-      const propDef = definitions.find(d => d.name === propertyName);
-      const currentValue = values?.[propertyName];
+      for (const [propertyName, value] of Object.entries(rawUpdates)) {
+        const propDef = definitions.find(d => d.name === propertyName);
+        const currentValue = values?.[propertyName];
 
-      if (value === null) {
-        // null → remove the property
-        if (!propDef) throw new Error(`Property '${propertyName}' not found`);
-        await this.fileType.removeProperty(filePath, propDef);
-      } else if (!propDef) {
-        // unknown key → add as a new property
-        await this.fileType.addProperty(
-          filePath,
-          promptName,
-          propertyName,
-          value,
-        );
-      } else {
-        // existing key → update in place
-        if (currentValue && !isEditable(currentValue)) {
-          throw new Error(`Property '${propertyName}' is not editable`);
-        }
-        if (!propDef.valueSpan) {
-          throw new Error(
-            `Property '${propertyName}' is missing source metadata`,
+        if (value === null) {
+          // null → remove the property
+          if (!propDef) throw new Error(`Property '${propertyName}' not found`);
+          await this.fileType.removeProperty(filePath, propDef);
+        } else if (!propDef) {
+          // unknown key → add as a new property
+          await this.fileType.addProperty(
+            filePath,
+            promptName,
+            propertyName,
+            value,
+          );
+        } else {
+          // existing key → update in place
+          if (currentValue && !isEditable(currentValue)) {
+            throw new Error(`Property '${propertyName}' is not editable`);
+          }
+          if (!propDef.valueSpan) {
+            throw new Error(
+              `Property '${propertyName}' is missing source metadata`,
+            );
+          }
+          await this.fileType.updateProperty(
+            filePath,
+            propDef,
+            value,
+            promptId,
           );
         }
-        await this.fileType.updateProperty(filePath, propDef, value, promptId);
       }
-    }
 
-    // Re-scan and re-parse to get updated prompt
-    return (await this.getPrompt(promptId))!;
+      // Re-scan and re-parse to get updated prompt
+      return (await this.getPrompt(promptId))!;
+    });
   }
 
   async getModelDefinition(): Promise<PropDefinition> {
@@ -1028,12 +1070,14 @@ export class FilePromptProvider
     newName: string,
   ): Promise<NormalizedFilePrompt> {
     const [filePath, oldName] = this.parsePromptId(promptId);
-    await this.fileType.renamePrompt(filePath, oldName, newName);
+    return this.mutateFile(filePath, async () => {
+      await this.fileType.renamePrompt(filePath, oldName, newName);
 
-    const relFilePath = path.relative(this.rootDir, filePath);
-    const prompt = await this.getPrompt(`${relFilePath}#${newName}`);
-    if (!prompt) throw new Error("Failed to find renamed prompt");
-    return prompt;
+      const relFilePath = path.relative(this.rootDir, filePath);
+      const prompt = await this.getPrompt(`${relFilePath}#${newName}`);
+      if (!prompt) throw new Error("Failed to find renamed prompt");
+      return prompt;
+    });
   }
 
   async addPrompt(

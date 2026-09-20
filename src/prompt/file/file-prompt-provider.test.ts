@@ -269,6 +269,69 @@ export function myPrompt() {
     ).rejects.toThrow("Prompt not found");
   });
 
+  it("serializes overlapping updates to the same file", async () => {
+    const filePath = p("test.prompt.ts");
+    const { provider, fileProvider } = setup({
+      [filePath]: `
+export function myPrompt() {
+  return {
+    model: 'openai/gpt-4o',
+    system: 'Old value'
+  };
+}
+`,
+    });
+
+    // A real write truncates the file before it fills it, so a read landing in
+    // between sees nothing. Reproduce that window: the first edit's write is
+    // held open right after the truncation, while a second edit is saved.
+    const write = fileProvider.writeFile.bind(fileProvider);
+    let truncated!: () => void;
+    const midWrite = new Promise<void>(resolve => {
+      truncated = resolve;
+    });
+    let resume!: () => void;
+    const held = new Promise<void>(resolve => {
+      resume = resolve;
+    });
+    let first = true;
+    vi.spyOn(fileProvider, "writeFile").mockImplementation(
+      async (target, content) => {
+        if (first) {
+          first = false;
+          await write(target, "");
+          truncated();
+          await held;
+        }
+        await write(target, content);
+      },
+    );
+
+    const promptId = `${filePath}#myPrompt`;
+    const update = (value: string) =>
+      provider.updatePromptProperties(promptId, {
+        style: "chat",
+        system: { kind: "primitive", value },
+      });
+
+    const firstEdit = update("First");
+    await midWrite;
+    const secondEdit = update("Second");
+    // Give the second edit every chance to read the half-written file.
+    await tick();
+    resume();
+
+    expect(((await firstEdit) as NormalizedChatPrompt).system).toEqual({
+      kind: "primitive",
+      value: "First",
+    });
+    expect(((await secondEdit) as NormalizedChatPrompt).system).toEqual({
+      kind: "primitive",
+      value: "Second",
+    });
+    expect(await fileProvider.readFile(filePath)).toContain('"Second"');
+  });
+
   it("should add a new property when key does not exist", async () => {
     const filePath = p("test.prompt.ts");
     const { provider } = setup({
