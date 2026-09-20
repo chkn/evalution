@@ -95,6 +95,11 @@ export interface LLMSpanDetails {
   model?: string;
   /** Model parameters (temperature, max_tokens, …). */
   modelParameters?: Record<string, unknown>;
+  /**
+   * Why the model stopped generating, as the provider or SDK reports it
+   * (`stop`, `length`, `tool-calls`, …). Not normalized across providers.
+   */
+  finishReason?: string;
 
   // -- prompt info --
   /**

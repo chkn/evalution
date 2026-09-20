@@ -68,6 +68,7 @@ function spanToRow(span: Span) {
     errorMessage: span.errorMessage ?? null,
     llmProvider: span.llm?.provider ?? null,
     llmModel: span.llm?.model ?? null,
+    llmFinishReason: span.llm?.finishReason ?? null,
     llmPromptTokens: span.llm?.promptTokens ?? null,
     llmCompletionTokens: span.llm?.completionTokens ?? null,
     llmTotalTokens: span.llm?.totalTokens ?? null,
@@ -89,6 +90,7 @@ function rowToSpan(row: typeof spans.$inferSelect): Span {
   const llm: LLMSpanDetails = {
     ...(row.llmProvider && { provider: row.llmProvider }),
     ...(row.llmModel && { model: row.llmModel }),
+    ...(row.llmFinishReason && { finishReason: row.llmFinishReason }),
     ...(row.llmPromptTokens != null && { promptTokens: row.llmPromptTokens }),
     ...(row.llmCompletionTokens != null && {
       completionTokens: row.llmCompletionTokens,

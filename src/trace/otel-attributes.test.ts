@@ -204,6 +204,30 @@ describe("readLLM input and output", () => {
   });
 });
 
+describe("readLLM finish reason", () => {
+  it("reads gen_ai.response.finish_reasons, joining multiple choices", () => {
+    expect(
+      readLLM({ "gen_ai.response.finish_reasons": ["stop"] })?.finishReason,
+    ).toBe("stop");
+    expect(
+      readLLM({ "gen_ai.response.finish_reasons": ["stop", "length"] })
+        ?.finishReason,
+    ).toBe("stop, length");
+  });
+
+  it("falls back to the Vercel AI SDK's ai.response.finishReason", () => {
+    expect(
+      readLLM({ "ai.response.finishReason": "tool-calls" })?.finishReason,
+    ).toBe("tool-calls");
+  });
+
+  it("omits the finish reason when none is reported", () => {
+    expect(
+      readLLM({ "gen_ai.request.model": "gpt-4o" })?.finishReason,
+    ).toBeUndefined();
+  });
+});
+
 describe("readLLM JSON input and output", () => {
   it("reads evalution.llm.input and evalution.llm.output as JSON", () => {
     const llm = readLLM({

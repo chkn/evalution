@@ -47,6 +47,7 @@ const TRACE = {
       llm: {
         provider: "openai",
         model: "gpt-4o",
+        finishReason: "stop",
         input: [{ role: "user", content: "Hello **world**" }],
         output: "Hi there!",
         promptTokens: 3,
@@ -76,7 +77,11 @@ const TRACE = {
 
 let nextAnnotationId = 1;
 
-async function mockTraceApi(page: Page, initialAnnotations: unknown[] = []) {
+async function mockTraceApi(
+  page: Page,
+  initialAnnotations: unknown[] = [],
+  trace: unknown = TRACE,
+) {
   const annotations = [...initialAnnotations];
 
   await page.route("**/api/traces/*/*/events", route =>
@@ -114,7 +119,7 @@ async function mockTraceApi(page: Page, initialAnnotations: unknown[] = []) {
 
   await page.route("**/api/traces/*/*", route => {
     if (route.request().method() !== "GET") return route.fallback();
-    return route.fulfill({ json: TRACE });
+    return route.fulfill({ json: trace });
   });
 }
 
@@ -256,12 +261,159 @@ test("selecting an LLM row shows its provider/model/token details in the details
   // message content itself isn't repeated here — that's the chat section's
   // job (see "renders the chat section below the tree" below).
   const details = component.locator(".trace-details-pane");
-  await expect(details).toContainText("openai");
-  await expect(details).toContainText("gpt-4o");
-  await expect(details).toContainText("3 in · 5 out · 8 total");
-  await expect(details).toContainText(
+  await expect(details.locator(".span-status-pill")).toHaveText("✓ ok");
+  const fact = (name: string) =>
+    details
+      .getByRole("group", { name, exact: true })
+      .locator(".span-details-fact-value");
+  await expect(fact("Provider")).toHaveText("openai");
+  await expect(fact("Stop reason")).toHaveText("stop");
+  await expect(fact("Model")).toHaveText("gpt-4o");
+  await expect(fact("Tokens")).toHaveText("3 in · 5 out");
+  await expect(fact("Duration")).toHaveText("500ms");
+  await expect(fact("Started")).not.toBeEmpty();
+  await expect(fact("Ended")).not.toBeEmpty();
+  await expect(fact("Cost")).toHaveText(
     `${formatCost(0.000265)} (${formatCost(0.000015)} in · ${formatCost(0.00025)} out)`,
   );
+  // Two groups: timing (+ stop reason), then provider/model/tokens/cost.
+  await expect(details.locator(".span-details-facts")).toHaveCount(2);
+  // The span id is shown without an "ID" label.
+  await expect(details).not.toContainText(/^ID$/m);
+});
+
+test("an error message closes the first facts group, and section headings keep their all-caps style", async ({
+  mount,
+  page,
+}) => {
+  await mockTraceApi(page, [], {
+    ...TRACE,
+    spans: [
+      ...TRACE.spans.filter(s => s.id !== "tool1"),
+      {
+        id: "tool-err",
+        traceId: "t1",
+        parentId: "root",
+        name: "tool: boom",
+        kind: "TOOL",
+        startTime: 1500,
+        endTime: 1800,
+        status: "error",
+        errorMessage: "it broke",
+        tool: { toolName: "boom", input: { a: 1 } },
+      },
+    ],
+  });
+  const component = await mount(<TraceViewHarness />);
+  await openSpansTab(component);
+  await component
+    .locator(".trace-row", { hasText: "tool: boom" })
+    .locator(".trace-row-main")
+    .click();
+
+  const details = component.locator(".trace-details-pane");
+  const firstGroup = details.locator(".span-details-facts").first();
+  await expect(firstGroup.locator(".span-details-error")).toHaveText(
+    "it broke",
+  );
+  // The error is the last thing in the group; a tool's arguments come first.
+  await expect(firstGroup.locator("> :last-child")).toHaveClass(
+    /span-details-error/,
+  );
+  const [argsBox, errorBox] = await Promise.all([
+    firstGroup.locator(".span-details-row").boundingBox(),
+    firstGroup.locator(".span-details-error").boundingBox(),
+  ]);
+  expect(argsBox?.y).toBeLessThan(errorBox?.y ?? 0);
+  await expect(firstGroup.locator(".span-details-row-label")).toHaveText(
+    "Arguments",
+  );
+
+  // Every heading — Arguments, Annotations — shares the same all-caps style.
+  const headings = details.locator(
+    ".span-details-row-label, .span-details-section-title",
+  );
+  await expect(headings.first()).toHaveText("Arguments");
+  for (const heading of await headings.all()) {
+    await expect(heading).toHaveCSS("text-transform", "uppercase");
+    await expect(heading).toHaveCSS("font-size", "11px");
+  }
+});
+
+test("a long error grows before it scrolls, and a wrapped fact's label stays centered on its value", async ({
+  mount,
+  page,
+}) => {
+  const tenLines = Array.from({ length: 10 }, (_, i) => `line ${i}`).join("\n");
+  await mockTraceApi(page, [], {
+    ...TRACE,
+    spans: [
+      {
+        ...TRACE.spans[1],
+        status: "error",
+        errorMessage: tenLines,
+        llm: { ...TRACE.spans[1].llm, model: "m".repeat(120) },
+      },
+    ],
+  });
+  const component = await mount(<TraceViewHarness />);
+  await openSpansTab(component);
+  await component
+    .locator(".trace-row", { hasText: "step: 0" })
+    .locator(".trace-row-main")
+    .click();
+
+  const details = component.locator(".trace-details-pane");
+  const error = details.locator(".span-details-error");
+  const { scrollHeight, clientHeight } = await error.evaluate(el => ({
+    scrollHeight: el.scrollHeight,
+    clientHeight: el.clientHeight,
+  }));
+  expect(scrollHeight).toBeLessThanOrEqual(clientHeight + 1);
+
+  const model = details.getByRole("group", { name: "Model", exact: true });
+  const [label, value] = await Promise.all([
+    model.locator(".span-details-fact-label").boundingBox(),
+    model.locator(".span-details-fact-value").boundingBox(),
+  ]);
+  expect(value!.height).toBeGreaterThan(label!.height * 1.5); // it wrapped
+  const center = (b: { y: number; height: number }) => b.y + b.height / 2;
+  expect(Math.abs(center(label!) - center(value!))).toBeLessThan(2);
+});
+
+test("a span that hasn't ended shows a running status and duration", async ({
+  mount,
+  page,
+}) => {
+  await mockTraceApi(page, [], {
+    ...TRACE,
+    spans: [
+      ...TRACE.spans,
+      {
+        id: "running1",
+        traceId: "t1",
+        parentId: "root",
+        name: "step: 1",
+        kind: "LLM",
+        startTime: 1800,
+      },
+    ],
+  });
+  const component = await mount(<TraceViewHarness />);
+  await openSpansTab(component);
+
+  await component
+    .locator(".trace-row", { hasText: "step: 1" })
+    .locator(".trace-row-main")
+    .click();
+
+  const details = component.locator(".trace-details-pane");
+  await expect(details.locator(".span-status-pill")).toHaveText("● running");
+  await expect(
+    details
+      .getByRole("group", { name: "Duration", exact: true })
+      .locator(".span-details-fact-value"),
+  ).toHaveText("—");
 });
 
 test("hovering the header's cost meta item reveals the prompt/completion breakdown and implied $/1M prices", async ({

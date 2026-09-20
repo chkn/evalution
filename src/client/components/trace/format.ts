@@ -35,6 +35,31 @@ export function formatTimestampCompact(ms: number): string {
   });
 }
 
+/**
+ * A span's status for display. A span that hasn't ended has no recorded
+ * status yet, so it reads as `running`.
+ */
+export function spanDisplayStatus(span: {
+  status?: string;
+  endTime?: number;
+}): string | undefined {
+  return span.status ?? (span.endTime === undefined ? "running" : undefined);
+}
+
+/** A glyph standing in for a span's status, shown in its status pill. */
+export function statusGlyph(status: string): string {
+  switch (status) {
+    case "ok":
+      return "✓";
+    case "error":
+      return "✕";
+    case "running":
+      return "●";
+    default:
+      return "?";
+  }
+}
+
 /** A token count with thousands separators, e.g. `12,345`. */
 export function formatTokenCount(tokens: number): string {
   return tokens.toLocaleString();

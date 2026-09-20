@@ -296,6 +296,7 @@ describe("Evalution", () => {
     const trace = await provider.getTrace(traceId);
     const step = trace?.spans.find(s => s.kind === "LLM");
     expect(step?.status).toBe("error");
+    expect(step?.llm?.finishReason).toBe("error");
   });
 
   it("fail() ends still-open child spans as error, not just the trace", async () => {

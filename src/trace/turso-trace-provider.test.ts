@@ -156,6 +156,7 @@ describe("TursoTraceProvider row round-tripping", () => {
       llm: {
         provider: "openai",
         model: "gpt-4o",
+        finishReason: "stop",
         promptTokens: 5,
         completionTokens: 7,
         totalTokens: 12,
@@ -204,6 +205,7 @@ describe("TursoTraceProvider row round-tripping", () => {
     expect(root?.llm).toEqual({
       provider: "openai",
       model: "gpt-4o",
+      finishReason: "stop",
       promptTokens: 5,
       completionTokens: 7,
       totalTokens: 12,

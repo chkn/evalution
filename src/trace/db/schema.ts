@@ -71,6 +71,7 @@ export const spans = sqliteTable(
 
     llmProvider: text("llm_provider"),
     llmModel: text("llm_model"),
+    llmFinishReason: text("llm_finish_reason"),
     llmPromptTokens: integer("llm_prompt_tokens"),
     llmCompletionTokens: integer("llm_completion_tokens"),
     llmTotalTokens: integer("llm_total_tokens"),

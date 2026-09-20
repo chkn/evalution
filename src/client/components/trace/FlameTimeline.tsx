@@ -8,11 +8,26 @@
  */
 
 import type { Annotation, SpanKind } from "../../../shared/types";
-import { formatDuration } from "./format.ts";
+import { formatDuration, spanDisplayStatus, statusGlyph } from "./format.ts";
 import { barGeometry, type Row, spanDuration } from "./rows.ts";
 
 export function SpanKindPill({ kind }: { kind: SpanKind }) {
   return <span className={`span-kind-pill span-kind-${kind}`}>{kind}</span>;
+}
+
+/** A span's status as a token — `✓ ok`, `✕ error`, `● running`. Renders nothing for an ended span with no status. */
+export function SpanStatusPill({
+  span,
+}: {
+  span: { status?: string; endTime?: number };
+}) {
+  const status = spanDisplayStatus(span);
+  if (!status) return null;
+  return (
+    <span className={`span-status-pill span-status-${status}`}>
+      {statusGlyph(status)} {status}
+    </span>
+  );
 }
 
 export function SpanErrorIcon({ visible }: { visible: boolean }) {

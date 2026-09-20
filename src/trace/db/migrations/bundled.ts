@@ -24,5 +24,14 @@ export const bundledMigrations: MigrationMeta[] = [
       "\nCREATE INDEX `idx_traces_start_time` ON `traces` (`start_time`);",
       "\nCREATE TRIGGER `trg_spans_cascade_delete_trace` AFTER DELETE ON `traces` BEGIN DELETE FROM `spans` WHERE `trace_id` = OLD.`id`; END;"
     ]
+  },
+  {
+    "name": "20260919154843_rich_captain_midlands",
+    "hash": "eae6a353961a14967d7922d786f74b2a122ebceaa3e6ef6e7385a8e8ab179965",
+    "folderMillis": 1789832923000,
+    "bps": true,
+    "sql": [
+      "-- SPDX-License-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nALTER TABLE `spans` ADD `llm_finish_reason` text;\n"
+    ]
   }
 ];

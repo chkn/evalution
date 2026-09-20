@@ -304,6 +304,65 @@ export function AnnotationsIcon() {
   );
 }
 
+/** A flag — when a span ended. */
+export function FlagIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M5 21V4" />
+      <path d="M5 4h12l-2.5 4 2.5 4H5" />
+    </svg>
+  );
+}
+
+/** A stop sign — why the model stopped generating. */
+export function StopReasonIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <polygon points="8 2 16 2 22 8 22 16 16 22 8 22 2 16 2 8" />
+      <line x1="8" y1="12" x2="16" y2="12" />
+    </svg>
+  );
+}
+
+/** A cloud — the provider serving the model. */
+export function ProviderIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10a4 4 0 0 1-.5 8Z" />
+    </svg>
+  );
+}
+
 export function MoreIcon() {
   return (
     <svg

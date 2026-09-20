@@ -83,6 +83,22 @@ function num(v: unknown): number | undefined {
 }
 
 /**
+ * The finish reason: OTel GenAI's `gen_ai.response.finish_reasons` is a string
+ * array (one per choice, joined here), the Vercel AI SDK's
+ * `ai.response.finishReason` a plain string.
+ */
+function readFinishReason(
+  attributes: Record<string, unknown>,
+): string | undefined {
+  const reasons = attributes["gen_ai.response.finish_reasons"];
+  if (Array.isArray(reasons)) {
+    const joined = reasons.filter(r => typeof r === "string").join(", ");
+    if (joined) return joined;
+  }
+  return str(reasons) || str(attributes["ai.response.finishReason"]);
+}
+
+/**
  * Converts a raw message `content` value (a string, or an array of
  * OTel/Vercel-style content parts) into a {@link SpanMessage.content}. Image
  * (and image-bearing `file`) parts are kept rather than dropped — see §A.5 in
@@ -198,6 +214,7 @@ export function readLLM(
   const model =
     str(attributes["gen_ai.response.model"]) ??
     str(attributes["gen_ai.request.model"]);
+  const finishReason = readFinishReason(attributes);
   // Token usage: OTel GenAI semconv keys, falling back to the Vercel AI SDK's
   // and the two `gen_ai.usage.{prompt,completion}_tokens` fallbacks Workshop
   // added for SDKs that predate the semconv's `input`/`output` rename.
@@ -246,6 +263,7 @@ export function readLLM(
   if (
     !provider &&
     !model &&
+    !finishReason &&
     !promptTokens &&
     !completionTokens &&
     !input &&
@@ -258,6 +276,7 @@ export function readLLM(
   return {
     ...(provider && { provider }),
     ...(model && { model }),
+    ...(finishReason && { finishReason }),
     ...(input && { input }),
     ...(output !== undefined && output !== "" && { output }),
     ...(promptTokens !== undefined && { promptTokens }),

@@ -9,7 +9,11 @@ import { useAnnotations } from "../hooks/useAnnotations.ts";
 import { ChatFlow } from "./trace/ChatFlow.tsx";
 import { CombinedTimeline } from "./trace/CombinedTimeline.tsx";
 import { CostTooltip } from "./trace/CostTooltip.tsx";
-import { FlameTimeline, SpanKindPill } from "./trace/FlameTimeline.tsx";
+import {
+  FlameTimeline,
+  SpanKindPill,
+  SpanStatusPill,
+} from "./trace/FlameTimeline.tsx";
 import {
   formatDuration,
   formatTimestamp,
@@ -243,15 +247,19 @@ function TraceView({
           )}
           <span className="trace-row-name">{selectedSpan.name}</span>
         </div>
-        <button
-          type="button"
-          className="trace-details-pane-close"
-          onClick={() => setSelectedSpanId(null)}
-          aria-label="Close details"
-        >
-          ×
-        </button>
+        <div className="trace-details-pane-actions">
+          <SpanStatusPill span={selectedSpan} />
+          <button
+            type="button"
+            className="trace-details-pane-close"
+            onClick={() => setSelectedSpanId(null)}
+            aria-label="Close details"
+          >
+            ×
+          </button>
+        </div>
       </div>
+      <code className="trace-details-pane-id">{selectedSpan.id}</code>
       <SpanDetails
         span={selectedSpan}
         annotations={annotations}

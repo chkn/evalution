@@ -384,6 +384,7 @@ export class VercelAISDKTelemetry
         ...(startSpan.llm ?? {}),
         provider: event.model.provider,
         model: event.model.modelId,
+        finishReason: event.finishReason,
         output: run.structuredOutput ? parseStructured(event.text) : event.text,
         promptTokens: event.usage.inputTokens,
         completionTokens: event.usage.outputTokens,
