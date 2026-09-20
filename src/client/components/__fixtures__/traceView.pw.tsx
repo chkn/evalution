@@ -269,18 +269,80 @@ test("selecting an LLM row shows its provider/model/token details in the details
   await expect(fact("Provider")).toHaveText("openai");
   await expect(fact("Stop reason")).toHaveText("stop");
   await expect(fact("Model")).toHaveText("gpt-4o");
-  await expect(fact("Tokens")).toHaveText("3 in · 5 out");
+  await expect(fact("Tokens")).toHaveText("3 in · 5 out · 8 total");
   await expect(fact("Duration")).toHaveText("500ms");
   await expect(fact("Started")).not.toBeEmpty();
   await expect(fact("Ended")).not.toBeEmpty();
   await expect(fact("Cost")).toHaveText(
     `${formatCost(0.000265)} (${formatCost(0.000015)} in · ${formatCost(0.00025)} out)`,
   );
-  // Two groups: timing (+ stop reason), then provider/model/tokens/cost.
+  // Two groups: timing (+ stop reason), then provider/model/tokens/cost,
+  // set apart by a blank line rather than the gap facts sit at within a group.
   await expect(details.locator(".span-details-facts")).toHaveCount(2);
+  const factTops = await details
+    .locator(".span-details-fact")
+    .evaluateAll(els => els.map(e => e.getBoundingClientRect().y));
+  const steps = factTops.slice(1).map((y, i) => y - factTops[i]);
+  const acrossGroups = steps[3]; // Stop reason → Provider
+  const withinGroups = steps.filter((_, i) => i !== 3);
+  expect(acrossGroups).toBeGreaterThan(Math.max(...withinGroups) + 8);
   // The span id is shown without an "ID" label.
   await expect(details).not.toContainText(/^ID$/m);
 });
+
+test("the facts' label column is shared across both groups and sized to the longest label present", async ({
+  mount,
+  page,
+}) => {
+  // No finish reason, so "Stop reason" — the longest label — is absent and the
+  // column must shrink to fit the rest rather than leaving a gap.
+  const { finishReason: _omitted, ...llm } = TRACE.spans[1].llm!;
+  await mockTraceApi(page, [], {
+    ...TRACE,
+    spans: [TRACE.spans[0], { ...TRACE.spans[1], llm }],
+  });
+  const component = await mount(<TraceViewHarness />);
+  await openSpansTab(component);
+  await component
+    .locator(".trace-row", { hasText: "step: 0" })
+    .locator(".trace-row-main")
+    .click();
+
+  const details = component.locator(".trace-details-pane");
+  await expect(details.getByRole("group", { name: "Stop reason" })).toHaveCount(
+    0,
+  );
+
+  const part = (name: string, cls: string) =>
+    details.getByRole("group", { name, exact: true }).locator(cls);
+  const [duration, provider] = await Promise.all([
+    part("Duration", ".span-details-fact-value").boundingBox(),
+    part("Provider", ".span-details-fact-value").boundingBox(),
+  ]);
+  // One column across both groups: the timing group's values and the
+  // provenance group's values start at the same x.
+  expect(duration!.x).toBeCloseTo(provider!.x, 0);
+
+  // And that column starts just past the widest label text on screen, rather
+  // than past a width reserved for a label that isn't rendered.
+  const labels = await details.locator(".span-details-fact-label").all();
+  const ends = await Promise.all(
+    labels.map(async l => (await textBox(l)).right),
+  );
+  expect(duration!.x - Math.max(...ends)).toBeLessThan(16);
+});
+
+/**
+ * The box around a node's text content, which — unlike `boundingBox()` — stops
+ * at the end of the text rather than at the edge of the element's layout box.
+ */
+async function textBox(locator: Locator): Promise<DOMRect> {
+  return locator.evaluate(el => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return range.getBoundingClientRect().toJSON();
+  });
+}
 
 test("an error message closes the first facts group, and section headings keep their all-caps style", async ({
   mount,

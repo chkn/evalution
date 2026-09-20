@@ -4176,23 +4176,41 @@ pre {
   overflow: hidden;
 }
 
-/* Icon + label + value facts; groups are separated by a blank line. */
-.span-details-facts {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+/*
+ * Icon + label + value facts; groups are separated by a blank line. The
+ * columns live on the outer grid and the groups and facts inherit them as
+ * subgrids, so every label lines up on one column that is sized by the
+ * longest label actually rendered — no fixed width leaving a gap when the
+ * optional "Stop reason" is absent.
+ */
+.span-details-facts-grid {
+  display: grid;
+  grid-template-columns: 14px max-content minmax(0, 1fr);
+  column-gap: 6px;
+  /* The grid's only rows are the groups, so this is the blank line between
+     them — it has to clear the 5px the facts sit apart by within a group. */
+  row-gap: 16px;
+  font-size: 12.5px;
 }
 
-.span-details-facts + .span-details-facts {
-  margin-top: 6px;
+.span-details-facts {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  row-gap: 5px;
 }
 
 .span-details-fact {
   display: grid;
-  grid-template-columns: 14px 78px minmax(0, 1fr);
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  column-gap: 6px;
-  font-size: 12.5px;
+}
+
+/* Full-width children of a group: a tool's arguments, an error message. */
+.span-details-facts > .span-details-row,
+.span-details-facts > .span-details-error {
+  grid-column: 1 / -1;
 }
 
 .span-details-fact-icon {
@@ -4201,6 +4219,8 @@ pre {
 }
 
 .span-details-fact-label {
+  /* 6px from the grid gap + 6px here — a touch more air than icon-to-label. */
+  padding-right: 6px;
   color: var(--trace-text-dim);
 }
 

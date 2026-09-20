@@ -89,10 +89,12 @@ export function SpanDetails({
     provenance.push({ label: "Model", icon: <ModelIcon />, value: llm.model });
   }
   if (llm?.promptTokens !== undefined || llm?.completionTokens !== undefined) {
+    const prompt = llm.promptTokens ?? 0;
+    const completion = llm.completionTokens ?? 0;
     provenance.push({
       label: "Tokens",
       icon: <TokensIcon />,
-      value: `${formatTokenCount(llm.promptTokens ?? 0)} in · ${formatTokenCount(llm.completionTokens ?? 0)} out`,
+      value: `${formatTokenCount(prompt)} in · ${formatTokenCount(completion)} out · ${formatTokenCount(llm.totalTokens ?? prompt + completion)} total`,
     });
   }
   if (llm?.cost !== undefined) {
@@ -140,27 +142,31 @@ export function SpanDetails({
   return (
     <div className="span-details">
       <div className="span-details-list">
-        <div className="span-details-facts">
-          {timing.map(f => (
-            <FactLine key={f.label} fact={f} />
-          ))}
-          {argumentsRow && (
-            <DetailRow
-              row={argumentsRow}
-              className="span-details-row-in-group"
-            />
-          )}
-          {span.errorMessage && (
-            <pre className="span-details-error">{span.errorMessage}</pre>
-          )}
-        </div>
-        {provenance.length > 0 && (
+        {/* One grid over both groups, so their label columns line up and are
+            no wider than the longest label actually on screen. */}
+        <div className="span-details-facts-grid">
           <div className="span-details-facts">
-            {provenance.map(f => (
+            {timing.map(f => (
               <FactLine key={f.label} fact={f} />
             ))}
+            {argumentsRow && (
+              <DetailRow
+                row={argumentsRow}
+                className="span-details-row-in-group"
+              />
+            )}
+            {span.errorMessage && (
+              <pre className="span-details-error">{span.errorMessage}</pre>
+            )}
           </div>
-        )}
+          {provenance.length > 0 && (
+            <div className="span-details-facts">
+              {provenance.map(f => (
+                <FactLine key={f.label} fact={f} />
+              ))}
+            </div>
+          )}
+        </div>
 
         {rows.map(r => (
           <DetailRow key={r.label} row={r} />
