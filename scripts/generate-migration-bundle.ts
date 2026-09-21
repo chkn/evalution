@@ -68,6 +68,16 @@ const migrations = dirs.map(name => {
   };
 });
 
+// drizzle-kit's SQL files carry an SPDX license header comment, which would
+// land inside a string literal here. `reuse lint` scans raw text for the tag,
+// and inside a one-line string it can't find the end of the expression (the
+// "newlines" are literal `\n`), so it fails to parse. Escaping the `-` hides
+// the tag from the scanner while leaving the runtime string unchanged.
+const migrationsJson = JSON.stringify(migrations, null, 2).replaceAll(
+  "SPDX-License-Identifier",
+  "SPDX\\u002DLicense-Identifier",
+);
+
 const contents = `// SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
@@ -78,7 +88,7 @@ const contents = `// SPDX-License-Identifier: AGPL-3.0-only
 import type { MigrationMeta } from "drizzle-orm/migrator";
 
 /** Every migration under \`src/trace/db/migrations/\`, in apply order. */
-export const bundledMigrations: MigrationMeta[] = ${JSON.stringify(migrations, null, 2)};
+export const bundledMigrations: MigrationMeta[] = ${migrationsJson};
 `;
 
 writeFileSync(OUT_FILE, contents);

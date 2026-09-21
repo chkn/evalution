@@ -41,4 +41,9 @@ describe("bundled migrations", () => {
       expect(migration.sql).toEqual(sql.split("--> statement-breakpoint"));
     }
   });
+
+  it("hides embedded SPDX tags from `reuse` (only the file's own header matches)", () => {
+    const source = readFileSync(join(MIGRATIONS_DIR, "bundled.ts"), "utf8");
+    expect(source.match(/SPDX-License-Identifier/g)).toHaveLength(1);
+  });
 });

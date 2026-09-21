@@ -15,7 +15,7 @@ export const bundledMigrations: MigrationMeta[] = [
     "folderMillis": 1789574605000,
     "bps": true,
     "sql": [
-      "-- SPDX-License-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nCREATE TABLE `annotations` (\n\t`id` text PRIMARY KEY,\n\t`trace_id` text NOT NULL,\n\t`span_id` text,\n\t`kind` text NOT NULL,\n\t`note` text NOT NULL,\n\t`source` text NOT NULL,\n\t`created_at` real NOT NULL,\n\tCONSTRAINT `fk_annotations_trace_id_traces_id_fk` FOREIGN KEY (`trace_id`) REFERENCES `traces`(`id`) ON DELETE CASCADE\n);\n",
+      "-- SPDX\u002DLicense-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nCREATE TABLE `annotations` (\n\t`id` text PRIMARY KEY,\n\t`trace_id` text NOT NULL,\n\t`span_id` text,\n\t`kind` text NOT NULL,\n\t`note` text NOT NULL,\n\t`source` text NOT NULL,\n\t`created_at` real NOT NULL,\n\tCONSTRAINT `fk_annotations_trace_id_traces_id_fk` FOREIGN KEY (`trace_id`) REFERENCES `traces`(`id`) ON DELETE CASCADE\n);\n",
       "\nCREATE TABLE `spans` (\n\t`id` text PRIMARY KEY,\n\t`trace_id` text NOT NULL,\n\t`parent_id` text,\n\t`name` text NOT NULL,\n\t`kind` text NOT NULL,\n\t`start_time` real NOT NULL,\n\t`end_time` real,\n\t`status` text,\n\t`error_message` text,\n\t`llm_provider` text,\n\t`llm_model` text,\n\t`llm_prompt_tokens` integer,\n\t`llm_completion_tokens` integer,\n\t`llm_total_tokens` integer,\n\t`llm_cost_prompt` real,\n\t`llm_cost_completion` real,\n\t`llm_input` text,\n\t`llm_output` text,\n\t`llm_parameters` text,\n\t`attributes` text,\n\t`prompt` text,\n\t`tool` text\n);\n",
       "\nCREATE TABLE `traces` (\n\t`id` text PRIMARY KEY,\n\t`provider_id` text,\n\t`name` text NOT NULL,\n\t`start_time` real NOT NULL,\n\t`end_time` real,\n\t`status` text NOT NULL,\n\t`attributes` text\n);\n",
       "\nCREATE INDEX `idx_annotations_trace_id` ON `annotations` (`trace_id`);",
@@ -31,7 +31,7 @@ export const bundledMigrations: MigrationMeta[] = [
     "folderMillis": 1789832923000,
     "bps": true,
     "sql": [
-      "-- SPDX-License-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nALTER TABLE `spans` ADD `llm_finish_reason` text;\n"
+      "-- SPDX\u002DLicense-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nALTER TABLE `spans` ADD `llm_finish_reason` text;\n"
     ]
   }
 ];
