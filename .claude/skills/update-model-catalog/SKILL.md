@@ -20,7 +20,7 @@ The model pickers offer curated presets with friendly names. They are polish, no
 |---|---|
 | OpenAI | https://developers.openai.com/api/docs/models/all |
 | Anthropic | https://platform.claude.com/docs/en/about-claude/models/overview |
-| Google | https://ai.google.dev/gemini-api/docs/models |
+| Google | https://aistudio.google.com/docs/models.md |
 
 WebFetch each one. Ask for exact API ID strings plus display names, and ask explicitly which entries are marked preview / legacy / deprecated.
 

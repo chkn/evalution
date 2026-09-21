@@ -182,7 +182,7 @@ export default prompts({ id: 'triage' }, ({ openai }) => ({
   it("writes a provider preset and reads it back as the same preset", async () => {
     const preset = presets(def.catalogs![0], "Anthropic")[0];
     const { updated, text } = await edit(preset.value);
-    expect(text).toContain(`anthropic("claude-fable-5")`);
+    expect(text).toContain(`anthropic("claude-fable-5-1")`);
     expect(text).toContain("({ openai, anthropic })");
     expect(findPreset(def.catalogs!, updated.model)?.preset).toBe(preset);
     expect(activeCatalogIndex(def.catalogs!, def, updated.model)).toBe(0);
@@ -191,7 +191,7 @@ export default prompts({ id: 'triage' }, ({ openai }) => ({
   it("writes a gateway preset and reads it back as the same preset", async () => {
     const preset = presets(def.catalogs![1], "OpenAI")[0];
     const { updated, text } = await edit(preset.value);
-    expect(text).toContain(`model: "openai/gpt-5.6-sol"`);
+    expect(text).toContain(`model: "openai/gpt-6-astra"`);
     expect(findPreset(def.catalogs!, updated.model)?.preset).toBe(preset);
     expect(activeCatalogIndex(def.catalogs!, def, updated.model)).toBe(1);
   });

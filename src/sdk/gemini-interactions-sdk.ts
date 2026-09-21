@@ -132,6 +132,7 @@ interface CuratedID {
  * lineup. See https://ai.google.dev/gemini-api/docs/interactions
  */
 const CURATED_MODELS: readonly CuratedID[] = [
+  { label: "Gemini 3.8 Flash", id: "gemini-3.8-flash" },
   { label: "Gemini 3.7 Flash", id: "gemini-3.7-flash" },
   { label: "Gemini 3.6 Flash", id: "gemini-3.6-flash" },
   { label: "Gemini 3.5 Flash", id: "gemini-3.5-flash" },
@@ -151,6 +152,7 @@ const CURATED_AGENTS: readonly CuratedID[] = [
     label: "Deep Research Max Preview",
     id: "deep-research-max-preview-04-2026",
   },
+  { label: "Antigravity Preview", id: "antigravity-preview-09-2026" },
 ];
 
 /** Which of the two request shapes a config is. */
