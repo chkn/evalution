@@ -38,6 +38,9 @@ export default defineConfig({
     },
   },
   resolve: {
+    // A symlinked (`npm link`-style) ts-proppy has its own node_modules/react;
+    // dedupe so there's only ever one copy of React.
+    dedupe: ["react", "react-dom"],
     alias: {
       "@shared": path.resolve(__dirname, "./src/shared"),
     },
