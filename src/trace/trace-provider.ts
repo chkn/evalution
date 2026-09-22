@@ -78,6 +78,17 @@ export interface TraceProvider {
    */
   watch?(callback: (event: TraceChangeEvent) => void): () => void;
 
+  /**
+   * Permanently deletes a trace along with its spans and annotations, and
+   * notifies {@link watch}ers with a `remove` event. Returns `false` if the trace
+   * doesn't exist.
+   *
+   * Optional — a provider backed by a read-only source omits it, and the REST
+   * route in `src/server/api-routes.ts` treats its absence as "not
+   * supported" (405).
+   */
+  deleteTrace?(traceId: string): Promise<boolean>;
+
   // ── Annotations — all optional; a provider with no annotation store
   // (e.g. `MemoryTraceProvider`) simply omits every member below, and the
   // REST handlers in `src/server/handlers/annotations.ts` treat their

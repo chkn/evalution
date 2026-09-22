@@ -866,6 +866,27 @@ pre {
   overflow: hidden;
 }
 
+/* Briefly flags the pane `flashPane` (App.tsx) just refocused, so a "trace ↗"
+   / "dataset ↗" link that lands on an already-open, already-visible pane
+   reads as "here it is", not a no-op. Removed by a timeout, and safe to
+   re-add before it fires — see `flashPane`. An inset outline rather than an
+   inset box-shadow: the pane's view paints an opaque background over the
+   latter, while an outline is drawn on top of its content. */
+.pane-flash {
+  outline: 3px solid transparent;
+  outline-offset: -3px;
+  animation: pane-flash 1.2s ease-out;
+}
+
+@keyframes pane-flash {
+  0% {
+    outline-color: var(--accent);
+  }
+  100% {
+    outline-color: transparent;
+  }
+}
+
 /* ─── Pane tab bar ──────────────────────────────────────────────────────────── */
 
 .pane-tabbar {
@@ -1215,6 +1236,8 @@ pre {
   box-sizing: border-box;
 }
 
+/* Narrow (bottom-docked): a column, the title above "Add to dataset"; the
+   side-docked layout below turns it into a row. */
 .pg-exec-header {
   display: flex;
   flex-direction: column;
@@ -3301,38 +3324,6 @@ pre {
   white-space: nowrap;
 }
 
-/* Sized for each column's own content, not a shared guess, since a
-   fixed-layout column's content can silently overflow into its neighbor
-   otherwise. Targeted by column key rather than position since the column
-   picker lets the user reorder them. */
-.trace-table-col-startTime {
-  width: 92px;
-}
-
-.trace-table-col-spanCount {
-  width: 40px;
-}
-
-.trace-table-col-duration {
-  width: 60px;
-}
-
-.trace-table-col-totalTokens {
-  width: 56px;
-}
-
-.trace-table-col-model {
-  width: 110px;
-}
-
-.trace-table-col-cost {
-  width: 64px;
-}
-
-.trace-table-col-annotations {
-  width: 90px;
-}
-
 .trace-table-sort-btn {
   display: inline-flex;
   align-items: center;
@@ -3665,7 +3656,9 @@ pre {
   display: none;
 }
 
-@container trace-header (max-width: 625px) {
+/* The actions collapse into the ⋯ menu sooner than the date shortens: with
+   "Add to dataset" beside "Add annotation" they need the room. */
+@container trace-header (max-width: 760px) {
   .trace-view-header-actions-full {
     display: none;
   }
@@ -3673,7 +3666,9 @@ pre {
   .trace-view-header-menu-trigger {
     display: inline-flex;
   }
+}
 
+@container trace-header (max-width: 625px) {
   .trace-view-date-full {
     display: none;
   }
@@ -3701,6 +3696,28 @@ pre {
 .trace-view-prompt-btn:hover {
   color: var(--trace-text);
   border-color: var(--trace-text-dim);
+}
+
+/* The (root span's or dataset's) prompt, as a link in the meta row. The
+   only item that shrinks — its name truncates before anything is clipped. */
+.trace-view-meta-item.trace-view-prompt-link {
+  flex-shrink: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.trace-view-prompt-link:hover {
+  color: var(--trace-text);
+}
+
+.trace-view-prompt-link-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .trace-view-meta {
@@ -3938,9 +3955,12 @@ pre {
 
 .trace-row-main {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) 70px minmax(80px, 200px);
+  /* The bar track is capped at a share of the row so a narrow pane leaves the
+     name column most of the width; the duration column only needs to fit
+     values like "123.45s". */
+  grid-template-columns: minmax(120px, 1fr) 52px minmax(60px, min(200px, 30%));
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 6px 16px 6px 13px;
   min-height: 32px;
   cursor: pointer;
@@ -5918,4 +5938,499 @@ pre {
   white-space: nowrap;
   font-size: 11px;
   color: var(--panel-text-secondary);
+}
+
+/* ─── Datasets ─────────────────────────────────────────────────────────── */
+
+/* Add to dataset: a trigger, the outcome of the last add beside it, and a
+   portal menu. */
+.add-to-dataset {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Inside the trace header's collapsed menu it's one row of the menu. */
+.trace-header-menu .add-to-dataset {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: stretch;
+  gap: 2px;
+}
+
+/* In the execute header the outcome of an add gets a line of its own under
+   the title and button: the column is too narrow to share one. */
+.pg-exec-header {
+  flex-wrap: wrap;
+}
+
+.pg-exec-header .add-to-dataset {
+  display: contents;
+}
+
+.pg-exec-header .add-to-dataset-outcome {
+  order: 2;
+  flex-basis: 100%;
+  max-width: none;
+  padding-top: 4px;
+  white-space: normal;
+}
+
+.pg-exec-title {
+  flex-shrink: 0;
+}
+
+.add-to-dataset-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px dashed var(--panel-text-muted);
+  border-radius: 6px;
+  color: var(--panel-text-secondary);
+  cursor: pointer;
+  font-size: 11.5px;
+  line-height: 14px;
+  padding: 3px 9px;
+}
+
+.add-to-dataset-btn:hover:not(:disabled) {
+  color: var(--panel-text);
+  border-color: var(--panel-text-secondary);
+}
+
+.add-to-dataset-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.add-to-dataset-outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 260px;
+  font-size: 11.5px;
+  color: var(--panel-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trace-header-menu .add-to-dataset-outcome {
+  max-width: none;
+  padding: 2px 10px;
+  white-space: normal;
+}
+
+.add-to-dataset-outcome-error {
+  color: var(--error-text);
+}
+
+.add-to-dataset-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-width: 340px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--dropdown-bg);
+  border: 1px solid var(--dropdown-border);
+  border-radius: 8px;
+  box-shadow: var(--dropdown-shadow);
+  font-size: 12.5px;
+}
+
+.add-to-dataset-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--dropdown-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.add-to-dataset-item:hover:not(:disabled) {
+  background: var(--dropdown-option-hover);
+}
+
+.add-to-dataset-item:disabled {
+  cursor: default;
+  color: var(--dropdown-text-faint);
+}
+
+.add-to-dataset-item-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.add-to-dataset-item-meta {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--dropdown-text-muted);
+}
+
+.add-to-dataset-item:disabled .add-to-dataset-item-meta {
+  color: var(--dropdown-text-faint);
+}
+
+.add-to-dataset-linked {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--accent-faint);
+  color: var(--dropdown-text-muted);
+}
+
+.add-to-dataset-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--dropdown-border);
+}
+
+.add-to-dataset-empty,
+.add-to-dataset-error {
+  padding: 6px 10px;
+  color: var(--dropdown-text-muted);
+}
+
+.add-to-dataset-error {
+  color: var(--error-text);
+}
+
+.add-to-dataset-new {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+}
+
+.add-to-dataset-name {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font: inherit;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 5px;
+  color: var(--input-text);
+}
+
+.add-to-dataset-name:focus {
+  outline: none;
+  background: var(--input-focus-bg);
+}
+
+.add-to-dataset-create {
+  padding: 4px 10px;
+  font: inherit;
+  background: var(--accent);
+  color: var(--on-accent);
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.add-to-dataset-create:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The notice a panel fill leaves above the inputs. The first item of
+   `.pg-exec-body`: a full-width line of its own whether the body wraps its
+   rows side by side (bottom-docked) or stacks them (side-docked). */
+.pg-exec-fill-notice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 28px 6px 10px;
+  border-radius: 6px;
+  background: var(--accent-faint);
+  color: var(--panel-text);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.pg-exec-fill-notice .pg-dismiss {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+}
+
+.pg-exec-fill-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.pg-exec-fill-link:hover {
+  color: var(--panel-text-secondary);
+}
+
+.pg-exec-fill-skipped {
+  color: var(--panel-text-secondary);
+}
+
+.dataset-list-error {
+  color: var(--error-text);
+}
+
+/* The dataset tab. */
+.dataset-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--trace-bg);
+  color: var(--trace-text);
+  overflow: hidden;
+  font-size: 12.5px;
+}
+
+.dataset-view-error {
+  padding: 24px;
+  color: var(--error-text);
+}
+
+/* Shares the trace header's layout (`.trace-view-header`) but has its own
+   container, since it has fewer actions and so collapses them later. */
+.dataset-view-header {
+  container-name: dataset-header;
+}
+
+@container dataset-header (max-width: 360px) {
+  .trace-view-header-actions-full {
+    display: none;
+  }
+
+  .trace-view-header-menu-trigger {
+    display: inline-flex;
+  }
+}
+
+@container dataset-header (max-width: 420px) {
+  .trace-view-date-full {
+    display: none;
+  }
+
+  .trace-view-date-compact {
+    display: inline;
+  }
+}
+
+.dataset-view-rename input {
+  font: inherit;
+  font-size: 15px;
+  line-height: 18px;
+  font-weight: 600;
+  padding: 1px 6px;
+  background: var(--input-focus-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 5px;
+  color: var(--prompt-header-text);
+}
+
+.dataset-menu-delete,
+.trace-menu-delete {
+  color: var(--delete-hover-text);
+}
+
+.trace-view-delete-btn:hover {
+  color: var(--delete-hover-text);
+  border-color: var(--delete-hover-text);
+}
+
+.dataset-view-action-error {
+  margin: 8px 16px 0;
+}
+
+.dataset-view-stale {
+  margin: 8px 16px 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  color: var(--error-text);
+  font-size: 12px;
+}
+
+.dataset-view-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 16px 16px;
+}
+
+.dataset-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.dataset-table th,
+.dataset-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--trace-border);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.dataset-table th {
+  position: sticky;
+  top: 0;
+  background: var(--trace-bg);
+  font-weight: 600;
+  font-size: 11.5px;
+  color: var(--trace-text-dim);
+}
+
+.dataset-table-field {
+  color: var(--trace-text);
+}
+
+.dataset-table-type {
+  margin-left: 6px;
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-weight: 400;
+  font-size: 10.5px;
+}
+
+.dataset-table-index {
+  width: 1%;
+  color: var(--trace-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.dataset-table td {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dataset-table-source {
+  color: var(--trace-text-dim);
+}
+
+.dataset-table-actions,
+.dataset-table-actions-th {
+  width: 1%;
+  text-align: right;
+}
+
+.dataset-cell-empty {
+  color: var(--trace-text-dim);
+}
+
+.dataset-cell-value {
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+}
+
+.dataset-cell-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--pill-bg);
+  border: 1px solid var(--pill-border);
+  color: var(--pill-text);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dataset-cell-chip-icon {
+  font-size: 9px;
+  color: var(--code-text);
+}
+
+.dataset-cell-args {
+  color: var(--trace-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* An object cell previews as {…} and expands on hover. */
+.dataset-cell-object {
+  position: relative;
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+  cursor: default;
+}
+
+.dataset-cell-expand {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 160px;
+  padding: 6px 10px;
+  background: var(--dropdown-bg);
+  border: 1px solid var(--dropdown-border);
+  border-radius: 6px;
+  box-shadow: var(--dropdown-shadow);
+  white-space: nowrap;
+}
+
+.dataset-cell-object:hover .dataset-cell-expand {
+  display: flex;
+}
+
+.dataset-table td:has(.dataset-cell-object) {
+  overflow: visible;
+}
+
+.dataset-cell-expand-key {
+  color: var(--trace-text-dim);
+}
+
+.dataset-link-btn,
+.dataset-row-btn {
+  background: none;
+  border: none;
+  padding: 0 4px;
+  font: inherit;
+  color: var(--trace-text-dim);
+  cursor: pointer;
+}
+
+.dataset-link-btn {
+  margin-left: -4px;
+}
+
+.dataset-link-btn:hover,
+.dataset-row-btn:hover {
+  color: var(--trace-text);
+}
+
+.dataset-row-delete:hover {
+  color: var(--delete-hover-text);
 }

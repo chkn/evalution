@@ -19,3 +19,4 @@ test-results/
 
 # Evalution
 .evalution/traces/
+.evalution/datasets/

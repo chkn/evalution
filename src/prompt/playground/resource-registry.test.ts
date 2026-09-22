@@ -1189,6 +1189,61 @@ describe("receipt round trip (specs/resource-arguments.md §E)", () => {
   });
 });
 
+describe("failures in author-written resource code", () => {
+  it("names the resource when create() throws, keeping the original as the cause", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const broken = resource({
+          create: () => { throw new TypeError("boom"); },
+        });`,
+    });
+
+    const error = (await reg
+      .lease()
+      .acquire("x.playground.ts#broken")
+      .catch(e => e)) as Error;
+    expect(error.message).toBe(
+      "Resource 'x.playground.ts#broken': create() failed — boom",
+    );
+    expect(error.cause).toBeInstanceOf(TypeError);
+    expect((error.cause as Error).message).toBe("boom");
+  });
+
+  it("names the resource when reset() throws", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const db = resource({
+          scope: "server",
+          create: () => ({
+            value: "db",
+            reset: async () => { const t = undefined; return t._.name; },
+          }),
+        });`,
+    });
+
+    const error = (await reg
+      .lease()
+      .acquire("x.playground.ts#db")
+      .catch(e => e)) as Error;
+    expect(error.message).toMatch(
+      /^Resource 'x\.playground\.ts#db': reset\(\) failed — /,
+    );
+    expect(error.cause).toBeInstanceOf(TypeError);
+  });
+
+  it("names only the failing dependency, not each resource that needed it", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const dep = resource({ create: () => { throw new Error("nope"); } });
+        export const top = resource({ inputs: { dep }, create: () => ({ value: 1 }) });`,
+    });
+
+    await expect(reg.lease().acquire("x.playground.ts#top")).rejects.toThrow(
+      "Resource 'x.playground.ts#dep': create() failed — nope",
+    );
+  });
+});
+
 describe("resource reset (specs/resource-arguments.md §F)", () => {
   it("calls reset once per lease, before the value is used, on a server-scoped instance", async () => {
     const { registry: reg } = registry({

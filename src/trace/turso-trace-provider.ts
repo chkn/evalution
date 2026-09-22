@@ -339,6 +339,18 @@ export class TursoTraceProvider extends BaseTraceProvider {
   }
 
   /**
+   * Deletes just the `traces` row — its spans go via the
+   * `trg_spans_cascade_delete_trace` trigger, and its annotations via their
+   * `ON DELETE CASCADE` foreign key, which relies on the client having
+   * `PRAGMA foreign_keys = ON` (as `createLocalTursoClient` sets it).
+   */
+  protected async removeTrace(traceId: string): Promise<void> {
+    await this.serializeWrite(() =>
+      this.db.delete(traces).where(eq(traces.id, traceId)),
+    );
+  }
+
+  /**
    * Reads any existing row, merges the incoming snapshot into it (via
    * `mergeSpans`, the same helper every in-memory sink uses), writes the
    * merged row back, and returns it — all inside one transaction (and one

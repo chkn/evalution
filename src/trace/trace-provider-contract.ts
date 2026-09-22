@@ -17,6 +17,7 @@ export interface ContractProvider extends TraceSink {
   id: string;
   getTrace(traceId: string): Promise<{ trace: { status: string } } | undefined>;
   hasTrace(traceId: string): Promise<boolean>;
+  deleteTrace(traceId: string): Promise<boolean>;
   getAllTraces(): Promise<{ id: string }[]>;
   subscribeTrace(
     traceId: string,
@@ -183,6 +184,36 @@ export function runTraceProviderContractTests(
 
       expect(seen).toContain("add:t1");
       expect(seen).toContain("update:t1");
+    });
+
+    it("deleteTrace removes the trace and its spans, leaves other traces alone, and notifies watchers", async () => {
+      const provider = await makeProvider();
+      const root = rootSpan("t1");
+      await provider.recordSpanStart(root);
+      await provider.recordSpanStart(
+        rootSpan("t1", { id: "t1:child", parentId: root.id }),
+      );
+      await provider.recordSpanStart(rootSpan("t2"));
+
+      const seen: string[] = [];
+      provider.watch(e => seen.push(`${e.type}:${e.traceId}`));
+
+      await expect(provider.deleteTrace("t1")).resolves.toBe(true);
+
+      expect(await provider.hasTrace("t1")).toBe(false);
+      expect(await provider.getTrace("t1")).toBeUndefined();
+      expect((await provider.getAllTraces()).map(s => s.id)).toEqual(["t2"]);
+      expect(((await provider.getTrace("t2")) as any)?.spans).toHaveLength(1);
+      expect(seen).toEqual(["remove:t1"]);
+    });
+
+    it("deleteTrace on an unknown trace id returns false and emits nothing", async () => {
+      const provider = await makeProvider();
+      const seen: string[] = [];
+      provider.watch(e => seen.push(e.type));
+
+      await expect(provider.deleteTrace("unknown")).resolves.toBe(false);
+      expect(seen).toEqual([]);
     });
 
     it("records concurrently-started sibling spans", async () => {

@@ -3,9 +3,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { PromptID, Span, Trace, TraceLiveEvent } from "../../shared/types";
-import { getTrace, subscribeTraceEvents } from "../api";
+import type {
+  NormalizedPrompt,
+  PromptID,
+  Span,
+  Trace,
+  TraceLiveEvent,
+} from "../../shared/types";
+import { deleteTrace, getTrace, subscribeTraceEvents } from "../api";
 import { useAnnotations } from "../hooks/useAnnotations.ts";
+import { AddToDatasetMenu, isInAddToDatasetMenu } from "./AddToDatasetMenu";
+import { fieldsForTrace, fromTrace, hasRecordedInputs } from "./named-inputs";
 import { ChatFlow } from "./trace/ChatFlow.tsx";
 import { CombinedTimeline } from "./trace/CombinedTimeline.tsx";
 import { CostTooltip } from "./trace/CostTooltip.tsx";
@@ -23,6 +31,7 @@ import {
 import {
   CalendarIcon,
   ConversationIcon,
+  DatasetsIcon,
   ModelIcon,
   MoreIcon,
   PlusIcon,
@@ -30,6 +39,7 @@ import {
   SpansIcon,
   StopwatchIcon,
   TokensIcon,
+  TrashIcon,
   TreeCombinedIcon,
   TreeExpandedIcon,
 } from "./trace/icons.tsx";
@@ -44,8 +54,20 @@ interface Props {
   traceId: string;
   /** Span to select and scroll to on first render. */
   initialSpanId?: string;
-  /** Called when the user asks to open a linked prompt in a split pane. */
+  /**
+   * Called when the user asks to open a linked prompt in a split pane. Gets
+   * the root span's whole recorded prompt — inputs included — so the panel
+   * can be filled from it.
+   */
   onOpenPrompt?: (prompt: PromptID) => void;
+  /**
+   * Looks up the prompt a (resolved) prompt reference names, if it's loaded.
+   * Supplies names and types a production trace doesn't record, and the
+   * schema a new dataset gets.
+   */
+  findPrompt?: (prompt: PromptID) => NormalizedPrompt | undefined;
+  /** Called after the user deletes this trace, so its tab can be closed. */
+  onDeleted?: () => void;
 }
 
 interface TraceState {
@@ -111,6 +133,8 @@ function TraceView({
   traceId,
   initialSpanId,
   onOpenPrompt,
+  findPrompt,
+  onDeleted,
 }: Props) {
   const [state, setState] = useState<TraceState>({ trace: null, spans: [] });
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(
@@ -131,6 +155,8 @@ function TraceView({
     open: headerMenuOpen,
     onClose: () => setHeaderMenuOpen(false),
     matchTriggerWidth: false,
+    // The add-to-dataset menu it contains is its own portal.
+    extraContains: isInAddToDatasetMenu,
   });
 
   const {
@@ -230,13 +256,53 @@ function TraceView({
     rootPrompt?.providerId &&
     onOpenPrompt
   );
-  const handleOpenRootPrompt = canOpenRootPrompt
-    ? () =>
-        onOpenPrompt!({
-          id: rootPrompt!.id,
-          providerId: rootPrompt!.providerId,
-        })
-    : undefined;
+
+  const handleDelete = async () => {
+    if (
+      !globalThis.confirm(
+        `Delete “${state.trace!.name}” and its ${state.spans.length} span${state.spans.length === 1 ? "" : "s"}? This can't be undone.`,
+      )
+    )
+      return;
+    try {
+      await deleteTrace(providerId, traceId);
+      onDeleted?.();
+    } catch (err: any) {
+      globalThis.alert(`Could not delete the trace: ${err.message}`);
+    }
+  };
+
+  // "Add to dataset", fed by the root span's recorded inputs — or, for a
+  // production trace, its raw arguments typed by the current prompt.
+  const currentPrompt =
+    rootPrompt?.providerId && findPrompt ? findPrompt(rootPrompt) : undefined;
+  const traceInputs =
+    rootPrompt && hasRecordedInputs(rootPrompt)
+      ? fromTrace(rootPrompt, currentPrompt)
+      : [];
+  const addToDatasetProps =
+    rootPrompt &&
+    traceInputs.length > 0 &&
+    ({
+      inputs: traceInputs,
+      newDatasetFields: fieldsForTrace(rootPrompt, currentPrompt, traceInputs),
+      prompt: currentPrompt?.providerId
+        ? {
+            link: {
+              id: currentPrompt.globalId ?? currentPrompt.id,
+              providerId: currentPrompt.providerId,
+            },
+            openable: {
+              id: currentPrompt.id,
+              providerId: currentPrompt.providerId,
+            },
+          }
+        : undefined,
+      source: { kind: "trace", traceId, traceProviderId: providerId },
+    } satisfies Omit<
+      React.ComponentProps<typeof AddToDatasetMenu>,
+      "children"
+    >);
 
   const spanDetailsContent = selectedSpan && (
     <>
@@ -279,20 +345,16 @@ function TraceView({
         ref={headerMenuRef}
         style={headerMenuStyle}
       >
-        {canOpenRootPrompt && (
-          <button
-            type="button"
+        {addToDatasetProps && (
+          <AddToDatasetMenu
+            {...addToDatasetProps}
             className="trace-header-menu-item"
-            onClick={() => {
-              handleOpenRootPrompt!();
-              setHeaderMenuOpen(false);
-            }}
           >
             <span className="trace-header-menu-item-icon">
-              <PromptLinkIcon />
+              <DatasetsIcon />
             </span>
-            <span className="trace-header-menu-item-label">Open prompt</span>
-          </button>
+            <span className="trace-header-menu-item-label">Add to dataset</span>
+          </AddToDatasetMenu>
         )}
         <button
           type="button"
@@ -307,6 +369,21 @@ function TraceView({
           </span>
           <span className="trace-header-menu-item-label">Add annotation</span>
         </button>
+        {onDeleted && (
+          <button
+            type="button"
+            className="trace-header-menu-item trace-menu-delete"
+            onClick={() => {
+              setHeaderMenuOpen(false);
+              void handleDelete();
+            }}
+          >
+            <span className="trace-header-menu-item-icon">
+              <TrashIcon />
+            </span>
+            <span className="trace-header-menu-item-label">Delete trace</span>
+          </button>
+        )}
       </div>,
       document.body,
     );
@@ -323,16 +400,11 @@ function TraceView({
           </div>
           <div className="trace-view-header-actions">
             <div className="trace-view-header-actions-full">
-              {canOpenRootPrompt && (
-                <button
-                  type="button"
+              {addToDatasetProps && (
+                <AddToDatasetMenu
+                  {...addToDatasetProps}
                   className="trace-view-prompt-btn"
-                  onClick={handleOpenRootPrompt}
-                  title="Open prompt"
-                >
-                  <PromptLinkIcon />
-                  Open prompt
-                </button>
+                />
               )}
               <button
                 type="button"
@@ -341,6 +413,17 @@ function TraceView({
               >
                 + Add annotation
               </button>
+              {onDeleted && (
+                <button
+                  type="button"
+                  className="trace-view-prompt-btn trace-view-delete-btn"
+                  onClick={() => void handleDelete()}
+                  title="Delete trace"
+                  aria-label="Delete trace"
+                >
+                  <TrashIcon />
+                </button>
+              )}
             </div>
             <button
               type="button"
@@ -364,6 +447,20 @@ function TraceView({
               {formatTimestampCompact(state.trace.startTime)}
             </span>
           </span>
+          {canOpenRootPrompt && (
+            <button
+              type="button"
+              className="trace-view-meta-item trace-view-prompt-link"
+              onClick={() => onOpenPrompt!(rootPrompt!)}
+              title="Open prompt with inputs filled from trace"
+            >
+              <PromptLinkIcon />
+              <span className="trace-view-prompt-link-name">
+                {currentPrompt?.name ?? rootPrompt!.id}
+              </span>
+              ↗
+            </button>
+          )}
           <span className="trace-view-meta-item">
             <SpansIcon />
             {state.spans.length} span{state.spans.length === 1 ? "" : "s"}

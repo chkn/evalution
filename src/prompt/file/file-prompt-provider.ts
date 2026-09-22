@@ -1012,6 +1012,7 @@ export class FilePromptProvider
     // actually needs. Alongside them goes a snapshot of the signature they
     // were captured against, so a later replay can diff two known shapes
     // rather than guess whether they still line up.
+    const snapshot = await this.parameterSnapshot(promptId);
     const handle = await this.sdkAdapter.executeConfig(config, {
       traceId,
       rootSpanId,
@@ -1023,10 +1024,8 @@ export class FilePromptProvider
           ? [...inputs.functionInputs]
           : undefined,
         executeInputs: inputs?.executeInputs,
-        parameterDefinitions: await this.parameterSnapshot(
-          filePath,
-          promptName,
-        ),
+        parameterDefinitions: snapshot?.functionParameters,
+        executeParameterDefinitions: snapshot?.executeParameters,
       },
     });
 
@@ -1048,14 +1047,26 @@ export class FilePromptProvider
    * is to write the shape down at run time. Replay then compares two known
    * signatures instead of inferring a match, which works with no version store
    * at all.
+   *
+   * Both halves are recorded: the execute parameters are only known after
+   * normalization (their shapes come from type probes), and without them a
+   * trace's `executeInputs` would have names but no types.
    */
-  private async parameterSnapshot(
-    filePath: string,
-    promptName: string,
-  ): Promise<PropDefinition[] | undefined> {
+  private async parameterSnapshot(promptId: string): Promise<
+    | {
+        functionParameters: PropDefinition[];
+        executeParameters?: PropDefinition[];
+      }
+    | undefined
+  > {
     try {
-      const parsed = await this.fileType.parsePrompts([filePath], this.rootDir);
-      return parsed.find(p => p.name === promptName)?.functionParameters;
+      const prompt = await this.getPrompt(promptId);
+      return prompt
+        ? {
+            functionParameters: prompt.functionParameters,
+            executeParameters: prompt.executeParameters,
+          }
+        : undefined;
     } catch {
       return undefined;
     }

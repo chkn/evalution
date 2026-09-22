@@ -49,6 +49,7 @@ import type {
   PropDefinition,
 } from "../../shared/types";
 import { getModelDefinition, updatePromptProperties } from "../api";
+import type { PanelFill, PanelFillSource } from "./named-inputs";
 import { applyOptimisticUpdates } from "./optimistic-updates";
 import PlaygroundEditor from "./PlaygroundEditor";
 import PlaygroundExecution from "./PlaygroundExecution";
@@ -63,6 +64,10 @@ interface Props {
    * for it. Lets the surrounding app open a trace tab in a split pane.
    */
   onExecuted?: (result: ExecuteResponse & { label: string }) => void;
+  /** A one-shot request to overwrite the execute panel — see `PanelFill`. */
+  fill?: PanelFill;
+  /** Opens where a fill came from — the notice's "trace ↗" / "dataset ↗". */
+  onOpenFillSource?: (from: PanelFillSource) => void;
 }
 
 function stableKey(value: unknown): string {
@@ -90,6 +95,8 @@ function PlaygroundContent({
   onUpdate,
   onDirtyChange,
   onExecuted,
+  fill,
+  onOpenFillSource,
 }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -182,7 +189,12 @@ function PlaygroundContent({
           />
         </div>
         <div className="pg-exec-col">
-          <PlaygroundExecution prompt={prompt} onExecuted={onExecuted} />
+          <PlaygroundExecution
+            prompt={prompt}
+            onExecuted={onExecuted}
+            fill={fill}
+            onOpenFillSource={onOpenFillSource}
+          />
         </div>
       </div>
     </div>

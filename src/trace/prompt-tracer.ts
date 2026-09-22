@@ -104,6 +104,12 @@ export interface PromptSpanInfo {
    * signatures instead of guessing whether the recorded inputs still fit.
    */
   parameterDefinitions?: unknown[];
+  /**
+   * The prompt's execute-parameter definitions, recorded for the same reason
+   * as {@link parameterDefinitions}: without them an entry of
+   * {@link executeInputs} has a name but no type.
+   */
+  executeParameterDefinitions?: unknown[];
 }
 
 /**
@@ -129,6 +135,7 @@ export function getPromptSpanAttributes(
           functionInputs: prompt.functionInputs,
           executeInputs: prompt.executeInputs,
           parameterDefinitions: prompt.parameterDefinitions,
+          executeParameterDefinitions: prompt.executeParameterDefinitions,
         })
       : undefined;
 

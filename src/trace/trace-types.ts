@@ -39,6 +39,12 @@ export interface PromptID {
    * guess whether the recorded inputs still fit.
    */
   parameterDefinitions?: unknown[];
+  /**
+   * The prompt's execute-parameter definitions as they stood when the run was
+   * launched — the types of {@link executeInputs}, as
+   * {@link parameterDefinitions} is for {@link functionInputs}.
+   */
+  executeParameterDefinitions?: unknown[];
 }
 
 /**

@@ -6,10 +6,16 @@ import type {
   AddPromptContext,
   Annotation,
   AnnotationKind,
+  Dataset,
+  DatasetField,
+  DatasetProviderInfo,
+  DatasetRow,
+  DatasetSummary,
   ExecuteRequest,
   ExecuteResponse,
   NormalizedPrompt,
   NormalizedPromptUpdates,
+  PromptID,
   PromptProviderInfo,
   PropDefinition,
   TraceLiveEvent,
@@ -182,6 +188,18 @@ export async function getTraces(): Promise<TraceSummary[]> {
   return res.json();
 }
 
+/** Deletes a trace along with its spans and annotations. */
+export async function deleteTrace(
+  providerId: string,
+  traceId: string,
+): Promise<void> {
+  const res = await fetch(
+    `/api/traces/${encodeURIComponent(providerId)}/${encodeURIComponent(traceId)}`,
+    { method: "DELETE" },
+  );
+  await throwIfError(res);
+}
+
 /** Options for {@link getTrace}'s "wait for a freshly-started trace" polling. */
 export interface GetTraceOptions {
   /** Aborts the in-flight request and stops polling. */
@@ -311,4 +329,109 @@ export async function deleteAnnotation(
     },
   );
   await throwIfError(res);
+}
+
+function datasetUrl(
+  providerId: string,
+  datasetId?: string,
+  suffix = "",
+): string {
+  const base = `/api/datasets/${encodeURIComponent(providerId)}`;
+  return datasetId ? `${base}/${encodeURIComponent(datasetId)}${suffix}` : base;
+}
+
+/** Every dataset across every dataset provider, most recently updated first. */
+export async function getDatasets(): Promise<DatasetSummary[]> {
+  const res = await fetch("/api/datasets");
+  await throwIfError(res);
+  return res.json();
+}
+
+/** A dataset with all its rows. */
+export async function getDataset(
+  providerId: string,
+  datasetId: string,
+): Promise<{ dataset: Dataset; rows: DatasetRow[] }> {
+  const res = await fetch(datasetUrl(providerId, datasetId));
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Creates a dataset. Field ids are minted by the server. */
+export async function createDataset(
+  providerId: string,
+  input: {
+    name: string;
+    fields: Omit<DatasetField, "id">[];
+    prompt?: PromptID;
+  },
+): Promise<Dataset> {
+  const res = await fetch(datasetUrl(providerId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Renames a dataset. */
+export async function renameDataset(
+  providerId: string,
+  datasetId: string,
+  name: string,
+): Promise<Dataset> {
+  const res = await fetch(datasetUrl(providerId, datasetId), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Deletes a dataset and all its rows. */
+export async function deleteDataset(
+  providerId: string,
+  datasetId: string,
+): Promise<void> {
+  const res = await fetch(datasetUrl(providerId, datasetId), {
+    method: "DELETE",
+  });
+  await throwIfError(res);
+}
+
+/** Appends rows to a dataset. */
+export async function addDatasetRows(
+  providerId: string,
+  datasetId: string,
+  rows: Pick<DatasetRow, "cells" | "source">[],
+): Promise<DatasetRow[]> {
+  const res = await fetch(datasetUrl(providerId, datasetId, "/rows"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rows }),
+  });
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Deletes one row of a dataset. */
+export async function deleteDatasetRow(
+  providerId: string,
+  datasetId: string,
+  rowId: string,
+): Promise<void> {
+  const res = await fetch(
+    datasetUrl(providerId, datasetId, `/rows/${encodeURIComponent(rowId)}`),
+    { method: "DELETE" },
+  );
+  await throwIfError(res);
+}
+
+/** Every configured dataset provider. */
+export async function getDatasetProviders(): Promise<DatasetProviderInfo[]> {
+  const res = await fetch("/api/dataset-providers");
+  await throwIfError(res);
+  return res.json();
 }

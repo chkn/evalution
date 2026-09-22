@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { access, constants, mkdir } from "node:fs/promises";
+import { access, constants } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { createLocalTursoClient } from "./db/local-turso-client.ts";
 import { runMigrations } from "./db/migrate.ts";
+import { mkdirSelfIgnoring } from "./db/self-ignoring-dir.ts";
 import type { TraceProvider } from "./trace-provider.ts";
 import { BaseTraceProvider } from "./trace-sink.ts";
 import type {
@@ -126,7 +127,9 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
   }
 
   private async open(): Promise<TursoTraceProvider> {
-    await mkdir(dirname(this.path), { recursive: true });
+    // A directory this creates ignores itself, so traces stay out of git
+    // without anyone editing their `.gitignore`.
+    await mkdirSelfIgnoring(dirname(this.path), ["*.db*"]);
     const client = await createLocalTursoClient({ path: this.path });
     await runMigrations(drizzle({ client }));
     const real = new TursoTraceProvider({
@@ -174,6 +177,19 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
 
   protected override addOrUpdateSpan(): Promise<Span> {
     throw new Error("should not be called");
+  }
+
+  protected override removeTrace(): Promise<void> {
+    throw new Error("should not be called");
+  }
+
+  /**
+   * Deletes a trace, its spans and its annotations. Returns `false` if the database
+   * was never created. The `remove` event reaches this provider's watchers
+   * through the bridge set up when the database is opened.
+   */
+  override async deleteTrace(traceId: string): Promise<boolean> {
+    return (await (await this.currentReal())?.deleteTrace(traceId)) ?? false;
   }
 
   override async getTrace(

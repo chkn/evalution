@@ -104,6 +104,12 @@ export abstract class BaseTraceProvider implements TraceProvider, TraceSink {
   protected abstract addOrUpdateTrace(trace: Trace): Promise<void>;
 
   /**
+   * Removes a trace together with its spans and annotations. Only called for
+   * a trace that {@link hasTrace} confirmed exists.
+   */
+  protected abstract removeTrace(traceId: string): Promise<void>;
+
+  /**
    * Stores a span, merging it into any existing span with the same ID (via
    * the `mergeSpans` helper). Returns the resulting stored span so callers
    * can stream the merged view rather than the partial snapshot they passed
@@ -116,6 +122,13 @@ export abstract class BaseTraceProvider implements TraceProvider, TraceSink {
     if (!trace) return undefined;
     const spans = await this.getTraceSpans(traceId);
     return { trace, spans };
+  }
+
+  async deleteTrace(traceId: string): Promise<boolean> {
+    if (!(await this.hasTrace(traceId))) return false;
+    await this.removeTrace(traceId);
+    this.emitChange({ type: "remove", traceId });
+    return true;
   }
 
   subscribeTrace(

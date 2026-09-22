@@ -9,12 +9,15 @@ import { connect, type Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
+import { runDatasetMigrations } from "../dataset/db/migrate.ts";
+import { TursoDatasetProvider } from "../dataset/turso-dataset-provider.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import { PromptRegistry } from "../prompt/prompt-registry.ts";
-import type { ExecuteRequest } from "../shared/types.ts";
+import type { ExecuteRequest, SSEData } from "../shared/types.ts";
 import { runMigrations } from "../trace/db/migrate.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
+import type { TraceProvider } from "../trace/trace-provider.ts";
 import { TursoTraceProvider } from "../trace/turso-trace-provider.ts";
 import { setupRoutes } from "./api-routes.ts";
 
@@ -430,5 +433,347 @@ describe("annotation routes", () => {
       `/api/traces/${TRACE_PROVIDER_ID}/t1/annotations`,
     );
     expect(res.status).toBe(405);
+  });
+});
+
+describe("DELETE /api/traces/:providerId/:id", () => {
+  const start = (provider: MemoryTraceProvider, traceId: string) =>
+    provider.recordSpanStart({
+      id: `${traceId}:root`,
+      traceId,
+      name: "root",
+      kind: "LLM",
+      startTime: Date.now(),
+    });
+
+  function makeTraceApp(traceProvider: TraceProvider) {
+    const app = new Hono();
+    setupRoutes({
+      app,
+      promptProviders: new Map(),
+      traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
+      promptRegistry: new PromptRegistry(),
+      hotReloadSubscribers: new Set(),
+      rootPath: "/demo",
+      hasConfig: true,
+      tracer: trace.getTracer("test"),
+      defaultTraceProviderId: TRACE_PROVIDER_ID,
+    });
+    return app;
+  }
+
+  it("deletes the trace, responding 204, then 404 on a repeat", async () => {
+    const provider = new MemoryTraceProvider({ id: TRACE_PROVIDER_ID });
+    await start(provider, "t1");
+    await start(provider, "t2");
+    const app = makeTraceApp(provider);
+    const url = `/api/traces/${TRACE_PROVIDER_ID}/t1`;
+
+    const res = await app.request(url, { method: "DELETE" });
+    expect(res.status).toBe(204);
+    expect((await app.request(url)).status).toBe(404);
+    expect(
+      (
+        (await (await app.request("/api/traces")).json()) as { id: string }[]
+      ).map(t => t.id),
+    ).toEqual(["t2"]);
+
+    expect((await app.request(url, { method: "DELETE" })).status).toBe(404);
+  });
+
+  it("responds 404 for an unknown trace provider", async () => {
+    const app = makeTraceApp(
+      new MemoryTraceProvider({ id: TRACE_PROVIDER_ID }),
+    );
+    const res = await app.request("/api/traces/nonexistent/t1", {
+      method: "DELETE",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("responds 405 for a provider that can't delete traces", async () => {
+    const readOnly: TraceProvider = {
+      id: TRACE_PROVIDER_ID,
+      getAllTraces: async () => [],
+      getTrace: async () => ({
+        trace: {
+          id: "t1",
+          name: "root",
+          startTime: 0,
+          status: "ok",
+        },
+        spans: [],
+      }),
+    };
+    const res = await makeTraceApp(readOnly).request(
+      `/api/traces/${TRACE_PROVIDER_ID}/t1`,
+      { method: "DELETE" },
+    );
+    expect(res.status).toBe(405);
+  });
+});
+
+describe("GET /api/traces/:providerId/:id", () => {
+  it("keeps the root span's recorded inputs when it resolves the prompt", async () => {
+    // Regression: `resolveSpanPrompt` used to rebuild `span.prompt` as
+    // `{ id, providerId }`, so the client never saw what a run was launched
+    // with — and "Open prompt" had nothing to fill the panel from.
+    const app = new Hono();
+    const promptProviders = new Map([[PROVIDER_ID, fakeProvider()]]);
+    const promptRegistry = new PromptRegistry();
+    await promptRegistry.rebuild(promptProviders);
+    const traceProvider = new MemoryTraceProvider({ id: TRACE_PROVIDER_ID });
+    setupRoutes({
+      app,
+      promptProviders,
+      traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
+      promptRegistry,
+      hotReloadSubscribers: new Set(),
+      rootPath: "/demo",
+      hasConfig: true,
+      tracer: trace.getTracer("test"),
+      defaultTraceProviderId: TRACE_PROVIDER_ID,
+    });
+
+    const functionInputs = [
+      { kind: "value", value: { kind: "primitive", value: "Ada" } },
+    ];
+    await traceProvider.recordSpanStart({
+      id: "t1:root",
+      traceId: "t1",
+      name: "test",
+      kind: "AGENT",
+      startTime: Date.now(),
+      prompt: {
+        id: "p#test",
+        providerId: PROVIDER_ID,
+        functionInputs,
+        parameterDefinitions: [{ name: "name" }],
+      },
+    });
+
+    const res = await app.request(`/api/traces/${TRACE_PROVIDER_ID}/t1`);
+    const body = (await res.json()) as any;
+    expect(body.spans[0].prompt).toEqual({
+      id: "p#test",
+      providerId: PROVIDER_ID,
+      functionInputs,
+      parameterDefinitions: [{ name: "name" }],
+    });
+  });
+});
+
+describe("dataset routes", () => {
+  const DATASET_PROVIDER_ID = "datasets";
+  let client: Database | undefined;
+
+  afterEach(async () => {
+    await client?.close();
+    client = undefined;
+  });
+
+  async function makeDatasetApp() {
+    client = await connect({ path: ":memory:", url: () => null });
+    await runDatasetMigrations(drizzle({ client }));
+    const datasetProvider = new TursoDatasetProvider({
+      client,
+      id: DATASET_PROVIDER_ID,
+    });
+    const promptProviders = new Map([[PROVIDER_ID, fakeProvider()]]);
+    const promptRegistry = new PromptRegistry();
+    await promptRegistry.rebuild(promptProviders);
+    const events: SSEData[] = [];
+    const app = new Hono();
+    setupRoutes({
+      app,
+      promptProviders,
+      traceProviders: new Map(),
+      datasetProviders: new Map([[DATASET_PROVIDER_ID, datasetProvider]]),
+      promptRegistry,
+      hotReloadSubscribers: new Set([(data: SSEData) => events.push(data)]),
+      rootPath: "/demo",
+      hasConfig: true,
+      tracer: trace.getTracer("test"),
+      defaultTraceProviderId: TRACE_PROVIDER_ID,
+    });
+    return { app, events };
+  }
+
+  const json = (method: string, body: unknown) => ({
+    method,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const stringField = (name: string) => ({
+    def: { name, type: { kind: "primitive", syntax: "string" } },
+  });
+
+  const text = (value: string) => ({
+    kind: "value",
+    value: { kind: "primitive", value },
+  });
+
+  async function create(
+    app: Hono,
+    body: unknown = { name: "Tickets", fields: [stringField("ticket")] },
+  ) {
+    const res = await app.request(
+      `/api/datasets/${DATASET_PROVIDER_ID}`,
+      json("POST", body),
+    );
+    return { res, body: (await res.json()) as any };
+  }
+
+  it("round-trips create, add rows, get, rename, delete row, and delete", async () => {
+    const { app } = await makeDatasetApp();
+    const { res, body: dataset } = await create(app);
+    expect(res.status).toBe(201);
+    expect(dataset.fields).toEqual([{ id: "0", ...stringField("ticket") }]);
+
+    const added = await app.request(
+      `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/rows`,
+      json("POST", {
+        rows: [
+          {
+            cells: {
+              "0": {
+                kind: "resource",
+                uri: "pg.ts#seededTask",
+                args: { title: text("Milk") },
+                // Stripped by the server: a row is a recipe, not a replay.
+                receipt: { id: "tsk_abc123" },
+              },
+            },
+            source: {
+              kind: "trace",
+              traceId: "t1",
+              traceProviderId: "local-db",
+            },
+          },
+        ],
+      }),
+    );
+    expect(added.status).toBe(201);
+
+    const list = (await (await app.request("/api/datasets")).json()) as any[];
+    expect(list.map(s => [s.id, s.rowCount])).toEqual([[dataset.id, 1]]);
+
+    const got = (await (
+      await app.request(`/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}`)
+    ).json()) as any;
+    expect(got.dataset.name).toBe("Tickets");
+    expect(got.rows[0].cells["0"]).toEqual({
+      kind: "resource",
+      uri: "pg.ts#seededTask",
+      args: { title: text("Milk") },
+    });
+    expect(got.rows[0].source).toEqual({
+      kind: "trace",
+      traceId: "t1",
+      traceProviderId: "local-db",
+    });
+
+    const renamed = await app.request(
+      `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}`,
+      json("PATCH", { name: "Refunds" }),
+    );
+    expect(((await renamed.json()) as any).name).toBe("Refunds");
+
+    const rowDeleted = await app.request(
+      `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/rows/${got.rows[0].id}`,
+      { method: "DELETE" },
+    );
+    expect(rowDeleted.status).toBe(204);
+
+    const deleted = await app.request(
+      `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}`,
+      { method: "DELETE" },
+    );
+    expect(deleted.status).toBe(204);
+    const gone = await app.request(
+      `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}`,
+    );
+    expect(gone.status).toBe(404);
+  });
+
+  it.each([
+    ["a non-object cell", "hello"],
+    ["an unknown kind", { kind: "mystery" }],
+    ["a value with no PropValue", { kind: "value", value: "raw" }],
+    ["a dataset reference", { kind: "dataset", uri: "tickets#3" }],
+    [
+      "a nested dataset reference",
+      { kind: "object", properties: { x: { kind: "dataset", uri: "d#1" } } },
+    ],
+    ["a resource with no uri", { kind: "resource" }],
+  ])("rejects %s with a 400", async (_label, cell) => {
+    const { app } = await makeDatasetApp();
+    const { body: dataset } = await create(app);
+    const res = await app.request(
+      `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/rows`,
+      json("POST", { rows: [{ cells: { "0": cell } }] }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a cell naming a field the dataset doesn't have with a 400", async () => {
+    const { app } = await makeDatasetApp();
+    const { body: dataset } = await create(app);
+    const res = await app.request(
+      `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/rows`,
+      json("POST", { rows: [{ cells: { z: text("x") } }] }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects fields that aren't unique by name and type", async () => {
+    const { app } = await makeDatasetApp();
+    const { res } = await create(app, {
+      name: "Dupes",
+      fields: [stringField("a"), stringField("a")],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("resolves the prompt link on read, and drops one that no longer resolves", async () => {
+    const { app } = await makeDatasetApp();
+    const { body: linked } = await create(app, {
+      name: "Linked",
+      fields: [],
+      prompt: { id: "p#test", providerId: PROVIDER_ID },
+    });
+    expect(linked.prompt).toEqual({ id: "p#test", providerId: PROVIDER_ID });
+    // A global id no prompt claims any more. (A provider-scoped id is
+    // trusted as-is, as for spans — the client checks it still exists.)
+    await create(app, {
+      name: "Orphan",
+      fields: [],
+      prompt: { id: "retired-global-id" },
+    });
+
+    const list = (await (await app.request("/api/datasets")).json()) as any[];
+    const byName = Object.fromEntries(list.map(s => [s.name, s]));
+    expect(byName.Linked.prompt).toEqual({
+      id: "p#test",
+      providerId: PROVIDER_ID,
+    });
+    expect(byName.Orphan.prompt).toBeUndefined();
+  });
+
+  it("responds 404 for an unknown dataset provider", async () => {
+    const { app } = await makeDatasetApp();
+    const res = await app.request("/api/datasets/nope/x");
+    expect(res.status).toBe(404);
+  });
+
+  it("broadcasts dataset changes on the hot-reload stream", async () => {
+    const { app, events } = await makeDatasetApp();
+    const { body: dataset } = await create(app);
+    expect(events).toContainEqual({
+      type: "dataset-changed",
+      providerId: DATASET_PROVIDER_ID,
+      event: { type: "add", datasetId: dataset.id },
+    });
   });
 });

@@ -449,6 +449,20 @@ class LeaseResetLocks {
   }
 }
 
+/**
+ * Wraps a failure thrown by author-written resource code (`create()`,
+ * `reset()`) so the message says which resource it came from. Without it the
+ * error is whatever the author's code happened to throw — `Cannot read
+ * properties of undefined` — with nothing tying it to a resource, and the
+ * stack (kept as `cause`) is only in the server log.
+ */
+function resourceFailure(label: string, phase: string, err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  return new Error(`Resource '${label}': ${phase} failed — ${message}`, {
+    cause: err,
+  });
+}
+
 /** Resources already warned about a `reset` that will never run, so the message appears once each. */
 const warnedRunScopedReset = new WeakSet<Resource<unknown>>();
 
@@ -859,7 +873,13 @@ export class ResourceRegistry {
     if (scope === "server" && instance.reset) {
       const sortKey = key ? `${label}@${key}` : label;
       const isNewToThisLease = await resetLocks.enter(target, key, sortKey);
-      if (isNewToThisLease) await instance.reset();
+      if (isNewToThisLease) {
+        try {
+          await instance.reset();
+        } catch (err) {
+          throw resourceFailure(label, "reset()", err);
+        }
+      }
     } else if (
       scope === "run" &&
       instance.reset &&
@@ -948,7 +968,12 @@ export class ResourceRegistry {
       }
     }
 
-    const instance = await target.create(resolved, binding?.receipt);
+    let instance: Instance;
+    try {
+      instance = await target.create(resolved, binding?.receipt);
+    } catch (err) {
+      throw resourceFailure(label, "create()", err);
+    }
     if (!instance || typeof instance !== "object" || !("value" in instance)) {
       throw new Error(
         `Resource '${label}': create() must return { value, dispose? }`,

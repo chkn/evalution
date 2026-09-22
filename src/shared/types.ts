@@ -1,10 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { DatasetChangeEvent } from "../dataset/dataset-types.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import type { SDKAdapter } from "../sdk/sdk-adapter.ts";
-
 import type { TraceChangeEvent } from "../trace/trace-types.ts";
+
+export type {
+  Dataset,
+  DatasetChangeEvent,
+  DatasetChangeType,
+  DatasetField,
+  DatasetProviderInfo,
+  DatasetRow,
+  DatasetRowSource,
+  DatasetSummary,
+} from "../dataset/dataset-types.ts";
 
 export type {
   Annotation,
@@ -509,7 +520,17 @@ export interface TraceChangedSSEData {
   event: TraceChangeEvent;
 }
 
-export type SSEData = PromptChangedSSEData | TraceChangedSSEData;
+/** A dataset was added, changed, or removed — see `DatasetProvider.watch`. */
+export interface DatasetChangedSSEData {
+  type: "dataset-changed";
+  providerId: string;
+  event: DatasetChangeEvent;
+}
+
+export type SSEData =
+  | PromptChangedSSEData
+  | TraceChangedSSEData
+  | DatasetChangedSSEData;
 
 // #region Model
 

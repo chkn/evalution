@@ -66,6 +66,11 @@ export class MemoryTraceProvider extends BaseTraceProvider {
     this.traces.set(trace.id, trace);
   }
 
+  protected async removeTrace(traceId: string): Promise<void> {
+    this.traces.delete(traceId);
+    this.spansByTrace.delete(traceId);
+  }
+
   protected async addOrUpdateSpan(span: Span): Promise<Span> {
     let list = this.spansByTrace.get(span.traceId);
     if (!list) {

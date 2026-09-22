@@ -69,6 +69,9 @@ describe("OTelTraceIngestor", () => {
           parameterDefinitions: [
             { name: "name", type: { kind: "primitive", syntax: "string" } },
           ],
+          executeParameterDefinitions: [
+            { name: "toolsContext", type: { kind: "opaque", syntax: "Ctx" } },
+          ],
         }),
       },
     });
@@ -88,6 +91,9 @@ describe("OTelTraceIngestor", () => {
     // diff two known shapes rather than guess whether they still line up.
     expect(loaded?.spans[0].prompt?.parameterDefinitions).toEqual([
       { name: "name", type: { kind: "primitive", syntax: "string" } },
+    ]);
+    expect(loaded?.spans[0].prompt?.executeParameterDefinitions).toEqual([
+      { name: "toolsContext", type: { kind: "opaque", syntax: "Ctx" } },
     ]);
   });
 

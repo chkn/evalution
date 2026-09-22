@@ -76,6 +76,8 @@ const TRACE = {
 };
 
 let nextAnnotationId = 1;
+/** URLs `mockTraceApi` saw a DELETE for — reset by each test that reads it. */
+let deletedTraceUrls: string[] = [];
 
 async function mockTraceApi(
   page: Page,
@@ -118,6 +120,10 @@ async function mockTraceApi(
   });
 
   await page.route("**/api/traces/*/*", route => {
+    if (route.request().method() === "DELETE") {
+      deletedTraceUrls.push(route.request().url());
+      return route.fulfill({ status: 204, body: "" });
+    }
     if (route.request().method() !== "GET") return route.fallback();
     return route.fulfill({ json: trace });
   });
@@ -761,6 +767,143 @@ test("creates and then deletes a trace-level annotation", async ({
   await expect(component.locator(".annotation-card")).toHaveCount(0);
 });
 
+test("deletes the trace from the inline header button once confirmed, then reports it deleted", async ({
+  mount,
+  page,
+}) => {
+  deletedTraceUrls = [];
+  await mockTraceApi(page);
+  await page.setViewportSize({ width: 1000, height: 700 });
+  let deleted = 0;
+  const component = await mount(
+    <TraceViewHarness
+      onDeleted={() => {
+        deleted++;
+      }}
+    />,
+  );
+
+  const dialogs: string[] = [];
+  page.on("dialog", d => {
+    dialogs.push(d.message());
+    void d.accept();
+  });
+  await component.getByRole("button", { name: "Delete trace" }).click();
+
+  await expect.poll(() => deleted).toBe(1);
+  expect(dialogs).toHaveLength(1);
+  expect(dialogs[0]).toContain("Delete");
+  expect(deletedTraceUrls).toEqual([
+    expect.stringMatching(/\/api\/traces\/p1\/t1$/),
+  ]);
+});
+
+test("cancelling the delete confirmation leaves the trace alone", async ({
+  mount,
+  page,
+}) => {
+  deletedTraceUrls = [];
+  await mockTraceApi(page);
+  await page.setViewportSize({ width: 1000, height: 700 });
+  let deleted = 0;
+  const component = await mount(
+    <TraceViewHarness
+      onDeleted={() => {
+        deleted++;
+      }}
+    />,
+  );
+
+  page.on("dialog", d => void d.dismiss());
+  await component.getByRole("button", { name: "Delete trace" }).click();
+  // Give a (wrongly) fired request a moment to land before asserting it didn't.
+  await page.waitForTimeout(200);
+
+  expect(deleted).toBe(0);
+  expect(deletedTraceUrls).toEqual([]);
+});
+
+test("deletes the trace from the header menu when the header is narrow", async ({
+  mount,
+  page,
+}) => {
+  deletedTraceUrls = [];
+  await mockTraceApi(page);
+  await page.setViewportSize({ width: 380, height: 700 });
+  let deleted = 0;
+  const component = await mount(
+    <TraceViewHarness
+      onDeleted={() => {
+        deleted++;
+      }}
+    />,
+  );
+
+  page.on("dialog", d => void d.accept());
+  await component.locator(".trace-view-header-menu-trigger").click();
+  await page
+    .locator(".trace-header-menu .trace-header-menu-item", {
+      hasText: "Delete trace",
+    })
+    .click();
+
+  await expect.poll(() => deleted).toBe(1);
+  expect(deletedTraceUrls).toHaveLength(1);
+});
+
+test("has no delete affordance when the host doesn't handle deletion", async ({
+  mount,
+  page,
+}) => {
+  await mockTraceApi(page);
+  await page.setViewportSize({ width: 1000, height: 700 });
+  const component = await mount(<TraceViewHarness />);
+
+  await expect(component.locator(".trace-view-name")).toBeVisible();
+  await expect(
+    component.getByRole("button", { name: "Delete trace" }),
+  ).toHaveCount(0);
+});
+
+test("links the root span's prompt by name in the meta row, not as a header button", async ({
+  mount,
+  page,
+}) => {
+  const withPrompt = {
+    ...TRACE,
+    spans: TRACE.spans.map(s =>
+      s.id === "root"
+        ? { ...s, prompt: { id: "src/support.ts#triage", providerId: "files" } }
+        : s,
+    ),
+  };
+  await mockTraceApi(page, [], withPrompt);
+  await page.setViewportSize({ width: 1000, height: 700 });
+  const opened: unknown[] = [];
+  const component = await mount(
+    <TraceViewHarness
+      promptName="triage"
+      onOpenPrompt={prompt => {
+        opened.push(prompt);
+      }}
+    />,
+  );
+
+  const link = component.locator(".trace-view-meta .trace-view-prompt-link");
+  await expect(link).toHaveText("triage↗");
+  await expect(component.getByText("Open prompt")).toHaveCount(0);
+
+  await link.click();
+  await expect
+    .poll(() => opened)
+    .toEqual([
+      expect.objectContaining({
+        id: "src/support.ts#triage",
+        providerId: "files",
+      }),
+    ]);
+});
+
 test("tool span details render args/result as an expandable JSON tree", async ({
   mount,
   page,
@@ -1130,4 +1273,34 @@ test("the details pane spans the full tab height, regardless of which tab is act
   const bodyBox = await component.locator(".trace-view-body").boundingBox();
   const paneBox = await component.locator(".trace-details-pane").boundingBox();
   expect(Math.abs(paneBox!.height - bodyBox!.height)).toBeLessThan(2);
+});
+
+test("in a narrow span list, the bar track leaves room for the span name instead of truncating it", async ({
+  mount,
+  page,
+}) => {
+  await mockTraceApi(page, [], {
+    ...TRACE,
+    spans: [
+      { ...TRACE.spans[0], name: "odin#orchestrator", status: "error" },
+      { ...TRACE.spans[1], name: "gemini-3-flash-preview" },
+    ],
+  });
+  await page.setViewportSize({ width: 470, height: 700 });
+  const component = await mount(<TraceViewHarness />);
+  await openSpansTab(component);
+
+  const names = component.locator(".trace-row-name");
+  await expect(names).toHaveCount(2);
+  // The agent's name fits outright; the LLM's long name may still ellipsize,
+  // but should get far more than the ~145px it used to when the bar track
+  // and duration column took a fixed 270px.
+  const [agent, llm] = await names.evaluateAll(els =>
+    els.map(el => ({
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth,
+    })),
+  );
+  expect(agent.scrollWidth).toBeLessThanOrEqual(agent.clientWidth);
+  expect(llm.clientWidth).toBeGreaterThan(100);
 });

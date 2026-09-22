@@ -2,16 +2,32 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import type { ExecuteResponse, PromptID, SSEData } from "../shared/types";
+import type {
+  ExecuteResponse,
+  NormalizedPrompt,
+  PromptID,
+  SSEData,
+} from "../shared/types";
 import { renamePrompt } from "./api";
 import AddPromptDialog from "./components/AddPromptDialog";
+import DatasetList, { datasetKey } from "./components/DatasetList";
+import DatasetView from "./components/DatasetView";
+import {
+  fromTrace,
+  hasRecordedInputs,
+  type PanelFill,
+  type PanelFillSource,
+  panelFill,
+} from "./components/named-inputs";
 import PlaygroundContent from "./components/PlaygroundContent";
 import PromptList from "./components/PromptList";
 import { Tab } from "./components/Tab";
 import { TerminalView } from "./components/TerminalView";
 import TraceList from "./components/TraceList";
 import TraceView from "./components/TraceView";
+import { DatasetsIcon as DatasetsGlyph } from "./components/trace/icons.tsx";
 import { WelcomeWizard } from "./components/welcome/WelcomeWizard";
+import { useDatasets } from "./hooks/useDatasets";
 import { usePrompts } from "./hooks/usePrompts";
 import { useResizable } from "./hooks/useResizable";
 import { useSSE } from "./hooks/useSSE";
@@ -25,12 +41,20 @@ interface PromptTab {
   type: "prompt";
   providerId: string;
   promptId: string;
+  /** A one-shot request to fill the execute panel — see `PanelFill`. */
+  fill?: PanelFill;
 }
 interface TraceTab {
   type: "trace";
   providerId: string;
   traceId: string;
   rootSpanId: string;
+  label: string;
+}
+interface DatasetTab {
+  type: "dataset";
+  providerId: string;
+  datasetId: string;
   label: string;
 }
 interface WelcomeTab {
@@ -44,7 +68,7 @@ interface TerminalTab {
   command: string;
   label: string;
 }
-type AppTab = PromptTab | TraceTab | WelcomeTab | TerminalTab;
+type AppTab = PromptTab | TraceTab | DatasetTab | WelcomeTab | TerminalTab;
 
 const WELCOME_TAB_KEY = "welcome";
 
@@ -53,9 +77,11 @@ const tabKey = (t: AppTab) =>
     ? `prompt:${t.providerId}:${t.promptId}`
     : t.type === "trace"
       ? `trace:${t.providerId}:${t.traceId}`
-      : t.type === "terminal"
-        ? `terminal:${t.id}`
-        : WELCOME_TAB_KEY;
+      : t.type === "dataset"
+        ? `dataset:${t.providerId}:${t.datasetId}`
+        : t.type === "terminal"
+          ? `terminal:${t.id}`
+          : WELCOME_TAB_KEY;
 
 let _terminalSeq = 0;
 
@@ -68,6 +94,34 @@ interface Pane {
 let _paneSeq = 0;
 const mkPaneId = () => `pane${++_paneSeq}`;
 const INIT_PANE = mkPaneId();
+
+/** How long a pane stays flagged `.pane-flash` after `flashPane` lands on it. */
+const PANE_FLASH_MS = 1200;
+
+/**
+ * Scrolls the pane `paneId` into view and briefly flashes it — what
+ * refocusing an already-open, already-visible pane (a "trace ↗" / "dataset
+ * ↗" link in a filled panel's notice, say) does to read as "here it is",
+ * not just a silent focus change nothing else about the screen shows.
+ */
+function flashPane(paneId: string) {
+  const el = document.querySelector<HTMLElement>(
+    `[data-pane="${CSS.escape(paneId)}"]`,
+  );
+  if (!el) return;
+  el.scrollIntoView({
+    behavior: "smooth",
+    block: "nearest",
+    inline: "nearest",
+  });
+  // Restart-safe, as in `SourceRow.tsx`'s `scrollToRow`: removing the class
+  // and forcing a reflow before adding it back makes a repeat click flash
+  // again instead of no-op-ing into an animation already in flight.
+  el.classList.remove("pane-flash");
+  void el.offsetWidth;
+  el.classList.add("pane-flash");
+  window.setTimeout(() => el.classList.remove("pane-flash"), PANE_FLASH_MS);
+}
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -100,6 +154,10 @@ function TracesIcon() {
       <line x1="6" y1="18" x2="16" y2="18" />
     </svg>
   );
+}
+
+function DatasetsIcon() {
+  return <DatasetsGlyph size={20} />;
 }
 
 function PromptsIcon() {
@@ -178,15 +236,23 @@ function App() {
     patchPrompt,
   } = usePrompts();
   const { traces, refetch: refetchTraces } = useTraces();
+  const {
+    datasets,
+    loading: datasetsLoading,
+    error: datasetsError,
+    refetch: refetchDatasets,
+  } = useDatasets();
+  // Bumped on every dataset change event, so open dataset views refetch.
+  const [datasetVersion, setDatasetVersion] = useState(0);
   const [panes, setPanes] = useState<Pane[]>([
     { id: INIT_PANE, tabs: [], activeTabKey: null },
   ]);
   const [focusedPaneId, setFocusedPaneId] = useState(INIT_PANE);
   const [rootPath, setRootPath] = useState("");
   const [configured, setConfigured] = useState(false);
-  const [activeSection, setActiveSection] = useState<"prompts" | "traces">(
-    "prompts",
-  );
+  const [activeSection, setActiveSection] = useState<
+    "prompts" | "traces" | "datasets"
+  >("prompts");
   const [showAddPrompt, setShowAddPrompt] = useState(false);
   const [sectionVisible, setSectionVisible] = useState(
     // `?expand=true` opens with the sidebar collapsed — handy when embedding a
@@ -246,9 +312,12 @@ function App() {
         refetchPrompts();
       } else if (data.type === "trace-changed") {
         refetchTraces();
+      } else if (data.type === "dataset-changed") {
+        refetchDatasets();
+        setDatasetVersion(v => v + 1);
       }
     },
-    [refetchPrompts, refetchTraces],
+    [refetchPrompts, refetchTraces, refetchDatasets],
   );
 
   // Re-pull config and prompts whenever the SSE stream (re)connects. After the
@@ -384,23 +453,17 @@ function App() {
     didDeepLink.current = true;
   }, [loading, prompts]);
 
-  const handleSelectTrace = (
-    providerId: string,
-    traceId: string,
-    label: string,
-  ) => {
-    const tab: AppTab = {
-      type: "trace",
-      providerId,
-      traceId,
-      rootSpanId: "",
-      label,
-    };
+  /**
+   * Opens `tab` in the focused pane — what picking a trace or dataset in the
+   * sidebar does. A tab already open anywhere is focused instead.
+   */
+  const openTabInFocusedPane = (tab: AppTab) => {
     const key = tabKey(tab);
     setPanes(prev => {
       const existing = prev.find(p => p.tabs.some(t => tabKey(t) === key));
       if (existing) {
         setFocusedPaneId(existing.id);
+        flashPane(existing.id);
         return prev.map(p =>
           p.id === existing.id ? { ...p, activeTabKey: key } : p,
         );
@@ -417,15 +480,29 @@ function App() {
     });
   };
 
-  const openTabRightOf = (fromPaneId: string, tab: AppTab) => {
+  /**
+   * @param replace - Whether an already-open copy of the tab is replaced by
+   *   `tab` rather than just focused — how a fresh `fill` reaches a prompt tab
+   *   that's already open.
+   */
+  const openTabRightOf = (fromPaneId: string, tab: AppTab, replace = false) => {
     const key = tabKey(tab);
     setPanes(prev => {
       // If already open anywhere, just focus it.
       const existing = prev.find(p => p.tabs.some(t => tabKey(t) === key));
       if (existing) {
         setFocusedPaneId(existing.id);
+        flashPane(existing.id);
         return prev.map(p =>
-          p.id === existing.id ? { ...p, activeTabKey: key } : p,
+          p.id === existing.id
+            ? {
+                ...p,
+                tabs: replace
+                  ? p.tabs.map(t => (tabKey(t) === key ? tab : t))
+                  : p.tabs,
+                activeTabKey: key,
+              }
+            : p,
         );
       }
 
@@ -480,14 +557,86 @@ function App() {
     openTabRightOf(fromPaneId, tab);
   };
 
-  const openPromptTabRightOf = (fromPaneId: string, prompt: PromptID) => {
-    // `prompt` comes from a resolved span, so `providerId` is set.
+  /** The loaded prompt a provider-scoped reference names, if any. */
+  const findPrompt = (ref: PromptID): NormalizedPrompt | undefined =>
+    prompts.find(p => p.id === ref.id && p.providerId === ref.providerId);
+
+  /**
+   * Opens a prompt tab to the right, optionally carrying a `fill` for its
+   * execute panel. An already-open tab gets the new fill (with its fresh
+   * nonce) and focus.
+   */
+  const openPromptTabRightOf = (
+    fromPaneId: string,
+    prompt: PromptID,
+    fill?: PanelFill,
+  ) => {
+    // `prompt` comes from a resolved span or dataset, so `providerId` is set.
     const providerId = requireProviderId(
       prompt.providerId,
-      `opening prompt ${prompt.id} from trace`,
+      `opening prompt ${prompt.id}`,
     );
-    const tab: PromptTab = { type: "prompt", providerId, promptId: prompt.id };
-    openTabRightOf(fromPaneId, tab);
+    const tab: PromptTab = {
+      type: "prompt",
+      providerId,
+      promptId: prompt.id,
+      ...(fill && { fill }),
+    };
+    openTabRightOf(fromPaneId, tab, !!fill);
+  };
+
+  /** "Open prompt" on a trace: open it with the panel filled from the trace's inputs. */
+  const openPromptFromTrace = (
+    fromPaneId: string,
+    recorded: PromptID,
+    traceId: string,
+    traceProviderId: string,
+  ) => {
+    const current = findPrompt(recorded);
+    const fill =
+      current && hasRecordedInputs(recorded)
+        ? panelFill(fromTrace(recorded, current), current, {
+            type: "trace",
+            description: `trace ${traceId.slice(0, 8)}…`,
+            providerId: traceProviderId,
+            traceId,
+          })
+        : undefined;
+    openPromptTabRightOf(fromPaneId, recorded, fill);
+  };
+
+  const traceTab = (providerId: string, traceId: string): TraceTab => ({
+    type: "trace",
+    providerId,
+    traceId,
+    rootSpanId: "",
+    label:
+      traces.find(t => t.id === traceId && t.providerId === providerId)?.name ??
+      `trace ${traceId.slice(0, 8)}…`,
+  });
+
+  /** A filled panel's "trace ↗" / "dataset ↗": focus the source if open, else open it beside the panel. */
+  const openFillSource = (fromPaneId: string, from: PanelFillSource) =>
+    openTabRightOf(
+      fromPaneId,
+      from.type === "trace"
+        ? traceTab(from.providerId, from.traceId)
+        : {
+            type: "dataset",
+            providerId: from.providerId,
+            datasetId: from.datasetId,
+            label: from.name,
+          },
+    );
+
+  /**
+   * Closes every tab with `key`, wherever it is (a deleted dataset's, say) —
+   * exactly as clicking each one's close button would.
+   */
+  const closeTabEverywhere = (key: string) => {
+    for (const pane of panes) {
+      if (pane.tabs.some(t => tabKey(t) === key)) closeTab(pane.id, key);
+    }
   };
 
   /**
@@ -509,8 +658,7 @@ function App() {
     openTabRightOf(fromPaneId, tab);
   };
 
-  const handleCloseTab = (paneId: string, key: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const closeTab = (paneId: string, key: string) => {
     handleDirtyChange(key, false);
     setPanes(prev => {
       const pane = prev.find(p => p.id === paneId)!;
@@ -523,13 +671,22 @@ function App() {
         return remaining;
       }
       const idx = pane.tabs.findIndex(t => tabKey(t) === key);
-      const nextActive = next[Math.min(idx, next.length - 1)]
-        ? tabKey(next[Math.min(idx, next.length - 1)])
-        : null;
+      const neighbor = next[Math.min(idx, next.length - 1)];
+      const nextActive =
+        pane.activeTabKey === key
+          ? neighbor
+            ? tabKey(neighbor)
+            : null
+          : pane.activeTabKey;
       return prev.map(p =>
         p.id === paneId ? { ...p, tabs: next, activeTabKey: nextActive } : p,
       );
     });
+  };
+
+  const handleCloseTab = (paneId: string, key: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    closeTab(paneId, key);
   };
 
   const handleSplitPane = (paneId: string) => {
@@ -628,6 +785,13 @@ function App() {
     focusedActiveTab?.type === "trace"
       ? `${focusedActiveTab.providerId}:${focusedActiveTab.traceId}`
       : null;
+  const selectedDatasetKey =
+    focusedActiveTab?.type === "dataset"
+      ? datasetKey({
+          providerId: focusedActiveTab.providerId,
+          id: focusedActiveTab.datasetId,
+        })
+      : null;
   const sidebarWidth = sidebar.sizes.w;
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -694,6 +858,21 @@ function App() {
             >
               <TracesIcon />
             </button>
+            <button
+              type="button"
+              className={`icon-nav-btn ${activeSection === "datasets" && sectionVisible ? "active" : ""}`}
+              onClick={() => {
+                if (activeSection === "datasets" && sectionVisible)
+                  setSectionVisible(false);
+                else {
+                  setActiveSection("datasets");
+                  setSectionVisible(true);
+                }
+              }}
+              title="Datasets"
+            >
+              <DatasetsIcon />
+            </button>
           </nav>
         </div>
 
@@ -758,7 +937,7 @@ function App() {
                                   p.id === tab.promptId &&
                                   p.providerId === tab.providerId,
                               )?.name ?? tab.promptId)
-                            : tab.type === "trace"
+                            : tab.type === "trace" || tab.type === "dataset"
                               ? tab.label
                               : tab.type === "terminal"
                                 ? tab.label
@@ -766,6 +945,8 @@ function App() {
                         const icon =
                           tab.type === "trace" ? (
                             <TracesIcon />
+                          ) : tab.type === "dataset" ? (
+                            <DatasetsGlyph size={14} />
                           ) : tab.type === "welcome" ? (
                             <WelcomeIcon />
                           ) : tab.type === "terminal" ? (
@@ -856,8 +1037,33 @@ function App() {
                       error={null}
                       selectedTraceKey={selectedTraceKey}
                       onSelect={t =>
-                        handleSelectTrace(t.providerId, t.id, t.name)
+                        openTabInFocusedPane({
+                          type: "trace",
+                          providerId: t.providerId,
+                          traceId: t.id,
+                          rootSpanId: "",
+                          label: t.name,
+                        })
                       }
+                      sidebarWidth={sidebarWidth}
+                      onResizeSidebar={w => sidebar.setSize("w", w)}
+                    />
+                  )}
+                  {activeSection === "datasets" && (
+                    <DatasetList
+                      datasets={datasets}
+                      loading={datasetsLoading}
+                      error={datasetsError}
+                      selectedKey={selectedDatasetKey}
+                      onSelect={d =>
+                        openTabInFocusedPane({
+                          type: "dataset",
+                          providerId: d.providerId,
+                          datasetId: d.id,
+                          label: d.name,
+                        })
+                      }
+                      promptName={ref => findPrompt(ref)?.name}
                       sidebarWidth={sidebarWidth}
                       onResizeSidebar={w => sidebar.setSize("w", w)}
                     />
@@ -972,6 +1178,35 @@ function App() {
                               onExecuted={result =>
                                 openTraceTabRightOf(pane.id, result)
                               }
+                              fill={tab.fill}
+                              onOpenFillSource={from =>
+                                openFillSource(pane.id, from)
+                              }
+                            />
+                          </div>
+                        );
+                      }
+                      if (tab.type === "dataset") {
+                        return (
+                          <div key={key} style={visible}>
+                            <DatasetView
+                              providerId={tab.providerId}
+                              datasetId={tab.datasetId}
+                              version={datasetVersion}
+                              findPrompt={findPrompt}
+                              onOpenPrompt={prompt =>
+                                openPromptTabRightOf(pane.id, prompt)
+                              }
+                              onOpenInPlayground={(prompt, fill) =>
+                                openPromptTabRightOf(pane.id, prompt, fill)
+                              }
+                              onOpenTrace={(providerId, traceId) =>
+                                openTabRightOf(
+                                  pane.id,
+                                  traceTab(providerId, traceId),
+                                )
+                              }
+                              onDeleted={() => closeTabEverywhere(key)}
                             />
                           </div>
                         );
@@ -983,8 +1218,18 @@ function App() {
                             traceId={tab.traceId}
                             initialSpanId={tab.rootSpanId || undefined}
                             onOpenPrompt={prompt =>
-                              openPromptTabRightOf(pane.id, prompt)
+                              openPromptFromTrace(
+                                pane.id,
+                                prompt,
+                                tab.traceId,
+                                tab.providerId,
+                              )
                             }
+                            findPrompt={findPrompt}
+                            onDeleted={() => {
+                              closeTabEverywhere(key);
+                              refetchTraces();
+                            }}
                           />
                         </div>
                       );

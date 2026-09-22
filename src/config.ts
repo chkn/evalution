@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { DatasetProvider } from "./dataset/dataset-provider.ts";
 import type { PromptProvider } from "./prompt/prompt-provider.ts";
 import type { TraceProvider } from "./trace/trace-provider.ts";
 
@@ -56,4 +57,15 @@ export interface EvalutionConfig {
    * storage (e.g. in tests).
    */
   traceProviders?: TraceProvider[];
+
+  /**
+   * One or more providers that store datasets — collections of input rows
+   * captured from the playground or from traces.
+   *
+   * If omitted, a {@link LocalDirectoryDatasetProvider} is used, which keeps
+   * one SQLite file per dataset under `.evalution/datasets/`. Nothing is
+   * written to disk until the first dataset is created; the directory then
+   * gets a `.gitignore` of its own, so datasets stay out of git.
+   */
+  datasetProviders?: DatasetProvider[];
 }

@@ -7,6 +7,7 @@ import type {
   PromptInputSources,
   PropDefinition,
 } from "../../../shared/types";
+import type { PanelFill, PanelFillSource } from "../named-inputs";
 import PlaygroundExecution from "../PlaygroundExecution";
 
 function makePrompt(
@@ -35,6 +36,8 @@ export function PlaygroundExecutionHarness({
   promptId,
   executeParameters,
   inputSources,
+  fill,
+  onOpenFillSource,
 }: {
   functionParameters: PropDefinition[];
   /** Overrides the mounted prompt's `id`, for testing per-prompt storage keys. */
@@ -43,6 +46,10 @@ export function PlaygroundExecutionHarness({
   executeParameters?: PropDefinition[];
   /** Resources the provider offers, and which slots they fit. */
   inputSources?: PromptInputSources;
+  /** A one-shot request to overwrite the panel, as a trace or dataset row sends. */
+  fill?: PanelFill;
+  /** Opens where a fill came from; without it the notice's source is plain text. */
+  onOpenFillSource?: (from: PanelFillSource) => void;
 }) {
   return (
     <PlaygroundExecution
@@ -50,6 +57,8 @@ export function PlaygroundExecutionHarness({
         ...(executeParameters ? { executeParameters } : {}),
         ...(inputSources ? { inputSources } : {}),
       })}
+      fill={fill}
+      onOpenFillSource={onOpenFillSource}
     />
   );
 }

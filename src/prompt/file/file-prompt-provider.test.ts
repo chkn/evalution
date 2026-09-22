@@ -144,6 +144,7 @@ export function myPrompt() {
         functionInputs,
         executeInputs: undefined,
         parameterDefinitions: [expect.objectContaining({ name: "name" })],
+        executeParameterDefinitions: undefined,
       },
     });
   });

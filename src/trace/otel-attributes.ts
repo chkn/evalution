@@ -298,7 +298,13 @@ export function readLLM(
  */
 export function readInputs(
   attributes: Record<string, unknown>,
-): Pick<PromptID, "functionInputs" | "executeInputs" | "parameterDefinitions"> {
+): Pick<
+  PromptID,
+  | "functionInputs"
+  | "executeInputs"
+  | "parameterDefinitions"
+  | "executeParameterDefinitions"
+> {
   const raw = str(attributes[PROMPT_INPUTS_ATTRIBUTE]);
   if (!raw) return {};
   const parsed = tryParseJson(raw) as any;
@@ -312,6 +318,9 @@ export function readInputs(
       : {}),
     ...(Array.isArray(parsed.parameterDefinitions) && {
       parameterDefinitions: parsed.parameterDefinitions,
+    }),
+    ...(Array.isArray(parsed.executeParameterDefinitions) && {
+      executeParameterDefinitions: parsed.executeParameterDefinitions,
     }),
   };
 }

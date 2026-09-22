@@ -17,6 +17,32 @@
  * @module evalution
  */
 export type { EvalutionConfig } from "./config.ts";
+export {
+  type CreateDatasetInput,
+  DatasetNotFoundError,
+  type DatasetProvider,
+  DatasetValidationError,
+  type NewDatasetRow,
+} from "./dataset/dataset-provider.ts";
+export type {
+  Dataset,
+  DatasetChangeEvent,
+  DatasetChangeType,
+  DatasetField,
+  DatasetProviderInfo,
+  DatasetRow,
+  DatasetRowSource,
+  DatasetSummary,
+} from "./dataset/dataset-types.ts";
+export { runDatasetMigrations } from "./dataset/db/migrate.ts";
+export {
+  LocalDirectoryDatasetProvider,
+  type LocalDirectoryDatasetProviderOptions,
+} from "./dataset/local-directory-dataset-provider.ts";
+export {
+  type TursoCreateDatasetOptions,
+  TursoDatasetProvider,
+} from "./dataset/turso-dataset-provider.ts";
 export type {
   FileProvider,
   FileWatchCallback,

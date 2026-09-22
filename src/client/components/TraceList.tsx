@@ -4,6 +4,11 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { AnnotationKind, TraceSummary } from "../../shared/types";
+import {
+  type SummaryColumn,
+  SummaryList,
+  TableModeButton,
+} from "./SummaryList";
 import { KIND_STYLES } from "./trace/AnnotationChip.tsx";
 import {
   formatCost,
@@ -24,15 +29,13 @@ import {
   DEFAULT_TRACE_COLUMNS,
   parseTraceColumns,
   reorderTraceColumns,
+  TRACE_COLUMN_WIDTH_PX,
   type TraceColumnKey,
   type TraceColumnState,
   tableModeWidth,
   toggleTraceColumn,
 } from "./trace-columns";
 import { useAnchoredPopover } from "./use-anchored-popover";
-
-/** How many of the visible, ordered columns the narrow (card) layout's meta row shows. */
-const CARD_META_COLUMN_COUNT = 3;
 
 const COLUMN_STORAGE_KEY = "trace-list-columns";
 
@@ -55,9 +58,6 @@ const COLUMN_LABELS: Record<TraceColumnKey, string> = {
   cost: "Cost",
   annotations: "Annotations",
 };
-
-/** Columns the wide (table) layout can sort by — every column except `annotations`, whose three counts don't collapse into one sortable value. */
-type SortKey = Exclude<TraceColumnKey, "annotations"> | "name";
 
 function columnIcon(key: TraceColumnKey) {
   switch (key) {
@@ -99,163 +99,6 @@ function AnnotationCountBadges({
         </span>
       ))}
     </span>
-  );
-}
-
-/** This column's value for `trace`, formatted for the table (a bare span count, no "spans" word). */
-function columnTableText(
-  trace: TraceSummary,
-  key: TraceColumnKey,
-): React.ReactNode {
-  switch (key) {
-    case "startTime":
-      return formatTimestampCompact(trace.startTime);
-    case "spanCount":
-      return trace.spanCount;
-    case "duration": {
-      const duration = traceDuration(trace);
-      return duration !== undefined ? formatDuration(duration) : "running…";
-    }
-    case "totalTokens":
-      return trace.totalTokens !== undefined
-        ? formatTokenCount(trace.totalTokens)
-        : "—";
-    case "model":
-      return trace.model ?? "—";
-    case "cost":
-      return trace.cost !== undefined ? formatCost(trace.cost) : "—";
-    case "annotations":
-      return <AnnotationCountBadges counts={trace.annotationCounts} />;
-  }
-}
-
-/** This column's value for `trace`, formatted for a card's meta row (e.g. "8 spans"). */
-function columnCardText(
-  trace: TraceSummary,
-  key: TraceColumnKey,
-): React.ReactNode {
-  if (key === "spanCount") {
-    return `${trace.spanCount} span${trace.spanCount === 1 ? "" : "s"}`;
-  }
-  return columnTableText(trace, key);
-}
-
-interface TraceListProps {
-  traces: TraceSummary[];
-  loading: boolean;
-  error: string | null;
-  selectedTraceKey: string | null;
-  onSelect: (trace: TraceSummary) => void;
-  /** The sidebar's current width, in px — read by the table-mode toggle to know what to restore. */
-  sidebarWidth: number;
-  /** Resizes the sidebar — how the table-mode toggle widens it and restores it. */
-  onResizeSidebar: (width: number) => void;
-}
-
-const traceKey = (t: { providerId: string; id: string }) =>
-  `${t.providerId}:${t.id}`;
-
-/** A trace's running duration, or `undefined` while it's still in flight. */
-function traceDuration(t: TraceSummary): number | undefined {
-  return t.endTime !== undefined ? t.endTime - t.startTime : undefined;
-}
-
-interface SortState {
-  key: SortKey;
-  dir: "asc" | "desc";
-}
-
-function sortValue(t: TraceSummary, key: SortKey): number | string | undefined {
-  switch (key) {
-    case "name":
-      return t.name;
-    case "startTime":
-      return t.startTime;
-    case "spanCount":
-      return t.spanCount;
-    case "duration":
-      return traceDuration(t);
-    case "totalTokens":
-      return t.totalTokens;
-    case "model":
-      return t.model;
-    case "cost":
-      return t.cost;
-  }
-}
-
-/** A trace still running (`undefined` duration) always sorts last, regardless of direction. */
-function sortTraces(traces: TraceSummary[], sort: SortState): TraceSummary[] {
-  const sign = sort.dir === "asc" ? 1 : -1;
-  return [...traces].sort((a, b) => {
-    const av = sortValue(a, sort.key);
-    const bv = sortValue(b, sort.key);
-    if (typeof av === "string" || typeof bv === "string") {
-      return (av as string).localeCompare(bv as string) * sign;
-    }
-    if (av === undefined) return bv === undefined ? 0 : 1;
-    if (bv === undefined) return -1;
-    return (av - bv) * sign;
-  });
-}
-
-function SortableHeader({
-  label,
-  icon,
-  sortKey,
-  sort,
-  onSort,
-  className = "trace-table-th",
-}: {
-  label: string;
-  icon?: React.ReactNode;
-  sortKey: SortKey;
-  sort: SortState;
-  onSort: (key: SortKey) => void;
-  className?: string;
-}) {
-  const active = sort.key === sortKey;
-  return (
-    <th
-      className={className}
-      aria-sort={
-        active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"
-      }
-    >
-      <button
-        type="button"
-        className={`trace-table-sort-btn${active ? " trace-table-sort-btn-active" : ""}`}
-        onClick={() => onSort(sortKey)}
-        title={`Sort by ${label}`}
-      >
-        {icon ?? label}
-        <span className="trace-table-sort-arrow" aria-hidden>
-          {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
-        </span>
-      </button>
-    </th>
-  );
-}
-
-/** Two horizontal arrows, stacked and pointing opposite ways — the table-mode toggle. */
-function TableModeIcon() {
-  return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <line x1="2" y1="7" x2="18" y2="7" />
-      <polyline points="14 3 18 7 14 11" />
-      <line x1="22" y1="17" x2="6" y2="17" />
-      <polyline points="10 13 6 17 10 21" />
-    </svg>
   );
 }
 
@@ -383,6 +226,66 @@ function ColumnPickerButton({
   );
 }
 
+interface TraceListProps {
+  traces: TraceSummary[];
+  loading: boolean;
+  error: string | null;
+  selectedTraceKey: string | null;
+  onSelect: (trace: TraceSummary) => void;
+  /** The sidebar's current width, in px — read by the table-mode toggle to know what to restore. */
+  sidebarWidth: number;
+  /** Resizes the sidebar — how the table-mode toggle widens it and restores it. */
+  onResizeSidebar: (width: number) => void;
+}
+
+const traceKey = (t: { providerId: string; id: string }) =>
+  `${t.providerId}:${t.id}`;
+
+/** A trace's running duration, or `undefined` while it's still in flight. */
+function traceDuration(t: TraceSummary): number | undefined {
+  return t.endTime !== undefined ? t.endTime - t.startTime : undefined;
+}
+
+/** How each {@link TraceColumnKey} renders and sorts — every column except `annotations` is sortable, since its three counts don't collapse into one value. */
+const COLUMN_DEFS: Record<
+  TraceColumnKey,
+  Omit<SummaryColumn<TraceSummary>, "key" | "label" | "icon" | "width">
+> = {
+  startTime: {
+    cell: t => formatTimestampCompact(t.startTime),
+    sortValue: t => t.startTime,
+  },
+  spanCount: {
+    // A bare count in the table, where the header says what it counts.
+    cell: t => t.spanCount,
+    card: t => `${t.spanCount} span${t.spanCount === 1 ? "" : "s"}`,
+    sortValue: t => t.spanCount,
+  },
+  duration: {
+    cell: t => {
+      const duration = traceDuration(t);
+      return duration !== undefined ? formatDuration(duration) : "running…";
+    },
+    sortValue: traceDuration,
+  },
+  totalTokens: {
+    cell: t =>
+      t.totalTokens !== undefined ? formatTokenCount(t.totalTokens) : "—",
+    sortValue: t => t.totalTokens,
+  },
+  model: {
+    cell: t => t.model ?? "—",
+    sortValue: t => t.model,
+  },
+  cost: {
+    cell: t => (t.cost !== undefined ? formatCost(t.cost) : "—"),
+    sortValue: t => t.cost,
+  },
+  annotations: {
+    cell: t => <AnnotationCountBadges counts={t.annotationCounts} />,
+  },
+};
+
 function TraceList({
   traces,
   loading,
@@ -392,14 +295,7 @@ function TraceList({
   sidebarWidth,
   onResizeSidebar,
 }: TraceListProps) {
-  const [sort, setSort] = useState<SortState>({
-    key: "startTime",
-    dir: "desc",
-  });
   const [columns, setColumns] = useState<TraceColumnState[]>(loadColumnState);
-  // `null` while at its normal width; the width to restore to while expanded
-  // for table mode, so the second click can put it back exactly.
-  const [savedWidth, setSavedWidth] = useState<number | null>(null);
 
   useEffect(() => {
     try {
@@ -409,196 +305,54 @@ function TraceList({
     }
   }, [columns]);
 
-  const toggleSort = (key: SortKey) => {
-    setSort(prev =>
-      prev.key === key
-        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: "desc" },
-    );
-  };
-
-  const toggleTableMode = () => {
-    if (savedWidth !== null) {
-      onResizeSidebar(savedWidth);
-      setSavedWidth(null);
-    } else {
-      setSavedWidth(sidebarWidth);
-      onResizeSidebar(tableModeWidth(columns));
-    }
-  };
-
-  const header = (
-    <div className="section-panel-header">
-      <span>Traces</span>
-      <div className="section-panel-header-actions">
-        <ColumnPickerButton
-          columns={columns}
-          onToggle={key => setColumns(prev => toggleTraceColumn(prev, key))}
-          onReorder={(fromIndex, toIndex) =>
-            setColumns(prev => reorderTraceColumns(prev, fromIndex, toIndex))
-          }
-        />
-        <button
-          type="button"
-          className={`tree-toolbar-btn${savedWidth !== null ? " tree-toolbar-btn-active" : ""}`}
-          title="Toggle table view"
-          aria-pressed={savedWidth !== null}
-          onClick={toggleTableMode}
-        >
-          <TableModeIcon />
-        </button>
-      </div>
-    </div>
-  );
-
-  if (loading) {
-    return (
-      <>
-        {header}
-        <div className="section-panel-body">
-          <div className="tree-status">Loading...</div>
-        </div>
-      </>
-    );
-  }
-
-  if (error) {
-    return (
-      <>
-        {header}
-        <div className="section-panel-body">
-          <div className="tree-status tree-error">Error: {error}</div>
-        </div>
-      </>
-    );
-  }
-
-  if (traces.length === 0) {
-    return (
-      <>
-        {header}
-        <div className="section-panel-body">
-          <div className="tree-empty-state">
-            <p>No traces yet.</p>
-            <p className="trace-list-hint">Run a prompt to create one.</p>
-          </div>
-        </div>
-      </>
-    );
-  }
-
-  const sorted = sortTraces(traces, sort);
-  const visibleColumns = columns.filter(c => c.visible);
-  const cardColumns = visibleColumns.slice(0, CARD_META_COLUMN_COUNT);
+  const visibleColumns: SummaryColumn<TraceSummary>[] = columns
+    .filter(c => c.visible)
+    .map(({ key }) => ({
+      key,
+      label: COLUMN_LABELS[key],
+      icon: columnIcon(key),
+      width: TRACE_COLUMN_WIDTH_PX[key],
+      ...COLUMN_DEFS[key],
+    }));
 
   return (
-    <>
-      {header}
-      <div className="section-panel-body trace-list">
-        {/* Card layout — the default, and the only one left once the sidebar
-            gets too narrow for the table's columns (its meta row disappears
-            below that). */}
-        <div className="trace-list-cards">
-          {sorted.map(trace => {
-            const key = traceKey(trace);
-            const isSelected = key === selectedTraceKey;
-            return (
-              <div
-                key={key}
-                className={`trace-list-row${isSelected ? " trace-list-row-selected" : ""}`}
-                onClick={() => onSelect(trace)}
-                title={trace.name}
-              >
-                <div className="trace-list-row-top">
-                  <span
-                    className={`trace-status-dot trace-status-${trace.status}`}
-                  />
-                  <span className="trace-list-name">{trace.name}</span>
-                </div>
-                <div className="trace-list-row-meta">
-                  {cardColumns.map(column => (
-                    <span key={column.key} className="trace-list-meta-item">
-                      {columnIcon(column.key)}
-                      {columnCardText(trace, column.key)}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Table layout — shown instead of the cards once the sidebar is
-            wide enough for sortable columns. */}
-        <table className="trace-table">
-          <thead>
-            <tr>
-              <SortableHeader
-                label="Name"
-                sortKey="name"
-                sort={sort}
-                onSort={toggleSort}
-                className="trace-table-name-th"
-              />
-              {visibleColumns.map(column => {
-                const className = `trace-table-th trace-table-col-${column.key}`;
-                if (column.key === "annotations") {
-                  return (
-                    <th
-                      key={column.key}
-                      className={className}
-                      title={COLUMN_LABELS[column.key]}
-                    >
-                      {columnIcon(column.key)}
-                    </th>
-                  );
-                }
-                return (
-                  <SortableHeader
-                    key={column.key}
-                    label={COLUMN_LABELS[column.key]}
-                    icon={columnIcon(column.key)}
-                    sortKey={column.key}
-                    sort={sort}
-                    onSort={toggleSort}
-                    className={className}
-                  />
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map(trace => {
-              const key = traceKey(trace);
-              const isSelected = key === selectedTraceKey;
-              return (
-                <tr
-                  key={key}
-                  className={`trace-table-row${isSelected ? " trace-table-row-selected" : ""}`}
-                  onClick={() => onSelect(trace)}
-                  title={trace.name}
-                >
-                  <td className="trace-table-name-cell">
-                    <span
-                      className={`trace-status-dot trace-status-${trace.status}`}
-                    />
-                    <span className="trace-list-name">{trace.name}</span>
-                  </td>
-                  {visibleColumns.map(column => (
-                    <td
-                      key={column.key}
-                      className={`trace-table-col-${column.key}`}
-                    >
-                      {columnTableText(trace, column.key)}
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </>
+    <SummaryList
+      title="Traces"
+      headerActions={
+        <>
+          <ColumnPickerButton
+            columns={columns}
+            onToggle={key => setColumns(prev => toggleTraceColumn(prev, key))}
+            onReorder={(fromIndex, toIndex) =>
+              setColumns(prev => reorderTraceColumns(prev, fromIndex, toIndex))
+            }
+          />
+          <TableModeButton
+            sidebarWidth={sidebarWidth}
+            onResizeSidebar={onResizeSidebar}
+            tableWidth={tableModeWidth(columns)}
+          />
+        </>
+      }
+      loading={loading}
+      error={error}
+      empty={
+        <>
+          <p>No traces yet.</p>
+          <p className="trace-list-hint">Run a prompt to create one.</p>
+        </>
+      }
+      items={traces}
+      columns={visibleColumns}
+      itemKey={traceKey}
+      itemName={t => t.name}
+      itemMarker={t => (
+        <span className={`trace-status-dot trace-status-${t.status}`} />
+      )}
+      selectedKey={selectedTraceKey}
+      onSelect={onSelect}
+      defaultSort={{ key: "startTime", dir: "desc" }}
+    />
   );
 }
 

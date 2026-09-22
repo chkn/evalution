@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { EvalutionConfig } from "../config.ts";
+import { LocalDirectoryDatasetProvider } from "../dataset/local-directory-dataset-provider.ts";
 import { startServer } from "../server/index.ts";
 import { TerminalSessionRegistry } from "../server/terminal.ts";
 import { CostFetchingTraceSink } from "../trace/cost-fetching-trace-sink.ts";
@@ -101,6 +102,13 @@ async function startConfiguredServer(
     traceProviders = [provider];
   }
 
+  // As for traces: `rootDir`-relative, not the provider's CWD-relative default.
+  const datasetProviders = config.datasetProviders ?? [
+    new LocalDirectoryDatasetProvider({
+      dir: path.join(rootDir, ".evalution", "datasets"),
+    }),
+  ];
+
   // Each adapter runs its own SDK-specific setup and returns the resulting
   // ingestor — we stand up nothing here beyond the default provider.
   const collected = (
@@ -134,6 +142,7 @@ async function startConfiguredServer(
   return startServer({
     promptProviders,
     traceProviders,
+    datasetProviders,
     port,
     rootPath: rootDir,
     hasConfig,

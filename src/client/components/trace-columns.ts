@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { tableModeWidth as baseTableModeWidth } from "./summary-list";
+
 const ALL_KEYS = [
   "startTime",
   "spanCount",
@@ -116,8 +118,8 @@ export function reorderTraceColumns(
 
 // ─── Table-mode width ───────────────────────────────────────────────────────
 
-/** Each column's pixel width in table mode. Mirrors `.trace-table-col-*` in `styles.css` — keep the two in sync. */
-const COLUMN_WIDTH_PX: Record<TraceColumnKey, number> = {
+/** Each column's pixel width in table mode, sized for its own content. */
+export const TRACE_COLUMN_WIDTH_PX: Record<TraceColumnKey, number> = {
   startTime: 92,
   spanCount: 40,
   duration: 60,
@@ -127,35 +129,13 @@ const COLUMN_WIDTH_PX: Record<TraceColumnKey, number> = {
   annotations: 90,
 };
 
-/** The Name column has no fixed CSS width (it flexes to fill the row) — a comfortable minimum for it, not a mirrored stylesheet value. */
-const NAME_COLUMN_WIDTH_PX = 120;
-
-/** Padding/borders the table needs beyond its columns' own widths. */
-const TABLE_CHROME_WIDTH_PX = 24;
-
-/**
- * However narrow the visible columns are, don't resize below this — it's
- * comfortably past the `min-width: 325px` container-query breakpoint
- * (`styles.css`) that swaps cards for the table, so the toggle reliably
- * lands in table mode even with just one or two columns shown.
- */
-const MIN_TABLE_MODE_WIDTH = 340;
-
-/**
- * However wide the visible columns get, don't resize past this — enabling
- * every column shouldn't be able to make the sidebar eat the whole window.
- */
-const MAX_TABLE_MODE_WIDTH = 480;
-
 /**
  * The sidebar width the table-mode toggle resizes to: enough to comfortably
- * fit the Name column plus every currently-visible column, clamped to
- * `[`{@link MIN_TABLE_MODE_WIDTH}`, `{@link MAX_TABLE_MODE_WIDTH}`]`.
+ * fit the Name column plus every currently-visible column (see
+ * `summary-list.ts`'s {@link baseTableModeWidth} for the clamping).
  */
 export function tableModeWidth(columns: TraceColumnState[]): number {
-  const columnsWidth = columns
-    .filter(c => c.visible)
-    .reduce((sum, c) => sum + COLUMN_WIDTH_PX[c.key], NAME_COLUMN_WIDTH_PX);
-  const target = columnsWidth + TABLE_CHROME_WIDTH_PX;
-  return Math.min(MAX_TABLE_MODE_WIDTH, Math.max(MIN_TABLE_MODE_WIDTH, target));
+  return baseTableModeWidth(
+    columns.filter(c => c.visible).map(c => TRACE_COLUMN_WIDTH_PX[c.key]),
+  );
 }

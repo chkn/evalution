@@ -9,6 +9,7 @@ import {
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import type { DatasetProvider } from "../dataset/dataset-provider.ts";
 import {
   resolveExecutionInputs,
   stampReceipts,
@@ -33,6 +34,17 @@ import {
   handleDeleteAnnotation,
   handleListAnnotations,
 } from "./handlers/annotations.ts";
+import {
+  type DatasetHandlerResult,
+  handleAddRows,
+  handleCreateDataset,
+  handleDeleteDataset,
+  handleDeleteRow,
+  handleGetDataset,
+  handleListDatasets,
+  handleRenameDataset,
+  type ResolvePromptLink,
+} from "./handlers/datasets.ts";
 import { handleOtlpTraces } from "./handlers/otlp-ingest.ts";
 import { streamTrace } from "./handlers/trace-stream.ts";
 
@@ -63,6 +75,8 @@ export interface SetupRoutesOptions {
   app: Hono;
   promptProviders: Map<string, PromptProvider>;
   traceProviders: Map<string, TraceProvider>;
+  /** Dataset stores. Omitted by hosts with none; the routes then list nothing. */
+  datasetProviders?: Map<string, DatasetProvider>;
   promptRegistry: PromptRegistry;
   /** Registry of hot-reload SSE writers; each `/api/events` client adds one. */
   hotReloadSubscribers: Set<(data: SSEData) => void>;
@@ -95,6 +109,7 @@ export function setupRoutes({
   app,
   promptProviders,
   traceProviders,
+  datasetProviders = new Map(),
   promptRegistry,
   hotReloadSubscribers,
   rootPath,
@@ -115,9 +130,15 @@ export function setupRoutes({
       span.prompt.providerId,
     );
     if (!resolved) return span;
+    // Only the reference is rewritten: the recorded inputs and definitions
+    // ride along, since they're what "Open prompt" fills the panel from.
     return {
       ...span,
-      prompt: { id: resolved.promptId, providerId: resolved.providerId },
+      prompt: {
+        ...span.prompt,
+        id: resolved.promptId,
+        providerId: resolved.providerId,
+      },
     };
   };
 
@@ -328,7 +349,9 @@ export function setupRoutes({
         // The request named something that cannot be turned into a value — a
         // dataset cell, a resource that no longer exists. That is a bad
         // request, not a failed run: nothing has been dispatched and no trace
-        // exists to carry the error, so it has to be answered here.
+        // exists to carry the error, so it has to be answered here — and
+        // logged, since the response carries only the message.
+        console.error("failed to resolve prompt inputs:", err);
         return c.json({ error: err?.message ?? String(err) }, 400);
       }
       const { functionParams, executeValues } = resolved;
@@ -434,6 +457,29 @@ export function setupRoutes({
     return c.json({ ...trace, spans: trace.spans.map(resolveSpanPrompt) });
   });
 
+  // DELETE /api/traces/:providerId/:id - Delete a trace with its spans and annotations
+  app.delete("/api/traces/:providerId/:id", async c => {
+    const { providerId, id } = c.req.param();
+    const provider = traceProviders.get(providerId);
+    if (!provider) {
+      return c.json({ error: "Trace provider not found" }, 404);
+    }
+    if (!provider.deleteTrace) {
+      return c.json(
+        { error: "This trace provider does not support deleting traces" },
+        405,
+      );
+    }
+    try {
+      const deleted = await provider.deleteTrace(id);
+      return deleted
+        ? c.body(null, 204)
+        : c.json({ error: "Trace not found" }, 404);
+    } catch (error: any) {
+      return c.json({ error: error.message }, 500);
+    }
+  });
+
   // GET /api/traces/:providerId/:id/events - SSE stream of trace updates
   // (span lifecycle + annotations — see `./handlers/trace-stream.ts`)
   app.get("/api/traces/:providerId/:id/events", c => {
@@ -493,6 +539,115 @@ export function setupRoutes({
     "/api/traces/:providerId/:traceId/annotations/:id",
     annotationRoute((provider, { traceId, id }) =>
       handleDeleteAnnotation(provider, traceId, id),
+    ),
+  );
+
+  // A dataset's stored prompt link (a global or provider-scoped id) resolved
+  // to one the client can open, or dropped when it no longer resolves — as
+  // `resolveSpanPrompt` does for spans.
+  const resolvePromptLink: ResolvePromptLink = prompt => {
+    const resolved = promptRegistry.resolve(prompt.id, prompt.providerId);
+    return resolved
+      ? { id: resolved.promptId, providerId: resolved.providerId }
+      : undefined;
+  };
+
+  // Dataset routes: resolve the provider, then relay the neutral handler's
+  // `{status, body}` — a 204 carries no body of its own.
+  const relay = (c: Context, { status, body }: DatasetHandlerResult) =>
+    body === undefined
+      ? c.body(null, status as ContentfulStatusCode)
+      : c.json(body as object, status as ContentfulStatusCode);
+  const datasetRoute =
+    (
+      handle: (
+        provider: DatasetProvider,
+        params: Record<string, string>,
+        c: Context,
+      ) => Promise<DatasetHandlerResult>,
+    ) =>
+    async (c: Context) => {
+      const params = c.req.param();
+      const provider = datasetProviders.get(params.providerId);
+      if (!provider) {
+        return c.json({ error: "Dataset provider not found" }, 404);
+      }
+      return relay(c, await handle(provider, params, c));
+    };
+  const jsonBody = (c: Context) => c.req.json().catch(() => undefined);
+
+  // Dataset changes ride the hot-reload stream, as `trace-changed` does —
+  // there is no second stream.
+  for (const [providerId, provider] of datasetProviders) {
+    provider.watch?.(event => {
+      for (const send of hotReloadSubscribers) {
+        send({ type: "dataset-changed", providerId, event });
+      }
+    });
+  }
+
+  // GET /api/dataset-providers - List dataset providers
+  app.get("/api/dataset-providers", c =>
+    c.json(
+      Array.from(datasetProviders.entries()).map(([id, provider]) => ({
+        id,
+        displayName: provider.displayName,
+        description: provider.description,
+      })),
+    ),
+  );
+
+  // GET /api/datasets - List datasets across every provider
+  app.get("/api/datasets", async c =>
+    relay(
+      c,
+      await handleListDatasets(datasetProviders.values(), resolvePromptLink),
+    ),
+  );
+
+  // POST /api/datasets/:providerId - Create a dataset
+  app.post(
+    "/api/datasets/:providerId",
+    datasetRoute(async (provider, _params, c) =>
+      handleCreateDataset(provider, await jsonBody(c), resolvePromptLink),
+    ),
+  );
+
+  // GET /api/datasets/:providerId/:id - A dataset with its rows
+  app.get(
+    "/api/datasets/:providerId/:id",
+    datasetRoute((provider, { id }) =>
+      handleGetDataset(provider, id, resolvePromptLink),
+    ),
+  );
+
+  // PATCH /api/datasets/:providerId/:id - Rename a dataset
+  app.patch(
+    "/api/datasets/:providerId/:id",
+    datasetRoute(async (provider, { id }, c) =>
+      handleRenameDataset(provider, id, await jsonBody(c), resolvePromptLink),
+    ),
+  );
+
+  // DELETE /api/datasets/:providerId/:id - Delete a dataset
+  app.delete(
+    "/api/datasets/:providerId/:id",
+    datasetRoute((provider, { id }) => handleDeleteDataset(provider, id)),
+  );
+
+  // POST /api/datasets/:providerId/:id/rows - Add rows
+  app.post(
+    "/api/datasets/:providerId/:id/rows",
+    datasetRoute(async (provider, { id }, c) =>
+      handleAddRows(provider, id, await jsonBody(c)),
+    ),
+  );
+
+  // DELETE /api/datasets/:providerId/:id/rows/:rowId - Delete a row
+  app.delete(
+    "/api/datasets/:providerId/:id/rows/:rowId",
+    datasetRoute((provider, { id, rowId }) =>
+      handleDeleteRow(provider, id, rowId),
     ),
   );
 

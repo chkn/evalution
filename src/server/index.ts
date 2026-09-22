@@ -7,6 +7,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { trace } from "@opentelemetry/api";
 import { Hono } from "hono";
 import { WebSocketServer } from "ws";
+import type { DatasetProvider } from "../dataset/dataset-provider.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import { PromptRegistry } from "../prompt/prompt-registry.ts";
 import type { SSEData } from "../shared/types.ts";
@@ -22,6 +23,8 @@ import {
 export interface ServerOptions {
   promptProviders: PromptProvider[];
   traceProviders: TraceProvider[];
+  /** Dataset stores. Defaults to none. */
+  datasetProviders?: DatasetProvider[];
   port: number;
   rootPath: string;
   /** Whether the server was started with a project config file loaded. */
@@ -58,6 +61,7 @@ export async function startServer(
   const {
     promptProviders,
     traceProviders,
+    datasetProviders = [],
     port,
     rootPath,
     hasConfig,
@@ -67,6 +71,7 @@ export async function startServer(
 
   const promptProviderMap = new Map(promptProviders.map(p => [p.id, p]));
   const traceProviderMap = new Map(traceProviders.map(p => [p.id, p]));
+  const datasetProviderMap = new Map(datasetProviders.map(p => [p.id, p]));
 
   // Maps globally-unique / provider-scoped prompt IDs carried by trace spans
   // back to a concrete prompt, so runtime traces can link to their prompt.
@@ -103,6 +108,7 @@ export async function startServer(
     app,
     promptProviders: promptProviderMap,
     traceProviders: traceProviderMap,
+    datasetProviders: datasetProviderMap,
     promptRegistry,
     hotReloadSubscribers,
     rootPath,

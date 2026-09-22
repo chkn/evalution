@@ -3,8 +3,9 @@
 
 /**
  * Bundles the SQL migrations `npm run db:generate` (`drizzle-kit generate`)
- * writes under `src/trace/db/migrations/` into a fs-free TS `MigrationMeta[]`
- * constant (`src/trace/db/migrations/bundled.ts`), so the runtime can apply
+ * writes under a migrations directory (`src/trace/db/migrations/`,
+ * `src/dataset/db/migrations/`) into a fs-free TS `MigrationMeta[]` constant
+ * (`<dir>/bundled.ts`), so the runtime can apply
  * them via `drizzle-orm/sqlite-core/async/session`'s `migrateAsync` without
  * ever touching the filesystem — required for a Workers bundle. See
  * `specs/trace-workshopping.md` §B.4.
@@ -16,7 +17,9 @@
  * `--> statement-breakpoint`, and its hash is a sha256 of the raw file
  * content.
  *
- * Usage: `npm run db:bundle`, after `npm run db:generate`.
+ * Usage: `npm run db:bundle`, after `npm run db:generate` — which bundles
+ * every migrations directory. Directly: `node
+ * scripts/generate-migration-bundle.ts <migrations dir>`.
  *
  * ⚠️ Migrations are append-only once shipped. `migrateAsync` decides what to
  * apply by comparing each bundled migration's `name` against the ledger, so
@@ -29,10 +32,17 @@
 
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 
-const MIGRATIONS_DIR = join(import.meta.dirname, "../src/trace/db/migrations");
+const dirArg = process.argv[2];
+if (!dirArg) {
+  throw new Error(
+    "Usage: node scripts/generate-migration-bundle.ts <migrations dir>",
+  );
+}
+const MIGRATIONS_DIR = resolve(dirArg);
 const OUT_FILE = join(MIGRATIONS_DIR, "bundled.ts");
+const DISPLAY_DIR = relative(join(import.meta.dirname, ".."), MIGRATIONS_DIR);
 
 function formatToMillis(dateStr: string): number {
   const year = Number.parseInt(dateStr.slice(0, 4), 10);
@@ -87,7 +97,7 @@ const contents = `// SPDX-License-Identifier: AGPL-3.0-only
 
 import type { MigrationMeta } from "drizzle-orm/migrator";
 
-/** Every migration under \`src/trace/db/migrations/\`, in apply order. */
+/** Every migration under \`${DISPLAY_DIR}/\`, in apply order. */
 export const bundledMigrations: MigrationMeta[] = ${migrationsJson};
 `;
 

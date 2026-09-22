@@ -152,6 +152,9 @@ describe("Evalution", () => {
         name: "greet",
         functionInputs,
         executeInputs: { toolsContext: { kind: "resource", uri: "pg.ts#ctx" } },
+        executeParameterDefinitions: [
+          { name: "toolsContext", type: { kind: "opaque", syntax: "Ctx" } },
+        ],
       })
       .withTraceId(traceId);
 
@@ -165,6 +168,10 @@ describe("Evalution", () => {
     expect(root?.prompt?.executeInputs).toEqual({
       toolsContext: { kind: "resource", uri: "pg.ts#ctx" },
     });
+    // Without these an execute input has a name but no type.
+    expect(root?.prompt?.executeParameterDefinitions).toEqual([
+      { name: "toolsContext", type: { kind: "opaque", syntax: "Ctx" } },
+    ]);
   });
 
   it("records a tool call nested under the current step", async () => {

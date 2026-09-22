@@ -13,6 +13,7 @@ import type {
   ResourceInfo,
 } from "../../shared/types";
 import { executePrompt } from "../api";
+import { AddToDatasetMenu } from "./AddToDatasetMenu";
 import { CombinedInputEditor } from "./CombinedInputEditor";
 import {
   collapseLossy,
@@ -32,6 +33,14 @@ import {
   toExecutionInput,
 } from "./execution-input-state";
 import {
+  fieldsForPrompt,
+  fromPanel,
+  type PanelFill,
+  type PanelFillSource,
+  type PartialExecuteRequest,
+  type SkippedInput,
+} from "./named-inputs";
+import {
   computeClaims,
   type ResourceArgsContext,
 } from "./resource-args-context";
@@ -43,6 +52,39 @@ interface Props {
    * the surrounding app open the corresponding trace tab.
    */
   onExecuted?: (result: ExecuteResponse & { label: string }) => void;
+  /**
+   * A one-shot request to overwrite the panel — from a trace or a dataset
+   * row. Applied once per `nonce`, then persisted like any other edit.
+   */
+  fill?: PanelFill;
+  /** Opens where a fill came from. Without it, the notice names the source as plain text. */
+  onOpenFillSource?: (from: PanelFillSource) => void;
+}
+
+/**
+ * Fill nonces already applied, page-wide — so a panel that remounts (its tab
+ * dragged to another pane, say) doesn't re-apply a fill over edits made
+ * since.
+ */
+const appliedFills = new Set<number>();
+
+/** What the notice under the header says after a fill. */
+interface FillNotice {
+  from: PanelFillSource;
+  /** Slots that kept the user's own value because the fill had none for them. */
+  kept: string[];
+  skipped: SkippedInput[];
+}
+
+function skipMessage({ name, reason }: SkippedInput) {
+  return (
+    <>
+      <code>{name}</code>
+      {reason === "resource-out-of-scope"
+        ? " uses a resource this prompt can't see"
+        : " has no matching parameter"}
+    </>
+  );
 }
 
 /** Per-slot layout choices, split the same way `Selections` is. */
@@ -164,7 +206,12 @@ function withEntry<T>(
   return { ...obj, [which]: bucket };
 }
 
-function PlaygroundExecution({ prompt, onExecuted }: Props) {
+function PlaygroundExecution({
+  prompt,
+  onExecuted,
+  fill,
+  onOpenFillSource,
+}: Props) {
   const stored = useState(() => loadStored(prompt))[0];
   const [functionSelections, setFunctionSelections] = useState<Selections>(
     stored.fn,
@@ -184,6 +231,7 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
   });
   const [executing, setExecuting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fillNotice, setFillNotice] = useState<FillNotice | null>(null);
 
   // Whether `.pg-exec-body` has more content below the fold — cues the
   // shadow above the run error, which otherwise reads as sitting flush
@@ -383,7 +431,7 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
   };
 
   /**
-   * Assemble the request.
+   * Gather the panel's inputs, by slot name.
    *
    * Nothing is materialized here. The panel sends recipes and the server
    * resolves them: a resource has no value until the run creates one, and a
@@ -394,27 +442,31 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
    * fully expanded selection immediately (see {@link toggleLayout} and
    * `CombinedInputEditor`'s `onChange`), so what's stored per slot is always
    * the same per-member tree expanded mode would have produced.
+   *
+   * @param requireAll - Whether an empty required slot is an error (for a
+   *   run), or simply absent (for a dataset row, where a partial row is
+   *   legitimate). Returns `null`, having set the error, only in the former.
    */
-  const buildRequest = (): ExecuteRequest | null => {
-    const functionInputs: ExecutionInput[] = [];
+  const collectInputs = ({
+    requireAll,
+  }: {
+    requireAll: boolean;
+  }): PartialExecuteRequest | null => {
+    const functionInputs: Record<string, ExecutionInput> = {};
     for (const param of prompt.functionParameters) {
       const input = toExecutionInput(
         functionSelections[param.name],
         resolveArgs,
       );
-      if (!input) {
-        if (!param.optional && param.defaultValue === undefined) {
-          setError(missingInputMessage(param, !!sources));
-          return null;
-        }
-        functionInputs.push(
-          param.defaultValue
-            ? { kind: "value", value: param.defaultValue }
-            : { kind: "value", value: { kind: "primitive", value: undefined } },
-        );
-        continue;
+      if (input) functionInputs[param.name] = input;
+      else if (
+        requireAll &&
+        !param.optional &&
+        param.defaultValue === undefined
+      ) {
+        setError(missingInputMessage(param, !!sources));
+        return null;
       }
-      functionInputs.push(input);
     }
 
     const executeInputs: Record<string, ExecutionInput> = {};
@@ -423,18 +475,81 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
         executeSelections[param.name],
         resolveArgs,
       );
-      if (!input) {
-        if (!param.optional) {
-          setError(missingInputMessage(param, !!sources));
-          return null;
-        }
-        continue;
+      if (input) executeInputs[param.name] = input;
+      else if (requireAll && !param.optional) {
+        setError(missingInputMessage(param, !!sources));
+        return null;
       }
-      executeInputs[param.name] = input;
     }
 
     return { functionInputs, executeInputs };
   };
+
+  /** The request to run: every slot, positionally, defaults filled in. */
+  const buildRequest = (): ExecuteRequest | null => {
+    const collected = collectInputs({ requireAll: true });
+    if (!collected) return null;
+    const functionInputs = prompt.functionParameters.map(
+      (param): ExecutionInput =>
+        collected.functionInputs[param.name] ??
+        (param.defaultValue
+          ? { kind: "value", value: param.defaultValue }
+          : { kind: "value", value: { kind: "primitive", value: undefined } }),
+    );
+    return { functionInputs, executeInputs: collected.executeInputs };
+  };
+
+  // Applies a fill once: matched slots overwritten, every other slot left as
+  // it was, and the result persisted so a reload shows the filled panel.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the nonce alone — a fill is a one-shot event, not state to track.
+  useEffect(() => {
+    if (!fill || appliedFills.has(fill.nonce)) return;
+    appliedFills.add(fill.nonce);
+
+    const recoveredArgs: ResourceArgs = {};
+    const restore = (inputs: Record<string, ExecutionInput>) =>
+      Object.fromEntries(
+        Object.entries(inputs).map(([name, input]) => {
+          const recovered = fromExecutionInput(input, resourcesByUri);
+          Object.assign(recoveredArgs, recovered.resourceArgs);
+          return [name, recovered.selection];
+        }),
+      );
+    const kept = [
+      ...prompt.functionParameters
+        .filter(
+          p =>
+            !(p.name in fill.functionInputs) &&
+            toExecutionInput(functionSelections[p.name], resolveArgs),
+        )
+        .map(p => p.name),
+      ...executeParameters
+        .filter(
+          p =>
+            !(p.name in fill.executeInputs) &&
+            toExecutionInput(executeSelections[p.name], resolveArgs),
+        )
+        .map(p => p.name),
+    ];
+
+    const fn = { ...functionSelections, ...restore(fill.functionInputs) };
+    const exec = { ...executeSelections, ...restore(fill.executeInputs) };
+    const args = { ...resourceArgs, ...recoveredArgs };
+    setFunctionSelections(fn);
+    setExecuteSelections(exec);
+    setResourceArgs(args);
+    persist(fn, exec, layoutChoices, args);
+    setFillNotice({ from: fill.from, kept, skipped: fill.skipped });
+  }, [fill?.nonce]);
+
+  // What "Add to dataset" would add: the filled slots, required or not.
+  const panelInputs = fromPanel(
+    prompt,
+    collectInputs({ requireAll: false }) ?? {
+      functionInputs: {},
+      executeInputs: {},
+    },
+  );
 
   const handleRun = async () => {
     setError(null);
@@ -549,8 +664,77 @@ function PlaygroundExecution({ prompt, onExecuted }: Props) {
     <div className="pg-exec-inner">
       <div className="pg-exec-header">
         <span className="pg-exec-title">Execute</span>
+        {prompt.providerId && (
+          <AddToDatasetMenu
+            inputs={panelInputs}
+            newDatasetFields={fieldsForPrompt(prompt)}
+            prompt={{
+              link: {
+                id: prompt.globalId ?? prompt.id,
+                providerId: prompt.providerId,
+              },
+              openable: { id: prompt.id, providerId: prompt.providerId },
+            }}
+            source={{
+              kind: "playground",
+              promptId: prompt.id,
+              providerId: prompt.providerId,
+            }}
+            disabled={panelInputs.length === 0}
+          />
+        )}
       </div>
       <div className="pg-exec-body" ref={bodyRef}>
+        {fillNotice && (
+          <div className="pg-exec-fill-notice" role="status">
+            <span>
+              Filled from{" "}
+              {onOpenFillSource ? (
+                <button
+                  type="button"
+                  className="pg-exec-fill-link"
+                  onClick={e => {
+                    // Otherwise this bubbles to the pane's own onClick,
+                    // which refocuses *this* pane right back — undoing the
+                    // jump just made.
+                    e.stopPropagation();
+                    onOpenFillSource(fillNotice.from);
+                  }}
+                  title={fillNotice.from.description}
+                >
+                  {fillNotice.from.type} ↗
+                </button>
+              ) : (
+                fillNotice.from.type
+              )}
+              {fillNotice.kept.length > 0 && (
+                <>
+                  <br />
+                  {"Not filled: "}
+                  {fillNotice.kept.map((name, i) => (
+                    <span key={name}>
+                      {i > 0 && ", "}
+                      <code>{name}</code>
+                    </span>
+                  ))}
+                </>
+              )}
+            </span>
+            {fillNotice.skipped.map(skip => (
+              <span key={skip.name} className="pg-exec-fill-skipped">
+                {skipMessage(skip)}
+              </span>
+            ))}
+            <button
+              type="button"
+              className="pg-dismiss"
+              aria-label="Dismiss"
+              onClick={() => setFillNotice(null)}
+            >
+              ×
+            </button>
+          </div>
+        )}
         {renderSlots(
           prompt.functionParameters,
           functionSelections,

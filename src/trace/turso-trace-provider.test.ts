@@ -10,9 +10,10 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { connect, type Database } from "@tursodatabase/sync";
+import type { Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { afterEach, describe, expect, it } from "vitest";
+import { createLocalTursoClient } from "./db/local-turso-client.ts";
 import { runMigrations } from "./db/migrate.ts";
 import { runTraceProviderContractTests } from "./trace-provider-contract.ts";
 import { TursoTraceProvider } from "./turso-trace-provider.ts";
@@ -23,10 +24,9 @@ const clients: Database[] = [];
 async function makeMigratedClient(): Promise<Database> {
   const dir = await mkdtemp(join(tmpdir(), "evalution-turso-provider-"));
   dirs.push(dir);
-  const client = await connect({
-    path: join(dir, "trace.db"),
-    url: () => null,
-  });
+  // The real bootstrap, not a bare `connect` — it's what turns on the
+  // `foreign_keys` pragma that the schema's `ON DELETE CASCADE`s depend on.
+  const client = await createLocalTursoClient({ path: join(dir, "trace.db") });
   clients.push(client);
   // `runMigrations` takes a Drizzle instance; build a throwaway one just to
   // apply DDL, mirroring what a real bootstrap does before ever constructing
@@ -93,6 +93,43 @@ describe("TursoTraceProvider annotations", () => {
     expect((await provider.listAnnotations("t1")).map(a => a.id)).toEqual([
       spanAnnotation.id,
     ]);
+  });
+
+  it("deleting a trace also deletes its spans and annotations, but no one else's", async () => {
+    client = await makeMigratedClient();
+    const provider = new TursoTraceProvider({ client });
+    const start = (traceId: string) =>
+      provider.recordSpanStart({
+        id: `${traceId}:root`,
+        traceId,
+        name: "root",
+        kind: "LLM",
+        startTime: Date.now(),
+      });
+    await start("t1");
+    await start("t2");
+    for (const traceId of ["t1", "t2"])
+      await provider.createAnnotation({
+        traceId,
+        kind: "note",
+        note: "hi",
+        source: "user",
+      });
+
+    await provider.deleteTrace("t1");
+
+    // Asserted against the raw tables, not through the provider — its reads
+    // are all scoped to a trace that no longer exists.
+    const count = async (table: string, traceId: string) => {
+      const stmt = await client.prepare(
+        `select count(*) as n from ${table} where trace_id = ?`,
+      );
+      return ((await stmt.get(traceId)) as { n: number }).n;
+    };
+    expect(await count("spans", "t1")).toBe(0);
+    expect(await count("annotations", "t1")).toBe(0);
+    expect(await count("spans", "t2")).toBe(1);
+    expect(await count("annotations", "t2")).toBe(1);
   });
 });
 

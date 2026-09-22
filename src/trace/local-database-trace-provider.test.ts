@@ -7,7 +7,7 @@
  * test files for the same reasoning).
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -98,6 +98,25 @@ describe("LocalDatabaseTraceProvider — deferred creation", () => {
     expect(existsSync(dbPath)).toBe(true);
     const loaded = await provider.getTrace("t1");
     expect(loaded?.trace.status).toBe("running");
+  });
+
+  it("writes a self-ignoring .gitignore into a directory it creates", async () => {
+    const dbPath = await tempDbPath();
+    const provider = new LocalDatabaseTraceProvider({ path: dbPath });
+    await provider.recordSpanStart(rootSpan("t1"));
+    expect(readFileSync(join(dirname(dbPath), ".gitignore"), "utf8")).toBe(
+      "*.db*\n",
+    );
+  });
+
+  it("leaves a directory that already existed without a .gitignore", async () => {
+    // It may be somewhere the user chose — ignoring all of it would be a
+    // nasty surprise.
+    const dbPath = await tempDbPath();
+    await mkdir(dirname(dbPath), { recursive: true });
+    const provider = new LocalDatabaseTraceProvider({ path: dbPath });
+    await provider.recordSpanStart(rootSpan("t1"));
+    expect(existsSync(join(dirname(dbPath), ".gitignore"))).toBe(false);
   });
 
   it("failTrace and createAnnotation also count as writes that create the file", async () => {
