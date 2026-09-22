@@ -1,13 +1,33 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useCallback, useEffect, useState } from "react";
+import "@glideapps/glide-data-grid/dist/index.css";
+import {
+  bubbleCellRenderer,
+  CompactSelection,
+  DataEditorCore,
+  type DrawHeaderCallback,
+  type GridCell,
+  GridCellKind,
+  type GridColumn,
+  type GridSelection,
+  type ImageWindowLoader,
+  type InnerGridCell,
+  type InternalCellRenderer,
+  type Item,
+  loadingCellRenderer,
+  markerCellRenderer,
+  type Rectangle,
+  type Theme,
+  textCellRenderer,
+} from "@glideapps/glide-data-grid";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { shortSyntax } from "ts-proppy/react";
 import type {
   Dataset,
   DatasetRow,
-  ExecutionInput,
+  DatasetRowsOverview,
   NormalizedPrompt,
   PromptID,
 } from "../../shared/types";
@@ -15,14 +35,26 @@ import {
   deleteDataset,
   deleteDatasetRow,
   getDataset,
+  getDatasetRows,
   renameDataset,
 } from "../api";
+import { DatasetRowDetails } from "./DatasetRowDetails";
+import { DetailsPane, DetailsPaneHeader, useIsWide } from "./DetailsPane";
 import {
-  objectCellLines,
-  previewArgs,
-  previewCell,
-  resourceName,
-} from "./dataset-preview";
+  buildColumns,
+  type CellView,
+  cellView,
+  type DatasetColumn,
+  type DatasetLayout,
+  DEFAULT_LAYOUT,
+  fieldIdsByGroup,
+  groupHeader,
+  layoutStorageKey,
+  parseDatasetLayout,
+  RowPager,
+  serializeDatasetLayout,
+} from "./dataset-grid";
+import { GRID_HEADER_ICONS } from "./grid-sprites";
 import {
   fromRow,
   type PanelFill,
@@ -38,6 +70,7 @@ import {
   TrashIcon,
 } from "./trace/icons.tsx";
 import { useAnchoredPopover } from "./use-anchored-popover";
+import { GRID_MONO_FONT, useGridTheme } from "./use-grid-theme";
 
 interface Props {
   providerId: string;
@@ -59,45 +92,120 @@ interface Props {
   onDeleted: () => void;
 }
 
-/** One cell of the table. */
-function Cell({ input }: { input: ExecutionInput | undefined }) {
-  if (!input) return <span className="dataset-cell-empty">—</span>;
-  switch (input.kind) {
-    case "resource": {
-      const args = previewArgs(input.args);
-      return (
-        <span className="dataset-cell-chip" title={input.uri}>
-          <span className="dataset-cell-chip-icon" aria-hidden>
-            ◆
-          </span>
-          {resourceName(input.uri)}
-          {args && <span className="dataset-cell-args">({args})</span>}
-        </span>
-      );
-    }
-    case "object":
-      return (
-        <span className="dataset-cell-object">
-          {"{…}"}
-          <span className="dataset-cell-expand" role="tooltip">
-            {objectCellLines(input).map(line => (
-              <span key={line.key} className="dataset-cell-expand-line">
-                <span className="dataset-cell-expand-key">{line.key}:</span>{" "}
-                {line.preview}
-              </span>
-            ))}
-          </span>
-        </span>
-      );
-    default:
-      return <span className="dataset-cell-value">{previewCell(input)}</span>;
+/**
+ * The only cell kinds the table draws — so the rest (markdown, images) aren't
+ * bundled. Glide types its own full list the same way: each renderer is
+ * narrower than the union it's looked up by.
+ */
+const RENDERERS = [
+  markerCellRenderer,
+  textCellRenderer,
+  bubbleCellRenderer,
+  loadingCellRenderer,
+] as readonly InternalCellRenderer<InnerGridCell>[];
+
+/** The table draws no images, so the loader Glide requires loads none. */
+const NO_IMAGES: ImageWindowLoader = {
+  setWindow: () => {},
+  loadOrGetImage: () => undefined,
+  setCallback: () => {},
+};
+
+/**
+ * This viewer's layout for one dataset — which fields they expanded, which
+ * columns they resized. A convenience, so a browser that refuses storage
+ * just opens the default layout.
+ */
+function loadLayout(key: string): DatasetLayout {
+  try {
+    const stored = localStorage.getItem(key);
+    if (stored) return parseDatasetLayout(JSON.parse(stored));
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_LAYOUT;
+}
+
+function saveLayout(key: string, layout: DatasetLayout): void {
+  try {
+    localStorage.setItem(key, serializeDatasetLayout(layout));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Drops a deleted dataset's layout, rather than leaving a key behind. */
+function forgetLayout(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* ignore */
   }
 }
 
 /**
- * A dataset's rows, as a table: view, delete, and — when the dataset is
- * linked to a prompt that's loaded — open a row in the playground with the
- * execute panel filled. No in-table editing in v1. See `specs/datasets.md` §J.
+ * The grid's row and header heights. Kept here rather than left to Glide's
+ * defaults because the cover below the last row is placed from them.
+ */
+const ROW_HEIGHT = 32;
+const HEADER_HEIGHT = 32;
+const GROUP_HEADER_HEIGHT = 26;
+
+const NO_SELECTION: GridSelection = {
+  columns: CompactSelection.empty(),
+  rows: CompactSelection.empty(),
+};
+
+/** A {@link CellView} as a Glide cell. */
+function toGridCell(view: CellView, theme: Partial<Theme>): GridCell {
+  const text = (
+    displayData: string,
+    extra: Partial<Omit<GridCell, "kind">> = {},
+  ): GridCell => ({
+    kind: GridCellKind.Text,
+    data: displayData,
+    displayData,
+    allowOverlay: false,
+    readonly: true,
+    ...extra,
+  });
+  switch (view.kind) {
+    case "loading":
+      return { kind: GridCellKind.Loading, allowOverlay: false };
+    case "empty":
+      return text("—", { themeOverride: { textDark: theme.textLight } });
+    case "n/a":
+      return text("n/a", {
+        themeOverride: {
+          textDark: theme.textLight,
+          bgCell: theme.bgCellMedium,
+        },
+      });
+    case "chip":
+      return {
+        kind: GridCellKind.Bubble,
+        data: [view.text],
+        allowOverlay: false,
+      };
+    case "text":
+      return text(view.text, {
+        ...(view.tone === "dim" && {
+          themeOverride: { textDark: theme.textMedium },
+        }),
+        ...(view.tone === "link" && {
+          themeOverride: { textDark: theme.linkColor },
+          cursor: "pointer",
+        }),
+      });
+  }
+}
+
+/**
+ * A dataset's rows as a virtualized grid, paged in from the server as they
+ * scroll into view. A field whose cells hold resources or objects can be
+ * expanded, from its group header, into a column per argument or property.
+ * Selecting a row shows it in full in the details pane, which is also where
+ * it's opened in the playground or deleted. See `specs/datasets.md` §J.
  */
 function DatasetView({
   providerId,
@@ -110,8 +218,36 @@ function DatasetView({
   onDeleted,
 }: Props) {
   const [dataset, setDataset] = useState<Dataset | null>(null);
-  const [rows, setRows] = useState<DatasetRow[]>([]);
+  const [overview, setOverview] = useState<DatasetRowsOverview>({
+    rowCount: 0,
+    fields: {},
+  });
   const [error, setError] = useState<string | null>(null);
+  /** Bumped after a local change, to refetch as a `version` bump would. */
+  const [reload, setReload] = useState(0);
+  /** Bumped whenever a page of rows lands, so the grid and pane redraw. */
+  const [loaded, setLoaded] = useState(0);
+  const layoutKey = layoutStorageKey(providerId, datasetId);
+  const [layout, setLayout] = useState<DatasetLayout>(() =>
+    loadLayout(layoutKey),
+  );
+  const { expanded, widths } = layout;
+  // Written where it changes rather than in an effect: an effect would fire
+  // on the load below too, saving one dataset's layout under another's key.
+  const updateLayout = useCallback(
+    (next: DatasetLayout) => {
+      setLayout(next);
+      saveLayout(layoutKey, next);
+    },
+    [layoutKey],
+  );
+  const layoutKeyRef = useRef(layoutKey);
+  useEffect(() => {
+    if (layoutKeyRef.current === layoutKey) return;
+    layoutKeyRef.current = layoutKey;
+    setLayout(loadLayout(layoutKey));
+  }, [layoutKey]);
+  const [selection, setSelection] = useState<GridSelection>(NO_SELECTION);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -125,22 +261,191 @@ function DatasetView({
     onClose: closeMenu,
     matchTriggerWidth: false,
   });
+  const theme = useGridTheme();
+  const { ref: bodyRef, isWide: showSidePane } = useIsWide(760);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the refetch signal.
+  const pager = useMemo(
+    () =>
+      new RowPager(
+        (offset, limit) => getDatasetRows(providerId, datasetId, offset, limit),
+        () => setLoaded(n => n + 1),
+        err => setError(err.message),
+      ),
+    [providerId, datasetId],
+  );
+  /** The rows last on screen, so a refetch knows what to reload first. */
+  const visibleRef = useRef({ start: 0, end: 0 });
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `version` and `reload` are the refetch signals.
   useEffect(() => {
     let cancelled = false;
     getDataset(providerId, datasetId)
-      .then(data => {
+      .then(({ dataset, rowCount, fields }) => {
         if (cancelled) return;
-        setDataset(data.dataset);
-        setRows(data.rows);
+        setDataset(dataset);
+        setOverview({ rowCount, fields });
         setError(null);
+        pager.invalidate();
+        const { start, end } = visibleRef.current;
+        pager.ensure(start, Math.min(end, rowCount));
       })
       .catch(err => !cancelled && setError(err.message));
     return () => {
       cancelled = true;
     };
-  }, [providerId, datasetId, version]);
+  }, [providerId, datasetId, version, reload, pager]);
+
+  const linkedPrompt = dataset?.prompt ? findPrompt(dataset.prompt) : undefined;
+
+  const columns = useMemo(
+    () =>
+      dataset
+        ? buildColumns({
+            fields: dataset.fields,
+            shape: overview.fields,
+            expanded,
+            shortType: syntax => shortSyntax(syntax, 24),
+          })
+        : [],
+    [dataset, overview.fields, expanded],
+  );
+  const fieldIdByGroup = useMemo(() => fieldIdsByGroup(columns), [columns]);
+  const getGroupDetails = useCallback(
+    (group: string) => groupHeader(group, fieldIdByGroup, expanded),
+    [fieldIdByGroup, expanded],
+  );
+
+  const columnsById = useMemo(
+    () => new Map(columns.map(c => [c.id, c])),
+    [columns],
+  );
+  const gridColumns = useMemo<GridColumn[]>(
+    () =>
+      columns.map(c => ({
+        id: c.id,
+        title: c.title,
+        width: widths[c.id] ?? c.width,
+        ...(c.group !== undefined && { group: c.group }),
+      })),
+    [columns, widths],
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `loaded` redraws cells as their pages land.
+  const getCellContent = useCallback(
+    ([col, row]: Item): GridCell =>
+      toGridCell(cellView(pager.get(row), columns[col]), theme),
+    [columns, pager, theme, loaded],
+  );
+
+  const onVisibleRegionChanged = useCallback(
+    (range: Rectangle) => {
+      const start = range.y;
+      const end = range.y + range.height;
+      visibleRef.current = { start, end };
+      pager.ensure(start, Math.min(end, overview.rowCount));
+    },
+    [pager, overview.rowCount],
+  );
+
+  /** Draws a field's type after its name, dimmed, as the old table did. */
+  const drawHeader = useCallback<DrawHeaderCallback>(
+    (args, drawContent) => {
+      drawContent();
+      const column = columnsById.get(args.column.id ?? "");
+      if (!column?.type) return;
+      const { ctx, rect, theme: t } = args;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(rect.x, rect.y, rect.width, rect.height);
+      ctx.clip();
+      ctx.font = `${t.headerFontStyle} ${t.fontFamily}`;
+      ctx.textBaseline = "middle";
+      const titleMeasure = ctx.measureText(column.title);
+      ctx.font = `10.5px ${GRID_MONO_FONT}`;
+      ctx.fillStyle = t.textLight;
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText(
+        column.type,
+        rect.x + t.cellHorizontalPadding + titleMeasure.width + 6,
+        rect.y + rect.height / 2 - titleMeasure.alphabeticBaseline + 0.5,
+      );
+      ctx.restore();
+    },
+    [columnsById],
+  );
+
+  const onGridSelectionChange = useCallback((newSelection: GridSelection) => {
+    const rows = newSelection.current
+      ? CompactSelection.fromSingleSelection(newSelection.current.range.y)
+      : newSelection.rows;
+    setSelection({
+      ...newSelection,
+      current: undefined,
+      rows,
+    });
+  }, []);
+
+  // `onGridSelectionChange` folds a selected cell into its row.
+  const selectedIndex = selection.rows.first() ?? null;
+  const inRange = selectedIndex !== null && selectedIndex < overview.rowCount;
+  const loadedRow = inRange ? pager.get(selectedIndex) : undefined;
+  // The pane keeps showing its row even once the pager drops that row's page
+  // (scrolled far away) — until another row is selected.
+  const shownRef = useRef<{ index: number; row: DatasetRow } | null>(null);
+  if (loadedRow && selectedIndex !== null) {
+    shownRef.current = { index: selectedIndex, row: loadedRow };
+  }
+  const selectedRow =
+    loadedRow ??
+    (inRange && shownRef.current?.index === selectedIndex
+      ? shownRef.current.row
+      : undefined);
+
+  const openInPlayground = (index: number) => {
+    const row = pager.get(index);
+    if (!dataset || !linkedPrompt || !row) return;
+    onOpenInPlayground(
+      linkedPrompt,
+      panelFill(fromRow(dataset, row), linkedPrompt, {
+        type: "dataset",
+        description: `${dataset.name}, row ${index + 1}`,
+        providerId,
+        datasetId,
+        name: dataset.name,
+      }),
+    );
+  };
+
+  /** Where the table's last row ends, leaving its closing rule in place. */
+  const contentBottom =
+    (columns.some(c => c.group !== undefined) ? GROUP_HEADER_HEIGHT : 0) +
+    HEADER_HEIGHT +
+    overview.rowCount * ROW_HEIGHT +
+    1;
+
+  const onCellClicked = useCallback(
+    ([col, row]: Item) => {
+      const column: DatasetColumn | undefined = columns[col];
+      const source = pager.get(row)?.source;
+      if (column?.role === "source" && source?.kind === "trace") {
+        onOpenTrace(source.traceProviderId, source.traceId);
+      }
+    },
+    [columns, pager, onOpenTrace],
+  );
+
+  const onGroupHeaderClicked = useCallback(
+    (col: number, event: { preventDefault: () => void }) => {
+      const column = columns[col];
+      if (!column || !("path" in column)) return;
+      event.preventDefault();
+      const { fieldId } = column.path;
+      const next = new Set(expanded);
+      if (!next.delete(fieldId)) next.add(fieldId);
+      updateLayout({ ...layout, expanded: next });
+    },
+    [columns, expanded, layout, updateLayout],
+  );
 
   const act = async (action: () => Promise<void>) => {
     try {
@@ -163,8 +468,8 @@ function DatasetView({
     );
   }
 
-  const linkedPrompt = dataset.prompt ? findPrompt(dataset.prompt) : undefined;
   const stale = linkedPrompt ? staleFields(dataset.fields, linkedPrompt) : [];
+  const { rowCount } = overview;
 
   const submitRename = () =>
     act(async () => {
@@ -182,12 +487,13 @@ function DatasetView({
   const handleDelete = () => {
     if (
       !window.confirm(
-        `Delete “${dataset.name}” and its ${rows.length} row${rows.length === 1 ? "" : "s"}?`,
+        `Delete “${dataset.name}” and its ${rowCount} row${rowCount === 1 ? "" : "s"}?`,
       )
     )
       return;
     void act(async () => {
       await deleteDataset(providerId, datasetId);
+      forgetLayout(layoutKey);
       onDeleted();
     });
   };
@@ -209,6 +515,51 @@ function DatasetView({
       </div>,
       document.body,
     );
+
+  const rowDetails = selectedRow && selectedIndex !== null && (
+    <>
+      <DetailsPaneHeader
+        title={<span className="trace-row-name">Row {selectedIndex + 1}</span>}
+        actions={
+          <>
+            {linkedPrompt && (
+              <button
+                type="button"
+                className="dataset-row-btn"
+                title={`Open in playground (${linkedPrompt.name})`}
+                aria-label="Open row in playground"
+                onClick={() => openInPlayground(selectedIndex)}
+              >
+                ▶
+              </button>
+            )}
+            <button
+              type="button"
+              className="dataset-row-btn dataset-row-delete"
+              title="Delete row"
+              aria-label="Delete row"
+              onClick={() =>
+                void act(async () => {
+                  await deleteDatasetRow(providerId, datasetId, selectedRow.id);
+                  setSelection(NO_SELECTION);
+                  setReload(n => n + 1);
+                })
+              }
+            >
+              <TrashIcon />
+            </button>
+          </>
+        }
+        id={selectedRow.id}
+        onClose={() => setSelection(NO_SELECTION)}
+      />
+      <DatasetRowDetails
+        dataset={dataset}
+        row={selectedRow}
+        onOpenTrace={onOpenTrace}
+      />
+    </>
+  );
 
   return (
     <div className="dataset-view">
@@ -279,7 +630,7 @@ function DatasetView({
           </span>
           <span className="trace-view-meta-item" title="Row count">
             <DatasetsIcon />
-            {rows.length} row{rows.length === 1 ? "" : "s"}
+            {rowCount} row{rowCount === 1 ? "" : "s"}
           </span>
           {linkedPrompt && (
             <button
@@ -322,104 +673,73 @@ function DatasetView({
           ))}
         </div>
       )}
-      <div className="dataset-view-body">
-        {rows.length === 0 ? (
-          <div className="tree-empty-state">
-            <p>No rows yet.</p>
-          </div>
-        ) : (
-          <table className="dataset-table">
-            <thead>
-              <tr>
-                <th className="dataset-table-index">#</th>
-                {dataset.fields.map(field => (
-                  <th key={field.id}>
-                    <span className="dataset-table-field">
-                      {field.def.name}
-                    </span>
-                    <span
-                      className="dataset-table-type"
-                      title={field.def.type.syntax}
-                    >
-                      {shortSyntax(field.def.type.syntax, 24)}
-                    </span>
-                  </th>
-                ))}
-                <th>source</th>
-                <th className="dataset-table-actions-th" aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => (
-                <tr key={row.id}>
-                  <td className="dataset-table-index">{index + 1}</td>
-                  {dataset.fields.map(field => (
-                    <td key={field.id}>
-                      <Cell input={row.cells[field.id]} />
-                    </td>
-                  ))}
-                  <td className="dataset-table-source">
-                    {row.source?.kind === "trace" ? (
-                      <button
-                        type="button"
-                        className="dataset-link-btn"
-                        onClick={() => {
-                          const source = row.source;
-                          if (source?.kind === "trace")
-                            onOpenTrace(source.traceProviderId, source.traceId);
-                        }}
-                        title="Open the trace this row came from"
-                      >
-                        trace ↗
-                      </button>
-                    ) : row.source?.kind === "playground" ? (
-                      "playground"
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="dataset-table-actions">
-                    {linkedPrompt && (
-                      <button
-                        type="button"
-                        className="dataset-row-btn"
-                        title={`Open in playground (${linkedPrompt.name})`}
-                        aria-label={`Open row ${index + 1} in playground`}
-                        onClick={() =>
-                          onOpenInPlayground(
-                            linkedPrompt,
-                            panelFill(fromRow(dataset, row), linkedPrompt, {
-                              type: "dataset",
-                              description: `${dataset.name}, row ${index + 1}`,
-                              providerId,
-                              datasetId,
-                              name: dataset.name,
-                            }),
-                          )
-                        }
-                      >
-                        ▶
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="dataset-row-btn dataset-row-delete"
-                      title="Delete row"
-                      aria-label={`Delete row ${index + 1}`}
-                      onClick={() =>
-                        void act(async () => {
-                          await deleteDatasetRow(providerId, datasetId, row.id);
-                          setRows(prev => prev.filter(r => r.id !== row.id));
-                        })
-                      }
-                    >
-                      ✕
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="trace-view-body dataset-view-body" ref={bodyRef}>
+        <div className="trace-view-main-column">
+          {rowCount === 0 ? (
+            <div className="tree-empty-state">
+              <p>No rows yet.</p>
+            </div>
+          ) : (
+            <div className="dataset-grid">
+              <DataEditorCore
+                renderers={RENDERERS}
+                imageWindowLoader={NO_IMAGES}
+                headerIcons={GRID_HEADER_ICONS}
+                getGroupDetails={getGroupDetails}
+                width="100%"
+                height="100%"
+                theme={theme}
+                columns={gridColumns}
+                rows={rowCount}
+                getCellContent={getCellContent}
+                onVisibleRegionChanged={onVisibleRegionChanged}
+                drawHeader={drawHeader}
+                rowMarkers="clickable-number"
+                rowSelect="single"
+                rangeSelect="cell"
+                columnSelect="none"
+                gridSelection={selection}
+                onGridSelectionChange={onGridSelectionChange}
+                onCellClicked={onCellClicked}
+                onGroupHeaderClicked={onGroupHeaderClicked}
+                onColumnResize={(column, width) =>
+                  column.id &&
+                  updateLayout({
+                    ...layout,
+                    widths: { ...widths, [column.id]: width },
+                  })
+                }
+                rowHeight={ROW_HEIGHT}
+                headerHeight={HEADER_HEIGHT}
+                groupHeaderHeight={GROUP_HEADER_HEIGHT}
+                smoothScrollX
+                smoothScrollY
+              />
+              {/*
+               * Glide rules the whole canvas, not just the rows: its
+               * horizontal lines are drawn past the last row and its vertical
+               * ones run the full height. Covering what's below the last row
+               * ends the table there, while the grid still fills the pane so
+               * the horizontal scrollbar stays at the bottom. Sits under the
+               * scroller (see `styles.css`) so that scrollbar stays visible.
+               */}
+              <div
+                className="dataset-grid-fill"
+                style={{ top: contentBottom }}
+                aria-hidden
+              />
+            </div>
+          )}
+          {!showSidePane && rowDetails && (
+            <DetailsPane placement="bottom" label="Row details">
+              {rowDetails}
+            </DetailsPane>
+          )}
+        </div>
+        {showSidePane && rowDetails && (
+          <DetailsPane placement="side" label="Row details">
+            {rowDetails}
+          </DetailsPane>
         )}
       </div>
     </div>

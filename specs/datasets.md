@@ -250,7 +250,13 @@ export interface DatasetProvider {
 
   listDatasets(): Promise<DatasetSummary[]>;
   getDataset(datasetId: string): Promise<Dataset | undefined>;
-  listRows(datasetId: string): Promise<DatasetRow[]>;
+  /** A window onto the rows, oldest first — all of them without `options`. */
+  listRows(
+    datasetId: string,
+    options?: { offset?: number; limit?: number },
+  ): Promise<DatasetRow[]>;
+  /** Row count, and what each field's cells hold one level in — see §J. */
+  describeRows(datasetId: string): Promise<DatasetRowsOverview>;
 
   createDataset(input: {
     name: string;
@@ -391,7 +397,8 @@ Anything else is a 400, not a row that fails later.
 | --- | --- |
 | `GET /api/datasets` | `DatasetSummary[]` across providers, `prompt` resolved |
 | `POST /api/datasets/:providerId` | create `{ name, fields, prompt? }` |
-| `GET /api/datasets/:providerId/:id` | `{ dataset, rows }`, `prompt` resolved |
+| `GET /api/datasets/:providerId/:id` | `{ dataset, rowCount, fields }`, `prompt` resolved — no rows |
+| `GET /api/datasets/:providerId/:id/rows?offset=&limit=` | one page of rows; `limit` capped at 1000 |
 | `PATCH /api/datasets/:providerId/:id` | rename |
 | `DELETE /api/datasets/:providerId/:id` | delete |
 | `POST /api/datasets/:providerId/:id/rows` | add rows (validated per §F) |
@@ -454,7 +461,8 @@ interface PanelFill {
 updated. A `useDatasets` hook modelled on `useTraces` refetches on `dataset-changed`.
 
 **Dataset tab.** A new `DatasetTab { type: "dataset"; providerId; datasetId; label }` in `App.tsx`'s
-tab model, rendering `DatasetView`:
+tab model, rendering `DatasetView`. (As first built, a plain `<table>` of every row; since
+2026-09-22 a virtualized grid, below the sketch.)
 
 ```
 Support tickets                        linked to classify ↗   [ ⋯ ]  rename / delete
@@ -471,11 +479,45 @@ Support tickets                        linked to classify ↗   [ ⋯ ]  rename 
   `{…}` preview that expands on hover, and `resource` cells show a chip with the export name plus
   an args summary. The view has no `inputSources`, so there's no resource *label* to use.
 - ▶ "Open in playground" appears only when the dataset's `prompt` resolved. It opens the prompt
-  tab to the right with a `fill` from `toPanel(fromRow(…))`.
+  tab to the right with a `fill` from `toPanel(fromRow(…))`. (Since 2026-09-22 it lives in the
+  details pane rather than in a column.)
 - "trace ↗" opens the source trace.
 - If fields no longer match the linked prompt's current parameters, a line above the table says
   so ("2 fields no longer match `classify`'s parameters"). The row still opens, and those fields
   are reported as skipped.
+
+**The grid (2026-09-22).** The table is a Glide Data Grid (`@glideapps/glide-data-grid`, the
+React 19–compatible `6.0.4-alpha24`, lazy-loaded with `DatasetView`), and rows are never all in
+memory:
+
+- `GET …/:id` returns an overview instead of rows; the grid is sized from `rowCount` and pages rows
+  in 100 at a time from `GET …/:id/rows` as they scroll into view (`RowPager` in
+  `dataset-grid.ts`). A change refetches the overview and the visible pages, serving the stale ones
+  until the new ones land so nothing flashes.
+- **Columns are paths into cells, found in the data.** A field's `def` is the slot type (`Db`),
+  which says nothing about which resource a row picked or what arguments it took, and different
+  rows pick different resources. So `describeRows` asks SQLite (`json_each` over the JSONB cells)
+  for the keys one level inside each field — a `resource` cell's argument names, an `object`
+  cell's property names, and the properties of a **typed-in object value** (`$.value.properties`),
+  which is how a trace's recorded object inputs land — **merged by name**, roughly in first-seen
+  order. A field with keys gets a group header; clicking it splits the field into one column per
+  key. A row without that key shows `n/a`, distinct from a sparse row's `—`. One level only, and
+  names only — no argument types — for now.
+- **The field keeps a column of its own only when a resource fills it** (`shape.resource`, also
+  from `describeRows`), to name *which* resource, since rows may name different ones. A field of
+  objects doesn't: its own cell would only ever read `{…}` beside the columns holding what's in
+  it.
+- **Selecting a row opens it in the details pane** the trace view uses for spans (`DetailsPane.tsx`,
+  shared): when it was added, its source, then every field in full — long text wraps, and a
+  resource shows its arguments nested beneath it. Open-in-playground and delete live there, and
+  only there — the grid has no ▶ column. "trace ↗" in the source column still opens the trace.
+- **Expanded fields and hand-resized columns persist per dataset** in
+  `localStorage` (`dataset-layout:<providerId>:<datasetId>`), as the trace list's columns do. A
+  per-viewer convenience: storage that's unavailable or hand-edited falls back to the default
+  layout, and deleting a dataset drops its entry.
+- **Sorting and filtering later** name the same paths: a path maps to a JSON path
+  (`$."1".args.title.value.value`), so they become `ORDER BY` / `WHERE` on `json_extract` behind
+  new `ListRowsOptions` members, and paging stays correct because the server orders.
 
 **Add-to-dataset menu.** One component, `AddToDatasetMenu`, anchored with
 `use-anchored-popover.ts` and given `NamedInputs` plus a suggested prompt link:

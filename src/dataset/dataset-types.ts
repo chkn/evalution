@@ -73,6 +73,43 @@ export interface DatasetRow {
   createdAt: number;
 }
 
+/**
+ * What one field's cells hold, beyond a single value — found in the rows,
+ * not the schema: a field's `def` is the slot's type (`Db`), which says
+ * nothing about which resource a row picked to fill it or what arguments
+ * that resource took.
+ */
+export interface DatasetFieldShape {
+  /**
+   * The keys one level inside the field's cells: a `resource` cell's
+   * argument names, an `object` cell's property names, and the property
+   * names of a typed-in object value. Merged by name across rows, roughly in
+   * the order they first appear.
+   */
+  keys: string[];
+  /**
+   * Whether any of the field's cells is a resource. A table that splits the
+   * field into its keys still needs a column naming the resource, since
+   * different rows may name different ones; a field of plain objects needs
+   * no such column.
+   */
+  resource?: boolean;
+}
+
+/**
+ * What a dataset's rows hold, summarized without fetching them — enough for a
+ * table to lay out its columns before it pages any rows in.
+ */
+export interface DatasetRowsOverview {
+  /** How many rows the dataset has. */
+  rowCount: number;
+  /**
+   * Field id → what its cells hold, for every field whose cells have keys to
+   * show. A field whose cells are all plain values has no entry.
+   */
+  fields: Record<string, DatasetFieldShape>;
+}
+
 /** Compact dataset entry for listings (sidebar / `GET /api/datasets`). */
 export interface DatasetSummary {
   providerId: string;

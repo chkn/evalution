@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type {
   ExecuteResponse,
   NormalizedPrompt,
@@ -11,7 +19,6 @@ import type {
 import { renamePrompt } from "./api";
 import AddPromptDialog from "./components/AddPromptDialog";
 import DatasetList, { datasetKey } from "./components/DatasetList";
-import DatasetView from "./components/DatasetView";
 import {
   fromTrace,
   hasRecordedInputs,
@@ -34,6 +41,12 @@ import { useSSE } from "./hooks/useSSE";
 import { useTraces } from "./hooks/useTraces";
 import { consumeSelfEdit } from "./self-edits";
 import { requireProviderId, withSetMembership } from "./utils";
+
+/**
+ * Loaded on first use: its data grid is sizeable, and most sessions never
+ * open a dataset.
+ */
+const DatasetView = lazy(() => import("./components/DatasetView"));
 
 // ─── Tab / Pane model ─────────────────────────────────────────────────────────
 
@@ -1189,25 +1202,27 @@ function App() {
                       if (tab.type === "dataset") {
                         return (
                           <div key={key} style={visible}>
-                            <DatasetView
-                              providerId={tab.providerId}
-                              datasetId={tab.datasetId}
-                              version={datasetVersion}
-                              findPrompt={findPrompt}
-                              onOpenPrompt={prompt =>
-                                openPromptTabRightOf(pane.id, prompt)
-                              }
-                              onOpenInPlayground={(prompt, fill) =>
-                                openPromptTabRightOf(pane.id, prompt, fill)
-                              }
-                              onOpenTrace={(providerId, traceId) =>
-                                openTabRightOf(
-                                  pane.id,
-                                  traceTab(providerId, traceId),
-                                )
-                              }
-                              onDeleted={() => closeTabEverywhere(key)}
-                            />
+                            <Suspense fallback={null}>
+                              <DatasetView
+                                providerId={tab.providerId}
+                                datasetId={tab.datasetId}
+                                version={datasetVersion}
+                                findPrompt={findPrompt}
+                                onOpenPrompt={prompt =>
+                                  openPromptTabRightOf(pane.id, prompt)
+                                }
+                                onOpenInPlayground={(prompt, fill) =>
+                                  openPromptTabRightOf(pane.id, prompt, fill)
+                                }
+                                onOpenTrace={(providerId, traceId) =>
+                                  openTabRightOf(
+                                    pane.id,
+                                    traceTab(providerId, traceId),
+                                  )
+                                }
+                                onDeleted={() => closeTabEverywhere(key)}
+                              />
+                            </Suspense>
                           </div>
                         );
                       }

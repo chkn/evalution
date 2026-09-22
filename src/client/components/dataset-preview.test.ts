@@ -3,9 +3,9 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  objectCellLines,
   previewCell,
   previewPropValue,
+  propValueToJson,
   resourceName,
 } from "./dataset-preview";
 
@@ -49,7 +49,7 @@ describe("previewCell", () => {
     expect(preview.endsWith("…")).toBe(true);
   });
 
-  it("collapses an object cell, which expands line by line", () => {
+  it("collapses an object cell nested in a preview", () => {
     const cell = {
       kind: "object" as const,
       properties: {
@@ -61,15 +61,36 @@ describe("previewCell", () => {
       },
     };
     expect(previewCell(cell)).toBe("{…}");
-    expect(objectCellLines(cell)).toEqual([
-      { key: "db", preview: "db" },
-      { key: "userId", preview: '"u1"' },
-    ]);
   });
 });
 
 describe("resourceName", () => {
   it("falls back to the whole uri without a #", () => {
     expect(resourceName("plain")).toBe("plain");
+  });
+});
+
+describe("propValueToJson", () => {
+  it("spells literals, templates, objects and arrays as plain data", () => {
+    expect(
+      propValueToJson({
+        kind: "object",
+        properties: {
+          n: { kind: "primitive", value: 1 },
+          missing: { kind: "primitive", value: undefined },
+          note: { kind: "template", value: ["Hi ", { expr: "name" }] },
+          tags: {
+            kind: "array",
+            elements: [{ kind: "primitive", value: "a" }],
+          },
+        },
+      }),
+    ).toEqual({ n: 1, missing: null, note: "Hi ${name}", tags: ["a"] });
+  });
+
+  it("previews what isn't data", () => {
+    expect(propValueToJson({ kind: "reference", path: ["ticket", "id"] })).toBe(
+      "ticket.id",
+    );
   });
 });

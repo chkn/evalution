@@ -120,9 +120,9 @@ export function reorderTraceColumns(
 
 /** Each column's pixel width in table mode, sized for its own content. */
 export const TRACE_COLUMN_WIDTH_PX: Record<TraceColumnKey, number> = {
-  startTime: 92,
+  startTime: 100,
   spanCount: 40,
-  duration: 60,
+  duration: 55,
   totalTokens: 56,
   model: 110,
   cost: 64,

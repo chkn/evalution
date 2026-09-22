@@ -81,7 +81,7 @@ function DatasetList({
       key: "updatedAt",
       label: "Updated",
       icon: <CalendarIcon />,
-      width: 92,
+      width: 100,
       cell: d => (d.updatedAt > 0 ? formatTimestampCompact(d.updatedAt) : "—"),
       card: d => (d.updatedAt > 0 ? formatTimestampCompact(d.updatedAt) : null),
       sortValue: d => d.updatedAt,

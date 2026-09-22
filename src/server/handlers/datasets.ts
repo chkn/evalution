@@ -18,6 +18,7 @@ import type {
   Dataset,
   DatasetField,
   DatasetRowSource,
+  DatasetRowsOverview,
   DatasetSummary,
 } from "../../dataset/dataset-types.ts";
 import { InvalidCellError, parseCell } from "../../shared/dataset-cells.ts";
@@ -26,6 +27,11 @@ import type {
   PromptID,
   PropDefinition,
 } from "../../shared/types.ts";
+
+/** The body of `GET /api/datasets/:providerId/:id`. */
+export interface DatasetWithOverview extends DatasetRowsOverview {
+  dataset: Dataset;
+}
 
 /** What a dataset handler returns; the route relays it. */
 export interface DatasetHandlerResult {
@@ -220,7 +226,12 @@ export async function handleCreateDataset(
   }
 }
 
-/** `GET /api/datasets/:providerId/:id` */
+/**
+ * `GET /api/datasets/:providerId/:id` — the dataset and a
+ * {@link DatasetRowsOverview} of its rows, but not the rows themselves: they
+ * grow without bound, so a client pages them in from
+ * {@link handleListRows}.
+ */
 export async function handleGetDataset(
   provider: DatasetProvider,
   datasetId: string,
@@ -229,11 +240,55 @@ export async function handleGetDataset(
   try {
     const dataset = await provider.getDataset(datasetId);
     if (!dataset) throw new DatasetNotFoundError(datasetId);
-    const rows = await provider.listRows(datasetId);
+    const overview = await provider.describeRows(datasetId);
     return {
       status: 200,
-      body: { dataset: withResolvedPrompt(dataset, resolvePrompt), rows },
+      body: {
+        dataset: withResolvedPrompt(dataset, resolvePrompt),
+        ...overview,
+      } satisfies DatasetWithOverview,
     };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
+/** The most rows one {@link handleListRows} request returns. */
+export const MAX_ROWS_PAGE = 1000;
+
+/** Parses an optional non-negative integer query parameter. */
+function parseCount(
+  value: string | undefined,
+  name: string,
+): number | undefined {
+  if (value === undefined || value === "") return undefined;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) {
+    throw new BadRequest(`${name} must be a non-negative integer`);
+  }
+  return n;
+}
+
+/**
+ * `GET /api/datasets/:providerId/:id/rows?offset=&limit=` — one page of rows,
+ * oldest first. `limit` defaults to, and is capped at, {@link MAX_ROWS_PAGE}.
+ */
+export async function handleListRows(
+  provider: DatasetProvider,
+  datasetId: string,
+  query: { offset?: string; limit?: string },
+): Promise<DatasetHandlerResult> {
+  try {
+    const offset = parseCount(query.offset, "offset") ?? 0;
+    const limit = Math.min(
+      parseCount(query.limit, "limit") ?? MAX_ROWS_PAGE,
+      MAX_ROWS_PAGE,
+    );
+    if (!(await provider.getDataset(datasetId))) {
+      throw new DatasetNotFoundError(datasetId);
+    }
+    const rows = await provider.listRows(datasetId, { offset, limit });
+    return { status: 200, body: rows };
   } catch (err) {
     return failure(err);
   }

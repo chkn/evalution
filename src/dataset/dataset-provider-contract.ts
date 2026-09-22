@@ -188,6 +188,102 @@ export function runDatasetProviderContractTests(
       expect((await provider.getDataset(dataset.id))?.name).toBe("Refunds");
     });
 
+    it("pages rows by offset and limit, in insertion order", async () => {
+      const provider = await makeProvider();
+      const dataset = await provider.createDataset({
+        name: "Paged",
+        fields: [{ def: def("n") }],
+      });
+      const added = await provider.addRows(
+        dataset.id,
+        ["0", "1", "2", "3", "4"].map(n => ({ cells: { "0": text(n) } })),
+      );
+
+      expect(
+        await provider.listRows(dataset.id, { offset: 1, limit: 2 }),
+      ).toEqual(added.slice(1, 3));
+      expect(await provider.listRows(dataset.id, { offset: 3 })).toEqual(
+        added.slice(3),
+      );
+      expect(await provider.listRows(dataset.id, { limit: 2 })).toEqual(
+        added.slice(0, 2),
+      );
+      expect(await provider.listRows(dataset.id, { offset: 9 })).toEqual([]);
+    });
+
+    it("describes rows: their count and the keys inside their cells", async () => {
+      const provider = await makeProvider();
+      expect(await provider.describeRows("nope")).toEqual({
+        rowCount: 0,
+        fields: {},
+      });
+      const dataset = await provider.createDataset({
+        name: "Shapes",
+        fields: [
+          { def: def("ticket") },
+          { def: def("task", "Task") },
+          { def: def("ctx", "Ctx") },
+          { def: def("info", "Info") },
+        ],
+      });
+      await provider.addRows(dataset.id, [
+        {
+          cells: {
+            "0": text("a"),
+            "1": {
+              kind: "resource",
+              uri: "pg.ts#seededTask",
+              args: { title: text("Milk"), owner: text("ann") },
+            },
+          },
+        },
+        {
+          cells: {
+            "1": {
+              kind: "resource",
+              uri: "pg.ts#otherTask",
+              // `title` again, merged by name; `due` is new.
+              args: { due: text("today"), title: text("Eggs") },
+            },
+            "2": {
+              kind: "object",
+              properties: {
+                db: { kind: "resource", uri: "pg.ts#db" },
+                userId: text("u1"),
+              },
+            },
+          },
+        },
+        // A resource without arguments adds no keys, but still marks the
+        // field as one a resource fills.
+        {
+          cells: {
+            "1": { kind: "resource", uri: "pg.ts#blank" },
+            // A typed-in object's properties are keys too.
+            "3": {
+              kind: "value",
+              value: {
+                kind: "object",
+                properties: {
+                  title: { kind: "primitive", value: "Hi" },
+                  note: { kind: "primitive", value: "there" },
+                },
+              },
+            },
+          },
+        },
+      ]);
+
+      expect(await provider.describeRows(dataset.id)).toEqual({
+        rowCount: 3,
+        fields: {
+          "1": { keys: ["title", "owner", "due"], resource: true },
+          "2": { keys: ["db", "userId"] },
+          "3": { keys: ["title", "note"] },
+        },
+      });
+    });
+
     it("deletes one row", async () => {
       const provider = await makeProvider();
       const dataset = await provider.createDataset({

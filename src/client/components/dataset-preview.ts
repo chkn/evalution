@@ -16,6 +16,13 @@ function truncate(text: string, max = MAX_PREVIEW): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
+/** A template's text, its interpolations spelled `${expr}`. */
+function templateText(value: Extract<PropValue, { kind: "template" }>): string {
+  return value.value
+    .map(part => (typeof part === "string" ? part : `\${${part.expr}}`))
+    .join("");
+}
+
 /** A compact, single-line rendering of a `PropValue`. Templates show their text. */
 export function previewPropValue(value: PropValue): string {
   switch (value.kind) {
@@ -26,9 +33,7 @@ export function previewPropValue(value: PropValue): string {
           ? JSON.stringify(value.value)
           : String(value.value);
     case "template":
-      return `"${value.value
-        .map(part => (typeof part === "string" ? part : `\${${part.expr}}`))
-        .join("")}"`;
+      return `"${templateText(value)}"`;
     case "object": {
       const keys = Object.keys(value.properties);
       return keys.length === 0 ? "{}" : `{ ${keys.join(", ")} }`;
@@ -84,14 +89,27 @@ export function previewCell(input: ExecutionInput): string {
 }
 
 /**
- * The lines an `object` cell expands to on hover — one per property, each
- * previewed as a cell of its own.
+ * A `PropValue` as the plain data it spells, for a JSON tree: literals as
+ * themselves, a template as its text, objects and arrays recursively.
+ * Anything that isn't data — a call, a reference, a lambda — is its preview.
  */
-export function objectCellLines(
-  input: Extract<ExecutionInput, { kind: "object" }>,
-): { key: string; preview: string }[] {
-  return Object.entries(input.properties).map(([key, child]) => ({
-    key,
-    preview: previewCell(child),
-  }));
+export function propValueToJson(value: PropValue): unknown {
+  switch (value.kind) {
+    case "primitive":
+      return value.value ?? null;
+    case "template":
+      return templateText(value);
+    case "object":
+      return Object.fromEntries(
+        Object.entries(value.properties).map(([key, child]) => [
+          key,
+          propValueToJson(child),
+        ]),
+      );
+    case "array":
+    case "tuple":
+      return value.elements.map(propValueToJson);
+    default:
+      return previewPropValue(value);
+  }
 }

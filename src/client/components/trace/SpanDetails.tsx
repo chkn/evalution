@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import type { Annotation, AnnotationKind, Span } from "../../../shared/types";
+import { DetailRow, type Fact, FactGroup, FactsGrid } from "../DetailsPane.tsx";
 import { AnnotationChip } from "./AnnotationChip.tsx";
 import {
   formatCost,
@@ -106,10 +107,10 @@ export function SpanDetails({
     });
   }
 
-  const rows: Row[] = [];
+  const rows: { label: string; value: React.ReactNode }[] = [];
   // A tool's arguments sit inside the first group, ahead of any error, so
   // what was asked reads before what went wrong.
-  let argumentsRow: Row | undefined;
+  let argumentsValue: React.ReactNode | undefined;
   if (llm?.modelParameters) {
     rows.push({
       label: "Model Parameters",
@@ -118,10 +119,7 @@ export function SpanDetails({
   }
   if (tool?.toolName) {
     if (tool.input !== undefined) {
-      argumentsRow = {
-        label: "Arguments",
-        value: <JsonView data={tool.input} />,
-      };
+      argumentsValue = <JsonView data={tool.input} />;
     }
     if (tool.output !== undefined) {
       rows.push({
@@ -142,34 +140,27 @@ export function SpanDetails({
   return (
     <div className="span-details">
       <div className="span-details-list">
-        {/* One grid over both groups, so their label columns line up and are
-            no wider than the longest label actually on screen. */}
-        <div className="span-details-facts-grid">
-          <div className="span-details-facts">
-            {timing.map(f => (
-              <FactLine key={f.label} fact={f} />
-            ))}
-            {argumentsRow && (
+        <FactsGrid>
+          <FactGroup facts={timing}>
+            {argumentsValue && (
               <DetailRow
-                row={argumentsRow}
+                label="Arguments"
                 className="span-details-row-in-group"
-              />
+              >
+                {argumentsValue}
+              </DetailRow>
             )}
             {span.errorMessage && (
               <pre className="span-details-error">{span.errorMessage}</pre>
             )}
-          </div>
-          {provenance.length > 0 && (
-            <div className="span-details-facts">
-              {provenance.map(f => (
-                <FactLine key={f.label} fact={f} />
-              ))}
-            </div>
-          )}
-        </div>
+          </FactGroup>
+          {provenance.length > 0 && <FactGroup facts={provenance} />}
+        </FactsGrid>
 
         {rows.map(r => (
-          <DetailRow key={r.label} row={r} />
+          <DetailRow key={r.label} label={r.label}>
+            {r.value}
+          </DetailRow>
         ))}
       </div>
 
@@ -204,38 +195,6 @@ export function SpanDetails({
           onCreate={input => onCreateAnnotation({ ...input, spanId: span.id })}
         />
       </div>
-    </div>
-  );
-}
-
-/** One icon + label + value line in the span details facts. */
-interface Fact {
-  label: string;
-  icon: React.ReactNode;
-  value: string;
-}
-
-function FactLine({ fact }: { fact: Fact }) {
-  return (
-    <div className="span-details-fact" role="group" aria-label={fact.label}>
-      <span className="span-details-fact-icon">{fact.icon}</span>
-      <span className="span-details-fact-label">{fact.label}</span>
-      <span className="span-details-fact-value">{fact.value}</span>
-    </div>
-  );
-}
-
-/** A labelled block — a heading over a JSON tree or other wide content. */
-interface Row {
-  label: string;
-  value: React.ReactNode;
-}
-
-function DetailRow({ row, className }: { row: Row; className?: string }) {
-  return (
-    <div className={`span-details-row${className ? ` ${className}` : ""}`}>
-      <div className="span-details-row-label">{row.label}</div>
-      <div className="span-details-row-value">{row.value}</div>
     </div>
   );
 }

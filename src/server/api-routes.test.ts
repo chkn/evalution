@@ -663,12 +663,22 @@ describe("dataset routes", () => {
       await app.request(`/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}`)
     ).json()) as any;
     expect(got.dataset.name).toBe("Tickets");
-    expect(got.rows[0].cells["0"]).toEqual({
+    // An overview, not the rows: they're paged in separately.
+    expect(got.rowCount).toBe(1);
+    expect(got.fields).toEqual({ "0": { keys: ["title"], resource: true } });
+    expect(got.rows).toBeUndefined();
+
+    const rows = (await (
+      await app.request(
+        `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/rows?offset=0&limit=10`,
+      )
+    ).json()) as any[];
+    expect(rows[0].cells["0"]).toEqual({
       kind: "resource",
       uri: "pg.ts#seededTask",
       args: { title: text("Milk") },
     });
-    expect(got.rows[0].source).toEqual({
+    expect(rows[0].source).toEqual({
       kind: "trace",
       traceId: "t1",
       traceProviderId: "local-db",
@@ -681,7 +691,7 @@ describe("dataset routes", () => {
     expect(((await renamed.json()) as any).name).toBe("Refunds");
 
     const rowDeleted = await app.request(
-      `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/rows/${got.rows[0].id}`,
+      `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/rows/${rows[0].id}`,
       { method: "DELETE" },
     );
     expect(rowDeleted.status).toBe(204);
@@ -695,6 +705,28 @@ describe("dataset routes", () => {
       `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}`,
     );
     expect(gone.status).toBe(404);
+  });
+
+  it("pages rows, rejecting a malformed window and an unknown dataset", async () => {
+    const { app } = await makeDatasetApp();
+    const { body: dataset } = await create(app);
+    await app.request(
+      `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/rows`,
+      json("POST", {
+        rows: ["a", "b", "c"].map(t => ({ cells: { "0": text(t) } })),
+      }),
+    );
+    const page = (query: string, id = dataset.id) =>
+      app.request(`/api/datasets/${DATASET_PROVIDER_ID}/${id}/rows${query}`);
+
+    const middle = (await (await page("?offset=1&limit=1")).json()) as any[];
+    expect(middle.map(r => r.cells["0"])).toEqual([text("b")]);
+    const all = (await (await page("")).json()) as any[];
+    expect(all).toHaveLength(3);
+
+    expect((await page("?offset=-1")).status).toBe(400);
+    expect((await page("?limit=abc")).status).toBe(400);
+    expect((await page("", "nope")).status).toBe(404);
   });
 
   it.each([

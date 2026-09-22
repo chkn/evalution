@@ -3,43 +3,54 @@
 
 import type { NormalizedPrompt } from "../../../shared/types";
 import DatasetView from "../DatasetView";
+import type { PanelFill } from "../named-inputs";
 
 /**
  * Mounts DatasetView for one dataset. With `promptName`, the dataset's
  * linked prompt resolves to a loaded prompt of that name; otherwise no
  * prompts are loaded.
+ *
+ * Wrapped in a fixed-height div, as `TraceViewHarness` is: in the app the
+ * view's `height: 100%` resolves against the `.app` layout, and without a
+ * height here the grid, which fills what's left, would have none.
  */
 export function DatasetViewHarness({
   providerId,
   datasetId,
   promptName,
   onOpenPrompt = () => {},
+  onOpenInPlayground = () => {},
+  onOpenTrace = () => {},
   onDeleted = () => {},
 }: {
   providerId: string;
   datasetId: string;
   promptName?: string;
   onOpenPrompt?: (prompt: NormalizedPrompt) => void;
+  onOpenInPlayground?: (prompt: NormalizedPrompt, fill: PanelFill) => void;
+  onOpenTrace?: (providerId: string, traceId: string) => void;
   onDeleted?: () => void;
 }) {
   return (
-    <DatasetView
-      providerId={providerId}
-      datasetId={datasetId}
-      version={0}
-      findPrompt={prompt =>
-        promptName
-          ? ({
-              ...prompt,
-              name: promptName,
-              functionParameters: [],
-            } as unknown as NormalizedPrompt)
-          : undefined
-      }
-      onOpenPrompt={onOpenPrompt}
-      onOpenInPlayground={() => {}}
-      onOpenTrace={() => {}}
-      onDeleted={onDeleted}
-    />
+    <div style={{ height: "500px" }}>
+      <DatasetView
+        providerId={providerId}
+        datasetId={datasetId}
+        version={0}
+        findPrompt={prompt =>
+          promptName
+            ? ({
+                ...prompt,
+                name: promptName,
+                functionParameters: [],
+              } as unknown as NormalizedPrompt)
+            : undefined
+        }
+        onOpenPrompt={onOpenPrompt}
+        onOpenInPlayground={onOpenInPlayground}
+        onOpenTrace={onOpenTrace}
+        onDeleted={onDeleted}
+      />
+    </div>
   );
 }

@@ -684,112 +684,114 @@ function PlaygroundExecution({
           />
         )}
       </div>
-      <div className="pg-exec-body" ref={bodyRef}>
-        {fillNotice && (
-          <div className="pg-exec-fill-notice" role="status">
-            <span>
-              Filled from{" "}
-              {onOpenFillSource ? (
-                <button
-                  type="button"
-                  className="pg-exec-fill-link"
-                  onClick={e => {
-                    // Otherwise this bubbles to the pane's own onClick,
-                    // which refocuses *this* pane right back — undoing the
-                    // jump just made.
-                    e.stopPropagation();
-                    onOpenFillSource(fillNotice.from);
-                  }}
-                  title={fillNotice.from.description}
-                >
-                  {fillNotice.from.type} ↗
-                </button>
-              ) : (
-                fillNotice.from.type
-              )}
-              {fillNotice.kept.length > 0 && (
-                <>
-                  <br />
-                  {"Not filled: "}
-                  {fillNotice.kept.map((name, i) => (
-                    <span key={name}>
-                      {i > 0 && ", "}
-                      <code>{name}</code>
-                    </span>
-                  ))}
-                </>
-              )}
-            </span>
-            {fillNotice.skipped.map(skip => (
-              <span key={skip.name} className="pg-exec-fill-skipped">
-                {skipMessage(skip)}
+      <div className="pg-exec-main">
+        <div className="pg-exec-body" ref={bodyRef}>
+          {fillNotice && (
+            <div className="pg-exec-fill-notice" role="status">
+              <span>
+                Filled from{" "}
+                {onOpenFillSource ? (
+                  <button
+                    type="button"
+                    className="pg-exec-fill-link"
+                    onClick={e => {
+                      // Otherwise this bubbles to the pane's own onClick,
+                      // which refocuses *this* pane right back — undoing the
+                      // jump just made.
+                      e.stopPropagation();
+                      onOpenFillSource(fillNotice.from);
+                    }}
+                    title={fillNotice.from.description}
+                  >
+                    {fillNotice.from.type} ↗
+                  </button>
+                ) : (
+                  fillNotice.from.type
+                )}
+                {fillNotice.kept.length > 0 && (
+                  <>
+                    <br />
+                    {"Not filled: "}
+                    {fillNotice.kept.map((name, i) => (
+                      <span key={name}>
+                        {i > 0 && ", "}
+                        <code>{name}</code>
+                      </span>
+                    ))}
+                  </>
+                )}
               </span>
-            ))}
-            <button
-              type="button"
-              className="pg-dismiss"
-              aria-label="Dismiss"
-              onClick={() => setFillNotice(null)}
-            >
-              ×
-            </button>
-          </div>
-        )}
-        {renderSlots(
-          prompt.functionParameters,
-          functionSelections,
-          sources?.functionSlots ?? {},
-          "fn",
-        )}
+              {fillNotice.skipped.map(skip => (
+                <span key={skip.name} className="pg-exec-fill-skipped">
+                  {skipMessage(skip)}
+                </span>
+              ))}
+              <button
+                type="button"
+                className="pg-dismiss"
+                aria-label="Dismiss"
+                onClick={() => setFillNotice(null)}
+              >
+                ×
+              </button>
+            </div>
+          )}
+          {renderSlots(
+            prompt.functionParameters,
+            functionSelections,
+            sources?.functionSlots ?? {},
+            "fn",
+          )}
 
-        {executeParameters.length > 0 && (
-          <>
-            <div className="pg-exec-section" />
-            {renderSlots(
-              executeParameters,
-              executeSelections,
-              sources?.executeSlots ?? {},
-              "exec",
-            )}
-          </>
-        )}
+          {executeParameters.length > 0 && (
+            <>
+              <div className="pg-exec-section" />
+              {renderSlots(
+                executeParameters,
+                executeSelections,
+                sources?.executeSlots ?? {},
+                "exec",
+              )}
+            </>
+          )}
 
-        {broken.map(r => (
-          <div className="pg-exec-error" key={r.uri}>
-            Playground module <code>{r.uri}</code> failed to load: {r.error}
-          </div>
-        ))}
-      </div>
-      <div className="pg-exec-footer">
-        {/* Above the Run button, not in `.pg-exec-body` — a run's own error
+          {broken.map(r => (
+            <div className="pg-exec-error" key={r.uri}>
+              Playground module <code>{r.uri}</code> failed to load: {r.error}
+            </div>
+          ))}
+        </div>
+        <div className="pg-exec-footer">
+          {/* Above the Run button, not in `.pg-exec-body` — a run's own error
             (as opposed to `broken`, which is about the resources offered
             above, not about running) should stay in view exactly where the
             button that caused it is, not scroll away with the inputs. */}
-        {error && (
-          <div
-            className={
-              "pg-exec-error pg-exec-error-run" +
-              (bodyHasMoreBelow ? " pg-exec-error-run-shadow" : "")
-            }
-          >
-            {error}
-            <button
-              type="button"
-              className="pg-dismiss"
-              onClick={() => setError(null)}
+          {error && (
+            <div
+              className={
+                "pg-exec-error pg-exec-error-run" +
+                (bodyHasMoreBelow ? " pg-exec-error-run-shadow" : "")
+              }
             >
-              ×
-            </button>
-          </div>
-        )}
-        <button
-          type="button"
-          className="pg-run-btn"
-          onClick={handleRun}
-          disabled={executing}
-        >
-          {executing ? "…" : "▶  Run"}
-        </button>
+              {error}
+              <button
+                type="button"
+                className="pg-dismiss"
+                onClick={() => setError(null)}
+              >
+                ×
+              </button>
+            </div>
+          )}
+          <button
+            type="button"
+            className="pg-run-btn"
+            onClick={handleRun}
+            disabled={executing}
+          >
+            {executing ? "…" : "▶  Run"}
+          </button>
+        </div>
       </div>
     </div>
   );

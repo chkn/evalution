@@ -1229,21 +1229,21 @@ pre {
 
 .pg-exec-inner {
   display: flex;
-  flex-direction: row;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   padding: 10px 0;
-  min-height: 66px;
+  gap: 8px;
   box-sizing: border-box;
 }
 
-/* Narrow (bottom-docked): a column, the title above "Add to dataset"; the
-   side-docked layout below turns it into a row. */
+/* Narrow (bottom-docked): the title and "Add to dataset" share a row above
+   the fields, title left / button right; the side-docked layout below keeps
+   the same row shape. */
 .pg-exec-header {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 3px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
   padding: 0 16px;
   flex-shrink: 0;
   border-bottom: none;
@@ -1258,11 +1258,21 @@ pre {
   color: var(--panel-text-secondary);
 }
 
+/* Narrow (bottom-docked): fields on the left, the Run button pinned to the
+   right of them; the side-docked layout dissolves this back into a plain
+   column (see the container query below). */
+.pg-exec-main {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
+}
+
 /* Narrow mode lays the input rows out side by side. */
 .pg-exec-body {
   flex: 1;
   min-width: 0;
-  padding: 0 12px;
+  padding: 0 12px 0 16px;
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
@@ -1270,7 +1280,12 @@ pre {
   align-items: flex-end;
 }
 
+/* Narrow (bottom-docked): grows to fill its wrapped line instead of
+   shrink-wrapping its control's own intrinsic width — a lone field (the
+   common case) then spans the full row, matching the wide/side-docked
+   layout below, which already stretches every field via `align-items`. */
 .pg-exec-param {
+  flex: 1 1 160px;
   min-width: 0;
 }
 
@@ -1624,9 +1639,18 @@ pre {
   color: var(--panel-text-secondary);
 }
 
+/* Narrow (bottom-docked): pinned to the bottom of the scrolling pane — via
+   `.pg-content`'s own scroll, the only scroll container in this layout —
+   so the Run button stays reachable without scrolling all the way down.
+   Constrained to `.pg-exec-main`'s box (its containing block), it can never
+   rise above that box's top edge, so scrolling back up releases it into
+   normal flow before it would ever reach `.pg-exec-header` above. */
 .pg-exec-footer {
   flex-shrink: 0;
-  padding: 0 16px;
+  align-self: flex-end;
+  position: sticky;
+  bottom: 10px;
+  padding: 0 16px 0 0;
   border-top: none;
 }
 
@@ -1746,6 +1770,20 @@ pre {
     gap: 0 !important;
   }
 
+  /* Dissolves the narrow-mode wrapper so `.pg-exec-body` and
+     `.pg-exec-footer` go back to being `.pg-exec-inner`'s own direct flex
+     children, stacked in a column like the rest of this block expects. */
+  .pg-exec-main {
+    display: contents !important;
+  }
+
+  /* Resets the narrow-mode row-grow (a *width* basis) — under this block's
+     column layout it would instead read as a *height* basis, forcing every
+     field to a 160px-tall box. */
+  .pg-exec-param {
+    flex: 0 0 auto !important;
+  }
+
   .pg-exec-body {
     padding: 14px 16px !important;
     overflow-y: auto;
@@ -1767,6 +1805,8 @@ pre {
   }
 
   .pg-exec-footer {
+    align-self: stretch !important;
+    position: static !important;
     padding: 0 16px 14px !important;
     border-top: none !important;
   }
@@ -6277,76 +6317,39 @@ pre {
   font-size: 12px;
 }
 
+/* The grid fills what the header leaves; the row details pane sits beside
+   it or below it, as a span's does in the trace view. */
 .dataset-view-body {
+  border-top: 1px solid var(--trace-border);
+}
+
+.dataset-grid {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  padding: 8px 16px 16px;
+  position: relative;
 }
 
-.dataset-table {
-  border-collapse: collapse;
-  width: 100%;
-}
-
-.dataset-table th,
-.dataset-table td {
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--trace-border);
-  text-align: left;
-  vertical-align: top;
-  white-space: nowrap;
-}
-
-.dataset-table th {
-  position: sticky;
-  top: 0;
+/* Hides the grid lines Glide rules below the last row — see `DatasetView`.
+   Kept off the scrollbar by lifting the scroller above it. */
+.dataset-grid-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
   background: var(--trace-bg);
-  font-weight: 600;
-  font-size: 11.5px;
-  color: var(--trace-text-dim);
+  pointer-events: none;
 }
 
-.dataset-table-field {
-  color: var(--trace-text);
-}
-
-.dataset-table-type {
-  margin-left: 6px;
-  font-family: "Geist Mono", ui-monospace, monospace;
-  font-weight: 400;
-  font-size: 10.5px;
-}
-
-.dataset-table-index {
-  width: 1%;
-  color: var(--trace-text-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-.dataset-table td {
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dataset-table-source {
-  color: var(--trace-text-dim);
-}
-
-.dataset-table-actions,
-.dataset-table-actions-th {
-  width: 1%;
-  text-align: right;
+/* Glide leaves its scroller `position: static`, so it needs positioning
+   before a z-index counts — without it the cover paints over the scrollbars. */
+.dataset-grid .dvn-scroller {
+  position: relative;
+  z-index: 1;
 }
 
 .dataset-cell-empty {
   color: var(--trace-text-dim);
-}
-
-.dataset-cell-value {
-  font-family: "Geist Mono", ui-monospace, monospace;
-  font-size: 11.5px;
 }
 
 .dataset-cell-chip {
@@ -6369,46 +6372,70 @@ pre {
   color: var(--code-text);
 }
 
-.dataset-cell-args {
-  color: var(--trace-text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* A cell in full, in the row details pane. */
+.dataset-detail-field {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  color: var(--trace-text);
 }
 
-/* An object cell previews as {…} and expands on hover. */
-.dataset-cell-object {
-  position: relative;
+.dataset-detail-type {
+  margin-left: 6px;
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-weight: 400;
+  font-size: 10.5px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.dataset-detail-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 24em;
+  overflow-y: auto;
+  padding: 6px 8px;
+  background: var(--trace-code-bg);
+  border-radius: 4px;
+}
+
+.dataset-detail-scalar {
   font-family: "Geist Mono", ui-monospace, monospace;
   font-size: 11.5px;
-  cursor: default;
 }
 
-.dataset-cell-expand {
-  display: none;
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 10;
+.dataset-detail-resource {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dataset-detail-resource > .dataset-detail-keys {
+  align-self: stretch;
+}
+
+/* Named inputs, nested under a rule so their depth reads at a glance. */
+.dataset-detail-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--trace-border);
+  min-width: 0;
+}
+
+.dataset-detail-key-row {
+  display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 160px;
-  padding: 6px 10px;
-  background: var(--dropdown-bg);
-  border: 1px solid var(--dropdown-border);
-  border-radius: 6px;
-  box-shadow: var(--dropdown-shadow);
-  white-space: nowrap;
+  min-width: 0;
 }
 
-.dataset-cell-object:hover .dataset-cell-expand {
-  display: flex;
-}
-
-.dataset-table td:has(.dataset-cell-object) {
-  overflow: visible;
-}
-
-.dataset-cell-expand-key {
+.dataset-detail-key {
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 11px;
   color: var(--trace-text-dim);
 }
 

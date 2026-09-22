@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   NormalizedPrompt,
@@ -13,6 +13,7 @@ import type {
 import { deleteTrace, getTrace, subscribeTraceEvents } from "../api";
 import { useAnnotations } from "../hooks/useAnnotations.ts";
 import { AddToDatasetMenu, isInAddToDatasetMenu } from "./AddToDatasetMenu";
+import { DetailsPane, DetailsPaneHeader, useIsWide } from "./DetailsPane";
 import { fieldsForTrace, fromTrace, hasRecordedInputs } from "./named-inputs";
 import { ChatFlow } from "./trace/ChatFlow.tsx";
 import { CombinedTimeline } from "./trace/CombinedTimeline.tsx";
@@ -96,37 +97,6 @@ function applyStreamEvent(prev: TraceState, event: TraceLiveEvent): TraceState {
 }
 
 type MainTab = "conversation" | "spans";
-
-/**
- * `true` once the observed element is at least `minWidth` wide. Backs the
- * selected span's details layout: a side pane alongside the tabs when
- * there's room for one, a bottom pane below them otherwise.
- *
- * Uses a callback ref rather than `useRef` + `useEffect([])`: `TraceView`
- * renders a loading placeholder (no timeline div at all) until the trace
- * arrives, so the element this attaches to mounts on a later render, not the
- * first one — an effect keyed on `ref.current` would miss that.
- */
-function useIsWide(minWidth: number) {
-  const [isWide, setIsWide] = useState(false);
-  const observerRef = useRef<ResizeObserver | null>(null);
-
-  const ref = useCallback(
-    (el: HTMLDivElement | null) => {
-      observerRef.current?.disconnect();
-      observerRef.current = null;
-      if (!el) return;
-      const observer = new ResizeObserver(([entry]) => {
-        setIsWide(entry.contentRect.width >= minWidth);
-      });
-      observer.observe(el);
-      observerRef.current = observer;
-    },
-    [minWidth],
-  );
-
-  return { ref, isWide };
-}
 
 function TraceView({
   providerId,
@@ -306,26 +276,19 @@ function TraceView({
 
   const spanDetailsContent = selectedSpan && (
     <>
-      <div className="trace-details-pane-header">
-        <div className="trace-details-pane-title">
-          {selectedSpan.kind !== "DEFAULT" && (
-            <SpanKindPill kind={selectedSpan.kind} />
-          )}
-          <span className="trace-row-name">{selectedSpan.name}</span>
-        </div>
-        <div className="trace-details-pane-actions">
-          <SpanStatusPill span={selectedSpan} />
-          <button
-            type="button"
-            className="trace-details-pane-close"
-            onClick={() => setSelectedSpanId(null)}
-            aria-label="Close details"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-      <code className="trace-details-pane-id">{selectedSpan.id}</code>
+      <DetailsPaneHeader
+        title={
+          <>
+            {selectedSpan.kind !== "DEFAULT" && (
+              <SpanKindPill kind={selectedSpan.kind} />
+            )}
+            <span className="trace-row-name">{selectedSpan.name}</span>
+          </>
+        }
+        actions={<SpanStatusPill span={selectedSpan} />}
+        id={selectedSpan.id}
+        onClose={() => setSelectedSpanId(null)}
+      />
       <SpanDetails
         span={selectedSpan}
         annotations={annotations}
@@ -447,6 +410,10 @@ function TraceView({
               {formatTimestampCompact(state.trace.startTime)}
             </span>
           </span>
+          <span className="trace-view-meta-item">
+            <SpansIcon />
+            {state.spans.length} span{state.spans.length === 1 ? "" : "s"}
+          </span>
           {canOpenRootPrompt && (
             <button
               type="button"
@@ -461,10 +428,6 @@ function TraceView({
               ↗
             </button>
           )}
-          <span className="trace-view-meta-item">
-            <SpansIcon />
-            {state.spans.length} span{state.spans.length === 1 ? "" : "s"}
-          </span>
           <span className="trace-view-meta-item">
             <StopwatchIcon />
             {formatDuration(totalDuration)}
@@ -562,14 +525,12 @@ function TraceView({
           )}
 
           {!showDetailsPane && spanDetailsContent && (
-            <div className="trace-details-bottom-pane">
-              {spanDetailsContent}
-            </div>
+            <DetailsPane placement="bottom">{spanDetailsContent}</DetailsPane>
           )}
         </div>
 
         {showDetailsPane && spanDetailsContent && (
-          <div className="trace-details-pane">{spanDetailsContent}</div>
+          <DetailsPane placement="side">{spanDetailsContent}</DetailsPane>
         )}
       </div>
     </div>

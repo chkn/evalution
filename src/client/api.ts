@@ -10,6 +10,7 @@ import type {
   DatasetField,
   DatasetProviderInfo,
   DatasetRow,
+  DatasetRowsOverview,
   DatasetSummary,
   ExecuteRequest,
   ExecuteResponse,
@@ -347,12 +348,29 @@ export async function getDatasets(): Promise<DatasetSummary[]> {
   return res.json();
 }
 
-/** A dataset with all its rows. */
+/**
+ * A dataset with an overview of its rows — their count and the keys inside
+ * their cells. The rows themselves are paged in with {@link getDatasetRows}.
+ */
 export async function getDataset(
   providerId: string,
   datasetId: string,
-): Promise<{ dataset: Dataset; rows: DatasetRow[] }> {
+): Promise<{ dataset: Dataset } & DatasetRowsOverview> {
   const res = await fetch(datasetUrl(providerId, datasetId));
+  await throwIfError(res);
+  return res.json();
+}
+
+/** One page of a dataset's rows, oldest first. */
+export async function getDatasetRows(
+  providerId: string,
+  datasetId: string,
+  offset: number,
+  limit: number,
+): Promise<DatasetRow[]> {
+  const res = await fetch(
+    datasetUrl(providerId, datasetId, `/rows?offset=${offset}&limit=${limit}`),
+  );
   await throwIfError(res);
   return res.json();
 }

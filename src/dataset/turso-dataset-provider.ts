@@ -24,14 +24,17 @@ import {
   DatasetNotFoundError,
   type DatasetProvider,
   DatasetValidationError,
+  type ListRowsOptions,
   type NewDatasetRow,
 } from "./dataset-provider.ts";
 import type {
   Dataset,
   DatasetChangeEvent,
   DatasetField,
+  DatasetFieldShape,
   DatasetRow,
   DatasetRowSource,
+  DatasetRowsOverview,
   DatasetSummary,
 } from "./dataset-types.ts";
 import { datasetRows, datasets, jsonColumn } from "./db/schema.ts";
@@ -161,7 +164,10 @@ export class TursoDatasetProvider implements DatasetProvider {
     return row ? rowToDataset(row) : undefined;
   }
 
-  async listRows(datasetId: string): Promise<DatasetRow[]> {
+  async listRows(
+    datasetId: string,
+    { offset = 0, limit }: ListRowsOptions = {},
+  ): Promise<DatasetRow[]> {
     const rows = await this.db
       .select({
         id: datasetRows.id,
@@ -173,7 +179,11 @@ export class TursoDatasetProvider implements DatasetProvider {
       .where(eq(datasetRows.datasetId, datasetId))
       // Rows added in one call share a timestamp; `rowid` keeps them in the
       // order they were given.
-      .orderBy(asc(datasetRows.createdAt), sql`rowid`);
+      .orderBy(asc(datasetRows.createdAt), sql`rowid`)
+      // SQLite takes an OFFSET only after a LIMIT. Drizzle drops SQLite's
+      // own "no limit", -1, so no limit is spelled as a limit nothing hits.
+      .limit(limit ?? Number.MAX_SAFE_INTEGER)
+      .offset(offset);
 
     return rows.map(row => ({
       id: row.id,
@@ -181,6 +191,62 @@ export class TursoDatasetProvider implements DatasetProvider {
       ...(row.source && { source: parseJson<DatasetRowSource>(row.source) }),
       createdAt: row.createdAt,
     }));
+  }
+
+  async describeRows(datasetId: string): Promise<DatasetRowsOverview> {
+    const [{ count }] = await this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(datasetRows)
+      .where(eq(datasetRows.datasetId, datasetId));
+
+    // One level into each cell, wherever that level lives: a resource's
+    // `args`, an object's `properties`, or those of a typed-in object value.
+    // They share a namespace per field, since a table shows any of them as
+    // columns under the field. Ordered by the first row a key appears in,
+    // then its position there — near enough to declaration order.
+    const found = await this.db.all<{ field: string; key: string }>(sql`
+      SELECT field.key AS field, inner_key.key AS key
+      FROM ${datasetRows},
+        json_each(${datasetRows.cells}) AS field,
+        json_each(
+          field.value,
+          CASE json_extract(field.value, '$.kind')
+            WHEN 'resource' THEN '$.args'
+            WHEN 'object' THEN '$.properties'
+            ELSE '$.value.properties'
+          END
+        ) AS inner_key
+      WHERE ${datasetRows.datasetId} = ${datasetId}
+      GROUP BY field.key, inner_key.key
+      ORDER BY field.key, min(${datasetRows}.rowid), min(inner_key.id)
+    `);
+
+    // Whether each field is ever filled by a resource — over every cell,
+    // including those of a resource that takes no arguments.
+    const resources = await this.db.all<{
+      field: string;
+      resource: number;
+    }>(sql`
+      SELECT
+        field.key AS field,
+        max(json_extract(field.value, '$.kind') = 'resource') AS resource
+      FROM ${datasetRows}, json_each(${datasetRows.cells}) AS field
+      WHERE ${datasetRows.datasetId} = ${datasetId}
+      GROUP BY field.key
+    `);
+    const isResource = new Set(
+      resources.filter(r => Number(r.resource) === 1).map(r => r.field),
+    );
+
+    const fields: Record<string, DatasetFieldShape> = {};
+    for (const { field, key } of found) {
+      fields[field] ??= {
+        keys: [],
+        ...(isResource.has(field) && { resource: true }),
+      };
+      fields[field].keys.push(key);
+    }
+    return { rowCount: Number(count), fields };
   }
 
   async createDataset(

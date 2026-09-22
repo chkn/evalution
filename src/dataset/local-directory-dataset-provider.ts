@@ -23,12 +23,14 @@ import {
   type CreateDatasetInput,
   DatasetNotFoundError,
   type DatasetProvider,
+  type ListRowsOptions,
   type NewDatasetRow,
 } from "./dataset-provider.ts";
 import type {
   Dataset,
   DatasetChangeEvent,
   DatasetRow,
+  DatasetRowsOverview,
   DatasetSummary,
 } from "./dataset-types.ts";
 import { runDatasetMigrations } from "./db/migrate.ts";
@@ -306,10 +308,19 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
     return dataset && this.withFileId(datasetId, dataset);
   }
 
-  async listRows(datasetId: string): Promise<DatasetRow[]> {
+  async listRows(
+    datasetId: string,
+    options?: ListRowsOptions,
+  ): Promise<DatasetRow[]> {
     const entry = await this.entryFor(datasetId);
     if (!entry?.ok) return [];
-    return entry.inner.listRows(entry.innerId);
+    return entry.inner.listRows(entry.innerId, options);
+  }
+
+  async describeRows(datasetId: string): Promise<DatasetRowsOverview> {
+    const entry = await this.entryFor(datasetId);
+    if (!entry?.ok) return { rowCount: 0, fields: {} };
+    return entry.inner.describeRows(entry.innerId);
   }
 
   /**

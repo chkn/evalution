@@ -184,19 +184,19 @@ describe("tableModeWidth", () => {
   });
 
   it("fits comfortably between the min and max for a middling set of columns", () => {
-    // Name (120) + startTime (92) + spanCount (40) + duration (60) +
-    // totalTokens (56) = 368, + 24px chrome = 392 — between 340 and 480.
+    // Name (120) + startTime (100) + spanCount (40) + duration (55) +
+    // totalTokens (56) = 371, + 24px chrome = 395 — between 340 and 480.
     expect(
       tableModeWidth(
         withVisible("startTime", "spanCount", "duration", "totalTokens"),
       ),
-    ).toBe(392);
+    ).toBe(395);
   });
 
   it("adding a visible column widens the total by exactly that column's own width, when unclamped", () => {
-    // 60 + 56 + 64 + 40 = 220, + 120 name + 24 chrome = 364 (unclamped).
+    // 55 + 56 + 64 + 40 = 215, + 120 name + 24 chrome = 359 (unclamped).
     const base = withVisible("duration", "totalTokens", "cost", "spanCount");
-    // + model (110) = 330 -> 474 (still unclamped, i.e. < 480).
+    // + model (110) = 325 -> 469 (still unclamped, i.e. < 480).
     const withModel = withVisible(
       "duration",
       "totalTokens",
@@ -204,8 +204,8 @@ describe("tableModeWidth", () => {
       "spanCount",
       "model",
     );
-    expect(tableModeWidth(base)).toBe(364);
-    expect(tableModeWidth(withModel)).toBe(474);
+    expect(tableModeWidth(base)).toBe(359);
+    expect(tableModeWidth(withModel)).toBe(469);
   });
 
   it("ignores the order columns are in — only visibility and identity matter", () => {

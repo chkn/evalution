@@ -11,9 +11,11 @@ export type {
   DatasetChangeEvent,
   DatasetChangeType,
   DatasetField,
+  DatasetFieldShape,
   DatasetProviderInfo,
   DatasetRow,
   DatasetRowSource,
+  DatasetRowsOverview,
   DatasetSummary,
 } from "../dataset/dataset-types.ts";
 

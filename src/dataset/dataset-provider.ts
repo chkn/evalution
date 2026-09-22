@@ -7,6 +7,7 @@ import type {
   DatasetChangeEvent,
   DatasetField,
   DatasetRow,
+  DatasetRowsOverview,
   DatasetSummary,
 } from "./dataset-types.ts";
 
@@ -17,6 +18,19 @@ export interface CreateDatasetInput {
   fields: Omit<DatasetField, "id">[];
   /** The prompt this dataset is created from, if any. */
   prompt?: PromptID;
+}
+
+/**
+ * Which rows {@link DatasetProvider.listRows} returns: a window onto the
+ * dataset's rows in their stable order (oldest first). Sorting and filtering,
+ * when they come, belong here too, so paging keeps meaning "a window onto the
+ * ordered, filtered rows".
+ */
+export interface ListRowsOptions {
+  /** How many rows to skip. Defaults to 0. */
+  offset?: number;
+  /** The most rows to return. Defaults to all of them. */
+  limit?: number;
 }
 
 /** A row as {@link DatasetProvider.addRows} takes it: id and timestamp are minted. */
@@ -65,8 +79,17 @@ export interface DatasetProvider {
   /** A dataset's metadata and schema, or `undefined` if it doesn't exist. */
   getDataset(datasetId: string): Promise<Dataset | undefined>;
 
-  /** Every row of a dataset, oldest first. Empty for an unknown dataset. */
-  listRows(datasetId: string): Promise<DatasetRow[]>;
+  /**
+   * A dataset's rows, oldest first — all of them, or the window `options`
+   * names. Empty for an unknown dataset.
+   */
+  listRows(datasetId: string, options?: ListRowsOptions): Promise<DatasetRow[]>;
+
+  /**
+   * How many rows a dataset has and which keys its cells hold, without
+   * reading the rows out. Zero rows and no keys for an unknown dataset.
+   */
+  describeRows(datasetId: string): Promise<DatasetRowsOverview>;
 
   /** Creates a dataset, minting its id and field ids. */
   createDataset(input: CreateDatasetInput): Promise<Dataset>;

@@ -42,6 +42,7 @@ import {
   handleDeleteRow,
   handleGetDataset,
   handleListDatasets,
+  handleListRows,
   handleRenameDataset,
   type ResolvePromptLink,
 } from "./handlers/datasets.ts";
@@ -613,11 +614,22 @@ export function setupRoutes({
     ),
   );
 
-  // GET /api/datasets/:providerId/:id - A dataset with its rows
+  // GET /api/datasets/:providerId/:id - A dataset with an overview of its rows
   app.get(
     "/api/datasets/:providerId/:id",
     datasetRoute((provider, { id }) =>
       handleGetDataset(provider, id, resolvePromptLink),
+    ),
+  );
+
+  // GET /api/datasets/:providerId/:id/rows?offset=&limit= - A page of rows
+  app.get(
+    "/api/datasets/:providerId/:id/rows",
+    datasetRoute((provider, { id }, c) =>
+      handleListRows(provider, id, {
+        offset: c.req.query("offset"),
+        limit: c.req.query("limit"),
+      }),
     ),
   );
 
