@@ -99,6 +99,8 @@ function model(provider: string, label: string, modelId: string): CuratedModel {
  */
 export const CURATED_MODELS: readonly CuratedModel[] = [
   model("openai", "GPT-6 Astra", "gpt-6-astra"),
+  model("openai", "GPT-6 Sol", "gpt-6-sol"),
+  model("openai", "GPT-6 Luna", "gpt-6-luna"),
   model("openai", "GPT-5.6 Sol", "gpt-5.6-sol"),
   model("openai", "GPT-5.6 Terra", "gpt-5.6-terra"),
   model("openai", "GPT-5.6 Luna", "gpt-5.6-luna"),
@@ -111,11 +113,12 @@ export const CURATED_MODELS: readonly CuratedModel[] = [
   model("openai", "GPT-5.4 nano", "gpt-5.4-nano"),
 
   model("anthropic", "Claude Fable 5.1", "claude-fable-5-1"),
+  model("anthropic", "Claude Opus 5.5", "claude-opus-5-5"),
+  model("anthropic", "Claude Sonnet 5", "claude-sonnet-5"),
+  model("anthropic", "Claude Haiku 4.5", "claude-haiku-4-5"),
   model("anthropic", "Claude Fable 5", "claude-fable-5"),
   model("anthropic", "Claude Opus 5", "claude-opus-5"),
-  model("anthropic", "Claude Sonnet 5", "claude-sonnet-5"),
   model("anthropic", "Claude Opus 4.8", "claude-opus-4-8"),
-  model("anthropic", "Claude Haiku 4.5", "claude-haiku-4-5"),
 
   model("google", "Gemini 3.8 Flash", "gemini-3.8-flash"),
   model("google", "Gemini 3.7 Flash", "gemini-3.7-flash"),
@@ -124,6 +127,10 @@ export const CURATED_MODELS: readonly CuratedModel[] = [
   model("google", "Gemini 3.5 Flash-Lite", "gemini-3.5-flash-lite"),
   model("google", "Gemini 3.1 Pro Preview", "gemini-3.1-pro-preview"),
   model("google", "Gemini 3.1 Flash-Lite", "gemini-3.1-flash-lite"),
+  model("google", "Gemini 3 Flash Preview", "gemini-3-flash-preview"),
+  model("google", "Gemini 2.5 Pro", "gemini-2.5-pro"),
+  model("google", "Gemini 2.5 Flash", "gemini-2.5-flash"),
+  model("google", "Gemini 2.5 Flash-Lite", "gemini-2.5-flash-lite"),
 ];
 
 const STRING: PropType = {
