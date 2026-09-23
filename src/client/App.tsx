@@ -333,13 +333,17 @@ function App() {
     [refetchPrompts, refetchTraces, refetchDatasets],
   );
 
-  // Re-pull config and prompts whenever the SSE stream (re)connects. After the
-  // server restarts itself when a config file is created, this is what flips
-  // the UI out of onboarding without a manual refresh.
+  // Re-pull everything the change events would have carried whenever the SSE
+  // stream (re)connects. After the server restarts itself when a config file is
+  // created, this is what flips the UI out of onboarding without a manual
+  // refresh; after a dropped connection it's what closes the gap, since every
+  // event sent while the stream was down is simply gone.
   const handleSSEOpen = useCallback(() => {
     refetchConfig();
     refetchPrompts();
-  }, [refetchConfig, refetchPrompts]);
+    refetchTraces();
+    refetchDatasets();
+  }, [refetchConfig, refetchPrompts, refetchTraces, refetchDatasets]);
 
   useSSE(handleSSEMessage, handleSSEOpen);
 
