@@ -14,6 +14,7 @@ import type { PromptSpanInfo } from "../../trace/prompt-tracer.ts";
 type Arrayable<T> = T | T[];
 
 import { makeBrand } from "../../brand.ts";
+import { answersWithConfidence } from "../../trace/evaluation-answers.ts";
 import { BaseTraceIngestor } from "../../trace/trace-ingestor.ts";
 import type {
   Span,
@@ -41,8 +42,15 @@ export interface PerTraceTelemetry extends PerPromptTelemetry {
    * bad model id) — without this, the trace pre-created for the route's
    * synchronous response would otherwise hang in `running` forever. If spans
    * were already opened before the rejection, they are closed as `error` too.
+   * Does nothing if `onError` already closed the run.
    */
   fail(message: string): Promise<void>;
+  /**
+   * Whether the SDK has reported this run's start. An `ai` release too old to
+   * send an operation's events never will, which `executeConfig` checks so
+   * the trace doesn't hang in `running`.
+   */
+  wasStarted(): boolean;
 }
 
 const { brand: brandTelemetry, isBranded: isVercelAISDKTelemetry } =
@@ -118,6 +126,20 @@ export function toArray<T>(v: Arrayable<T> | undefined) {
 }
 
 type Callbacks = Required<Telemetry>;
+
+type EvaluateStartEvent = Parameters<
+  Callbacks["experimental_onEvaluateStart"]
+>[0];
+
+/** An `onError` event: the call that failed, and why. */
+interface ErrorEvent {
+  callId?: string;
+  error?: unknown;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 /**
  * Per-call run state, keyed by the v7 event `callId`. Holds the open spans of
@@ -215,6 +237,14 @@ export class VercelAISDKTelemetry
   onStepEnd: Callbacks["onStepEnd"] = event => this.handleStepEnd(event);
   onEnd: Callbacks["onEnd"] = event => this.handleEnd(event);
   onAbort: Callbacks["onAbort"] = event => this.handleAbort(event);
+  onError: Callbacks["onError"] = async event => {
+    await this.handleError(event);
+  };
+  experimental_onEvaluateStart: Callbacks["experimental_onEvaluateStart"] =
+    event =>
+      this.shouldDeferGlobally() ? undefined : this.handleEvaluateStart(event);
+  experimental_onEvaluateEnd: Callbacks["experimental_onEvaluateEnd"] = event =>
+    this.handleEvaluateEnd(event);
 
   /**
    * Mints a `PerPromptTelemetry` integration bound to the given prompt identity.
@@ -232,14 +262,37 @@ export class VercelAISDKTelemetry
       onStepEnd: event => this.handleStepEnd(event),
       onEnd: event => this.handleEnd(event),
       onAbort: event => this.handleAbort(event),
+      onError: async event => {
+        await this.handleError(event);
+      },
+      experimental_onEvaluateStart: event =>
+        this.handleEvaluateStart(event, { identity }),
+      experimental_onEvaluateEnd: event => this.handleEvaluateEnd(event),
       // The brand is non-enumerable, so the spread below drops it — the result
       // is re-branded by `brandPerPrompt`.
-      withTraceId: traceId =>
-        brandPerPrompt({
+      withTraceId: traceId => {
+        let started = false;
+        let errored = false;
+        return brandPerPrompt({
           ...perPromptTelemetry,
-          onStart: event => this.handleStart(event, { identity, traceId }),
-          fail: message => this.handleFail(traceId, message),
-        }),
+          onStart: event => {
+            started = true;
+            return this.handleStart(event, { identity, traceId });
+          },
+          experimental_onEvaluateStart: event => {
+            started = true;
+            return this.handleEvaluateStart(event, { identity, traceId });
+          },
+          onError: async event => {
+            if (await this.handleError(event)) errored = true;
+          },
+          // `onError` already closed the run (and so failed the trace); a
+          // second failure would only rewrite it.
+          fail: message =>
+            errored ? Promise.resolve() : this.handleFail(traceId, message),
+          wasStarted: () => started,
+        });
+      },
     });
     return perPromptTelemetry;
   }
@@ -290,6 +343,73 @@ export class VercelAISDKTelemetry
     // The root span's `recordSpanStart` creates the `running` trace; no
     // separate pre-creation step is needed.
     await this.recordSpanStart(span);
+  }
+
+  /**
+   * An `experimental_evaluate` call: one `LLM` span, since there are no steps
+   * or tools — the model answers every question in one call. Its input is the
+   * state and the questions, recorded as they were asked.
+   */
+  private async handleEvaluateStart(
+    event: EvaluateStartEvent,
+    {
+      identity,
+      traceId = crypto.randomUUID(),
+    }: { identity?: PromptSpanInfo; traceId?: string } = {},
+  ): Promise<void> {
+    const span: Span = {
+      id: `${traceId}:root`,
+      traceId,
+      name: identity?.id ?? event.operationId,
+      kind: "LLM",
+      startTime: Date.now(),
+      llm: {
+        provider: event.provider,
+        model: event.modelId,
+        input: { state: event.state, questions: event.questions },
+      },
+      prompt: identity?.id
+        ? {
+            id: identity.id,
+            functionParameters: identity.functionParameters,
+            functionInputs: identity.functionInputs,
+            executeInputs: identity.executeInputs,
+            parameterDefinitions: identity.parameterDefinitions,
+          }
+        : undefined,
+    };
+    this.runs.set(event.callId, {
+      traceId,
+      root: span,
+      tools: new Map(),
+      structuredOutput: false,
+    });
+    await this.recordSpanStart(span);
+  }
+
+  private async handleEvaluateEnd(
+    event: Parameters<Callbacks["experimental_onEvaluateEnd"]>[0],
+  ): Promise<void> {
+    const run = this.runs.get(event.callId);
+    if (!run) return;
+    this.runs.delete(event.callId);
+
+    const { inputTokens, outputTokens, totalTokens } = event.usage;
+    await this.recordSpanEnd({
+      ...run.root,
+      endTime: Date.now(),
+      status: "ok",
+      llm: {
+        ...run.root.llm,
+        // The model that actually answered: an alias like `jev-latest`
+        // resolves to a version.
+        model: event.response?.modelId ?? event.modelId,
+        output: answersWithConfidence(event.answers, event.providerMetadata),
+        ...(inputTokens !== undefined && { promptTokens: inputTokens }),
+        ...(outputTokens !== undefined && { completionTokens: outputTokens }),
+        ...(totalTokens !== undefined && { totalTokens }),
+      },
+    });
   }
 
   private async handleStepStart(
@@ -446,6 +566,19 @@ export class VercelAISDKTelemetry
         errorMessage: message,
       });
     }
+  }
+
+  /**
+   * The SDK's report that a call failed. Nothing else closes its spans: a
+   * failed operation sends no `onEnd`. Returns whether it closed a run.
+   */
+  private async handleError(event: unknown): Promise<boolean> {
+    const { callId, error } = (event ?? {}) as ErrorEvent;
+    const run = callId === undefined ? undefined : this.runs.get(callId);
+    if (!run) return false;
+    this.runs.delete(callId!);
+    await this.endOpenSpansAsError(run, errorMessage(error));
+    return true;
   }
 
   private async handleFail(traceId: string, message: string): Promise<void> {

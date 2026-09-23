@@ -56,16 +56,30 @@ const PROVIDERS: Record<string, { module: string; label: string }> = {
   fal: { module: "@ai-sdk/fal", label: "fal" },
   hume: { module: "@ai-sdk/hume", label: "Hume" },
   lmnt: { module: "@ai-sdk/lmnt", label: "LMNT" },
+  typeSafeAi: { module: "@ai-sdk/typesafe-ai", label: "TypeSafe" },
 };
 
 /** What a language model is, as `generateText`'s `model` accepts it. */
 const LANGUAGE_MODEL = 'import("ai").LanguageModel';
 
+/** What an evaluation model is, as `experimental_evaluate`'s `model` accepts it. */
+const EVALUATION_MODEL = 'import("ai").Experimental_EvaluationModel';
+
+/** Every provider package, once. */
+const PROVIDER_MODULES = [
+  ...new Set(Object.values(PROVIDERS).map(p => p.module)),
+];
+
 /** Probe names, as reported in {@link ProbeResults}. */
 export const MODEL_PROBE = "model";
 export const PROVIDERS_PROBE = "providers";
+export const EVALUATION_MODEL_PROBE = "evaluationModel";
+export const EVALUATION_PROVIDERS_PROBE = "evaluationProviders";
 
-/** The project probes behind {@link vercelModelDefinition}. */
+/**
+ * The project probes behind {@link vercelModelDefinition} and
+ * {@link vercelEvaluationModelDefinition}.
+ */
 export const MODEL_PROJECT_PROBES: TypeProbe[] = [
   {
     kind: "type",
@@ -76,13 +90,29 @@ export const MODEL_PROJECT_PROBES: TypeProbe[] = [
   {
     kind: "factories",
     name: PROVIDERS_PROBE,
-    modules: [...new Set(Object.values(PROVIDERS).map(p => p.module))],
+    modules: PROVIDER_MODULES,
     produces: LANGUAGE_MODEL,
+  },
+  {
+    kind: "type",
+    name: EVALUATION_MODEL_PROBE,
+    expression: EVALUATION_MODEL,
+    syntax: "EvaluationModel",
+  },
+  // A provider's evaluation models come from a method on its default
+  // instance — `typeSafeAi.evaluationModel("jev-latest")` — not from calling
+  // it, so this probe looks at that method.
+  {
+    kind: "factories",
+    name: EVALUATION_PROVIDERS_PROBE,
+    modules: PROVIDER_MODULES,
+    member: "evaluationModel",
+    produces: EVALUATION_MODEL,
   },
 ];
 
 /** A curated model, offered as a preset under both catalogs. */
-interface CuratedModel {
+export interface CuratedModel {
   provider: string;
   label: string;
   modelId: string;
@@ -133,43 +163,75 @@ export const CURATED_MODELS: readonly CuratedModel[] = [
   model("google", "Gemini 2.5 Flash-Lite", "gemini-2.5-flash-lite"),
 ];
 
+/**
+ * Presets for evaluation models: TypeSafe's own, and the curated language
+ * models (the OpenAI, Anthropic and Google providers evaluate with them too).
+ * Only offered under a provider whose `evaluationModel` was discovered.
+ */
+export const CURATED_EVALUATION_MODELS: readonly CuratedModel[] = [
+  model("typeSafeAi", "Jev (latest)", "jev-latest"),
+  ...CURATED_MODELS,
+];
+
 const STRING: PropType = {
   kind: "primitive",
   syntax: "string",
   base: "string",
 };
 
-/** A provider factory as the checker would describe it, for when it can't. */
-function fallbackFactory(name: string): ValueFactory {
+/**
+ * A provider factory as the checker would describe it, for when it can't:
+ * the provider itself, or with `member`, one of its methods.
+ */
+function fallbackFactory(
+  provider: string,
+  produces: string,
+  member?: string,
+): ValueFactory {
   return {
     def: {
-      name,
+      name: member ? `${provider}.${member}` : provider,
       type: {
         kind: "function",
-        syntax: "(modelId: string) => LanguageModel",
+        syntax: `(modelId: string) => ${produces}`,
         parameters: [{ name: "modelId", type: STRING, optional: false }],
       },
       optional: false,
     },
     binding: {
       kind: "import",
-      spec: { name, from: PROVIDERS[name].module },
+      spec: { name: provider, from: PROVIDERS[provider].module },
     },
   };
 }
 
 /** The providers offered when no checker could discover the installed ones. */
 const FALLBACK_FACTORIES: ValueFactory[] = [
-  fallbackFactory("openai"),
-  fallbackFactory("anthropic"),
-  fallbackFactory("google"),
-];
+  "openai",
+  "anthropic",
+  "google",
+].map(p => fallbackFactory(p, "LanguageModel"));
+
+/** The evaluation providers offered when no checker could discover them. */
+const FALLBACK_EVALUATION_FACTORIES: ValueFactory[] = [
+  "typeSafeAi",
+  "openai",
+  "anthropic",
+  "google",
+].map(p => fallbackFactory(p, "EvaluationModel", "evaluationModel"));
 
 /** The model slot's type when it couldn't be resolved: a gateway string or a model object. */
 const FALLBACK_MODEL_TYPE: PropType = {
   kind: "union",
   syntax: "LanguageModel",
   types: [STRING, { kind: "opaque", syntax: "LanguageModelV3" }],
+};
+
+/** The evaluation model slot's type when it couldn't be resolved. */
+const FALLBACK_EVALUATION_MODEL_TYPE: PropType = {
+  kind: "union",
+  syntax: "EvaluationModel",
+  types: [STRING, { kind: "opaque", syntax: "EvaluationModelV4" }],
 };
 
 /** Binding candidates for a provider call: the helper's destructure, then the import. */
@@ -183,14 +245,19 @@ function providerBinding(factory: ValueFactory): CalleeBinding[] {
   ];
 }
 
+/** The provider a factory belongs to: `typeSafeAi` for `typeSafeAi.evaluationModel`. */
+function providerOf(factory: ValueFactory): string {
+  return factory.def.name.split(".")[0];
+}
+
 function providerCall(
-  provider: string,
+  callee: string,
   modelId: string,
   binding?: CalleeBinding[],
 ): PropValue {
   return {
     kind: "functionCall",
-    callee: provider,
+    callee,
     args: [{ kind: "primitive", value: modelId }],
     ...(binding && { binding }),
   };
@@ -226,45 +293,89 @@ function gatewayLiteral(type: PropType): PropDefinition {
  * and a **Gateway** catalog of model strings.
  */
 export function vercelModelDefinition(project: ProbeResults): PropDefinition {
-  const resolvedModel = project[MODEL_PROBE];
+  return catalogedModelDefinition(project, {
+    typeProbe: MODEL_PROBE,
+    factoriesProbe: PROVIDERS_PROBE,
+    fallbackType: FALLBACK_MODEL_TYPE,
+    fallbackFactories: FALLBACK_FACTORIES,
+    curated: CURATED_MODELS,
+  });
+}
+
+/**
+ * The model slot of an `experimental_evaluate` prompt, cataloged like
+ * {@link vercelModelDefinition}: a **Provider** group per installed provider
+ * whose default instance has an `evaluationModel` method
+ * (`typeSafeAi.evaluationModel("jev-latest")`), and a **Gateway** catalog of
+ * model strings, which the SDK resolves through the default provider.
+ */
+export function vercelEvaluationModelDefinition(
+  project: ProbeResults,
+): PropDefinition {
+  return catalogedModelDefinition(project, {
+    typeProbe: EVALUATION_MODEL_PROBE,
+    factoriesProbe: EVALUATION_PROVIDERS_PROBE,
+    fallbackType: FALLBACK_EVALUATION_MODEL_TYPE,
+    fallbackFactories: FALLBACK_EVALUATION_FACTORIES,
+    curated: CURATED_EVALUATION_MODELS,
+  });
+}
+
+function catalogedModelDefinition(
+  project: ProbeResults,
+  options: {
+    typeProbe: string;
+    factoriesProbe: string;
+    fallbackType: PropType;
+    fallbackFactories: ValueFactory[];
+    /** Presets for the Provider catalog. */
+    curated: readonly CuratedModel[];
+  },
+): PropDefinition {
+  const resolvedModel = project[options.typeProbe];
   const modelType =
     resolvedModel && !Array.isArray(resolvedModel)
       ? resolvedModel.type
-      : FALLBACK_MODEL_TYPE;
+      : options.fallbackType;
 
-  const discovered = project[PROVIDERS_PROBE];
+  const discovered = project[options.factoriesProbe];
   const factories = (
-    Array.isArray(discovered) ? discovered : FALLBACK_FACTORIES
-  ).filter(f => f.def.name in PROVIDERS);
+    Array.isArray(discovered) ? discovered : options.fallbackFactories
+  ).filter(f => providerOf(f) in PROVIDERS);
 
   // Providers with presets first, in curated order; the rest alphabetically.
-  const curatedOrder = [...new Set(CURATED_MODELS.map(m => m.provider))];
+  const curatedOrder = [...new Set(options.curated.map(m => m.provider))];
   const rank = (name: string) => {
     const i = curatedOrder.indexOf(name);
     return i < 0 ? curatedOrder.length : i;
   };
   const sorted = [...factories].sort(
     (a, b) =>
-      rank(a.def.name) - rank(b.def.name) ||
+      rank(providerOf(a)) - rank(providerOf(b)) ||
       a.def.name.localeCompare(b.def.name),
   );
 
   const providerGroups: ValueCatalogGroup[] = sorted.map(factory => {
-    const name = factory.def.name;
+    const provider = providerOf(factory);
     const binding = providerBinding(factory);
-    const { label } = PROVIDERS[name];
+    const { label } = PROVIDERS[provider];
     return {
       label,
       icon: label,
-      presets: CURATED_MODELS.filter(m => m.provider === name).map(m => ({
-        label: m.label,
-        value: providerCall(name, m.modelId, binding),
-      })),
+      presets: options.curated
+        .filter(m => m.provider === provider)
+        .map(m => ({
+          label: m.label,
+          value: providerCall(factory.def.name, m.modelId, binding),
+        })),
       factory: { def: factory.def, binding },
     };
   });
 
-  const gatewayGroups: ValueCatalogGroup[] = curatedOrder.map(provider => ({
+  // Gateway model strings are `provider/model`, for the providers the
+  // gateway routes to: the curated language-model providers.
+  const gatewayProviders = [...new Set(CURATED_MODELS.map(m => m.provider))];
+  const gatewayGroups: ValueCatalogGroup[] = gatewayProviders.map(provider => ({
     label: PROVIDERS[provider].label,
     icon: PROVIDERS[provider].label,
     presets: CURATED_MODELS.filter(m => m.provider === provider).map(m => ({

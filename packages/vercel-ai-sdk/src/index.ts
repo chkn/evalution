@@ -6,7 +6,7 @@
  * @module @evalution/vercel-ai-sdk
  */
 import { createRequire } from "node:module";
-import type { generateText, streamText } from "ai";
+import type { experimental_evaluate, generateText, streamText } from "ai";
 
 // The following are bundled in by tsdown to pull in just these
 // symbols without taking a runtime dependency on the rest of the
@@ -53,6 +53,7 @@ import type { PerplexityProvider } from "@ai-sdk/perplexity";
 import type { ReplicateProvider } from "@ai-sdk/replicate";
 import type { RevaiProvider } from "@ai-sdk/revai";
 import type { TogetherAIProvider } from "@ai-sdk/togetherai";
+import type { TypeSafeAiProvider } from "@ai-sdk/typesafe-ai";
 import type { VercelProvider } from "@ai-sdk/vercel";
 import type { XaiProvider } from "@ai-sdk/xai";
 
@@ -120,7 +121,21 @@ export interface Providers {
   hume: HumeProvider;
   /** `lmnt` from `@ai-sdk/lmnt` */
   lmnt: LMNTProvider;
+  /**
+   * `typeSafeAi` from `@ai-sdk/typesafe-ai`, for evaluations:
+   * `typeSafeAi.evaluationModel("jev-latest")`.
+   */
+  typeSafeAi: TypeSafeAiProvider;
 }
+
+/**
+ * The package each provider is imported from, where it isn't `@ai-sdk/<key>`.
+ */
+const PROVIDER_MODULES: Partial<Record<keyof Providers, string>> = {
+  vertex: "@ai-sdk/google-vertex",
+  bedrock: "@ai-sdk/amazon-bedrock",
+  typeSafeAi: "@ai-sdk/typesafe-ai",
+};
 
 class LazilyImportedProviders implements Providers {
   private readonly values: Partial<Providers>;
@@ -130,11 +145,12 @@ class LazilyImportedProviders implements Providers {
   }
 
   private importProvider<K extends keyof Providers>(key: K): Providers[K] {
+    if (this.values[key]) return this.values[key];
+    const module = PROVIDER_MODULES[key] ?? `@ai-sdk/${key}`;
     return (
-      this.values[key] ??
-      require(`@ai-sdk/${key}`)?.[key] ??
+      require(module)?.[key] ??
       (() => {
-        throw new Error(`Unable to import "${key}" from "@ai-sdk/${key}"`);
+        throw new Error(`Unable to import "${key}" from "${module}"`);
       })
     );
   }
@@ -223,6 +239,9 @@ class LazilyImportedProviders implements Providers {
   get lmnt() {
     return this.importProvider("lmnt");
   }
+  get typeSafeAi() {
+    return this.importProvider("typeSafeAi");
+  }
 }
 
 export {
@@ -291,7 +310,12 @@ function buildNativeTelemetry(
 
 type GenerateTextConfig = Parameters<typeof generateText>[0];
 type StreamTextConfig = Parameters<typeof streamText>[0];
-export type Prompt = GenerateTextConfig | StreamTextConfig; // | Agent<any, any, any>; // (agent not supported yet)
+type EvaluateConfig = Parameters<typeof experimental_evaluate>[0];
+/**
+ * What a prompt function returns: `generateText`/`streamText` parameters, or
+ * `experimental_evaluate` parameters for a prompt that asks typed questions.
+ */
+export type Prompt = GenerateTextConfig | StreamTextConfig | EvaluateConfig; // | Agent<any, any, any>; // (agent not supported yet)
 
 /**
  * Helper for defining Evalution prompt modules using the Vercel AI SDK.
@@ -304,7 +328,8 @@ export type Prompt = GenerateTextConfig | StreamTextConfig; // | Agent<any, any,
  * The second argument is a factory function that receives a {@link Providers} object
  * and returns a record of prompt-building functions. Each key in the returned record
  * is the prompt name, and each value is a function that returns a Vercel AI SDK config object
- * (`generateText` / `streamText` parameters) with telemetry automatically configured.
+ * (`generateText` / `streamText` parameters, or `experimental_evaluate` parameters)
+ * with telemetry automatically configured.
  *
  * The {@link Providers} object lazily imports provider singletons (e.g. `openai` from `@ai-sdk/openai`)
  * on first access, so only the providers you destructure need to be installed. You can override
@@ -327,6 +352,23 @@ export type Prompt = GenerateTextConfig | StreamTextConfig; // | Agent<any, any,
  *        messages: [{ role: 'user', content: 'Hello!' }],
  *     }),
  * }));
+ * ```
+ *
+ * A prompt that asks typed questions returns `experimental_evaluate`
+ * parameters instead, and is traced the same way:
+ *
+ * ```ts
+ * export default prompts({ id: "support" }, ({ typeSafeAi }) => ({
+ *   triage: (message: string) => ({
+ *     model: typeSafeAi.evaluationModel("jev-latest"),
+ *     state: { message },
+ *     questions: {
+ *       requestsRefund: { type: "boolean", instructions: "Is the customer requesting money back?" },
+ *     },
+ *   }),
+ * }));
+ *
+ * const { answers } = await experimental_evaluate(support().triage(message));
  * ```
  */
 export const prompts = (<
@@ -352,6 +394,15 @@ export const prompts = (<
           id: `${id}#${name}`,
           functionParameters: args,
         };
+
+        // `experimental_evaluate` is v7-only, so its config needs no v6
+        // `experimental_telemetry`.
+        if ("questions" in config) {
+          return {
+            ...config,
+            telemetry: buildNativeTelemetry(config as Prompt, identity),
+          };
+        }
 
         const experimental_telemetry = config.experimental_telemetry as any;
         return {

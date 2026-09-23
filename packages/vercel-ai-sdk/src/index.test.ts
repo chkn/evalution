@@ -73,6 +73,21 @@ describe("prompts", () => {
     expect(seen).toBe(true);
   });
 
+  it.each([
+    ["vertex", "@ai-sdk/google-vertex"],
+    ["bedrock", "@ai-sdk/amazon-bedrock"],
+    ["typeSafeAi", "@ai-sdk/typesafe-ai"],
+  ] as const)("imports %s from %s, not @ai-sdk/<name>", (key, _module) => {
+    let provider: unknown;
+    prompts(psi, providers => {
+      provider = providers[key];
+      return { stub: stubPrompt };
+    })();
+    // The fallback for a failed import is a function that throws on call; a
+    // real provider has its model factories.
+    expect(provider).toHaveProperty("languageModel");
+  });
+
   it("does not eagerly import provider packages", () => {
     const factory = vi.fn(() => ({ stub: stubPrompt }));
     prompts(psi, factory)();

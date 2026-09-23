@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { useState } from "react";
+import { VERCEL_EVALUATION_FALLBACK } from "../../../sdk/vercel-ai-sdk/evaluation-fallback";
 import type {
   NormalizedPromptUpdates,
   NormalizedQuestionsPrompt,
@@ -159,6 +160,42 @@ function makeMixedModePrompt(): NormalizedQuestionsPrompt {
   };
 }
 
+/**
+ * An AI SDK `experimental_evaluate` prompt: questions are object literals of
+ * `ai`'s own question union (from the generated snapshot of its types).
+ */
+function makeEvaluationPrompt(): NormalizedQuestionsPrompt {
+  const base = makePrompt();
+  return {
+    ...base,
+    state: {
+      def: {
+        ...(VERCEL_EVALUATION_FALLBACK.evaluationState as PropDefinition),
+        name: "state",
+      },
+      value: { kind: "primitive", value: "" },
+    },
+    questions: {
+      def: {
+        ...(VERCEL_EVALUATION_FALLBACK.evaluationQuestions as PropDefinition),
+        name: "questions",
+      },
+      value: {
+        kind: "object",
+        properties: {
+          spam: {
+            kind: "object",
+            properties: {
+              type: { kind: "primitive", value: "boolean" },
+              instructions: { kind: "primitive", value: "Is this spam?" },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
 /** Renders the questions editor for `prompt`, applying its updates locally. */
 function Harness({ initial }: { initial: () => NormalizedQuestionsPrompt }) {
   const [prompt, setPrompt] = useState(initial);
@@ -193,6 +230,9 @@ function Harness({ initial }: { initial: () => NormalizedQuestionsPrompt }) {
         )}
       </pre>
       <pre data-testid="state-value">{JSON.stringify(prompt.state.value)}</pre>
+      <pre data-testid="questions-value">
+        {JSON.stringify(prompt.questions.value)}
+      </pre>
       <pre data-testid="update-count">{updates.length}</pre>
     </div>
   );
@@ -206,4 +246,8 @@ export function QuestionsHarness() {
 /** The same editor over two questions in different entry modes. */
 export function MixedModeQuestionsHarness() {
   return <Harness initial={makeMixedModePrompt} />;
+}
+
+export function EvaluationQuestionsHarness() {
+  return <Harness initial={makeEvaluationPrompt} />;
 }

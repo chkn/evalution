@@ -10,12 +10,16 @@ import { isPerPromptTelemetry, toArray } from "./telemetry.ts";
 // `executeConfig`. Mock it so the test exercises that dynamic-import path
 // without depending on the real package being resolvable. `registerTelemetry`
 // makes the adapter take its v7 native path in `setupTraceIngestion`.
-const { generateTextMock, registerTelemetryMock } = vi.hoisted(() => ({
-  generateTextMock: vi.fn().mockResolvedValue(undefined),
-  registerTelemetryMock: vi.fn(),
-}));
+const { generateTextMock, evaluateMock, registerTelemetryMock } = vi.hoisted(
+  () => ({
+    generateTextMock: vi.fn().mockResolvedValue(undefined),
+    evaluateMock: vi.fn().mockResolvedValue(undefined),
+    registerTelemetryMock: vi.fn(),
+  }),
+);
 vi.mock("ai", () => ({
   generateText: generateTextMock,
+  experimental_evaluate: evaluateMock,
   registerTelemetry: registerTelemetryMock,
 }));
 
@@ -134,6 +138,95 @@ describe("VercelAISDK", () => {
       expect(root?.prompt?.id).toBe("weather.ts#weatherAgent");
       expect(trace?.trace.name).toBe("weather.ts#weatherAgent");
       expect(await provider.getAllTraces()).toHaveLength(1); // no duplicate
+    });
+  });
+
+  describe("executeConfig for an evaluation", () => {
+    const config = {
+      model: "jev-latest",
+      state: "I was charged twice.",
+      questions: {
+        refund: { type: "boolean", instructions: "Asking for money back?" },
+      },
+    };
+    const identity = { id: "triage#route", name: "route" };
+
+    beforeEach(() => {
+      generateTextMock.mockReset().mockResolvedValue(undefined);
+      evaluateMock.mockReset().mockResolvedValue(undefined);
+    });
+
+    it("calls experimental_evaluate for a config that asks questions", async () => {
+      await (await sdk.executeConfig(config))!.done;
+      expect(evaluateMock).toHaveBeenCalledWith(config);
+      expect(generateTextMock).not.toHaveBeenCalled();
+    });
+
+    it("traces it through the same trace-bound integration as a generation", async () => {
+      const telemetry = await sdk.setupTraceIngestion();
+      const provider = new MemoryTraceProvider();
+      telemetry!.addSink(provider);
+
+      evaluateMock.mockImplementation(async (cfg: any) => {
+        const integ: any = toArray(cfg?.telemetry?.integrations).find(
+          isPerPromptTelemetry,
+        );
+        if (!integ) return;
+        const start = {
+          callId: "e1",
+          operationId: "ai.evaluate",
+          provider: "typesafe.evaluation",
+          modelId: "jev-latest",
+          state: cfg.state,
+          questions: cfg.questions,
+        };
+        await integ.experimental_onEvaluateStart(start);
+        await integ.experimental_onEvaluateEnd({
+          ...start,
+          answers: { refund: { type: "boolean", probability: 0.9 } },
+          usage: {},
+        });
+      });
+
+      const handle = await sdk.executeConfig(config, {
+        traceId: "eval-trace",
+        identity,
+      });
+      await handle!.done;
+
+      const trace = await provider.getTrace("eval-trace");
+      expect(trace?.trace.status).toBe("ok");
+      expect(trace?.trace.name).toBe("triage#route");
+      expect(trace?.spans[0].llm?.output).toEqual({
+        refund: { type: "boolean", probability: 0.9 },
+      });
+    });
+
+    it("fails the trace with an upgrade hint when `ai` doesn't report evaluations", async () => {
+      const telemetry = await sdk.setupTraceIngestion();
+      const provider = new MemoryTraceProvider();
+      telemetry!.addSink(provider);
+      // The route pre-creates the trace the run is recorded into.
+      await provider.recordSpanStart({
+        id: "old-ai:root",
+        traceId: "old-ai",
+        name: "route",
+        kind: "LLM",
+        startTime: Date.now(),
+      });
+
+      // An `ai` before 7.0.111: evaluates, but sends no telemetry events.
+      const handle = await sdk.executeConfig(config, {
+        traceId: "old-ai",
+        identity,
+      });
+      await handle!.done;
+
+      const trace = await provider.getTrace("old-ai");
+      expect(trace?.trace.status).toBe("error");
+      expect((trace?.trace as any).attributes?.errorMessage).toMatch(
+        /7\.0\.111/,
+      );
     });
   });
 });

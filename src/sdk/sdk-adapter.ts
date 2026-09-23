@@ -93,12 +93,20 @@ export interface SDKAdapter {
    * picker offers.
    *
    * A per-SDK call rather than something copied onto every prompt, since the
-   * suggestions a checker derives can run to hundreds of model IDs.
+   * suggestions a checker derives can run to hundreds of model IDs. It is
+   * asked per {@link PromptStyle}, since one SDK may drive different kinds of
+   * model — the Vercel AI SDK's chat prompts take a language model, and its
+   * evaluation prompts an evaluation model. An adapter that only produces one
+   * style may ignore it.
    *
    * @param project - What {@link getProjectProbes} resolved to, by probe name.
    *   Substitute a fallback for any `undefined` result.
+   * @param style - The style of the prompts the slot belongs to.
    */
-  getModelDefinition(project: ProbeResults): Promise<PropDefinition>;
+  getModelDefinition(
+    project: ProbeResults,
+    style: PromptStyle,
+  ): Promise<PropDefinition>;
 
   /**
    * Returns the list of model parameters that can be edited in the playground

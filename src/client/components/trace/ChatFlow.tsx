@@ -33,7 +33,7 @@ import { hasOutput, newMessagesByTurn, spanDuration } from "./rows.ts";
  * message it is, anything else (structured output, a model whose answer is
  * data) in the same bubble, through a renderer picked by its shape.
  */
-function OutputBubble({ output }: { output: unknown }) {
+function OutputBubble({ output, input }: { output: unknown; input?: unknown }) {
   if (typeof output === "string") {
     return (
       <MessageList
@@ -46,7 +46,7 @@ function OutputBubble({ output }: { output: unknown }) {
     <div className="message-list-bubble">
       <div className="chat-bubble chat-bubble-role-assistant">
         <div className="chat-bubble-role">assistant</div>
-        <div className="chat-bubble-content">{renderOutput(output)}</div>
+        <div className="chat-bubble-content">{renderOutput(output, input)}</div>
       </div>
     </div>
   );
@@ -100,7 +100,9 @@ function ChatLLMBlock({
       {visibleMessages.length > 0 && (
         <MessageList messages={visibleMessages} variant="bubble" />
       )}
-      {hasOutput(span.llm) && <OutputBubble output={span.llm?.output} />}
+      {hasOutput(span.llm) && (
+        <OutputBubble output={span.llm?.output} input={span.llm?.input} />
+      )}
       {span.errorMessage && (
         <pre className="span-details-error">{span.errorMessage}</pre>
       )}

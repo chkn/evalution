@@ -2,7 +2,12 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import { parseMessages, readLLM, readTool } from "./otel-attributes.ts";
+import {
+  parseMessages,
+  readKind,
+  readLLM,
+  readTool,
+} from "./otel-attributes.ts";
 
 describe("parseMessages", () => {
   it("keeps an all-text content array collapsed to a plain string", () => {
@@ -246,5 +251,44 @@ describe("readLLM JSON input and output", () => {
 
   it("ignores malformed JSON attributes", () => {
     expect(readLLM({ "evalution.llm.output": "{ nope" })).toBeUndefined();
+  });
+});
+
+describe("experimental_evaluate spans from @ai-sdk/otel", () => {
+  const attributes = {
+    "gen_ai.operation.name": "evaluate",
+    "gen_ai.provider.name": "typesafe.evaluation",
+    "gen_ai.request.model": "jev-latest",
+    "ai.evaluation.state": JSON.stringify({ message: "Charged twice" }),
+    "ai.evaluation.questions": JSON.stringify({
+      team: { type: "choice", instructions: "Which team?", criteria: {} },
+    }),
+    "ai.evaluation.answers": JSON.stringify({
+      team: { type: "choice", choice: "billing" },
+    }),
+    "ai.response.providerMetadata": JSON.stringify({
+      typesafe: { confidence: { team: 0.8 } },
+    }),
+  };
+
+  it("is an LLM span", () => {
+    expect(readKind(attributes)).toBe("LLM");
+  });
+
+  it("reads the state and questions as input, and the answers as output", () => {
+    expect(readLLM(attributes)).toMatchObject({
+      input: {
+        state: { message: "Charged twice" },
+        questions: { team: { type: "choice" } },
+      },
+      output: { team: { type: "choice", choice: "billing", confidence: 0.8 } },
+    });
+  });
+
+  it("reads answers without provider metadata as they are", () => {
+    const { "ai.response.providerMetadata": _, ...rest } = attributes;
+    expect(readLLM(rest)?.output).toEqual({
+      team: { type: "choice", choice: "billing" },
+    });
   });
 });

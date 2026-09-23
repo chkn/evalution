@@ -6,7 +6,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ItemEditor,
   interpolatablesFromDefinitions,
-  recordFactories,
   recordKeyError,
   valueToDisplayString,
 } from "ts-proppy/react";
@@ -24,6 +23,7 @@ import {
   addQuestion,
   questionDefinition,
   questionEntries,
+  questionKinds,
   renameQuestion,
 } from "./questions";
 
@@ -158,7 +158,10 @@ export default function QuestionsPromptEditor({
 
   const questions = questionEntries(questionsValue);
   const questionsEditable = canEdit(prompt.questionsEditable, questionsValue);
-  const factories = questionDef ? recordFactories(questionDef) : [];
+  const kinds = useMemo(
+    () => (questionDef ? questionKinds(questionDef) : []),
+    [questionDef],
+  );
 
   const setQuestions = (next: Record<string, PropValue>, immediate = false) => {
     const value: PropValue = { kind: "object", properties: next };
@@ -269,38 +272,33 @@ export default function QuestionsPromptEditor({
           )}
         </div>
 
-        {questionsEditable &&
-          questionDef &&
-          questions &&
-          factories.length > 0 && (
-            <div className="pg-panel-footer">
-              <div className="pg-add-msg-btn pg-add-question">
-                ＋ Add question
-                <select
-                  aria-label="Add question"
-                  className="pg-model-overlay-select"
-                  value=""
-                  onChange={e => {
-                    const factory = factories.find(
-                      f => f.factory.def.name === e.target.value,
-                    )?.factory;
-                    if (!factory) return;
-                    const added = addQuestion(questions, factory);
-                    pendingFocus.current =
-                      Object.keys(added.questions).length - 1;
-                    setQuestions(added.questions, true);
-                  }}
-                >
-                  <option value="">Choose…</option>
-                  {factories.map(({ label, factory }) => (
-                    <option key={factory.def.name} value={factory.def.name}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+        {questionsEditable && questionDef && questions && kinds.length > 0 && (
+          <div className="pg-panel-footer">
+            <div className="pg-add-msg-btn pg-add-question">
+              ＋ Add question
+              <select
+                aria-label="Add question"
+                className="pg-model-overlay-select"
+                value=""
+                onChange={e => {
+                  const kind = kinds.find(k => k.key === e.target.value);
+                  if (!kind) return;
+                  const added = addQuestion(questions, kind);
+                  pendingFocus.current =
+                    Object.keys(added.questions).length - 1;
+                  setQuestions(added.questions, true);
+                }}
+              >
+                <option value="">Choose…</option>
+                {kinds.map(({ key, label }) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
             </div>
-          )}
+          </div>
+        )}
       </div>
     </div>
   );

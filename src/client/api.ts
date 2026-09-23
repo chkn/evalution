@@ -18,6 +18,7 @@ import type {
   NormalizedPromptUpdates,
   PromptID,
   PromptProviderInfo,
+  PromptStyle,
   PropDefinition,
   TraceLiveEvent,
   TraceProviderInfo,
@@ -103,11 +104,17 @@ export async function getPrompts(): Promise<NormalizedPrompt[]> {
   return res.json();
 }
 
-/** The SDK's model slot for a provider, catalogs included, or `null` if it has none. */
+/**
+ * The SDK's model slot for a provider's prompts of `style`, catalogs included,
+ * or `null` if it has none.
+ */
 export async function getModelDefinition(
   providerId: string,
+  style: PromptStyle,
 ): Promise<PropDefinition | null> {
-  const res = await fetch(`/api/providers/${providerId}/model-definition`);
+  const res = await fetch(
+    `/api/providers/${providerId}/model-definition?style=${style}`,
+  );
   await throwIfError(res);
   return res.json();
 }

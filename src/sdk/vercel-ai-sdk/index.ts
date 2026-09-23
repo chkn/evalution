@@ -22,9 +22,11 @@ import type {
   NormalizedChatPrompt,
   NormalizedMessage,
   NormalizedParameter,
+  NormalizedPrompt,
   NormalizedPromptUpdates,
   NormalizedToolCall,
   ParsedPrompt,
+  PromptStyle,
 } from "../../shared/types.ts";
 import { setupGlobalOTelPipeline } from "../../trace/otel-global-pipeline.ts";
 import type { TraceIngestor } from "../../trace/trace-ingestor.ts";
@@ -38,8 +40,16 @@ import {
   type SDKAdapter,
 } from "../sdk-adapter.ts";
 import {
+  denormalizeEvaluationUpdates,
+  EVALUATION_PROJECT_PROBES,
+  isEvaluationConfig,
+  isEvaluationPrompt,
+  normalizeEvaluationPrompt,
+} from "./evaluation.ts";
+import {
   MODEL_PROJECT_PROBES,
   PROMPTS_HELPER_CALL,
+  vercelEvaluationModelDefinition,
   vercelModelDefinition,
 } from "./model-definition.ts";
 import {
@@ -185,6 +195,10 @@ async function importAI(): Promise<typeof import("ai")> {
  * - `getModelParameters` reads `CallSettings` from the SDK's `.d.ts` bundle
  *   and surfaces parameters with simple types that can be edited in the UI.
  * - `executeConfig` delegates to `generateText`.
+ *
+ * A prompt whose config asks `questions` is an `experimental_evaluate` call
+ * instead: it is edited in the `questions` style and executed with
+ * `experimental_evaluate`. Both are traced through the same native telemetry.
  */
 export class VercelAISDK implements SDKAdapter {
   readonly promptsHelperImport = PROMPTS_HELPER_CALL.import.from;
@@ -218,11 +232,19 @@ export class VercelAISDK implements SDKAdapter {
   };
 
   getProjectProbes(language: string): TypeProbe[] {
-    return language === "typescript" ? MODEL_PROJECT_PROBES : [];
+    return language === "typescript"
+      ? [...MODEL_PROJECT_PROBES, ...EVALUATION_PROJECT_PROBES]
+      : [];
   }
 
-  async getModelDefinition(project: ProbeResults): Promise<PropDefinition> {
-    return vercelModelDefinition(project);
+  /** A language model for chat prompts; an evaluation model for evaluation prompts. */
+  async getModelDefinition(
+    project: ProbeResults,
+    style: PromptStyle = "chat",
+  ): Promise<PropDefinition> {
+    return style === "questions"
+      ? vercelEvaluationModelDefinition(project)
+      : vercelModelDefinition(project);
   }
 
   getModelParameters(rootDir: string): PropDefinition[] {
@@ -278,10 +300,12 @@ export class VercelAISDK implements SDKAdapter {
     syntax: TOOLS_CONTEXT_SYNTAX,
   };
 
-  getPromptProbes(_prompt: ParsedPrompt, language: string): TypeProbe[] {
+  getPromptProbes(prompt: ParsedPrompt, language: string): TypeProbe[] {
     // The expression above is plainly TypeScript; an adapter should say so
     // rather than emit it for a language that cannot evaluate it.
     if (language !== "typescript") return [];
+    // An evaluation has no tools, so no tools context.
+    if (isEvaluationPrompt(prompt)) return [];
     return [VercelAISDK.TOOLS_CONTEXT_PROBE];
   }
 
@@ -293,7 +317,14 @@ export class VercelAISDK implements SDKAdapter {
     // who actually execute a Vercel AI SDK prompt need the package installed,
     // and execution runs against the consumer's own copy of `ai` (the same
     // instance their provider/model objects were built with).
-    const { generateText } = await importAI();
+    const ai = await importAI();
+    const evaluation = isEvaluationConfig(config);
+    if (evaluation && typeof ai.experimental_evaluate !== "function") {
+      throw new Error(
+        "This prompt asks questions, which needs `experimental_evaluate` " +
+          "from `ai` 7.0.104 or later. Run `npm install ai@latest`.",
+      );
+    }
 
     let integration: PerTraceTelemetry | undefined;
     if (traceId) {
@@ -359,8 +390,25 @@ export class VercelAISDK implements SDKAdapter {
     // `done` settles either way, and never rejects: a caller awaiting it (to
     // dispose run-scoped resources, say) only needs to know the run is over,
     // and the failure has already been reported through the trace.
-    const done = generateText(config).then(
-      () => undefined,
+    //
+    // An evaluation is traced through the same integration: `ai` sends it the
+    // `experimental_onEvaluate*` events instead of the generation ones.
+    const call: Promise<unknown> = evaluation
+      ? Promise.resolve().then(() => ai.experimental_evaluate(config))
+      : ai.generateText(config);
+    const done = call.then(
+      async () => {
+        // An `ai` release that predates evaluation telemetry (before 7.0.111)
+        // runs the call without reporting it, which would leave the trace
+        // running forever.
+        if (integration && !integration.wasStarted()) {
+          await integration.fail(
+            "This run succeeded, but the installed `ai` doesn't report " +
+              "evaluations to telemetry. Upgrade to `ai` 7.0.111 or later " +
+              "to trace them.",
+          );
+        }
+      },
       (err: any) => {
         void integration?.fail(err?.message ?? String(err));
         console.error("prompt execution failed:", err);
@@ -405,6 +453,17 @@ export class VercelAISDK implements SDKAdapter {
   }
 
   normalizePrompt(
+    prompt: ParsedPrompt,
+    resolvedProbes?: readonly ProbeResult[],
+    project: ProbeResults = {},
+  ): NormalizedPrompt {
+    if (isEvaluationPrompt(prompt)) {
+      return normalizeEvaluationPrompt(prompt, project);
+    }
+    return this.normalizeChatPrompt(prompt, resolvedProbes);
+  }
+
+  private normalizeChatPrompt(
     prompt: ParsedPrompt,
     resolvedProbes?: readonly ProbeResult[],
   ): NormalizedChatPrompt {
@@ -492,6 +551,9 @@ export class VercelAISDK implements SDKAdapter {
     updates: NormalizedPromptUpdates,
     _currentValues?: Record<string, PropValue>,
   ): Record<string, PropValue | null> {
+    if (updates.style === "questions") {
+      return denormalizeEvaluationUpdates(updates);
+    }
     assertUpdateStyle(updates, "chat");
     const out: Record<string, PropValue | null> = {};
     if (MODEL_KEY in updates) out[MODEL_KEY] = updates.model ?? null;

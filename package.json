@@ -66,9 +66,9 @@
   },
   "peerDependencies": {
     "@google/genai": ">=2.0.0-0",
+    "@typesafe-ai/sdk": ">=0.6.0-0",
     "ai": ">=3.4.0-0",
-    "typescript": ">=5.3.3-0 <7.0.0-0",
-    "@typesafe-ai/sdk": ">=0.6.0-0"
+    "typescript": ">=5.3.3-0 <7.0.0-0"
   },
   "peerDependenciesMeta": {
     "ai": {
@@ -82,6 +82,7 @@
     }
   },
   "devDependencies": {
+    "@ai-sdk/typesafe-ai": "^3.0.5",
     "@biomejs/biome": "^2.5.0",
     "@glideapps/glide-data-grid": "6.0.4-alpha24",
     "@google/genai": "^2.9.0",
@@ -97,7 +98,7 @@
     "@typesafe-ai/sdk": "^0.6.0",
     "@vitejs/plugin-react": "^4.2.1",
     "@vitest/coverage-v8": "^1.1.0",
-    "ai": "^7.0.105",
+    "ai": "^7.0.112",
     "concurrently": "^9.2.1",
     "drizzle-kit": "1.0.0-rc.4",
     "lucide-react": "^1.43.0",

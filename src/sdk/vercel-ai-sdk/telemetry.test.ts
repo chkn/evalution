@@ -559,3 +559,168 @@ describe("Evalution", () => {
     expect(step?.llm?.output).toEqual(expected);
   });
 });
+
+function evaluateStartEvent(callId: string) {
+  return {
+    callId,
+    operationId: "ai.evaluate",
+    runtimeContext: {},
+    provider: "typesafe.evaluation",
+    modelId: "jev-latest",
+    state: { message: "I was charged twice." },
+    questions: {
+      department: {
+        type: "choice",
+        instructions: "Which team should handle this?",
+        criteria: { billing: null, technical: null },
+      },
+      requestsRefund: {
+        type: "boolean",
+        instructions: "Is the customer requesting money back?",
+      },
+    },
+    maxRetries: 2,
+    headers: undefined,
+    providerOptions: {},
+  } satisfies Parameters<
+    VercelAISDKTelemetry["experimental_onEvaluateStart"]
+  >[0];
+}
+
+function evaluateEndEvent(callId: string) {
+  return {
+    ...evaluateStartEvent(callId),
+    answers: {
+      department: {
+        type: "choice",
+        choice: "billing",
+        probabilities: { billing: 0.93, technical: 0.07 },
+      },
+      requestsRefund: { type: "boolean", probability: 0.88 },
+    },
+    usage: { inputTokens: 40, outputTokens: 2, totalTokens: 42 },
+    warnings: [],
+    rounding: { probabilityDecimals: 2 },
+    providerMetadata: { typesafe: { confidence: { department: 0.81 } } },
+    response: { timestamp: new Date(), modelId: "jev-2026-09-01" },
+  } satisfies Parameters<VercelAISDKTelemetry["experimental_onEvaluateEnd"]>[0];
+}
+
+describe("evaluations", () => {
+  it("records an evaluation as one LLM span: state and questions in, answers out", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "triage#route", name: "route" })
+      .withTraceId("t-eval");
+
+    await integration.experimental_onEvaluateStart?.(evaluateStartEvent("e1"));
+    expect(integration.wasStarted()).toBe(true);
+    await integration.experimental_onEvaluateEnd?.(evaluateEndEvent("e1"));
+
+    const trace = await provider.getTrace("t-eval");
+    expect(trace?.trace.status).toBe("ok");
+    expect(trace?.spans).toHaveLength(1);
+    const [span] = trace!.spans;
+    expect(span).toMatchObject({
+      kind: "LLM",
+      name: "triage#route",
+      status: "ok",
+      prompt: { id: "triage#route" },
+      llm: {
+        provider: "typesafe.evaluation",
+        // The version the alias resolved to, not the alias.
+        model: "jev-2026-09-01",
+        input: {
+          state: { message: "I was charged twice." },
+          questions: { department: { type: "choice" } },
+        },
+        promptTokens: 40,
+        completionTokens: 2,
+        totalTokens: 42,
+      },
+    });
+    // Confidence comes back as provider metadata; it's recorded on its answer.
+    expect(span.llm?.output).toEqual({
+      department: {
+        type: "choice",
+        choice: "billing",
+        probabilities: { billing: 0.93, technical: 0.07 },
+        confidence: 0.81,
+      },
+      requestsRefund: { type: "boolean", probability: 0.88 },
+    });
+  });
+
+  it("closes an evaluation's span as an error on onError, which sends no onEnd", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const integration = evalution
+      .createTelemetryForPrompt()
+      .withTraceId("t-err");
+
+    await integration.experimental_onEvaluateStart?.(evaluateStartEvent("e2"));
+    await integration.onError?.({
+      callId: "e2",
+      error: new Error("422: criteria must not be empty"),
+    });
+
+    const trace = await provider.getTrace("t-err");
+    expect(trace?.trace.status).toBe("error");
+    expect(trace?.spans[0]).toMatchObject({
+      status: "error",
+      errorMessage: "422: criteria must not be empty",
+    });
+
+    // The run's rejection then reaches `fail()`, which mustn't rewrite the
+    // trace's error with its own.
+    await integration.fail("a different message");
+    expect(
+      (await provider.getTrace("t-err"))?.trace.attributes?.errorMessage,
+    ).not.toBe("a different message");
+  });
+
+  it("closes a generation's spans on onError too", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const integration = evalution
+      .createTelemetryForPrompt()
+      .withTraceId("t-gen");
+
+    await integration.onStart?.(startEvent("g1"));
+    await integration.onError?.({ callId: "g1", error: new Error("boom") });
+
+    expect((await provider.getTrace("t-gen"))?.trace.status).toBe("error");
+  });
+
+  it("ignores onError for a call it isn't recording", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    await evalution.onError({ callId: "unknown", error: new Error("x") });
+    expect(await provider.getAllTraces()).toHaveLength(0);
+  });
+
+  it("reports whether the SDK ever started the run", () => {
+    const integration = new VercelAISDKTelemetry()
+      .createTelemetryForPrompt()
+      .withTraceId("t-none");
+    expect(integration.wasStarted()).toBe(false);
+  });
+
+  it("records evaluations through the global fallback, without identity", async () => {
+    const evalution = new VercelAISDKTelemetry({ nativeTelemetry: "always" });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+
+    await evalution.experimental_onEvaluateStart(evaluateStartEvent("e3"));
+    await evalution.experimental_onEvaluateEnd(evaluateEndEvent("e3"));
+
+    const [trace] = await provider.getAllTraces();
+    expect(trace.status).toBe("ok");
+    expect(trace.name).toBe("ai.evaluate");
+  });
+});

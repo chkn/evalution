@@ -122,6 +122,13 @@ export interface FactoriesProbe {
    * call must produce, e.g. `import("ai").LanguageModel`.
    */
   produces: string;
+  /**
+   * Consider a method of each export rather than the export itself: with
+   * `"evaluationModel"`, an exported provider object `typeSafeAi` whose
+   * `evaluationModel(…)` produces the type is found as the factory
+   * `typeSafeAi.evaluationModel`, still bound to the import of `typeSafeAi`.
+   */
+  member?: string;
 }
 
 /**

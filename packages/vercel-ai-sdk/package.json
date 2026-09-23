@@ -44,6 +44,7 @@
     "@ai-sdk/replicate": "*",
     "@ai-sdk/revai": "*",
     "@ai-sdk/togetherai": "*",
+    "@ai-sdk/typesafe-ai": "*",
     "@ai-sdk/vercel": "*",
     "@ai-sdk/xai": "*",
     "@opentelemetry/api": "^1.9.0",
@@ -128,6 +129,9 @@
     "@ai-sdk/togetherai": {
       "optional": true
     },
+    "@ai-sdk/typesafe-ai": {
+      "optional": true
+    },
     "@ai-sdk/vercel": {
       "optional": true
     },
@@ -164,12 +168,13 @@
     "@ai-sdk/replicate": "^3.0.44",
     "@ai-sdk/revai": "^3.0.43",
     "@ai-sdk/togetherai": "^3.0.52",
+    "@ai-sdk/typesafe-ai": "^3.0.5",
     "@ai-sdk/valibot": "^3.0.43",
     "@ai-sdk/vercel": "^3.0.30",
     "@ai-sdk/xai": "^5.0.2",
     "@opentelemetry/api": "^1.9.0",
     "@types/json-schema": "^7.0.15",
-    "ai": "^7.0.105",
+    "ai": "^7.0.112",
     "tsdown": "^0.22.1",
     "typescript": "^5.3.3"
   },

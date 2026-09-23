@@ -19,6 +19,7 @@ import type {
   ResolvedPromptInputs,
 } from "../prompt/prompt-provider.ts";
 import type { PromptRegistry } from "../prompt/prompt-registry.ts";
+import { isPromptStyle } from "../shared/helpers.ts";
 import type { SetupTask } from "../shared/setup-task.ts";
 import type {
   ExecuteRequest,
@@ -204,14 +205,18 @@ export function setupRoutes({
     }
   });
 
-  // GET /api/providers/:providerId/model-definition
+  // GET /api/providers/:providerId/model-definition?style=chat|questions
   app.get("/api/providers/:providerId/model-definition", async c => {
     const { providerId } = c.req.param();
     const provider = promptProviders.get(providerId);
     if (!provider) {
       return c.json({ error: "Provider not found" }, 404);
     }
-    return c.json((await provider.getModelDefinition?.()) ?? null);
+    const style = c.req.query("style") ?? "chat";
+    if (!isPromptStyle(style)) {
+      return c.json({ error: `Unknown prompt style "${style}"` }, 400);
+    }
+    return c.json((await provider.getModelDefinition?.(style)) ?? null);
   });
 
   // GET /api/providers/:providerId/model-parameters

@@ -876,20 +876,25 @@ function factoryAlias(i: number): string {
  * so a module that isn't installed only empties its own alias.
  *
  * Each alias is a mapped type over the module's exports keeping those whose
- * call produces the probe's type. The `0 extends 1 & X` guards drop `any` — an
+ * call (or, with a `member`, whose method's call) produces the probe's type,
+ * mapped to that callable. The `0 extends 1 & X` guards drop `any` — an
  * uninstalled module types as `any`, and so would a call returning it.
  */
 function probeExpressions(probe: TypeProbe): Record<string, string> {
   if (probe.kind === "type") return { probe: probe.expression };
+  const member = probe.member && JSON.stringify(probe.member);
   return Object.fromEntries([
     [PRODUCES_ALIAS, probe.produces],
     ...probe.modules.map((module, i) => {
       const m = `typeof import(${JSON.stringify(module)})`;
+      const callable = member
+        ? `${m}[K] extends { readonly ${member}: infer F } ? F : never`
+        : `${m}[K]`;
       return [
         factoryAlias(i),
-        `0 extends 1 & ${m} ? never : { [K in keyof ${m} as ${m}[K] extends (...args: any) => infer R ` +
+        `0 extends 1 & ${m} ? never : { [K in keyof ${m} as (${callable}) extends (...args: any) => infer R ` +
           `? 0 extends 1 & R ? never : [R] extends [${probe.produces}] ? K : never ` +
-          `: never]: ${m}[K] }`,
+          `: never]: ${callable} }`,
       ];
     }),
   ]);
@@ -969,9 +974,9 @@ function evaluateProbe(
 }
 
 /**
- * The factories a `factories` probe's aliases found: each surviving export,
- * described as a `function`-kind definition bound to an import from its
- * module. `undefined` when no alias resolved at all (nothing was evaluated).
+ * The factories a `factories` probe's aliases found: each surviving export
+ * (or its `member`), described as a `function`-kind definition bound to an
+ * import of the export from its module. `undefined` when no alias resolved at all (nothing was evaluated).
  */
 function evaluateFactories(
   probe: Extract<TypeProbe, { kind: "factories" }>,
@@ -999,13 +1004,17 @@ function evaluateFactories(
       const built = buildPropTypeFromType(exportType, typeChecker, sourceFile);
       if (built.kind !== "function") continue;
       const def: PropDefinition = {
-        name: symbol.name,
+        // The callee as it is written: `typeSafeAi.evaluationModel`.
+        name: probe.member ? `${symbol.name}.${probe.member}` : symbol.name,
         type: built,
         optional: false,
       };
-      const description = ts
-        .displayPartsToString(symbol.getDocumentationComment(typeChecker))
-        .trim();
+      // The export's own docs describe the export, not a method of it.
+      const description = probe.member
+        ? ""
+        : ts
+            .displayPartsToString(symbol.getDocumentationComment(typeChecker))
+            .trim();
       if (description) def.description = description;
       factories.push({
         def,

@@ -7,6 +7,7 @@ import type {
   NormalizedPrompt,
   NormalizedPromptUpdates,
   PromptChangeEvent,
+  PromptStyle,
   PropDefinition,
 } from "../shared/types.ts";
 import type { TraceIngestor } from "../trace/trace-ingestor.ts";
@@ -166,11 +167,12 @@ export interface PromptProvider<
 
   /**
    * Returns the definition of the model slot for this provider's underlying
-   * SDK, catalogs included. See `SDKAdapter.getModelDefinition`.
+   * SDK, catalogs included, for prompts of the given style. See
+   * `SDKAdapter.getModelDefinition`.
    *
    * Optional — providers that do not expose model info may omit it.
    */
-  getModelDefinition?(): Promise<PropDefinition>;
+  getModelDefinition?(style: PromptStyle): Promise<PropDefinition>;
 
   /**
    * Returns the list of editable model parameters exposed by this provider's

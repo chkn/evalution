@@ -19,6 +19,7 @@ import {
   parseJsonOrRaw,
   tryParseJson,
 } from "../shared/helpers.ts";
+import { answersWithConfidence } from "./evaluation-answers.ts";
 import {
   PROMPT_ID_ATTRIBUTE,
   PROMPT_INPUTS_ATTRIBUTE,
@@ -201,6 +202,33 @@ function parseJsonObject(
 }
 
 /**
+ * An `experimental_evaluate` span's input and output, from `@ai-sdk/otel`'s
+ * `ai.evaluation.*` attributes (recorded only when its integration is built
+ * with `experimental_evaluation: true`). The answers carry the confidence a
+ * provider reported in `ai.response.providerMetadata`, as a native-telemetry
+ * span's do.
+ */
+function readEvaluation(attributes: Record<string, unknown>): {
+  input?: { [key: string]: unknown };
+  output?: unknown;
+} {
+  const state = tryParseJson(attributes["ai.evaluation.state"]);
+  const questions = tryParseJson(attributes["ai.evaluation.questions"]);
+  const answers = tryParseJson(attributes["ai.evaluation.answers"]);
+  return {
+    ...((state !== undefined || questions !== undefined) && {
+      input: { state, questions },
+    }),
+    ...(answers !== undefined && {
+      output: answersWithConfidence(
+        answers,
+        tryParseJson(attributes["ai.response.providerMetadata"]),
+      ),
+    }),
+  };
+}
+
+/**
  * Reads {@link LLMSpanDetails} out of an OTel-shaped attribute bag, following
  * both the OTel GenAI semantic conventions and the Vercel AI SDK's own
  * attribute names. Returns `undefined` when nothing LLM-related is present,
@@ -235,8 +263,10 @@ export function readLLM(
   const messages = parseMessages(
     attributes["gen_ai.input.messages"] ?? attributes["ai.prompt.messages"],
   );
-  const input = jsonInput ?? messages;
-  const jsonOutput = tryParseJson(attributes["evalution.llm.output"]);
+  const evaluation = readEvaluation(attributes);
+  const input = jsonInput ?? evaluation.input ?? messages;
+  const jsonOutput =
+    tryParseJson(attributes["evalution.llm.output"]) ?? evaluation.output;
   const text =
     parseOutput(attributes["gen_ai.output.messages"]) ??
     str(attributes["ai.response.text"]);

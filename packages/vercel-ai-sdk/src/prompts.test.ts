@@ -259,3 +259,38 @@ describe("prompts() telemetry wrapping — v7 (native Telemetry integrations)", 
     expect(integrations.some(isPerPromptTelemetry)).toBe(true);
   });
 });
+
+describe("prompts() with an experimental_evaluate config", () => {
+  const psi = { id: "support" };
+
+  afterEach(() => {
+    delete globalThis.AI_SDK_TELEMETRY_INTEGRATIONS;
+  });
+
+  const build = prompts(psi, () => ({
+    triage: (message: string) => ({
+      model: "jev-latest",
+      state: { message },
+      questions: {
+        refund: { type: "boolean" as const, instructions: "Refund?" },
+      },
+    }),
+  }));
+
+  it("swaps in a per-call integration, which evaluate reads from `telemetry`", () => {
+    globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [new Evalution()];
+    const config: Prompt = build().triage("Charged twice");
+    const integrations = toArray(config.telemetry?.integrations);
+    expect(integrations).toHaveLength(1);
+    expect(isPerPromptTelemetry(integrations[0])).toBe(true);
+  });
+
+  it("adds no v6 experimental_telemetry, which evaluate never had", () => {
+    const config = build().triage("Charged twice");
+    expect(config).not.toHaveProperty("experimental_telemetry");
+    expect(config).toMatchObject({
+      model: "jev-latest",
+      state: { message: "Charged twice" },
+    });
+  });
+});

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type { PropValue } from "ts-proppy";
-import type { SpanKind } from "./types.ts";
+import type { PromptStyle, SpanKind } from "./types.ts";
 
 export function otelOperationToSpanKind(operationName: any): SpanKind {
   switch (operationName) {
@@ -10,6 +10,8 @@ export function otelOperationToSpanKind(operationName: any): SpanKind {
     case "response":
     case "text_completion":
     case "generate_content":
+    // `experimental_evaluate`: a model answering questions.
+    case "evaluate":
       return "LLM";
     case "execute_tool":
       return "TOOL";
@@ -21,6 +23,16 @@ export function otelOperationToSpanKind(operationName: any): SpanKind {
     default:
       return "DEFAULT";
   }
+}
+
+const PROMPT_STYLES: Record<PromptStyle, true> = {
+  chat: true,
+  questions: true,
+};
+
+/** Whether `value` names a {@link PromptStyle}. */
+export function isPromptStyle(value: unknown): value is PromptStyle {
+  return typeof value === "string" && Object.hasOwn(PROMPT_STYLES, value);
 }
 
 /** Whether a property value can be edited in the UI. */

@@ -12,6 +12,7 @@ import type {
   NormalizedPromptUpdates,
   PromptChangeEvent,
   PromptInputSources,
+  PromptStyle,
   PropDefinition,
 } from "../../shared/types.ts";
 import {
@@ -951,9 +952,10 @@ export class FilePromptProvider
     });
   }
 
-  async getModelDefinition(): Promise<PropDefinition> {
+  async getModelDefinition(style: PromptStyle): Promise<PropDefinition> {
     return this.sdkAdapter.getModelDefinition(
       await this.resolveProjectProbes(),
+      style,
     );
   }
 

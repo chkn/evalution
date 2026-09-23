@@ -79,15 +79,24 @@ describe("assertUpdateStyle", () => {
 });
 
 describe("chat adapters", () => {
-  it.each([
-    ["VercelAISDK", new VercelAISDK()],
-    ["GeminiInteractionsSDK", new GeminiInteractionsSDK()],
-  ])("%s refuses to denormalize questions-style updates", (_, sdk) => {
+  it("GeminiInteractionsSDK refuses to denormalize questions-style updates", () => {
     expect(() =>
-      sdk.denormalizeUpdates({
+      new GeminiInteractionsSDK().denormalizeUpdates({
         style: "questions",
         state: { kind: "primitive", value: "x" },
       }),
     ).toThrow(/"questions" updates/);
+  });
+
+  // It also drives `experimental_evaluate`, whose prompts are questions.
+  it("VercelAISDK denormalizes questions-style updates to config keys", () => {
+    const state = { kind: "primitive", value: "x" } as const;
+    expect(
+      new VercelAISDK().denormalizeUpdates({
+        style: "questions",
+        state,
+        questions: null,
+      }),
+    ).toEqual({ state, questions: null });
   });
 });

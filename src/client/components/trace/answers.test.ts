@@ -6,7 +6,7 @@ import {
   type ChoiceAnswer,
   choiceRows,
   formatPercent,
-  isSystemOneAnswers,
+  readAnswers,
   type ScoreAnswer,
   scoreLevels,
   scorePosition,
@@ -26,15 +26,14 @@ const score: ScoreAnswer = {
   probabilities: { "2": 0.5, "0": 0.1, "1": 0.4 },
 };
 
-describe("isSystemOneAnswers", () => {
+describe("readAnswers", () => {
   it("recognizes answers of every type", () => {
-    expect(
-      isSystemOneAnswers({
-        refund: { type: "noul", noul: 0.93 },
-        team: choice,
-        frustration: score,
-      }),
-    ).toBe(true);
+    const answers = {
+      refund: { type: "noul", noul: 0.93 },
+      team: choice,
+      frustration: score,
+    };
+    expect(readAnswers(answers)).toEqual(answers);
   });
 
   it.each([
@@ -44,15 +43,98 @@ describe("isSystemOneAnswers", () => {
     ["an unknown type", { a: { type: "rank", rank: 1 } }],
     ["a noul outside 0–1", { a: { type: "noul", noul: 1.5 } }],
     ["a choice not among its labels", { a: { ...choice, choice: "sales" } }],
-    ["a score without probabilities", { a: { ...score, probabilities: {} } }],
+    [
+      "a score with empty probabilities",
+      { a: { ...score, probabilities: {} } },
+    ],
     [
       "a score keyed by non-levels",
       { a: { ...score, probabilities: { low: 1 } } },
     ],
     ["one non-answer among answers", { a: choice, b: { type: "noul" } }],
     ["structured output that happens to have a type", { a: { type: "noul" } }],
+    ["a boolean without a probability", { a: { type: "boolean" } }],
+    ["a confidence outside 0–1", { a: { ...choice, confidence: 2 } }],
   ])("rejects %s", (_, value) => {
-    expect(isSystemOneAnswers(value)).toBe(false);
+    expect(readAnswers(value)).toBeUndefined();
+  });
+});
+
+describe("readAnswers of AI SDK evaluations", () => {
+  const input = {
+    state: "I was charged twice.",
+    questions: {
+      severity: {
+        type: "score",
+        instructions: "How severe?",
+        criteria: ["Cosmetic", "Workaround exists", "Blocking"],
+      },
+    },
+  };
+
+  it("reads a boolean's probability of true as a yes/no answer", () => {
+    expect(
+      readAnswers({ refund: { type: "boolean", probability: 0.88 } }),
+    ).toEqual({ refund: { type: "noul", noul: 0.88 } });
+  });
+
+  it("reads choices and scores without probabilities or confidence", () => {
+    expect(
+      readAnswers({
+        team: { type: "choice", choice: "billing" },
+        severity: { type: "score", score: 1.2 },
+      }),
+    ).toEqual({
+      team: { type: "choice", choice: "billing" },
+      severity: { type: "score", score: 1.2 },
+    });
+  });
+
+  it("keeps a confidence recorded from provider metadata", () => {
+    expect(
+      readAnswers({
+        team: {
+          type: "choice",
+          choice: "billing",
+          probabilities: { billing: 0.9, technical: 0.1 },
+          confidence: 0.81,
+        },
+      })?.team,
+    ).toMatchObject({ confidence: 0.81 });
+  });
+
+  it("describes a score's levels by its question's criteria", () => {
+    const answers = readAnswers(
+      {
+        severity: {
+          type: "score",
+          score: 1.2,
+          probabilities: { "0": 0.2, "1": 0.4, "2": 0.4 },
+        },
+      },
+      input,
+    );
+    expect(scoreLevels(answers!.severity as ScoreAnswer)).toEqual([
+      { level: 0, probability: 0.2, description: "Cosmetic" },
+      { level: 1, probability: 0.4, description: "Workaround exists" },
+      { level: 2, probability: 0.4, description: "Blocking" },
+    ]);
+  });
+
+  it("lays out a score's levels from its criteria even without a distribution", () => {
+    const answers = readAnswers(
+      { severity: { type: "score", score: 2 } },
+      input,
+    );
+    expect(scoreLevels(answers!.severity as ScoreAnswer)).toEqual([
+      { level: 0, description: "Cosmetic" },
+      { level: 1, description: "Workaround exists" },
+      { level: 2, description: "Blocking" },
+    ]);
+  });
+
+  it("has no choice rows without a distribution", () => {
+    expect(choiceRows({ type: "choice", choice: "billing" })).toEqual([]);
   });
 });
 

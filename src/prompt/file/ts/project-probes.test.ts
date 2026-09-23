@@ -101,6 +101,50 @@ describe("factories probes", () => {
   });
 });
 
+describe("factories probes over a member", () => {
+  const EVALUATION: TypeProbe = {
+    kind: "factories",
+    name: "evaluation",
+    modules: [
+      "@ai-sdk/typesafe-ai",
+      "@ai-sdk/openai",
+      "@ai-sdk/elevenlabs",
+      "@ai-sdk/not-installed",
+    ],
+    member: "evaluationModel",
+    produces: 'import("ai").Experimental_EvaluationModel',
+  };
+
+  it("finds exports whose method produces the type, named as the call is written", async () => {
+    const { evaluation } = await resolveProject([EVALUATION]);
+    const factories = evaluation as ValueFactory[];
+    // ElevenLabs has no evaluation models; constructors (`createOpenAI`)
+    // return providers, whose `evaluationModel` isn't called on an export.
+    expect(factories.map(f => f.def.name).sort()).toEqual([
+      "openai.evaluationModel",
+      "typeSafeAi.evaluationModel",
+    ]);
+    // Bound to the import of the export the method is called on.
+    const typeSafe = factories.find(f => f.def.name.startsWith("typeSafeAi"))!;
+    expect(typeSafe.binding).toEqual({
+      kind: "import",
+      spec: { name: "typeSafeAi", from: "@ai-sdk/typesafe-ai" },
+    });
+  });
+
+  it("describes the method's parameters, with model IDs as suggestions", async () => {
+    const { evaluation } = await resolveProject([EVALUATION]);
+    const factory = (evaluation as ValueFactory[]).find(f =>
+      f.def.name.startsWith("typeSafeAi"),
+    )!;
+    if (factory.def.type.kind !== "function") throw new Error("not a function");
+    const [modelId] = factory.def.type.parameters;
+    expect(getOpenStringUnionInfo(modelId.type)?.suggestions).toContain(
+      "jev-latest",
+    );
+  });
+});
+
 describe("project type probes", () => {
   it("resolves a type from an installed package, and `never` to null", async () => {
     const results = await resolveProject([

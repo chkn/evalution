@@ -32,7 +32,10 @@ Evalution currently supports **TypeScript** projects using a supported AI SDK.
 The supported SDKs today are the [Vercel AI SDK](https://sdk.vercel.ai/) (the `ai`
 package) and [TypeSafe](https://docs.typesafe.ai/)'s System One models (the
 `@typesafe-ai/sdk` package). The steps below use the Vercel AI SDK; for TypeSafe,
-see [TypeSafe System One prompts](/docs/prompts#typesafe-system-one-prompts).
+see [TypeSafe System One prompts](/docs/prompts#typesafe-system-one-prompts). The
+Vercel AI SDK's own evaluations (`experimental_evaluate`, including through
+`@ai-sdk/typesafe-ai`) need nothing extra — see
+[Vercel AI SDK evaluations](/docs/prompts#vercel-ai-sdk-evaluations).
 
 - **If your project already uses TypeScript and the Vercel AI SDK**, continue to
   step 2.

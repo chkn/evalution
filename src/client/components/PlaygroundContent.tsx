@@ -115,11 +115,13 @@ function PlaygroundContent({
 
   useEffect(() => {
     if (prompt.providerId) {
-      getModelDefinition(prompt.providerId)
+      // Cleared first, so a style switch never shows the other style's slot.
+      setModelDefinition(null);
+      getModelDefinition(prompt.providerId, prompt.style)
         .then(setModelDefinition)
         .catch(() => {});
     }
-  }, [prompt.providerId]);
+  }, [prompt.providerId, prompt.style]);
 
   const handleUpdate = useCallback(
     async (updates: NormalizedPromptUpdates) => {

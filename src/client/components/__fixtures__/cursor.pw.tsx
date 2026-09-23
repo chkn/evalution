@@ -7,7 +7,7 @@ import { CursorHarness } from "./CursorHarness";
 import { getCursorOffset } from "./cursorTestUtils";
 
 async function mockApiRoutes(page: Page) {
-  await page.route("**/model-definition", route =>
+  await page.route(/\/model-definition(\?|$)/, route =>
     route.fulfill({ json: null }),
   );
   await page.route("**/model-parameters", route => route.fulfill({ json: [] }));

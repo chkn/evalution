@@ -5685,7 +5685,28 @@ pre {
   border-color: var(--panel-text-secondary);
 }
 
-.pg-entry-toggle {
+/* A nullable entry's `null`: shown in place of the text box, and clicked to
+   start writing. */
+.pg-entry-none {
+  padding: 5px 8px;
+  min-height: 24px;
+  border: 1px dashed var(--panel-card-border);
+  border-radius: 5px;
+  background: none;
+  color: var(--panel-text-secondary);
+  font: inherit;
+  font-style: italic;
+  text-align: left;
+  cursor: text;
+  box-sizing: border-box;
+}
+
+.pg-entry-none:hover {
+  border-color: var(--panel-text-secondary);
+}
+
+.pg-entry-toggle,
+.pg-entry-set-null {
   flex-shrink: 0;
   padding: 1px 6px;
   border: 1px solid var(--panel-card-border);

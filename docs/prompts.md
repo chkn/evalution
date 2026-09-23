@@ -185,6 +185,54 @@ const { answers } = await client.systemOne(triagePrompts().triage(ticket, "Pro p
 answers.team.choice; // "billing" | "technical"
 ```
 
+## Vercel AI SDK evaluations
+
+The Vercel AI SDK asks typed questions too, through `experimental_evaluate` and a provider with evaluation models: TypeSafe's (`@ai-sdk/typesafe-ai`), OpenAI's, Anthropic's, Google's, or the AI Gateway's. A prompt function that returns `experimental_evaluate`'s parameters — anything with `questions` — is one of these, edited and run in the playground the same way as a TypeSafe prompt:
+
+```ts
+// triage.prompt.ts
+import { prompts } from "@evalution/vercel-ai-sdk";
+
+type Ticket = { subject: string; message: string };
+
+export default prompts({ id: "support-triage" }, ({ typeSafeAi }) => ({
+  triage: (ticket: Ticket) => ({
+    model: typeSafeAi.evaluationModel("jev-latest"),
+    state: { ticket },
+    questions: {
+      department: {
+        type: "choice",
+        instructions: "Which team should handle this?",
+        criteria: { billing: "Charges, invoices, refunds", technical: null },
+      },
+      severity: {
+        type: "score",
+        instructions: "How severe is the issue?",
+        criteria: ["Cosmetic", "Workaround exists", "Blocking"],
+      },
+      requestsRefund: {
+        type: "boolean",
+        instructions: "Is the customer requesting money back?",
+      },
+    },
+  }),
+}));
+```
+
+It uses the same provider as your other Vercel AI SDK prompts (`sdk: new VercelAISDK()`); set the provider's API key (`TYPESAFE_AI_API_KEY` for TypeSafe) to run it. The model picker offers each installed provider's evaluation models, and "＋ Add question" offers the SDK's question types. Runs are traced like any other AI SDK call — tracing evaluations needs `ai` 7.0.111 or later — and their answers shown as charts, with TypeSafe's confidence where it reports one.
+
+At run time, pass the prompt's config to `experimental_evaluate`; the `prompts()` helper has already attached the telemetry that links the call back to its prompt:
+
+```ts
+import { experimental_evaluate } from "ai";
+import triagePrompts from "./triage.prompt.ts";
+
+const { answers } = await experimental_evaluate(triagePrompts().triage(ticket));
+answers.department.choice; // "billing" | "technical"
+```
+
+If you trace through OpenTelemetry (`@ai-sdk/otel`) rather than Evalution's own integration, construct it with `new OpenTelemetry({ experimental_evaluation: true })`: without that option, the spans it records for an evaluation leave out the state, questions and answers.
+
 ## See also
 
 - [Setup](/docs/setup) — get prompts into this format from an existing codebase.
