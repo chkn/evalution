@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PropDefinition, PropValue } from "ts-proppy";
@@ -425,6 +427,32 @@ export default prompts({ id: 'load' }, () => ({
         system: "hi world",
         messages: [],
       });
+    });
+
+    // Real FS on purpose: the bug is Node's module cache, which
+    // MemoryFileProvider's content-keyed data: URLs never hit.
+    it("picks up edits to the prompt file between calls", async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), "load-config-"));
+      try {
+        const filePath = path.join(dir, "edited.prompt.ts");
+        const source = (system: string) =>
+          `export function myPrompt() {\n` +
+          `  return { model: 'openai/gpt-4o', system: ${JSON.stringify(system)}, messages: [] };\n` +
+          `}\n`;
+        const ft = new TSPromptFileType(new LocalFileProvider());
+
+        await fs.writeFile(filePath, source("before"));
+        expect(await ft.loadConfig(filePath, "myPrompt", [])).toMatchObject({
+          system: "before",
+        });
+
+        await fs.writeFile(filePath, source("after"));
+        expect(await ft.loadConfig(filePath, "myPrompt", [])).toMatchObject({
+          system: "after",
+        });
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
     });
   });
 });

@@ -40,9 +40,9 @@ export class LocalFileProvider implements FileProvider {
 
   /**
    * Whether the host rejected a cache-busting query string, so we stop adding
-   * one. Node accepts `file:///x.ts?v=1` and treats it as a distinct module,
+   * one. Node accepts `file:///x.ts?mtime=1` and treats it as a distinct module,
    * but a transform pipeline in front of it may read the extension off the
-   * whole specifier and choke on `.ts?v=1`.
+   * whole specifier and choke on `.ts?mtime=1`.
    */
   #cacheBustingUnsupported = false;
 
@@ -51,10 +51,13 @@ export class LocalFileProvider implements FileProvider {
     if (!fresh || this.#cacheBustingUnsupported) return import(plain);
 
     // A distinct specifier is the only way past Node's module cache. mtime
-    // rather than a counter, so an unchanged file still hits the cache.
-    const { mtimeMs } = await fs.stat(filePath);
+    // rather than a counter, so an unchanged file still hits the cache. Integer
+    // nanoseconds, not the fractional `mtimeMs`: a loader that reads the
+    // extension off the whole specifier sees `?x=1.5` as a `.5` file. And not
+    // `?v=` or `?t=`, which Vite reserves and strips before its module cache.
+    const { mtimeNs } = await fs.stat(filePath, { bigint: true });
     const url = pathToFileURL(filePath);
-    url.search = `?v=${mtimeMs}`;
+    url.search = `?mtime=${mtimeNs}`;
 
     try {
       return await import(url.href);

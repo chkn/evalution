@@ -592,7 +592,8 @@ export default prompts(
     promptName: string,
     params: any[],
   ): Promise<any> {
-    const module = await this.fileProvider.import(filePath);
+    // Fresh, or a prompt edited since its last run would run the old version.
+    const module = await this.fileProvider.import(filePath, { fresh: true });
     let fn = module[promptName];
 
     // Fall back to the prompts() helper shape: `export default prompts(factory)`
