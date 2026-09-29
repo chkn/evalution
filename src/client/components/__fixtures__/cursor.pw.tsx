@@ -3,6 +3,7 @@
 
 import { expect, test } from "@playwright/experimental-ct-react";
 import type { Page } from "@playwright/test";
+import { EDIT_SAVE_DELAY_MS } from "../edit-save-delay";
 import { CursorHarness } from "./CursorHarness";
 import { getCursorOffset } from "./cursorTestUtils";
 
@@ -71,7 +72,7 @@ test("cursor preserved when typing in message editor during save/reload cycle", 
   await mockApiRoutes(page);
 
   const component = await mount(<CursorHarness />);
-  // Message editor (debounced save — 600 ms)
+  // Message editor (debounced save)
   const editor = component.locator(".token-editor").nth(1);
 
   await editor.click();
@@ -79,7 +80,7 @@ test("cursor preserved when typing in message editor during save/reload cycle", 
   expect(await getCursorOffset(editor)).toBe(11);
 
   // Wait for debounce + onUpdate → setPrompt to complete.
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(EDIT_SAVE_DELAY_MS + 200);
 
   expect(await getCursorOffset(editor)).toBe(11);
 });

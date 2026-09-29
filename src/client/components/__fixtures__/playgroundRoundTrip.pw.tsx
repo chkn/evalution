@@ -3,6 +3,7 @@
 
 import { expect, test } from "@playwright/experimental-ct-react";
 import type { Page } from "@playwright/test";
+import { EDIT_SAVE_DELAY_MS } from "../edit-save-delay";
 import { getCursorOffset } from "./cursorTestUtils";
 import { PlaygroundRoundTripHarness } from "./PlaygroundRoundTripHarness";
 
@@ -96,7 +97,7 @@ test("a pending message save doesn't undo an added message", async ({
   await editor.pressSequentially("!");
   await expect(editor).toHaveText("Hi!");
 
-  // Well inside the 600 ms debounce that keystroke armed.
+  // Well inside the save debounce that keystroke armed.
   await component.getByText("Add message").click();
 
   // Past the debounce window: a timer left armed would now save the list as it
@@ -180,8 +181,8 @@ test("system editor keeps newer typing when an older save response lands", async
   await editor.click();
   await editor.press("H");
   // Let the debounce send a save for "H", then type another character before
-  // that older response comes back.
-  await page.waitForTimeout(650);
+  // that older response (250 ms away) comes back.
+  await page.waitForTimeout(EDIT_SAVE_DELAY_MS + 50);
   await editor.press("i");
   await page.waitForTimeout(300);
 
@@ -189,7 +190,7 @@ test("system editor keeps newer typing when an older save response lands", async
   expect(await getCursorOffset(editor)).toBe(2);
 
   // The follow-up save for "Hi" should acknowledge without moving the caret.
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(EDIT_SAVE_DELAY_MS + 450);
   await expect(editor).toHaveText("Hi");
   expect(await getCursorOffset(editor)).toBe(2);
 });

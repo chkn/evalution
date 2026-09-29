@@ -17,6 +17,7 @@ import type {
   QuestionsPromptUpdates,
 } from "../../shared/types";
 import { useSyncedExternal } from "../hooks/useSyncedExternal";
+import { EDIT_SAVE_DELAY_MS } from "./edit-save-delay";
 import ModelRow from "./ModelRow";
 import { questionPlugins } from "./question-plugins";
 import {
@@ -36,8 +37,6 @@ interface Props {
   /** The SDK's model slot, or `null` while it loads. */
   modelDefinition: PropDefinition | null;
 }
-
-const SAVE_DELAY_MS = 600;
 
 /** A value that isn't editable, shown as its source. */
 function ReadOnlyValue({ value }: { value: PropValue | undefined }) {
@@ -133,7 +132,7 @@ export default function QuestionsPromptEditor({
     clearTimeout(timers.current[key]);
     timers.current[key] = setTimeout(
       () => onUpdate({ [key]: value }),
-      SAVE_DELAY_MS,
+      EDIT_SAVE_DELAY_MS,
     );
   };
 

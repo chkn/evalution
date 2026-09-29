@@ -29,6 +29,7 @@ import type {
 import { getModelParameters } from "../api";
 import { useSyncedExternal } from "../hooks/useSyncedExternal";
 import { defaultValueForType } from "../utils";
+import { EDIT_SAVE_DELAY_MS } from "./edit-save-delay";
 import ModelRow from "./ModelRow";
 
 /** Updates a {@link ChatPromptEditor} emits; the caller supplies the style. */
@@ -523,12 +524,18 @@ export default function ChatPromptEditor({
   const handleMessagesChange = (msgs: NormalizedMessage[]) => {
     setLocalMessages(msgs);
     if (msgSaveTimer.current) clearTimeout(msgSaveTimer.current);
-    msgSaveTimer.current = setTimeout(() => onUpdate({ messages: msgs }), 600);
+    msgSaveTimer.current = setTimeout(
+      () => onUpdate({ messages: msgs }),
+      EDIT_SAVE_DELAY_MS,
+    );
   };
 
   const handleSystemChange = (system: PropValue) => {
     if (systemSaveTimer.current) clearTimeout(systemSaveTimer.current);
-    systemSaveTimer.current = setTimeout(() => onUpdate({ system }), 600);
+    systemSaveTimer.current = setTimeout(
+      () => onUpdate({ system }),
+      EDIT_SAVE_DELAY_MS,
+    );
   };
 
   const handleAddMessage = () => {
