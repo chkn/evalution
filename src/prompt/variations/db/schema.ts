@@ -19,21 +19,27 @@ import {
 
 /**
  * Every variation, frozen or WIP. A frozen row is unique by (prompt, base,
- * canonical updates); there is at most one WIP per (prompt, base), and at
- * most one head WIP per prompt.
+ * canonical updates, the values they overwrite); there is at most one WIP per
+ * (prompt, old version), and at most one head WIP per prompt.
  */
 export const variations = sqliteTable(
   "variations",
   {
     /** `var_` + a short random id. */
     id: text("id").primaryKey(),
-    /** The prompt's provider-scoped id, as of the base version. */
+    /** The prompt's provider-scoped id, as of the base. */
     promptId: text("prompt_id").notNull(),
     /** The prompt's `prompts()` id, when it has one. */
     globalId: text("global_id"),
-    baseVersion: text("base_version").notNull(),
+    /**
+     * The commit the variation was made against, or `''` for none — so it
+     * takes part in the unique indexes, which a NULL wouldn't.
+     */
+    baseVersion: text("base_version").notNull().default(""),
     /** Canonical JSON `NormalizedPromptUpdates` — see `serializeUpdates`. */
     updates: text("updates").notNull(),
+    /** Canonical JSON `FieldValues`: what the updates overwrite. */
+    baseValues: text("base_values").notNull(),
     wip: integer("wip").notNull().default(0),
     /** For a WIP: whether it holds the unsaved edits to head. */
     onHead: integer("on_head").notNull().default(0),
@@ -48,11 +54,11 @@ export const variations = sqliteTable(
   },
   t => [
     uniqueIndex("uq_variations_frozen")
-      .on(t.promptId, t.baseVersion, t.updates)
+      .on(t.promptId, t.baseVersion, t.updates, t.baseValues)
       .where(sql`${t.wip} = 0`),
     uniqueIndex("uq_variations_wip")
       .on(t.promptId, t.baseVersion)
-      .where(sql`${t.wip} = 1`),
+      .where(sql`${t.wip} = 1 and ${t.onHead} = 0`),
     uniqueIndex("uq_variations_head_wip")
       .on(t.promptId)
       .where(sql`${t.wip} = 1 and ${t.onHead} = 1`),
@@ -72,24 +78,4 @@ export const variationNames = sqliteTable(
     createdAt: real("created_at").notNull(),
   },
   t => [primaryKey({ columns: [t.promptId, t.name] })],
-);
-
-/** File contents by SHA-256 — the versions of file-only versioning. */
-export const blobs = sqliteTable("blobs", {
-  sha256: text("sha256").primaryKey(),
-  content: text("content").notNull(),
-});
-
-/** Which file each file-only snapshot was taken of, and when. */
-export const fileSnapshots = sqliteTable(
-  "file_snapshots",
-  {
-    path: text("path").notNull(),
-    sha256: text("sha256")
-      .notNull()
-      .references(() => blobs.sha256),
-    /** When this content of this file was first snapshotted (ms). */
-    createdAt: real("created_at").notNull(),
-  },
-  t => [primaryKey({ columns: [t.path, t.sha256] })],
 );

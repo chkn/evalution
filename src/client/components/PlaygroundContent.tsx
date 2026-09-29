@@ -86,6 +86,7 @@ import {
   isSavedVariation,
   openingLabel,
   runDisabledReason,
+  savedAsHead,
 } from "./prompt-ref";
 import { PromptLinkIcon } from "./trace/icons.tsx";
 
@@ -396,7 +397,8 @@ function PlaygroundContent({
       const result = await saveVariation(providerId, wip.id);
       if (result.ok) {
         setRefPrompt(null);
-        onUpdate({ ...headRef.current, dirty: undefined, wipId: undefined });
+        // The file now holds what was shown: keep showing it, as head.
+        onUpdate(savedAsHead(headRef.current, shownRef.current));
       }
       return result;
     });

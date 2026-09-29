@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { GitVersioning, SNAPSHOT_REF_PREFIX } from "./git-versioning.ts";
+import { GitVersioning } from "./git-versioning.ts";
 
 const tmpDirs: string[] = [];
 afterEach(async () => {
@@ -35,83 +35,39 @@ async function makeRepo() {
     git("commit", "-q", "-m", message);
     return git("rev-parse", "HEAD").trim();
   };
-  // No memo: each test's writes must be seen by the next snapshot.
-  const versioning = (await GitVersioning.detect(dir, { memoTtlMs: 0 }))!;
+  const versioning = (await GitVersioning.detect(dir))!;
   return { dir, git, write, commit, versioning };
 }
 
 describe("GitVersioning", () => {
-  it("returns HEAD for a clean working tree", async () => {
+  it("reports HEAD, and whether the working tree is clean", async () => {
     const { write, commit, versioning } = await makeRepo();
     await write("a.prompt.ts", "one");
     const head = await commit("first");
-
-    const version = await versioning.snapshot();
-    expect(version).toMatchObject({
-      id: head,
-      kind: "commit",
-      message: "first",
+    expect(await versioning.head()).toEqual({
+      commit: expect.objectContaining({ id: head, message: "first" }),
+      clean: true,
     });
-  });
 
-  it("returns one snapshot for dirty trees with identical content", async () => {
-    const { write, commit, versioning } = await makeRepo();
-    await write("a.prompt.ts", "one");
-    const head = await commit("first");
     await write("a.prompt.ts", "two");
+    expect(await versioning.head()).toMatchObject({
+      commit: { id: head },
+      clean: false,
+    });
 
-    const first = await versioning.snapshot();
-    const second = await versioning.snapshot();
-    expect(first.kind).toBe("snapshot");
-    expect(first.parent).toBe(head);
-    expect(second.id).toBe(first.id);
-    expect(await versioning.readFile(first.id, "a.prompt.ts")).toBe("two");
-
-    // Back to the committed content: HEAD again, not a new snapshot.
+    // Back to the committed content: clean again.
     await write("a.prompt.ts", "one");
-    expect((await versioning.snapshot()).id).toBe(head);
+    expect((await versioning.head()).clean).toBe(true);
   });
 
-  it("captures an untracked file but not an ignored one", async () => {
+  it("counts an untracked file as uncommitted, but not an ignored one", async () => {
     const { write, commit, versioning } = await makeRepo();
     await write(".gitignore", "ignored.txt\n");
     await commit("ignore");
-    await write("new.prompt.ts", "new");
     await write("ignored.txt", "secret");
-
-    const version = await versioning.snapshot();
-    expect(await versioning.readFile(version.id, "new.prompt.ts")).toBe("new");
-    expect(
-      await versioning.readFile(version.id, "ignored.txt"),
-    ).toBeUndefined();
-  });
-
-  it("leaves the user's index, HEAD and stash byte-identical", async () => {
-    const { dir, git, write, commit, versioning } = await makeRepo();
-    await write("a.prompt.ts", "one");
-    await commit("first");
-    await write("a.prompt.ts", "two");
-    await write("staged.ts", "staged");
-    git("add", "staged.ts");
-    await write("untracked.ts", "untracked");
-
-    const indexPath = path.join(dir, ".git", "index");
-    const before = {
-      index: await fs.readFile(indexPath),
-      head: git("rev-parse", "HEAD"),
-      branch: git("symbolic-ref", "HEAD"),
-      stash: git("stash", "list"),
-      status: git("status", "--porcelain"),
-    };
-    await versioning.snapshot();
-    expect(await fs.readFile(indexPath)).toEqual(before.index);
-    expect(git("rev-parse", "HEAD")).toBe(before.head);
-    expect(git("symbolic-ref", "HEAD")).toBe(before.branch);
-    expect(git("stash", "list")).toBe(before.stash);
-    expect(git("status", "--porcelain")).toBe(before.status);
-    // Kept alive by a ref out of the way of `git branch`.
-    expect(git("for-each-ref", SNAPSHOT_REF_PREFIX)).not.toBe("");
-    expect(git("branch", "--list")).not.toContain("evalution");
+    expect((await versioning.head()).clean).toBe(true);
+    await write("new.ts", "new");
+    expect((await versioning.head()).clean).toBe(false);
   });
 
   it("doesn't refresh the user's index when a file's stat changed but not its content", async () => {
@@ -125,33 +81,15 @@ describe("GitVersioning", () => {
 
     const indexPath = path.join(dir, ".git", "index");
     const before = await fs.readFile(indexPath);
-    await versioning.snapshot();
+    await versioning.head();
     expect(await fs.readFile(indexPath)).toEqual(before);
   });
 
-  it("captures a same-size edit made in the same second as the last add", async () => {
-    const { write, commit, versioning } = await makeRepo();
-    await write("a.prompt.ts", "one");
-    await commit("first");
-    await write("a.prompt.ts", "two");
-    // Snapshot in a later second than the index was written, so only git's
-    // racy-entry check tells the edit apart from the committed content.
-    await new Promise(r => setTimeout(r, 1100));
-
-    const version = await versioning.snapshot();
-    expect(await versioning.readFile(version.id, "a.prompt.ts")).toBe("two");
-  });
-
-  it("snapshots a repository with an unborn HEAD", async () => {
+  it("has no commit before the first one", async () => {
     const { write, versioning } = await makeRepo();
     await write("a.prompt.ts", "first draft");
-
-    const version = await versioning.snapshot();
-    expect(version.kind).toBe("snapshot");
-    expect(version.parent).toBeUndefined();
-    expect(await versioning.readFile(version.id, "a.prompt.ts")).toBe(
-      "first draft",
-    );
+    expect(await versioning.head()).toEqual({ clean: false });
+    expect(await versioning.history("a.prompt.ts")).toEqual([]);
   });
 
   it("resolves paths relative to a root below the repository's top level", async () => {
@@ -171,7 +109,7 @@ describe("GitVersioning", () => {
     const head = await commit("first");
     expect(await versioning.get(head)).toMatchObject({
       id: head,
-      kind: "commit",
+      message: "first",
       author: "Test",
     });
     expect(await versioning.get("--output=/tmp/x")).toBeUndefined();
@@ -190,32 +128,6 @@ describe("GitVersioning", () => {
 
       const ids = (await versioning.history("a.prompt.ts")).map(v => v.id);
       expect(ids).toEqual([third, first]);
-    });
-
-    it("lists a snapshot that changed the file, skips one that changed only another file, and collapses snapshots sharing a blob", async () => {
-      const { write, commit, versioning } = await makeRepo();
-      await write("a.prompt.ts", "one");
-      await write("tools.ts", "t1");
-      const head = await commit("first");
-
-      // Changes only another file: not a version of a.prompt.ts.
-      await write("tools.ts", "t2");
-      const toolsOnly = await versioning.snapshot();
-      // Changes the prompt.
-      await write("a.prompt.ts", "two");
-      const older = await versioning.snapshot();
-      // Same prompt content, different tools: collapses with `older`.
-      await new Promise(r => setTimeout(r, 1100)); // commit times are seconds
-      await write("tools.ts", "t3");
-      const newer = await versioning.snapshot();
-
-      const history = await versioning.history("a.prompt.ts");
-      const ids = history.map(v => v.id);
-      expect(ids).not.toContain(toolsOnly.id);
-      expect(ids).toContain(newer.id);
-      expect(ids).not.toContain(older.id);
-      expect(ids.at(-1)).toBe(head);
-      expect(history[0]).toMatchObject({ id: newer.id, kind: "snapshot" });
     });
 
     it("pages with before and limit", async () => {

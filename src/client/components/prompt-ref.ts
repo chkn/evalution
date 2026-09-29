@@ -7,7 +7,7 @@
  * `specs/prompt-versions-and-variations.md` §I.
  */
 
-import { shortId, versionLabel } from "../../shared/helpers";
+import { shortId } from "../../shared/helpers";
 import type {
   NormalizedPrompt,
   PromptRef,
@@ -50,10 +50,37 @@ export function isHeadWip(prompt: NormalizedPrompt): boolean {
   return !!prompt.variation?.wip && !!prompt.variation.onHead;
 }
 
+/**
+ * The head prompt as saving `wip` — head's unsaved edits, as shown — leaves
+ * it: the edits' fields over the rest of `head`, with nothing unsaved. Shown
+ * at once, rather than head as it was before the save until a re-read of
+ * every prompt lands.
+ */
+export function savedAsHead(
+  head: NormalizedPrompt,
+  wip: NormalizedPrompt,
+): NormalizedPrompt {
+  const {
+    variation: _variation,
+    version: _version,
+    dirty: _dirty,
+    wipId: _wipId,
+    ...fields
+  } = wip;
+  return {
+    ...head,
+    ...fields,
+    ref: { promptId: head.id },
+    atHead: true,
+    dirty: undefined,
+    wipId: undefined,
+  } as NormalizedPrompt;
+}
+
 /** What the ref chip in the prompt header says. */
 export function refChipLabel(prompt: NormalizedPrompt): string {
   const v = prompt.variation;
-  const base = prompt.version ? versionLabel(prompt.version) : undefined;
+  const base = prompt.version ? shortId(prompt.version.id) : undefined;
   if (v?.wip) {
     const where = v.onHead ? "Working tree" : (base ?? "Old version");
     return `${where} · ● unsaved`;
@@ -73,7 +100,7 @@ export function refChipLabel(prompt: NormalizedPrompt): string {
 /** How "Open on working tree" names what it's opening: a variation, or a version. */
 export function openingLabel(prompt: NormalizedPrompt): string {
   if (prompt.variation) return variationLabel(prompt.variation);
-  if (prompt.version) return versionLabel(prompt.version);
+  if (prompt.version) return shortId(prompt.version.id);
   return "this version";
 }
 

@@ -46,7 +46,6 @@ import type {
   StoredVariation,
   VariationStore,
 } from "../variations/variation-store.ts";
-import { FileSnapshotVersioning } from "../versioning/file-snapshot-versioning.ts";
 import type { VersioningAdapter } from "../versioning/versioning-adapter.ts";
 import { FileVariations } from "./file-variations.ts";
 import type {
@@ -158,9 +157,9 @@ export interface FilePromptProviderOptions {
    * `specs/prompt-versions-and-variations.md`.
    *
    * Defaults, when no {@link fileProvider} is given (so files are on the real
-   * disk): a git adapter when `rootDir` is inside a repository, otherwise
-   * {@link FileSnapshotVersioning} over the {@link variationStore}. With a
-   * custom `fileProvider` there is no default. `false` turns versions off.
+   * disk), to a git adapter when `rootDir` is inside a repository; outside
+   * one there are no versions, though variations still work. With a custom
+   * `fileProvider` there is no default. `false` turns versions off.
    */
   versioning?: VersioningAdapter | false;
 
@@ -397,10 +396,9 @@ export class FilePromptProvider
   private listeners = new Set<(event: PromptChangeEvent) => void>();
 
   /**
-   * Versions of this provider's prompts: git commits and snapshots of the
-   * working tree, or — outside a repository — snapshots of prompt files.
-   * Absent when versioning is turned off; a method rejects when the default
-   * turns out to be unavailable.
+   * Versions of this provider's prompts: git commits. Absent when versioning
+   * is turned off; a method rejects when the default turns out to be
+   * unavailable (outside a repository).
    */
   readonly versions: PromptVersions | undefined;
 
@@ -454,14 +452,9 @@ export class FilePromptProvider
     this.versions = this.versioningPossible
       ? this.deferredVersions()
       : undefined;
-    const storePossible =
-      this.variationStoreOption === undefined
-        ? this.useDefaultVersioning
-        : !!this.variationStoreOption;
-    this.variations =
-      this.versioningPossible && storePossible
-        ? this.deferredVariations()
-        : undefined;
+    this.variations = this.storePossible
+      ? this.deferredVariations()
+      : undefined;
   }
 
   async getAllPrompts(): Promise<NormalizedFilePrompt[]> {
@@ -488,13 +481,19 @@ export class FilePromptProvider
   }
 
   /**
-   * Whether versions (and so possibly variations) can be set up at all: off
-   * when turned off, and when a custom file provider left nothing to default
-   * to.
+   * Whether versions can be set up at all: off when turned off, and when a
+   * custom file provider left nothing to default to.
    */
   private get versioningPossible(): boolean {
     if (this.versioningOption === false) return false;
     return !!this.versioningOption || this.useDefaultVersioning;
+  }
+
+  /** Whether variations can be set up at all, as {@link versioningPossible}. */
+  private get storePossible(): boolean {
+    return this.variationStoreOption === undefined
+      ? this.useDefaultVersioning
+      : !!this.variationStoreOption;
   }
 
   /**
@@ -503,7 +502,9 @@ export class FilePromptProvider
    * call. `undefined` when there are none.
    */
   private fileVariations(): Promise<FileVariations | undefined> {
-    if (!this.versioningPossible) return Promise.resolve(undefined);
+    if (!this.versioningPossible && !this.storePossible) {
+      return Promise.resolve(undefined);
+    }
     this.variationsReady ??= this.setUpVariations().catch(err => {
       console.warn("⚠️ prompt versions are unavailable:", err?.message ?? err);
       return undefined;
@@ -530,18 +531,15 @@ export class FilePromptProvider
     }
 
     let versioning = this.versioningOption || undefined;
-    if (!versioning && this.useDefaultVersioning) {
+    if (
+      !versioning &&
+      this.versioningOption === undefined &&
+      this.useDefaultVersioning
+    ) {
       const { GitVersioning } = await import("../versioning/git-versioning.ts");
       versioning = await GitVersioning.detect(this.rootDir);
-      if (!versioning && store) {
-        versioning = new FileSnapshotVersioning({
-          rootDir: this.rootDir,
-          fileProvider: this.fileProvider,
-          store,
-        });
-      }
     }
-    if (!versioning) return undefined;
+    if (!versioning && !store) return undefined;
 
     return new FileVariations(
       {
@@ -573,11 +571,13 @@ export class FilePromptProvider
   private deferredVersions(): PromptVersions {
     const ready = async () => {
       const variations = await this.fileVariations();
-      if (!variations) throw new Error("Prompt versions are unavailable");
+      if (!variations?.versioning) {
+        throw new Error("Prompt versions are unavailable");
+      }
       return variations.versions;
     };
     return {
-      snapshot: async promptId => (await ready()).snapshot(promptId),
+      head: async () => (await ready()).head(),
       history: async (promptId, options) =>
         (await ready()).history(promptId, options),
       get: async id => (await ready()).get(id),
@@ -1252,9 +1252,10 @@ export class FilePromptProvider
   }
 
   /**
-   * Runs the prompt `ref` names. With versions, head is pinned as a version
-   * first and a variation runs on head — rebased onto it if made elsewhere —
-   * and both are recorded on the trace and returned.
+   * Runs the prompt `ref` names, on the working tree: a variation is carried
+   * onto it first if made elsewhere. The commit checked out is recorded on
+   * the trace as the version — when nothing is uncommitted, so the version
+   * is what ran — along with the variation, and both are returned.
    */
   async execute(
     ref: PromptRefLike,
@@ -1292,6 +1293,9 @@ export class FilePromptProvider
     // actually needs. Alongside them goes a snapshot of the signature they
     // were captured against, and the version (and variation) that ran.
     const snapshot = await this.parameterSnapshot(promptId, variation);
+    const version = prepared?.head?.clean
+      ? prepared.head.commit?.id
+      : undefined;
     const identity: PromptSpanInfo = {
       id: promptId,
       name: promptName,
@@ -1301,7 +1305,7 @@ export class FilePromptProvider
       executeInputs: inputs?.executeInputs,
       parameterDefinitions: snapshot?.functionParameters,
       executeParameterDefinitions: snapshot?.executeParameters,
-      version: prepared?.version.id,
+      version,
       variation: variation?.id,
     };
     const handle = await this.sdkAdapter.executeConfig(config, {
@@ -1319,7 +1323,7 @@ export class FilePromptProvider
       else onSettled();
     }
     return {
-      ...(prepared && { version: prepared.version.id }),
+      ...(version && { version }),
       ...(variation && { variation: variation.id }),
     };
   }
@@ -1328,9 +1332,9 @@ export class FilePromptProvider
    * The prompt's parameter definitions as they stand right now, recorded
    * beside a run's inputs.
    *
-   * Redundant whenever the run's recorded version can be read back, but a
-   * snapshot version outlives nothing if its ref is deleted, and the recorded
-   * signature costs little. Replay then compares two known signatures instead
+   * Redundant whenever the run's recorded version can be read back, but a run
+   * on a dirty working tree records no version, and the recorded signature
+   * costs little. Replay then compares two known signatures instead
    * of inferring a match.
    *
    * Both halves are recorded: the execute parameters are only known after
@@ -1472,7 +1476,7 @@ export class FilePromptProvider
       this.playgroundIncludePatterns,
       { cwd: this.rootDir, ignored: this.playgroundIgnorePatterns },
       async () => {
-        // Playground modules are part of the world a version captures.
+        // Prompts' resolved types depend on playground modules.
         (await this.fileVariations())?.invalidate();
         // A changed playground module invalidates every prompt that could be
         // offered its resources, and the change stream is keyed by prompt id —

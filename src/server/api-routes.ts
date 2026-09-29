@@ -357,22 +357,6 @@ export function setupRoutes({
     }
   });
 
-  // GET /api/versions?ids=a,b - Describe versions, across providers (for
-  // labelling traces, which don't say which provider ran them)
-  app.get("/api/versions", async c => {
-    const ids = (c.req.query("ids") ?? "").split(",").filter(Boolean);
-    const found: Record<string, unknown> = {};
-    for (const provider of promptProviders.values()) {
-      if (!provider.versions) continue;
-      for (const id of ids) {
-        if (found[id]) continue;
-        const info = await provider.versions.get(id).catch(() => undefined);
-        if (info) found[id] = info;
-      }
-    }
-    return c.json(found);
-  });
-
   // GET /api/variations?ids=a,b - Describe variations, across providers
   app.get("/api/variations", async c => {
     const ids = (c.req.query("ids") ?? "").split(",").filter(Boolean);

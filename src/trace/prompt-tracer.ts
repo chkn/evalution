@@ -69,7 +69,8 @@ export const PROMPT_INPUTS_ATTRIBUTE = "evalution.prompt.inputs";
 
 /**
  * Attribute name a span can set to record which version of its prompt ran —
- * for a file-based prompt, a commit or a snapshot of the working tree.
+ * for a file-based prompt, the commit checked out, when nothing was
+ * uncommitted.
  */
 export const PROMPT_VERSION_ATTRIBUTE = "evalution.prompt.version";
 

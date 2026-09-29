@@ -9,6 +9,7 @@
 
 import type {
   ConflictChoices,
+  FieldValues,
   NormalizedPrompt,
   NormalizedPromptUpdates,
   PendingConflicts,
@@ -21,6 +22,7 @@ import {
   sameValue,
   updateFields,
   withField,
+  withoutUnchanged,
 } from "./canonical-updates.ts";
 
 /** The pseudo-field a conflict names when the prompt itself is gone. */
@@ -40,8 +42,9 @@ export type MergeOutcome =
     };
 
 /**
- * Re-expresses `updates`, made against `base`, against `target`. Each field
- * the updates set compares three values:
+ * Re-expresses a variation's `updates` against `target`. Each field the
+ * updates set compares three values — the base's being the one the variation
+ * recorded overwriting (`baseValues`), so no copy of the base is needed:
  *
  * | `T[f]` vs `B[f]` | `T[f]` vs `V[f]` | result |
  * | --- | --- | --- |
@@ -53,9 +56,16 @@ export type MergeOutcome =
  * the pseudo-field {@link PROMPT_FIELD}, as does one whose style changed.
  */
 export function rebaseUpdates(
-  base: NormalizedPrompt,
+  {
+    promptId,
+    baseValues,
+    updates,
+  }: {
+    promptId: string;
+    baseValues: FieldValues;
+    updates: NormalizedPromptUpdates;
+  },
   target: NormalizedPrompt | undefined,
-  updates: NormalizedPromptUpdates,
 ): MergeOutcome {
   if (!target || target.style !== updates.style) {
     return {
@@ -64,9 +74,9 @@ export function rebaseUpdates(
       conflicts: [
         {
           field: PROMPT_FIELD,
-          base: base.id,
+          base: promptId,
           target: target ? `${target.id} (${target.style})` : null,
-          variation: base.id,
+          variation: promptId,
         },
       ],
     };
@@ -75,7 +85,7 @@ export function rebaseUpdates(
   let kept = emptyUpdates(updates.style);
   const conflicts: VariationConflict[] = [];
   for (const [field, value] of updateFields(updates)) {
-    const b = promptFieldValue(base, field);
+    const b = baseValues[field];
     const t = promptFieldValue(target, field);
     if (sameValue(t, b)) {
       kept = withField(kept, field, value);
@@ -125,15 +135,14 @@ export function mergeIntoWip(
 
 /**
  * Settles `pending` with a choice per conflicted field, producing the updates
- * the WIP holds from then on, against `target` (the prompt at
- * `pending.onto`). Keeping head's value on a rebase conflict leaves nothing
- * to apply, which the canonicalization drops.
+ * the WIP holds from then on, against `pending.targetValues`. Keeping the
+ * working tree's value on a rebase conflict leaves nothing to apply, which
+ * the canonicalization drops.
  *
  * @throws When a conflicted field has no choice, or the conflict is on the
  *   prompt itself, which no choice resolves.
  */
 export function resolveConflicts(
-  target: NormalizedPrompt,
   pending: PendingConflicts,
   choices: ConflictChoices,
 ): NormalizedPromptUpdates {
@@ -156,5 +165,5 @@ export function resolveConflicts(
       choice === "target" ? conflict.target : conflict.variation,
     );
   }
-  return canonicalizeUpdates(target, updates);
+  return withoutUnchanged(pending.targetValues, updates);
 }

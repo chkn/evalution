@@ -32,8 +32,8 @@ describe("LocalVariationStore", () => {
 
     await store.putWip({
       promptId: "p#p",
-      base: "v1",
       updates: { style: "chat" },
+      baseValues: {},
       onHead: true,
     });
     expect((await store.listHeadWips()).map(w => w.promptId)).toEqual(["p#p"]);
@@ -57,7 +57,7 @@ describe("LocalVariationStore", () => {
           new URL("./local-variation-store.ts", import.meta.url).href,
         )});
         const store = new LocalVariationStore(${JSON.stringify(dbPath)});
-        await store.putWip({ promptId: "p#p", base: "v1", updates: { style: "chat" }, onHead: true });
+        await store.putWip({ promptId: "p#p", updates: { style: "chat" }, baseValues: {}, onHead: true });
         console.log("ready");
         process.stdin.resume();
         process.stdin.on("end", () => process.exit(0));`,
@@ -81,8 +81,8 @@ describe("LocalVariationStore", () => {
       await expect(
         second.putWip({
           promptId: "p#q",
-          base: "v1",
           updates: { style: "chat" },
+          baseValues: {},
           onHead: true,
         }),
       ).rejects.toThrow(/another evalution process/);

@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { shortId, versionLabel } from "../../shared/helpers";
+import { shortId } from "../../shared/helpers";
 import type {
   ConflictChoices,
   NormalizedPrompt,
@@ -131,7 +131,9 @@ export function PromptRefChip({ head, shown, onSelect }: ChipProps) {
             onClick={() => pick({ promptId: head.id, variation: v.id })}
           >
             <span className="pg-ref-item-name">{variationLabel(v)}</span>
-            <span className="pg-ref-item-meta">on {shortId(v.base)}</span>
+            <span className="pg-ref-item-meta">
+              {v.base ? `on ${shortId(v.base)}` : "on uncommitted changes"}
+            </span>
           </button>
         ))}
 
@@ -148,7 +150,9 @@ export function PromptRefChip({ head, shown, onSelect }: ChipProps) {
             onClick={() => pick({ promptId: head.id, variation: v.id })}
           >
             <span className="pg-ref-item-name">● unsaved</span>
-            <span className="pg-ref-item-meta">on {shortId(v.base)}</span>
+            <span className="pg-ref-item-meta">
+              {v.base ? `on ${shortId(v.base)}` : "on uncommitted changes"}
+            </span>
           </button>
         ))}
 
@@ -166,14 +170,9 @@ export function PromptRefChip({ head, shown, onSelect }: ChipProps) {
             title={v.message}
           >
             <span className="pg-ref-item-name">
-              <code>{versionLabel(v)}</code>
-              {v.kind === "commit" && v.message && (
+              <code>{shortId(v.id)}</code>
+              {v.message && (
                 <span className="pg-ref-item-message"> {v.message}</span>
-              )}
-              {v.kind === "snapshot" && !v.fileOnly && (
-                // Several snapshots can share a parent; their own ids tell
-                // them apart.
-                <span className="pg-ref-item-message"> {shortId(v.id)}</span>
               )}
             </span>
             <span className="pg-ref-item-meta">{relativeTime(v.time)}</span>
@@ -340,20 +339,11 @@ export function RefBanner({ shown, busy, onOpenOnHead }: BannerProps) {
         {shown.variation && old && " on "}
         {old && (
           <>
-            <code>{version ? versionLabel(version) : "an old version"}</code>
-            {version?.message && version.kind === "commit" && (
-              <> · {version.message}</>
-            )}
+            <code>{version ? shortId(version.id) : "an old version"}</code>
+            {version?.message && <> · {version.message}</>}
           </>
         )}
         . {note}
-        {old && version?.fileOnly && (
-          <span className="pg-ref-banner-note">
-            {" "}
-            (File contents only: this version reproduces the prompt, not its
-            tools.)
-          </span>
-        )}
       </span>
       <button
         type="button"

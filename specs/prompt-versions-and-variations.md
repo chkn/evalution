@@ -25,6 +25,14 @@ Two things now need more than that:
 `FilePromptProvider` delegates to adapters for both: a git versioning adapter (the default when a
 `.git` directory is found) and a Turso-backed variation store.
 
+Revised 2026-09-29: **uncommitted changes are never versioned.** An earlier draft snapshotted a
+dirty working tree into unreferenced commits (and, without git, stored prompt files as blobs) so
+every run and every WIP had an exact base. Nothing read those snapshots back beyond the prompt's own
+file, and the cost was a `git add -A` per edit session and run plus refs that piled up. Now a
+version is a commit and nothing else. A variation records the field values it overwrote, which is
+all its three-way merge needs (§F). A run on a dirty tree records no version, and evals warn about
+it (`specs/evals.md` §C).
+
 Decided up front (2026-09-25):
 
 - **v1 runs head and variations on head only.** Older versions can be *viewed*, and a variation
@@ -40,11 +48,12 @@ Decided up front (2026-09-25):
 The ask this spec answers is in `v-and-v-prompt.txt`. Four deliberate departures, each argued in
 its section:
 
-1. **Uncommitted changes become a version, not a variation** (§C). Most uncommitted changes can't
-   be expressed as `NormalizedPromptUpdates` — an edit to `stopWhen`, to a tool, to
-   `tools/index.ts` — and those are the changes most likely to move an eval. The git adapter
-   snapshots the dirty working tree into a real, unreferenced commit instead. Variations stay what
-   they're good at: the edits made in the playground.
+1. **Uncommitted changes are neither a version nor a variation** (§C). Most uncommitted changes
+   can't be expressed as `NormalizedPromptUpdates` — an edit to `stopWhen`, to a tool, to
+   `tools/index.ts` — so they can't become a variation. Capturing them as versions costs more than
+   it has bought so far (see the revision note above). They're simply the working tree:
+   variations apply on top of it, and a run on it records no version. Anyone who needs a
+   reproducible run commits first.
 2. **"Apply to head" is a three-way merge, not a patch application** (§F). Updates replace whole
    fields, so applying one blindly over a head that also changed that field silently discards
    head's change.
@@ -61,11 +70,11 @@ its section:
 | term | meaning |
 | --- | --- |
 | **head** | The working tree: what is on disk now. What runs, and what the user edits in their IDE. |
-| **version** | An immutable, reproducible state of the world, named by an opaque id. For git: a commit — a real one, or a snapshot of a dirty working tree (§C). |
-| **variation** | An immutable `NormalizedPromptUpdates` for one prompt, against one base version. |
-| **WIP variation** | The one mutable variation per (prompt, base): the playground's unsaved edits (§G). |
+| **version** | An immutable, reproducible state of the world, named by an opaque id. For git: a commit (§C). |
+| **variation** | An immutable `NormalizedPromptUpdates` for one prompt, plus the field values it overwrote. It applies to the working tree. Its base commit, when it has one, is where it can also be shown as made (§E). |
+| **WIP variation** | The one mutable variation of head per prompt, or per (prompt, old version): the playground's unsaved edits (§G). |
 | **named variation** | A variation someone gave a name to. Names point at variations; variations don't carry names. |
-| **rebase** | Re-expressing a variation against a different base, by three-way merge (§F). Produces a new variation. |
+| **rebase** | Re-expressing a variation against a different target (usually the working tree), by three-way merge (§F). |
 | **save** | Rebase onto head, then write the result into the file. |
 
 "Head" is the working tree rather than `HEAD` the commit because it's what executes: a prompt that
@@ -80,7 +89,7 @@ export type PromptRef =
   | { promptId: string }
   /** The prompt as it was at a saved version. Read-only in v1 unless it equals head. */
   | { promptId: string; version: VersionId }
-  /** A variation, applied to its own base version. */
+  /** A variation, applied to its base commit (or to the working tree, without one). */
   | { promptId: string; variation: VariationId };
 ```
 
@@ -130,14 +139,14 @@ export interface PromptProvider<TPrompt extends NormalizedPrompt = NormalizedPro
   of versions keeps its current shape, and most call sites don't change.
 - **Capabilities are objects, not a spray of optional methods.** `provider.variations?.save(id)`
   reads as what it is, and a provider either has the whole capability or none of it.
-- **`execute` returns what it ran** — `{ version, variation? }` — because running head pins a
-  version (§C) and running a variation may first rebase it (§H). The caller records it and the eval
-  runner needs it.
+- **`execute` returns what it ran** — `{ version?, variation? }` — because a run on a clean tree
+  records the commit (§D) and running a variation may first rebase it (§H). The caller records it
+  and the eval runner needs it.
 
 ```ts
 export interface PromptVersions {
-  /** Pins head as a version and returns it. Cheap when nothing changed since the last call. */
-  snapshot(): Promise<VersionInfo>;
+  /** The commit checked out, and whether the working tree is clean. */
+  head(): Promise<{ commit?: VersionInfo; clean: boolean }>;
   /**
    * Versions that changed this prompt's file, newest first — what the version
    * selector lists (§I). Never every version: see §C.3.
@@ -148,11 +157,7 @@ export interface PromptVersions {
 
 export interface VersionInfo {
   id: VersionId;
-  /** A real commit, or a snapshot of a dirty working tree (§C). */
-  kind: "commit" | "snapshot";
-  /** For a snapshot: the commit the working tree was dirty against. */
-  parent?: VersionId;
-  /** Commit subject; a fixed description for a snapshot. */
+  /** Commit subject. */
   message?: string;
   author?: string;
   time: number;
@@ -165,14 +170,14 @@ export interface PromptVariations {
   /** Names a variation. A name is unique per prompt, and naming again moves it. */
   name(id: VariationId, name: string): Promise<VariationInfo>;
   unname(promptId: string, name: string): Promise<void>;
-  /** Re-expresses `id` against `onto` (default: head). See §F. */
+  /** Re-expresses `id` against `onto` (default: head) as a new frozen variation. See §F. */
   rebase(id: VariationId, onto?: VersionId): Promise<RebaseResult>;
   /**
    * Brings `id`'s changes into the head WIP: rebases onto head, then merges
    * into the WIP if one exists. Returns the WIP. See §G.
    */
   openOnHead(id: VariationId): Promise<RebaseResult>;
-  /** Rebases the head WIP onto head, writes it into the source, and deletes it. See §G. */
+  /** Rebases a WIP onto head, writes it into the source, and deletes it. See §G. */
   save(wipId: VariationId): Promise<RebaseResult>;
   /** Drops a WIP variation. Frozen variations are never deleted in v1 (§E). */
   discard(id: VariationId): Promise<void>;
@@ -181,7 +186,8 @@ export interface PromptVariations {
 export interface VariationInfo {
   id: VariationId;
   promptId: string;
-  base: VersionId;
+  /** The commit it was made against, if the prompt's file had nothing uncommitted (§E). */
+  base?: VersionId;
   updates: NormalizedPromptUpdates;
   wip: boolean;
   names: string[];
@@ -212,13 +218,15 @@ interface NormalizedPrompt {
 ## C. The git versioning adapter
 
 `FilePromptProvider` takes a `versioning?: VersioningAdapter` option. When it's omitted and a
-`.git` directory is found above `rootDir`, it builds a `GitVersioning`. Otherwise it falls back to
-`FileSnapshotVersioning` (§C.4).
+`.git` directory is found above `rootDir`, it builds a `GitVersioning`. Otherwise there are no
+versions: variations still work, since they apply to the working tree (§E), but nothing records or
+reopens a version.
 
 ```ts
 export interface VersioningAdapter {
   readonly id: string;
-  snapshot(): Promise<VersionInfo>;
+  /** The commit checked out, and whether the working tree has changes on top. */
+  head(): Promise<{ commit?: VersionInfo; clean: boolean }>;
   /** A file's content at a version, or undefined if it didn't exist there. */
   readFile(version: VersionId, relativePath: string): Promise<string | undefined>;
   history(relativePath: string, options?: { limit?: number; before?: VersionId }): Promise<VersionInfo[]>;
@@ -230,67 +238,15 @@ The adapter speaks paths; `FilePromptProvider` maps prompt ids to paths. It shel
 through `execFile`. There's no library dependency, and a missing `git` binary is reported at
 construction as "versioning unavailable" rather than failing later.
 
-### C.1 Snapshots of a dirty working tree
-
-When head has uncommitted changes, `snapshot()` records them as a commit **without touching the
-user's index, branch, or stash**:
-
-```sh
-cp "$(git rev-parse --git-path index)" "$TMP_INDEX"   # start from the real index: incremental
-GIT_INDEX_FILE="$TMP_INDEX" git add -A                # stage everything, untracked included
-tree=$(GIT_INDEX_FILE="$TMP_INDEX" git write-tree)
-git rev-parse -q --verify "refs/evalution/snapshots/$tree" \
-  || git update-ref "refs/evalution/snapshots/$tree" \
-       "$(git commit-tree "$tree" -p HEAD -m 'evalution: uncommitted changes')"
-```
-
-- **The tree hash is the identity.** The same dirty state always resolves to the same snapshot, and
-  a run on a clean working tree gets `HEAD` itself. The commit's own hash can't be the identity
-  because it includes a timestamp.
-- **`git add -A` rather than `git stash create`.** `stash create` leaves out untracked files, and a
-  new prompt or playground module is exactly the kind of file a user hasn't added yet. The user's
-  `.gitignore` is honoured, so `.evalution/traces/` and `node_modules` stay out.
-- **The ref keeps it alive.** An unreferenced commit is garbage to `git gc`. Refs under
-  `refs/evalution/` are local, are not pushed by default, and don't show up in `git branch`.
-- **Unborn `HEAD`** (a repo with no commits) makes a parentless snapshot.
-- **`.evalution/` itself is part of the world.** Its config and playground modules — resources,
-  and the checks from `specs/evals.md` — are captured with everything else, which is correct: they
-  are code the run depended on.
-
-### C.2 Cost
-
-`snapshot()` runs on every run at head and whenever a WIP variation is created or rebased (§G).
-`git status --porcelain` short-circuits the clean case. The dirty case costs one incremental
-`add -A`, which rehashes only files whose stat changed since the real index was written. The
-adapter memoizes the last result until `FilePromptProvider`'s watcher reports a change. Its
-patterns don't cover every file, so the memo also expires after a short interval (§K.2).
-
-### C.3 History lists only versions that changed the prompt's file
-
-Since a snapshot captures the whole working tree, most versions are irrelevant to any one prompt.
-A new version is minted for every tool edit, and every edit to another prompt. The version
-selector is for choosing *this prompt's* past states, so `history()` returns only versions whose
-copy of the prompt's file differs from the version before it:
-
-- **Commits:** `git log --format=… -- <path>` over `HEAD`'s ancestry, which already returns only
-  commits that touched the file.
-- **Snapshots:** those under `refs/evalution/snapshots/` whose parent is reachable from `HEAD` and
-  whose blob for the path (`<snap>:<path>`) differs from the parent's (`<snap>^:<path>`). One
-  `git cat-file --batch-check` resolves both blob ids for every snapshot at once. Snapshots that
-  share a blob collapse to the newest, since they hold the same prompt.
-- The two lists are merged by time.
-
-A trace can still point at a version that isn't listed, such as a snapshot whose only change was
-a tool. **Trace → Open prompt** opens it directly by id (§I). The filter applies to browsing, not
-to what can be referenced.
-
-### C.4 Without git
-
-`FileSnapshotVersioning` versions only the prompt file itself. `snapshot()` stores the file's
-content in the variation database's `blobs` table, keyed by its SHA-256, and returns
-`blob:<sha256>` with `kind: "snapshot"`. `history()` returns only snapshots that runs or variations
-created. The UI labels these as "file contents only": they reproduce the prompt, not its tools.
-They exist so that WIP editing and variations work in a directory that isn't a repository.
+- **`head()`** is `rev-parse HEAD` plus `status --porcelain`, run with `GIT_OPTIONAL_LOCKS=0` so
+  it never rewrites the user's index. Untracked files make the tree dirty (a new tool module
+  changes what a run does as surely as an edited one). Ignored files don't. An unborn `HEAD` has
+  no commit and is never clean.
+- **`readFile()`** is `git cat-file blob <commit>:<path>`.
+- **`history()`** is `git log -- <path>` over `HEAD`'s ancestry: only commits that touched the
+  prompt's file, since the version selector is for choosing *this prompt's* past states.
+- **Uncommitted changes are never recorded.** Nothing is written to the repository: no temporary
+  index, no objects, no refs.
 
 ## D. Recording versions on traces
 
@@ -299,39 +255,56 @@ They exist so that WIP editing and variations work in a directory that isn't a r
 ```ts
 interface PromptID {
   // … existing fields
-  /** The version the run executed against. */
+  /** The commit the run executed against, when the working tree was clean. */
   version?: string;
-  /** The variation applied on top of {@link version}, if any. */
+  /** The variation applied on top, if any. */
   variation?: string;
 }
 ```
 
 `FilePromptProvider.execute` fills both through the existing `identity` passed to
 `SDKAdapter.executeConfig`, and they travel as `evalution.prompt.version` and
-`evalution.prompt.variation` beside `evalution.prompt.id` in `otel-attributes.ts`. A production
-trace has neither unless the app sets them. Stamping a deploy's commit is a natural later addition
-and shares the field.
+`evalution.prompt.variation` beside `evalution.prompt.id` in `otel-attributes.ts`.
 
-`parameterSnapshot` stays for now. It's redundant whenever the recorded version can be read back,
-but a snapshot version outlives nothing if the ref is deleted, and the recorded signature costs
-little. Removing it is a follow-up once §K.3 is settled.
+**A version is recorded only when the working tree is clean**, because only then is the commit what
+ran. A run on a dirty tree records no version: claiming the commit would be a lie, and there's no
+other name for what ran. The trace still records its variation, and its `parameterSnapshot`. It's
+the caller's job to warn where reproducibility matters: the eval runner does (`specs/evals.md`
+§C), and the playground doesn't, since most runs there are exploratory.
+
+A production trace has neither field unless the app sets them. Stamping a deploy's commit is a
+natural later addition and shares the field.
+
+`parameterSnapshot` stays. It's redundant whenever the recorded version can be read back, but a
+run on a dirty tree records none.
 
 ## E. The variation store
+
+A variation is three things:
+
+- **`updates`:** the fields it sets.
+- **`baseValues`:** the prompt's values for those same fields, as they were when it was made (the
+  working tree's, or the old version's). This is the base of the three-way merge that carries it
+  onto a working tree that has changed since (§F). No copy of the base file is needed.
+- **`base`:** the commit it was made against, when there is one. It's set when the prompt's file had
+  nothing uncommitted, so the commit plus the updates reproduce exactly what the user saw. That is
+  what viewing a variation "as made" shows, and what running old base plus variation will need
+  (§J). Otherwise it's absent, and the variation is shown on the working tree. A head WIP has no
+  base: it's the working tree's unsaved edits.
 
 ```ts
 export interface VariationStore {
   get(id: VariationId): Promise<StoredVariation | undefined>;
-  /** Inserts, or returns the existing row for the same (promptId, base, canonical updates). */
-  intern(v: { promptId: string; base: VersionId; updates: NormalizedPromptUpdates }): Promise<StoredVariation>;
-  getWip(promptId: string, base: VersionId): Promise<StoredVariation | undefined>;
-  putWip(v: { promptId: string; base: VersionId; updates: NormalizedPromptUpdates }): Promise<StoredVariation>;
-  moveWip(id: VariationId, base: VersionId, updates: NormalizedPromptUpdates): Promise<StoredVariation>;
+  /** Inserts, or returns the existing row with the same content. */
+  intern(v: { promptId: string; base?: VersionId; updates: NormalizedPromptUpdates; baseValues: FieldValues }): Promise<StoredVariation>;
+  getWip(promptId: string, oldVersion: VersionId): Promise<StoredVariation | undefined>;
+  getHeadWip(promptId: string): Promise<StoredVariation | undefined>;
+  putWip(v: NewWip): Promise<StoredVariation>;
+  updateWip(id: VariationId, changes: { updates?, baseValues?, pending?, originName? }): Promise<StoredVariation>;
   deleteWip(id: VariationId): Promise<void>;
   list(promptId: string): Promise<StoredVariation[]>;
   name(id: VariationId, promptId: string, name: string): Promise<void>;
   unname(promptId: string, name: string): Promise<void>;
-  putBlob(content: string): Promise<string>;
-  getBlob(sha: string): Promise<string | undefined>;
 }
 ```
 
@@ -342,15 +315,20 @@ and dataset DBs' migration pattern.
 ```
 variations
   id            TEXT PRIMARY KEY          -- "var_" + nanoid
-  prompt_id     TEXT NOT NULL             -- as of the base version
+  prompt_id     TEXT NOT NULL             -- as of the base
   global_id     TEXT                      -- the prompt's prompts() id, when it has one
-  base_version  TEXT NOT NULL
+  base_version  TEXT NOT NULL DEFAULT ''  -- '' for none, so it takes part in the indexes
   updates       TEXT NOT NULL             -- canonical JSON (§E.1)
+  base_values   TEXT NOT NULL             -- canonical JSON
   wip           INTEGER NOT NULL DEFAULT 0
+  on_head       INTEGER NOT NULL DEFAULT 0
+  origin_name   TEXT                      -- a WIP opened from a named variation
+  pending       TEXT                      -- a WIP's unresolved conflicts (§G)
   created_at    REAL NOT NULL
   updated_at    REAL NOT NULL
-  UNIQUE (prompt_id, base_version, updates) WHERE wip = 0
-  UNIQUE (prompt_id, base_version)          WHERE wip = 1
+  UNIQUE (prompt_id, base_version, updates, base_values) WHERE wip = 0
+  UNIQUE (prompt_id, base_version)  WHERE wip = 1 AND on_head = 0
+  UNIQUE (prompt_id)                WHERE wip = 1 AND on_head = 1
 
 variation_names
   prompt_id     TEXT NOT NULL
@@ -358,18 +336,15 @@ variation_names
   variation_id  TEXT NOT NULL REFERENCES variations(id)
   created_at    REAL NOT NULL
   PRIMARY KEY (prompt_id, name)
-
-blobs
-  sha256        TEXT PRIMARY KEY
-  content       TEXT NOT NULL
 ```
 
-- **Uniqueness covers the base and the prompt, not the updates alone.** "Set `system` to X" means
-  different things for different prompts, and against different bases it produces different
-  source.
+- **Uniqueness covers the prompt, the base and the overwritten values, not the updates alone.**
+  "Set `system` to X" means different things for different prompts, and over different values it
+  merges differently.
 - **`global_id` is recorded** so a rebase can find the prompt at head after a file move or an
   export rename (§F).
-- **At most one WIP per (prompt, base)**, enforced by the partial unique index.
+- **At most one head WIP per prompt, and one WIP per (prompt, old version)**, enforced by the
+  partial unique indexes.
 - **Nothing is garbage-collected in v1.** Frozen rows are only minted when something runs or gets a
   name (§G), and they dedupe, so growth is bounded by distinct runs. Traces and eval results
   reference variations by id as plain data, the same way they reference prompts. A variation whose
@@ -394,8 +369,9 @@ This lives in one pure function, `canonicalizeUpdates(base: NormalizedPrompt, up
 
 ## F. Rebase: three-way merge per field
 
-A variation is "set these fields to these values". Rebasing it from base `B` onto target `T`
-compares three values for each field it sets:
+A variation is "set these fields to these values". Rebasing it onto target `T` (the working tree,
+unless an old version is named) compares three values for each field it sets. The base's value
+`B[f]` is the one it recorded overwriting:
 
 | `T[f]` vs `B[f]` | `T[f]` vs `V[f]` | result |
 | --- | --- | --- |
@@ -406,10 +382,12 @@ compares three values for each field it sets:
 - **Fields are the normalized ones**: `model`, `system`, `messages`, each `modelParameters` key,
   `state`, and `questions`. `messages` is one field. A per-message merge is a later refinement,
   and a line-level text merge inside `system` is §K.4.
-- **`B[f]` comes from the base version**: `versioning.readFile(base, path)`, parsed. It's never
-  stored, so there's nothing to drift.
-- **A clean rebase produces a new variation** (via `intern`, so rebasing twice onto the same head
-  is free). A rebase whose result is empty is `ok` with empty updates, and means "already applied".
+- **`B[f]` is the variation's `baseValues[f]`.** A merge only ever looks at the fields the updates
+  set, so those values are all of the base it needs. It needs no copy of the base file, and there's
+  no version of a dirty tree to keep.
+- **A clean rebase re-records the base values** as `T`'s. A frozen variation rebases into a new
+  one (via `intern`, so rebasing twice onto the same head is free). A WIP is updated in place. A
+  rebase whose result is empty is `ok` with empty updates, and means "already applied".
 - **The prompt has to exist at the target.** It's found by `prompt_id`, then by `global_id`.
   Neither matching is a conflict on the pseudo-field `prompt`.
 - **Conflicts carry all three values** so the UI can show them side by side and let the user pick:
@@ -421,32 +399,37 @@ interface VariationConflict {
 }
 ```
 
-Parsing `B`'s content resolves its imports against head's code, because that's the only code on
-disk (§J). The normalized fields are read syntactically, so for merging this is exact. For display
-it can mislabel a type that changed since, which is why an old version opens read-only with a
-banner (§I).
+Parsing an old version's content (to show it, or to rebase onto it) resolves its imports against
+head's code, because that's the only code on disk (§J). The normalized fields are read
+syntactically, so for merging this is exact. For display it can mislabel a type that changed since,
+which is why an old version opens read-only with a banner (§I).
 
 ## G. Editing: the WIP variation
 
 With variations available, `updatePromptProperties` never writes the file:
 
-1. **The first edit** at `{ promptId }` (head) snapshots head (§C), creates the WIP for
-   (prompt, snapshot) with the canonicalized update, and returns `ref: { variation: wipId }`. The
-   client switches to that ref.
-2. **Later edits** to the WIP merge and re-canonicalize in place (`moveWip`). A WIP that
-   canonicalizes to empty is deleted, and the prompt is clean again.
-3. **Run** freezes the WIP: `intern` its current updates and run the frozen row. The WIP carries on.
-   Every trace points at an immutable variation, and running unchanged edits twice reuses one row.
-4. **Save** calls `variations.save(wipId)`. It rebases onto a fresh head snapshot, writes the result
+1. **The first edit** at `{ promptId }` (head) creates the head WIP with the canonicalized update
+   and the working tree's values for its fields, and returns `ref: { variation: wipId }`. The
+   client switches to that ref. Uncommitted changes to the file need no special handling: they're
+   simply part of the working tree the WIP applies to.
+2. **Later edits** to the WIP merge and re-canonicalize in place, against the working tree. A WIP
+   that canonicalizes to empty is deleted, and the prompt is clean again.
+3. **Run** carries the WIP onto the working tree (a no-op when nothing changed) and `intern`s the
+   result as a frozen row, with the checked-out commit as its base when the file is clean. The WIP
+   carries on. Every trace points at an immutable variation, and running unchanged edits twice
+   reuses one row.
+4. **Save** calls `variations.save(wipId)`. It rebases onto the working tree, writes the result
    through today's pipeline (`denormalizeUpdates` → `fileType.updateProperty` inside `mutateFile`),
    and deletes the WIP. This is the only path that writes a prompt file.
 5. **Discard** deletes the WIP.
 
-**External edits rebase the WIP.** When the watcher reports a change to a prompt file with a head
-WIP, the provider snapshots the new head and rebases the WIP onto it (`moveWip`). A clean rebase is
-silent. A conflicted one marks the WIP `conflicted` and the editor shows the conflicts (§I). The
-WIP can't run until they're resolved, because running would silently drop either the IDE edit or
-the playground edit.
+**External edits rebase the WIP.** On a watcher event, or lazily on the next read, the provider
+compares the working tree's values for the WIP's fields with the WIP's `baseValues`. An edit to
+other fields changes nothing. An edit to one of its fields rebases it (§F). A clean rebase is
+silent. A conflicted one records the conflicts as `pending` (with the working tree's values at
+that moment, which the resolved WIP will be based on) and the editor shows them (§I). The WIP
+can't run until they're resolved, because running would silently drop either the IDE edit or the
+playground edit.
 
 **Editing an old version** follows the same rules against a different base: editing
 `{ version: v }` creates or updates the WIP for (prompt, `v`).
@@ -460,7 +443,7 @@ name, and "Save as variation" moves that name to the new frozen row. Editing a v
 bringing it to head (say, a WIP of its own) is left open for later.
 
 **Open on working tree is the only way to bring a variation to head.** `openOnHead(x)` rebases `x`
-onto a fresh head snapshot (§F). If there's no head WIP, the result becomes the WIP. If there is
+onto the working tree (§F). If there's no head WIP, the result becomes the WIP. If there is
 one, the rebased updates merge on top of it field by field, and any field both set to different
 values becomes a conflict in the same conflict bar, labelled *unsaved edits* vs *x*. Writing the
 file is then an ordinary Save. There's no separate "apply" action, because it would be exactly
@@ -479,13 +462,12 @@ resolves against the wrong directory.
 
 **Parse and edit through an overlay.** `OverlayFileProvider` wraps the provider's `FileProvider`.
 `readFile` and `writeFile` for overlaid paths hit an in-memory map, and everything else passes
-through. Materialization writes the base content (`versioning.readFile(base, path)`) into the
-overlay, then runs the **existing** edit pipeline against it: `denormalizeUpdates` and
+through. Materialization writes the base content (`versioning.readFile(base, path)`, or the working
+tree's content for a variation without a base) into the overlay, then runs the **existing** edit pipeline against it: `denormalizeUpdates` and
 `fileType.updateProperty`/`addProperty`/`removeProperty`. So there's no second implementation of
 "apply updates to source". `prompt-program.ts` already reads prompt sources through the
-`FileProvider`, so the checker sees the patched text. The result is cached by variation id, which
-is safe because frozen variations are immutable. A WIP's cache entry is dropped whenever the WIP
-changes.
+`FileProvider`, so the checker sees the patched text. The result is cached by variation id, its last
+change, and its base: the commit, or the hash of the working tree's content.
 
 **Import through a load hook.** `OverlayFileProvider.import(path)` registers the patched source
 under its SHA-256 and imports `file:///…/odin.prompt.ts?evalution-src=<sha256>`. A `load` hook
@@ -498,7 +480,7 @@ mtime is needed. A host whose transform pipeline refuses query strings (the case
 running head.
 
 **Running a variation runs it on head.** In v1, `execute({ variation })` first rebases the
-variation onto a fresh head snapshot (usually a no-op `intern` hit) and runs the result. The
+variation onto the working tree (usually a no-op `intern` hit) and runs the result. The
 returned `ExecuteResult` and the trace record the rebased id. A conflicted rebase refuses to run
 and returns the conflicts.
 
@@ -516,10 +498,10 @@ and returns the conflicts.
   read-only.", "Running is only available on the working tree."). One action: **Open on working
   tree** (`openOnHead`, §G).
 - **Trace → Open prompt** opens `{ variation }` when the trace recorded one, otherwise
-  `{ version }`. When that version is the current head snapshot, it opens head, so the common case
-  of opening a trace you just ran lands somewhere editable.
-- **Trace list:** a "Version" column (short sha, or "snapshot of <short sha>") and a variation name
-  column, both off by default.
+  `{ version }`, otherwise head. When that version's copy of the file is what's on disk, it opens
+  head, so the common case of opening a trace you just ran lands somewhere editable.
+- **Trace list:** a "Version" column (the short sha, or `—` for a run on a dirty tree) and a
+  variation name column, both off by default.
 
 **Wire.** Refs travel as query parameters on the existing prompt routes: `?version=` or
 `?variation=`. New routes:
@@ -556,23 +538,21 @@ Deferred by decision. What running old versions will need, so v1 doesn't paint o
    only changes a sibling prompt in the same file is still listed. Filtering by the prompt's own
    normalized fields would mean parsing every listed version. Worth it only if multi-prompt files
    turn out to be common.
-2. *Snapshot cost in large repos.* The memo expires on watcher events plus a timeout. Measure it on
-   asgard before tuning. An `fsmonitor`-enabled repo makes `add -A` cheap regardless.
-3. *Pruning `refs/evalution/snapshots/*`.* They accumulate. `evalution prune` could delete the ones
-   no trace or eval run references, with the same cross-provider query as §E.
-4. *Text merge.* `system` is the field most likely to conflict, and a line-level diff3 would resolve
+2. *Capturing uncommitted changes.* If reproducible runs on a dirty tree turn out to matter (evals
+   are the likely case), snapshot the tree once per eval run, not per edit, into a commit kept alive
+   by a ref. The earlier draft of §C did this for every run and edit.
+3. *Text merge.* `system` is the field most likely to conflict, and a line-level diff3 would resolve
    most of those. `system` is a `PropValue` that may hold interpolation tokens, so the merge has to
    treat each token as an atom.
-5. *Production traces.* An app could stamp its deploy's commit as `evalution.prompt.version`, which
+4. *Production traces.* An app could stamp its deploy's commit as `evalution.prompt.version`, which
    would make a production trace openable at the exact prompt it ran. It needs an SDK option, and
    a way to tell that a commit exists locally.
 
 ## L. Phasing
 
-1. **Versions on traces.** The `VersioningAdapter` interface, `GitVersioning` (`snapshot`,
-   `readFile`, `history`, `get`), `FileSnapshotVersioning`, `PromptID.version`, and the OTel
-   attribute. Every run at head records a version. Nothing is visible in the UI yet except a trace
-   column.
+1. **Versions on traces.** The `VersioningAdapter` interface, `GitVersioning` (`head`,
+   `readFile`, `history`, `get`), `PromptID.version`, and the OTel attribute. Every run on a clean
+   tree records a version. Nothing is visible in the UI yet except a trace column.
 2. **`PromptRef` and read-only refs.** The reshaped `PromptProvider`, `OverlayFileProvider`, and
    `getPrompt({ version })`. Open prompt from a trace, with the old-version banner.
 3. **Variations and WIP editing.** `TursoVariationStore`, canonicalization, rebase, the load hook,
@@ -588,10 +568,11 @@ alone is enough for `specs/evals.md` to record what an eval run measured.
 - `src/prompt/prompt-provider.ts`: `PromptRef`, `PromptVersions`, `PromptVariations`,
   `ExecuteResult`, and the reshaped methods.
 - `src/prompt/versioning/versioning-adapter.ts`: `VersioningAdapter` and `VersionInfo`.
-- `src/prompt/versioning/git-versioning.ts` and `file-snapshot-versioning.ts`.
+- `src/prompt/versioning/git-versioning.ts`.
 - `src/prompt/variations/variation-store.ts`: the interface.
   `turso-variation-store.ts`, `db/schema.ts`, and `db/migrations/`.
-- `src/prompt/variations/canonical-updates.ts`: `canonicalizeUpdates` and `mergeUpdates`.
+- `src/prompt/variations/canonical-updates.ts`: `canonicalizeUpdates`, `mergeUpdates` and
+  `fieldValuesOf`.
 - `src/prompt/variations/rebase.ts`: the field-wise three-way merge (pure).
 - `src/file-provider-overlay.ts`: `OverlayFileProvider`.
 - `src/cli/variation-loader-hook.ts`: the `?evalution-src=` load hook, registered in
@@ -610,14 +591,11 @@ alone is enough for `specs/evals.md` to record what an eval run measured.
 Unit tests (vitest; `MemoryFileProvider` except where noted):
 
 - **`GitVersioning`** against a real temp repo, since this is real-git behaviour:
-  - A clean tree returns `HEAD`.
-  - Dirty trees with identical content return one snapshot.
-  - An untracked file is captured and an ignored one isn't.
-  - The user's index, `HEAD`, and `git stash list` are byte-identical before and after.
-  - An unborn `HEAD` works.
-  - `history()` lists commits that touched the file and skips ones that didn't. It lists a
-    snapshot that changed the file, skips one that changed only another file, and collapses
-    snapshots that share a blob.
+  - `head()` reports `HEAD`, clean or not. An untracked file makes the tree dirty and an ignored
+    one doesn't.
+  - `head()` leaves the user's index untouched.
+  - An unborn `HEAD` has no commit.
+  - `history()` lists commits that touched the file and skips ones that didn't.
 - **`canonicalizeUpdates`:**
   - Edit-then-undo is empty.
   - Key order doesn't matter.
@@ -625,11 +603,15 @@ Unit tests (vitest; `MemoryFileProvider` except where noted):
   - `null` survives.
 - **Rebase:** every row of §F's table, plus the `prompt` pseudo-conflict via `global_id` after a
   rename.
-- **WIP lifecycle through `FilePromptProvider`:**
+- **WIP lifecycle through `FilePromptProvider`** (with an in-memory commit adapter):
   - An edit leaves the file untouched and creates a WIP.
-  - A run interns a frozen row, and a second run reuses it.
+  - A run interns a frozen row, and a second run reuses it. On a clean tree, the run records the
+    commit and the row's base is that commit. On a dirty tree, it records neither.
+  - Edits over uncommitted changes to the same field run and save without conflicting.
   - Save writes the file and clears the WIP.
-  - An external write to the file rebases a clean WIP and marks a conflicting one.
+  - An external write to another field carries the WIP along. One to the same field marks it
+    conflicted.
+  - Without versions, variations still apply to the working tree.
   - `openOnHead` with no WIP creates one. With a WIP, it merges disjoint fields and reports a
     field both set differently as a conflict.
 - **Materialization:** a variation's parsed prompt reflects its updates, and `readFile` on the real
@@ -644,6 +626,6 @@ Real-FS tests (the load hook can't be exercised through `MemoryFileProvider`'s `
 Manual, against asgard:
 
 - Edit Odin's system prompt in the playground and confirm `odin.prompt.ts` is unchanged on disk.
-- Run, and confirm the trace shows a snapshot version and a variation.
+- Run, and confirm the trace shows a variation, and a version only when the tree is clean.
 - Edit the file in the IDE and confirm the WIP rebases.
 - Save, and confirm the file has both edits.

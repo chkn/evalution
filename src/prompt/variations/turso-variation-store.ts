@@ -8,22 +8,17 @@
  */
 
 import type { Database } from "@tursodatabase/sync";
-import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import type {
+  FieldValues,
   NormalizedPromptUpdates,
   PendingConflicts,
   VariationId,
   VersionId,
 } from "../../shared/types.ts";
-import type { FileSnapshotRecord } from "../versioning/file-snapshot-versioning.ts";
-import { serializeUpdates } from "./canonical-updates.ts";
-import {
-  blobs,
-  fileSnapshots,
-  variationNames,
-  variations,
-} from "./db/schema.ts";
+import { serializeFieldValues, serializeUpdates } from "./canonical-updates.ts";
+import { variationNames, variations } from "./db/schema.ts";
 import type {
   NewWip,
   StoredVariation,
@@ -40,17 +35,6 @@ function mintVariationId(): VariationId {
   let id = "var_";
   for (const b of bytes) id += BASE62[b % 62];
   return id;
-}
-
-/** Hex SHA-256 of `content`'s UTF-8 bytes. */
-export async function sha256Hex(content: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(content),
-  );
-  return Array.from(new Uint8Array(digest), b =>
-    b.toString(16).padStart(2, "0"),
-  ).join("");
 }
 
 type Row = typeof variations.$inferSelect;
@@ -101,8 +85,9 @@ export class TursoVariationStore implements VariationStore {
       id: row.id,
       promptId: row.promptId,
       ...(row.globalId && { globalId: row.globalId }),
-      base: row.baseVersion,
+      ...(row.baseVersion && { base: row.baseVersion }),
       updates: JSON.parse(row.updates) as NormalizedPromptUpdates,
+      baseValues: JSON.parse(row.baseValues) as FieldValues,
       wip: row.wip === 1,
       ...(row.wip === 1 && { onHead: row.onHead === 1 }),
       names: names.filter(n => n.variationId === row.id).map(n => n.name),
@@ -134,6 +119,8 @@ export class TursoVariationStore implements VariationStore {
 
   intern(v: VariationContent): Promise<StoredVariation> {
     const updates = serializeUpdates(v.updates);
+    const baseValues = serializeFieldValues(v.baseValues);
+    const baseVersion = v.base ?? "";
     return this.serialize(async () => {
       const now = Date.now();
       await this.db
@@ -142,8 +129,9 @@ export class TursoVariationStore implements VariationStore {
           id: mintVariationId(),
           promptId: v.promptId,
           globalId: v.globalId ?? null,
-          baseVersion: v.base,
+          baseVersion,
           updates,
+          baseValues,
           wip: 0,
           createdAt: now,
           updatedAt: now,
@@ -157,8 +145,9 @@ export class TursoVariationStore implements VariationStore {
             and(
               eq(variations.wip, 0),
               eq(variations.promptId, v.promptId),
-              eq(variations.baseVersion, v.base),
+              eq(variations.baseVersion, baseVersion),
               eq(variations.updates, updates),
+              eq(variations.baseValues, baseValues),
             ),
           ),
       );
@@ -179,6 +168,7 @@ export class TursoVariationStore implements VariationStore {
           .where(
             and(
               eq(variations.wip, 1),
+              eq(variations.onHead, 0),
               eq(variations.promptId, promptId),
               eq(variations.baseVersion, base),
             ),
@@ -220,25 +210,28 @@ export class TursoVariationStore implements VariationStore {
       const now = Date.now();
       const id = mintVariationId();
       await this.db.transaction(async tx => {
-        // Whatever WIP held either slot this one takes is replaced by it.
+        // Whatever WIP held the slot this one takes is replaced by it.
         await tx
           .delete(variations)
           .where(
             and(
               eq(variations.wip, 1),
               eq(variations.promptId, v.promptId),
-              or(
-                eq(variations.baseVersion, v.base),
-                v.onHead ? eq(variations.onHead, 1) : sql`0`,
-              ),
+              v.onHead
+                ? eq(variations.onHead, 1)
+                : and(
+                    eq(variations.onHead, 0),
+                    eq(variations.baseVersion, v.base ?? ""),
+                  ),
             ),
           );
         await tx.insert(variations).values({
           id,
           promptId: v.promptId,
           globalId: v.globalId ?? null,
-          baseVersion: v.base,
+          baseVersion: v.base ?? "",
           updates: serializeUpdates(v.updates),
+          baseValues: serializeFieldValues(v.baseValues),
           wip: 1,
           onHead: v.onHead ? 1 : 0,
           originName: v.originName ?? null,
@@ -255,43 +248,22 @@ export class TursoVariationStore implements VariationStore {
       const set: Partial<typeof variations.$inferInsert> = {
         updatedAt: Date.now(),
       };
-      if (changes.base !== undefined) set.baseVersion = changes.base;
       if (changes.updates !== undefined) {
         set.updates = serializeUpdates(changes.updates);
       }
-      if (changes.onHead !== undefined) set.onHead = changes.onHead ? 1 : 0;
+      if (changes.baseValues !== undefined) {
+        set.baseValues = serializeFieldValues(changes.baseValues);
+      }
       if (changes.pending !== undefined) {
         set.pending = changes.pending && JSON.stringify(changes.pending);
       }
       if (changes.originName !== undefined) {
         set.originName = changes.originName;
       }
-      await this.db.transaction(async tx => {
-        // Moving onto a base another WIP of the same prompt already holds
-        // displaces it: there is one WIP per (prompt, base).
-        if (changes.base !== undefined) {
-          const [row] = await tx
-            .select({ promptId: variations.promptId })
-            .from(variations)
-            .where(eq(variations.id, id));
-          if (row) {
-            await tx
-              .delete(variations)
-              .where(
-                and(
-                  eq(variations.wip, 1),
-                  eq(variations.promptId, row.promptId),
-                  eq(variations.baseVersion, changes.base),
-                  sql`${variations.id} <> ${id}`,
-                ),
-              );
-          }
-        }
-        await tx
-          .update(variations)
-          .set(set)
-          .where(and(eq(variations.id, id), eq(variations.wip, 1)));
-      });
+      await this.db
+        .update(variations)
+        .set(set)
+        .where(and(eq(variations.id, id), eq(variations.wip, 1)));
       const updated = await this.readById(id);
       if (!updated?.wip) throw new Error(`No WIP variation ${id}`);
       return updated;
@@ -349,65 +321,6 @@ export class TursoVariationStore implements VariationStore {
             eq(variationNames.name, name),
           ),
         );
-    });
-  }
-
-  async putBlob(content: string): Promise<string> {
-    const sha = await sha256Hex(content);
-    await this.serialize(() =>
-      this.db
-        .insert(blobs)
-        .values({ sha256: sha, content })
-        .onConflictDoNothing(),
-    );
-    return sha;
-  }
-
-  getBlob(sha256: string): Promise<string | undefined> {
-    return this.serialize(async () => {
-      const [row] = await this.db
-        .select({ content: blobs.content })
-        .from(blobs)
-        .where(eq(blobs.sha256, sha256));
-      return row?.content;
-    });
-  }
-
-  recordSnapshot(path: string, sha256: string): Promise<FileSnapshotRecord> {
-    return this.serialize(async () => {
-      await this.db
-        .insert(fileSnapshots)
-        .values({ path, sha256, createdAt: Date.now() })
-        .onConflictDoNothing();
-      const [row] = await this.db
-        .select()
-        .from(fileSnapshots)
-        .where(
-          and(eq(fileSnapshots.path, path), eq(fileSnapshots.sha256, sha256)),
-        );
-      return row;
-    });
-  }
-
-  listSnapshots(path: string): Promise<FileSnapshotRecord[]> {
-    return this.serialize(async () => {
-      return this.db
-        .select()
-        .from(fileSnapshots)
-        .where(eq(fileSnapshots.path, path))
-        .orderBy(desc(fileSnapshots.createdAt));
-    });
-  }
-
-  getSnapshot(sha256: string): Promise<FileSnapshotRecord | undefined> {
-    return this.serialize(async () => {
-      const [row] = await this.db
-        .select()
-        .from(fileSnapshots)
-        .where(eq(fileSnapshots.sha256, sha256))
-        .orderBy(asc(fileSnapshots.createdAt))
-        .limit(1);
-      return row;
     });
   }
 }

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type { PropValue } from "ts-proppy";
-import type { PromptStyle, SpanKind, VersionInfo } from "./types.ts";
+import type { PromptStyle, SpanKind } from "./types.ts";
 
 export function otelOperationToSpanKind(operationName: any): SpanKind {
   switch (operationName) {
@@ -76,13 +76,5 @@ export function parseJsonOrRaw(v: unknown): unknown {
 
 /** The first seven characters of a version or variation id, past its prefix. */
 export function shortId(id: string): string {
-  return id.replace(/^(blob:|var_)/, "").slice(0, 7);
-}
-
-/** A short label for a version: its short sha, or what a snapshot was of. */
-export function versionLabel(info: VersionInfo): string {
-  if (info.fileOnly) return `file snapshot ${shortId(info.id)}`;
-  if (info.kind === "commit") return shortId(info.id);
-  if (info.parent) return `snapshot of ${shortId(info.parent)}`;
-  return `snapshot ${shortId(info.id)}`;
+  return id.replace(/^var_/, "").slice(0, 7);
 }

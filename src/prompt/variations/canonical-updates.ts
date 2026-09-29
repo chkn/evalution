@@ -8,6 +8,7 @@
  */
 
 import type {
+  FieldValues,
   NormalizedPrompt,
   NormalizedPromptUpdates,
 } from "../../shared/types.ts";
@@ -67,6 +68,45 @@ export function promptFieldValue(
     default:
       return undefined;
   }
+}
+
+/**
+ * `prompt`'s values for the fields `updates` sets — what applying them
+ * overwrites. A missing prompt has no values: every field is `null`.
+ */
+export function fieldValuesOf(
+  prompt: NormalizedPrompt | undefined,
+  updates: NormalizedPromptUpdates,
+): FieldValues {
+  return Object.fromEntries(
+    updateFields(updates).map(([field]) => [
+      field,
+      (prompt && promptFieldValue(prompt, field)) ?? null,
+    ]),
+  );
+}
+
+/** `values`' entries for the fields `updates` sets — `null` for one it lacks. */
+export function pickFieldValues(
+  values: FieldValues,
+  updates: NormalizedPromptUpdates,
+): FieldValues {
+  return Object.fromEntries(
+    updateFields(updates).map(([field]) => [field, values[field] ?? null]),
+  );
+}
+
+/**
+ * Whether `prompt` still has every value in `values` — so a variation that
+ * recorded overwriting them applies to it unchanged.
+ */
+export function hasFieldValues(
+  prompt: NormalizedPrompt,
+  values: FieldValues,
+): boolean {
+  return Object.entries(values).every(([field, value]) =>
+    sameValue(value, promptFieldValue(prompt, field)),
+  );
 }
 
 /** A copy of `updates` with `field` set to `value`. */
@@ -272,6 +312,23 @@ function withoutDisplayValues(value: unknown): unknown {
 }
 
 /**
+ * `updates` without the fields `values` already has — what
+ * {@link canonicalizeUpdates} does against a prompt, done against the field
+ * values a variation recorded instead.
+ */
+export function withoutUnchanged(
+  values: FieldValues,
+  updates: NormalizedPromptUpdates,
+): NormalizedPromptUpdates {
+  let result = emptyUpdates(updates.style);
+  for (const [field, value] of updateFields(updates)) {
+    if (sameValue(values[field], value)) continue;
+    result = withField(result, field, withoutDisplayValues(value));
+  }
+  return result;
+}
+
+/**
  * The one spelling of `updates` against `base`:
  *
  * - **Minimized against the base.** A field equal to the base's value is
@@ -298,6 +355,11 @@ export function canonicalizeUpdates(
     result = withField(result, field, withoutDisplayValues(value));
   }
   return result;
+}
+
+/** The canonical bytes of a variation's base values — stored and deduped on beside its updates. */
+export function serializeFieldValues(values: FieldValues): string {
+  return stableStringify(withoutDisplayValues(values));
 }
 
 /** The canonical bytes of `updates` — what a variation row stores and dedupes on. */

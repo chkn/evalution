@@ -7,9 +7,8 @@ import type {
   AnnotationKind,
   TraceSummary,
   VariationInfo,
-  VersionInfo,
 } from "../../shared/types";
-import { lookupVariations, lookupVersions } from "../api";
+import { lookupVariations } from "../api";
 import {
   type SummaryColumn,
   SummaryList,
@@ -303,25 +302,18 @@ const COLUMN_DEFS: Record<
 };
 
 /**
- * Descriptions of the prompt versions and variations the listed traces ran,
- * looked up only while their columns are shown, and only for ids not already
- * known — both are immutable, so nothing ever needs re-fetching.
+ * Descriptions of the prompt variations the listed traces ran, looked up only
+ * while their column is shown, and only for ids not already known — they are
+ * immutable, so nothing ever needs re-fetching.
  */
-function usePromptRefLookups(
+function useVariationLookups(
   traces: TraceSummary[],
   columns: TraceColumnState[],
 ) {
-  const [versions, setVersions] = useState<Record<string, VersionInfo>>({});
   const [variations, setVariations] = useState<Record<string, VariationInfo>>(
     {},
   );
-  const showVersions = columns.some(c => c.key === "version" && c.visible);
   const showVariations = columns.some(c => c.key === "variation" && c.visible);
-  const versionIds = showVersions
-    ? [...new Set(traces.flatMap(t => t.promptVersion ?? []))]
-        .filter(id => !(id in versions))
-        .join(",")
-    : "";
   const variationIds = showVariations
     ? [...new Set(traces.flatMap(t => t.promptVariation ?? []))]
         .filter(id => !(id in variations))
@@ -329,19 +321,13 @@ function usePromptRefLookups(
     : "";
 
   useEffect(() => {
-    if (!versionIds) return;
-    lookupVersions(versionIds.split(","))
-      .then(found => setVersions(prev => ({ ...prev, ...found })))
-      .catch(() => {});
-  }, [versionIds]);
-  useEffect(() => {
     if (!variationIds) return;
     lookupVariations(variationIds.split(","))
       .then(found => setVariations(prev => ({ ...prev, ...found })))
       .catch(() => {});
   }, [variationIds]);
 
-  return { versions, variations };
+  return variations;
 }
 
 function TraceList({
@@ -354,7 +340,7 @@ function TraceList({
   onResizeSidebar,
 }: TraceListProps) {
   const [columns, setColumns] = useState<TraceColumnState[]>(loadColumnState);
-  const { versions, variations } = usePromptRefLookups(traces, columns);
+  const variations = useVariationLookups(traces, columns);
 
   useEffect(() => {
     try {
@@ -373,7 +359,7 @@ function TraceList({
       width: TRACE_COLUMN_WIDTH_PX[key],
       ...(key === "version"
         ? {
-            cell: (t: TraceSummary) => traceVersionLabel(t, versions),
+            cell: (t: TraceSummary) => traceVersionLabel(t),
             sortValue: (t: TraceSummary) => t.promptVersion,
           }
         : key === "variation"

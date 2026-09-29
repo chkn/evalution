@@ -342,18 +342,6 @@ export async function nameVariation(
   return res.json();
 }
 
-/** Describes versions by id, across providers. Unknown ids are absent. */
-export async function lookupVersions(
-  ids: string[],
-): Promise<Record<string, VersionInfo>> {
-  if (ids.length === 0) return {};
-  const res = await fetch(
-    `/api/versions?ids=${ids.map(encodeURIComponent).join(",")}`,
-  );
-  await throwIfError(res);
-  return res.json();
-}
-
 /** Describes variations by id, across providers. Unknown ids are absent. */
 export async function lookupVariations(
   ids: string[],

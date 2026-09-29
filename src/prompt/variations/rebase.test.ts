@@ -2,7 +2,12 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import type { PropValue } from "../../shared/types.ts";
+import type {
+  NormalizedPrompt,
+  NormalizedPromptUpdates,
+  PropValue,
+} from "../../shared/types.ts";
+import { fieldValuesOf } from "./canonical-updates.ts";
 import {
   mergeIntoWip,
   PROMPT_FIELD,
@@ -13,14 +18,23 @@ import { chatPrompt } from "./test-prompts.ts";
 
 const str = (value: string): PropValue => ({ kind: "primitive", value });
 
+/** A variation of `updates`, made against `base`. */
+const variationOf = (
+  base: NormalizedPrompt,
+  updates: NormalizedPromptUpdates,
+) => ({ promptId: base.id, baseValues: fieldValuesOf(base, updates), updates });
+
 describe("rebaseUpdates", () => {
   it("takes the variation's value when only the variation changed the field", () => {
     const base = chatPrompt();
     const target = chatPrompt({ model: str("openai/gpt-5") }); // unrelated change
-    const result = rebaseUpdates(base, target, {
-      style: "chat",
-      system: str("mine"),
-    });
+    const result = rebaseUpdates(
+      variationOf(base, {
+        style: "chat",
+        system: str("mine"),
+      }),
+      target,
+    );
     expect(result).toEqual({
       ok: true,
       updates: { style: "chat", system: str("mine") },
@@ -30,21 +44,27 @@ describe("rebaseUpdates", () => {
   it("drops a field both sides changed the same way", () => {
     const base = chatPrompt();
     const target = chatPrompt({ system: str("same") });
-    const result = rebaseUpdates(base, target, {
-      style: "chat",
-      system: str("same"),
-    });
+    const result = rebaseUpdates(
+      variationOf(base, {
+        style: "chat",
+        system: str("same"),
+      }),
+      target,
+    );
     expect(result).toEqual({ ok: true, updates: { style: "chat" } });
   });
 
   it("conflicts on a field both sides changed differently, carrying all three values", () => {
     const base = chatPrompt();
     const target = chatPrompt({ system: str("theirs") });
-    const result = rebaseUpdates(base, target, {
-      style: "chat",
-      system: str("mine"),
-      model: str("openai/gpt-5"),
-    });
+    const result = rebaseUpdates(
+      variationOf(base, {
+        style: "chat",
+        system: str("mine"),
+        model: str("openai/gpt-5"),
+      }),
+      target,
+    );
     expect(result).toEqual({
       ok: false,
       updates: { style: "chat", model: str("openai/gpt-5") },
@@ -62,10 +82,13 @@ describe("rebaseUpdates", () => {
   it("merges model parameters per key", () => {
     const base = chatPrompt();
     const target = chatPrompt({ system: str("theirs") });
-    const result = rebaseUpdates(base, target, {
-      style: "chat",
-      modelParameters: { temperature: { kind: "primitive", value: 1 } },
-    });
+    const result = rebaseUpdates(
+      variationOf(base, {
+        style: "chat",
+        modelParameters: { temperature: { kind: "primitive", value: 1 } },
+      }),
+      target,
+    );
     expect(result.ok).toBe(true);
     expect(result.updates.modelParameters).toEqual({
       temperature: { kind: "primitive", value: 1 },
@@ -73,10 +96,13 @@ describe("rebaseUpdates", () => {
   });
 
   it("conflicts on the prompt itself when it doesn't exist at the target", () => {
-    const result = rebaseUpdates(chatPrompt(), undefined, {
-      style: "chat",
-      system: str("mine"),
-    });
+    const result = rebaseUpdates(
+      variationOf(chatPrompt(), {
+        style: "chat",
+        system: str("mine"),
+      }),
+      undefined,
+    );
     expect(result.ok).toBe(false);
     expect(!result.ok && result.conflicts.map(c => c.field)).toEqual([
       PROMPT_FIELD,
@@ -112,9 +138,8 @@ describe("mergeIntoWip", () => {
 });
 
 describe("resolveConflicts", () => {
-  const head = chatPrompt({ system: str("theirs") });
   const pending = {
-    onto: "v2",
+    targetValues: { system: str("theirs"), model: str("openai/gpt-4o") },
     updates: { style: "chat" as const, model: str("openai/gpt-5") },
     conflicts: [
       {
@@ -128,14 +153,14 @@ describe("resolveConflicts", () => {
   };
 
   it("keeping the target's value leaves nothing to apply for that field", () => {
-    expect(resolveConflicts(head, pending, { system: "target" })).toEqual({
+    expect(resolveConflicts(pending, { system: "target" })).toEqual({
       style: "chat",
       model: str("openai/gpt-5"),
     });
   });
 
   it("keeping the variation's value applies it", () => {
-    expect(resolveConflicts(head, pending, { system: "variation" })).toEqual({
+    expect(resolveConflicts(pending, { system: "variation" })).toEqual({
       style: "chat",
       model: str("openai/gpt-5"),
       system: str("mine"),
@@ -143,6 +168,6 @@ describe("resolveConflicts", () => {
   });
 
   it("refuses a conflict left without a choice", () => {
-    expect(() => resolveConflicts(head, pending, {})).toThrow(/system/);
+    expect(() => resolveConflicts(pending, {})).toThrow(/system/);
   });
 });

@@ -2,13 +2,13 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type {
+  FieldValues,
   NormalizedPromptUpdates,
   PendingConflicts,
   VariationId,
   VariationInfo,
   VersionId,
 } from "../../shared/types.ts";
-import type { SnapshotBlobStore } from "../versioning/file-snapshot-versioning.ts";
 
 /** A variation as stored: {@link VariationInfo} plus what only the store needs. */
 export interface StoredVariation extends VariationInfo {
@@ -17,15 +17,22 @@ export interface StoredVariation extends VariationInfo {
    * prompt at head after a file move or an export rename.
    */
   globalId?: string;
+  /**
+   * The prompt's values for the fields {@link updates} sets, as they were
+   * when it was made — the base of the three-way merge that carries it onto
+   * a changed working tree. See `fieldValuesOf`.
+   */
+  baseValues: FieldValues;
 }
 
 /** What identifies a variation's content. */
 export interface VariationContent {
   promptId: string;
   globalId?: string;
-  base: VersionId;
+  base?: VersionId;
   /** Canonical updates — see `canonicalizeUpdates`. */
   updates: NormalizedPromptUpdates;
+  baseValues: FieldValues;
 }
 
 /** A new WIP variation. */
@@ -38,31 +45,30 @@ export interface NewWip extends VariationContent {
 
 /** Changes to a WIP. Omitted fields are left alone; `null` clears. */
 export interface WipChanges {
-  base?: VersionId;
   updates?: NormalizedPromptUpdates;
-  onHead?: boolean;
+  baseValues?: FieldValues;
   pending?: PendingConflicts | null;
   originName?: string | null;
 }
 
 /**
  * Where a {@link FilePromptProvider} keeps variations: immutable ("frozen")
- * ones, deduplicated by content, and the one mutable WIP per (prompt, base).
- * Also keeps the blobs file-only versioning needs.
+ * ones, deduplicated by content, the one mutable WIP of unsaved edits to
+ * head per prompt, and one per (prompt, old version).
  *
  * Nothing is garbage-collected: frozen rows are minted only when something
  * runs or gets a name, and they dedupe. See
  * `specs/prompt-versions-and-variations.md` §E.
  */
-export interface VariationStore extends SnapshotBlobStore {
+export interface VariationStore {
   /** The variation with this id, frozen or WIP. */
   get(id: VariationId): Promise<StoredVariation | undefined>;
   /**
    * Inserts a frozen variation, or returns the existing one with the same
-   * (prompt, base, canonical updates).
+   * content.
    */
   intern(v: VariationContent): Promise<StoredVariation>;
-  /** The WIP for (prompt, base), if any. */
+  /** The WIP of unsaved edits to an old version of a prompt, if any. */
   getWip(
     promptId: string,
     base: VersionId,
@@ -71,9 +77,9 @@ export interface VariationStore extends SnapshotBlobStore {
   getHeadWip(promptId: string): Promise<StoredVariation | undefined>;
   /** Every head WIP, of every prompt — what the dirty indicators come from. */
   listHeadWips(): Promise<StoredVariation[]>;
-  /** Creates the WIP for (prompt, base), replacing any that exists. */
+  /** Creates a WIP, replacing any that holds the same slot. */
   putWip(v: NewWip): Promise<StoredVariation>;
-  /** Changes a WIP in place — to rebase it, record conflicts, or edit it. */
+  /** Changes a WIP in place — to edit it, rebase it, or record conflicts. */
   updateWip(id: VariationId, changes: WipChanges): Promise<StoredVariation>;
   /** Deletes a WIP. A frozen variation is never deleted. */
   deleteWip(id: VariationId): Promise<void>;

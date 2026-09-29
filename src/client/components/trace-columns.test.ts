@@ -230,20 +230,11 @@ describe("tableModeWidth", () => {
 });
 
 describe("traceVersionLabel / traceVariationLabel", () => {
-  it("label a trace's version by what it was, once looked up", () => {
-    const trace = { promptVersion: "fedcba9876543210" };
-    expect(traceVersionLabel(trace, {})).toBe("fedcba9");
-    expect(
-      traceVersionLabel(trace, {
-        fedcba9876543210: {
-          id: "fedcba9876543210",
-          kind: "snapshot",
-          parent: "0123456789",
-          time: 0,
-        },
-      }),
-    ).toBe("snapshot of 0123456");
-    expect(traceVersionLabel({}, {})).toBe("—");
+  it("label a trace's version by its short sha", () => {
+    expect(traceVersionLabel({ promptVersion: "fedcba9876543210" })).toBe(
+      "fedcba9",
+    );
+    expect(traceVersionLabel({})).toBe("—");
   });
 
   it("label a trace's variation by its name when it has one", () => {

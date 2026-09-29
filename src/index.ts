@@ -134,6 +134,7 @@ export {
 } from "./prompt/prompt-provider.ts";
 export {
   canonicalizeUpdates,
+  fieldValuesOf,
   mergeUpdates,
   serializeUpdates,
 } from "./prompt/variations/canonical-updates.ts";
@@ -158,15 +159,11 @@ export type {
   WipChanges,
 } from "./prompt/variations/variation-store.ts";
 export {
-  type FileSnapshotRecord,
-  FileSnapshotVersioning,
-  type SnapshotBlobStore,
-} from "./prompt/versioning/file-snapshot-versioning.ts";
-export {
   GitVersioning,
   type GitVersioningOptions,
 } from "./prompt/versioning/git-versioning.ts";
 export type {
+  HeadState,
   VersionHistoryOptions,
   VersioningAdapter,
 } from "./prompt/versioning/versioning-adapter.ts";
@@ -210,6 +207,7 @@ export type {
   ExecuteResponse,
   ExecutionInput,
   ExtractedProps,
+  FieldValues,
   InputLayout,
   LLMSpanDetails,
   NormalizedChatPrompt,

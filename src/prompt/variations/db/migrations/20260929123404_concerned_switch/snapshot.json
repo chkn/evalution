@@ -1,19 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "385233aa-7157-40ad-986e-b6932a7dfa2f",
-  "prevIds": [
-    "00000000-0000-0000-0000-000000000000"
-  ],
+  "id": "77ad002a-12ab-47c0-a3b1-9bf313c495d4",
+  "prevIds": ["00000000-0000-0000-0000-000000000000"],
   "ddl": [
-    {
-      "name": "blobs",
-      "entityType": "tables"
-    },
-    {
-      "name": "file_snapshots",
-      "entityType": "tables"
-    },
     {
       "name": "variation_names",
       "entityType": "tables"
@@ -21,56 +11,6 @@
     {
       "name": "variations",
       "entityType": "tables"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "sha256",
-      "entityType": "columns",
-      "table": "blobs"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "content",
-      "entityType": "columns",
-      "table": "blobs"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "path",
-      "entityType": "columns",
-      "table": "file_snapshots"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "sha256",
-      "entityType": "columns",
-      "table": "file_snapshots"
-    },
-    {
-      "type": "real",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "created_at",
-      "entityType": "columns",
-      "table": "file_snapshots"
     },
     {
       "type": "text",
@@ -146,7 +86,7 @@
       "type": "text",
       "notNull": true,
       "autoincrement": false,
-      "default": null,
+      "default": "''",
       "generated": null,
       "name": "base_version",
       "entityType": "columns",
@@ -159,6 +99,16 @@
       "default": null,
       "generated": null,
       "name": "updates",
+      "entityType": "columns",
+      "table": "variations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "base_values",
       "entityType": "columns",
       "table": "variations"
     },
@@ -223,28 +173,9 @@
       "table": "variations"
     },
     {
-      "columns": [
-        "sha256"
-      ],
-      "tableTo": "blobs",
-      "columnsTo": [
-        "sha256"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "NO ACTION",
-      "nameExplicit": false,
-      "name": "fk_file_snapshots_sha256_blobs_sha256_fk",
-      "entityType": "fks",
-      "table": "file_snapshots"
-    },
-    {
-      "columns": [
-        "variation_id"
-      ],
+      "columns": ["variation_id"],
       "tableTo": "variations",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -253,38 +184,14 @@
       "table": "variation_names"
     },
     {
-      "columns": [
-        "path",
-        "sha256"
-      ],
-      "nameExplicit": false,
-      "name": "file_snapshots_pk",
-      "entityType": "pks",
-      "table": "file_snapshots"
-    },
-    {
-      "columns": [
-        "prompt_id",
-        "name"
-      ],
+      "columns": ["prompt_id", "name"],
       "nameExplicit": false,
       "name": "variation_names_pk",
       "entityType": "pks",
       "table": "variation_names"
     },
     {
-      "columns": [
-        "sha256"
-      ],
-      "nameExplicit": false,
-      "name": "blobs_pk",
-      "table": "blobs",
-      "entityType": "pks"
-    },
-    {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "variations_pk",
       "table": "variations",
@@ -302,6 +209,10 @@
         },
         {
           "value": "updates",
+          "isExpression": false
+        },
+        {
+          "value": "base_values",
           "isExpression": false
         }
       ],
@@ -324,7 +235,7 @@
         }
       ],
       "isUnique": true,
-      "where": "\"variations\".\"wip\" = 1",
+      "where": "\"variations\".\"wip\" = 1 and \"variations\".\"on_head\" = 0",
       "origin": "manual",
       "name": "uq_variations_wip",
       "entityType": "indexes",

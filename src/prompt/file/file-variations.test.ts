@@ -6,11 +6,18 @@ import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryFileProvider } from "../../file-provider-memory.ts";
 import { VercelAISDK } from "../../sdk/vercel-ai-sdk/index.ts";
-import type { NormalizedChatPrompt, PropValue } from "../../shared/types.ts";
+import type {
+  NormalizedChatPrompt,
+  PropValue,
+  VersionInfo,
+} from "../../shared/types.ts";
 import { VariationConflictError } from "../prompt-provider.ts";
 import { runVariationMigrations } from "../variations/db/migrate.ts";
 import { TursoVariationStore } from "../variations/turso-variation-store.ts";
-import { FileSnapshotVersioning } from "../versioning/file-snapshot-versioning.ts";
+import type {
+  HeadState,
+  VersioningAdapter,
+} from "../versioning/versioning-adapter.ts";
 import { FilePromptProvider } from "./file-prompt-provider.ts";
 import { TSPromptFileType } from "./ts/ts-prompt-file-type.ts";
 
@@ -31,6 +38,70 @@ const SOURCE = `export function greet(name) {
 
 const str = (value: string): PropValue => ({ kind: "primitive", value });
 
+/**
+ * Git, in memory: commits of the files a test names, read from a
+ * `MemoryFileProvider`.
+ */
+class MemoryVersioning implements VersioningAdapter {
+  readonly id = "memory";
+  private commits: { info: VersionInfo; files: Map<string, string> }[] = [];
+  private readonly fileProvider: MemoryFileProvider;
+  private readonly paths: string[];
+
+  constructor(fileProvider: MemoryFileProvider, paths: string[]) {
+    this.fileProvider = fileProvider;
+    this.paths = paths;
+  }
+
+  private async read(): Promise<Map<string, string>> {
+    const files = new Map<string, string>();
+    for (const rel of this.paths) {
+      const content = await this.fileProvider
+        .readFile(`${ROOT}/${rel}`)
+        .catch(() => undefined);
+      if (content !== undefined) files.set(rel, content);
+    }
+    return files;
+  }
+
+  /** Commits the named files as they are now, and returns the commit's id. */
+  async commit(message: string): Promise<string> {
+    const id = `c0${this.commits.length}`.padEnd(40, "0");
+    this.commits.push({
+      info: { id, message, time: this.commits.length },
+      files: await this.read(),
+    });
+    return id;
+  }
+
+  async head(): Promise<HeadState> {
+    const last = this.commits.at(-1);
+    const files = await this.read();
+    const clean =
+      !!last &&
+      files.size === last.files.size &&
+      [...files].every(([rel, content]) => last.files.get(rel) === content);
+    return { ...(last && { commit: last.info }), clean };
+  }
+
+  async readFile(version: string, rel: string) {
+    return this.commits.find(c => c.info.id === version)?.files.get(rel);
+  }
+
+  async history(rel: string) {
+    return this.commits
+      .filter(
+        (c, i) => c.files.get(rel) !== this.commits[i - 1]?.files.get(rel),
+      )
+      .map(c => c.info)
+      .reverse();
+  }
+
+  async get(id: string) {
+    return this.commits.find(c => c.info.id === id)?.info;
+  }
+}
+
 const clients: Database[] = [];
 afterEach(async () => {
   await Promise.all(clients.splice(0).map(c => c.close()));
@@ -46,15 +117,17 @@ async function setup(source = SOURCE) {
   const execute = vi
     .spyOn(sdk, "executeConfig")
     .mockResolvedValue({ done: Promise.resolve() });
+  const versioning = new MemoryVersioning(fileProvider, [
+    "greet.prompt.ts",
+    "helper.prompt.ts",
+    "moved.prompt.ts",
+  ]);
+  const initial = await versioning.commit("initial");
   const provider = new FilePromptProvider({
     rootDir: ROOT,
     fileProvider,
     sdk,
-    versioning: new FileSnapshotVersioning({
-      rootDir: ROOT,
-      fileProvider,
-      store,
-    }),
+    versioning,
     variationStore: store,
   });
   const edit = (
@@ -65,7 +138,15 @@ async function setup(source = SOURCE) {
       style: "chat",
       system: str(system),
     });
-  return { provider, fileProvider, store, execute, edit };
+  return {
+    provider,
+    fileProvider,
+    store,
+    versioning,
+    initial,
+    execute,
+    edit,
+  };
 }
 
 const systemOf = (prompt: unknown) => (prompt as NormalizedChatPrompt).system;
@@ -109,7 +190,7 @@ describe("FilePromptProvider WIP variations", () => {
   });
 
   it("a run interns a frozen row, and a second run of unchanged edits reuses it", async () => {
-    const { provider, execute, edit } = await setup();
+    const { provider, execute, edit, initial } = await setup();
     const { ref } = await edit(ID, "Run me");
 
     const first = await provider.execute(ref, ["Ada"], { traceId: "t1" });
@@ -117,7 +198,12 @@ describe("FilePromptProvider WIP variations", () => {
     expect(first.variation).toBeDefined();
     expect(first.variation).not.toBe(ref.variation);
     expect(second.variation).toBe(first.variation);
-    expect(first.version).toMatch(/^blob:/);
+    // A clean working tree: the commit is what ran, and what the variation
+    // applies to.
+    expect(first.version).toBe(initial);
+    expect(await provider.variations!.get(first.variation!)).toMatchObject({
+      base: initial,
+    });
 
     // The patched source is what ran, and the trace records what it was.
     const [config, options] = execute.mock.calls[0];
@@ -132,10 +218,10 @@ describe("FilePromptProvider WIP variations", () => {
   });
 
   it("a run at head records the version and no variation", async () => {
-    const { provider, execute } = await setup();
+    const { provider, execute, initial } = await setup();
     const result = await provider.execute(ID, ["Ada"], { traceId: "t1" });
     expect(result.variation).toBeUndefined();
-    expect(result.version).toMatch(/^blob:/);
+    expect(result.version).toBe(initial);
     expect(execute.mock.calls[0][0].system).toBe("Hello");
     expect(execute.mock.calls[0][1]?.identity?.version).toBe(result.version);
   });
@@ -246,18 +332,12 @@ describe("FilePromptProvider WIP variations", () => {
     expect((await provider.getPrompt(ID))?.dirty).toBeUndefined();
   });
 
-  it("an external write rebases a clean WIP onto it", async () => {
+  it("an external write to another field carries the WIP along", async () => {
     const { provider, fileProvider, edit } = await setup();
     const { ref } = await edit(ID, "Mine");
-    const rebased = new Promise<void>(resolve =>
-      provider.watch(event => {
-        if (event.ref?.variation) resolve();
-      }),
-    );
 
     // The IDE changes a different field.
     await fileProvider.writeFile(FILE, SOURCE.replace("0.5", "0.9"));
-    await rebased;
 
     const wip = await provider.getPrompt(ref);
     expect(systemOf(wip)).toEqual(str("Mine"));
@@ -303,6 +383,43 @@ describe("FilePromptProvider WIP variations", () => {
 
     await provider.variations!.save(ref.variation!);
     expect(await fileProvider.readFile(FILE)).toContain('"Mine"');
+  });
+
+  it("a run on uncommitted changes records no version, and its variation no base", async () => {
+    const { provider, fileProvider, edit } = await setup();
+    await fileProvider.writeFile(FILE, SOURCE.replace("0.5", "0.9"));
+    const { ref } = await edit(ID, "Mine");
+
+    const result = await provider.execute(ref, ["Ada"]);
+    expect(result.version).toBeUndefined();
+    const frozen = await provider.variations!.get(result.variation!);
+    expect(frozen?.base).toBeUndefined();
+    // Shown on the working tree it was made against.
+    const shown = await provider.getPrompt({
+      promptId: ID,
+      variation: result.variation!,
+    });
+    expect(systemOf(shown)).toEqual(str("Mine"));
+    expect(
+      shown?.modelParameters.find(p => p.def.name === "temperature")?.value,
+    ).toEqual({ kind: "primitive", value: 0.9 });
+  });
+
+  it("edits over uncommitted changes to the same field run and save without conflicting", async () => {
+    const { provider, fileProvider, execute, edit } = await setup();
+    await fileProvider.writeFile(
+      FILE,
+      SOURCE.replace("Hello", "Local").replace("0.5", "0.9"),
+    );
+    const { ref } = await edit(ID, "Mine");
+
+    await provider.execute(ref, ["Ada"]);
+    expect(execute.mock.calls[0][0].system).toBe("Mine");
+
+    expect((await provider.variations!.save(ref.variation!)).ok).toBe(true);
+    const saved = await fileProvider.readFile(FILE);
+    expect(saved).toContain('"Mine"');
+    expect(saved).toContain("0.9");
   });
 
   it("opens a variation from an old version at head, creating the WIP", async () => {
@@ -430,23 +547,23 @@ describe("FilePromptProvider WIP variations", () => {
   });
 
   it("reads a prompt back at an old version after the file changed", async () => {
-    const { provider, fileProvider } = await setup();
-    const { version } = await provider.execute(ID, ["Ada"]);
+    const { provider, fileProvider, versioning, initial } = await setup();
+    const version = initial;
     await fileProvider.writeFile(FILE, SOURCE.replace("Hello", "Changed"));
 
-    const old = await provider.getPrompt({ promptId: ID, version: version! });
+    const old = await provider.getPrompt({ promptId: ID, version });
     expect(systemOf(old)).toEqual(str("Hello"));
     expect(old).toMatchObject({
       ref: { promptId: ID, version },
       atHead: false,
-      version: { id: version, kind: "snapshot", fileOnly: true },
+      version: { id: version, message: "initial" },
     });
     await expect(
-      provider.execute({ promptId: ID, version: version! }, ["Ada"]),
+      provider.execute({ promptId: ID, version }, ["Ada"]),
     ).rejects.toThrow(/working tree/);
 
     // At the current head, a version is head: editable and runnable.
-    const { version: current } = await provider.execute(ID, ["Ada"]);
+    const current = await versioning.commit("changed");
     const atHead = await provider.getPrompt({
       promptId: ID,
       version: current!,
@@ -458,12 +575,11 @@ describe("FilePromptProvider WIP variations", () => {
   });
 
   it("editing an old version makes a WIP there, which opens on head", async () => {
-    const { provider, fileProvider } = await setup();
-    const { version } = await provider.execute(ID, ["Ada"]);
+    const { provider, fileProvider, initial: version } = await setup();
     await fileProvider.writeFile(FILE, SOURCE.replace("0.5", "0.9"));
 
     const { ref, prompt } = await provider.updatePromptProperties(
-      { promptId: ID, version: version! },
+      { promptId: ID, version },
       { style: "chat", system: str("From the past") },
     );
     expect(prompt.atHead).toBe(false);
@@ -538,14 +654,13 @@ export default prompts({ id: 'greeter' }, () => ({
   });
 
   it("opens an old version on head as unsaved edits restoring its values", async () => {
-    const { provider, fileProvider } = await setup();
-    const { version } = await provider.execute(ID, ["Ada"]);
+    const { provider, fileProvider, initial: version } = await setup();
     await fileProvider.writeFile(
       FILE,
       SOURCE.replace("Hello", "Newer").replace("0.5", "0.9"),
     );
 
-    const opened = await provider.variations!.openVersionOnHead(ID, version!);
+    const opened = await provider.variations!.openVersionOnHead(ID, version);
     expect(opened.ok).toBe(true);
     const head = await provider.getPrompt(ID);
     expect(systemOf(head)).toEqual(str("Newer"));
@@ -562,8 +677,7 @@ export default prompts({ id: 'greeter' }, () => ({
   });
 
   it("reads unsaved edits and old versions without resolving types again", async () => {
-    const { provider, fileProvider, edit } = await setup();
-    const { version } = await provider.execute(ID, ["Ada"]);
+    const { provider, fileProvider, edit, initial: version } = await setup();
     const resolve = vi.spyOn(TSPromptFileType.prototype, "resolveTypes");
     // Calls that build a program: project probes alone are answered from a
     // cache.
@@ -586,13 +700,43 @@ export default prompts({ id: 'greeter' }, () => ({
 
       // An old version can't run, so it's read for its fields alone.
       await fileProvider.writeFile(FILE, SOURCE.replace("0.5", "0.9"));
-      await provider.getPrompt({ promptId: ID, version: version! });
+      await provider.getPrompt({ promptId: ID, version });
       await provider.getPrompt({ promptId: ID, variation: ref.variation! });
       // Only head's own re-read after its file changed resolves types.
       expect(builds() - afterHead).toBeLessThanOrEqual(1);
     } finally {
       resolve.mockRestore();
     }
+  });
+
+  it("works without versions: variations apply to the working tree", async () => {
+    const client = await connect({ path: ":memory:", url: () => null });
+    clients.push(client);
+    await runVariationMigrations(drizzle({ client }));
+    const fileProvider = new MemoryFileProvider({ [FILE]: SOURCE });
+    const sdk = new VercelAISDK();
+    vi.spyOn(sdk, "executeConfig").mockResolvedValue({
+      done: Promise.resolve(),
+    });
+    const provider = new FilePromptProvider({
+      rootDir: ROOT,
+      fileProvider,
+      sdk,
+      variationStore: new TursoVariationStore({ client }),
+    });
+    expect(provider.versions).toBeUndefined();
+
+    const { ref } = await provider.updatePromptProperties(ID, {
+      style: "chat",
+      system: str("No git"),
+    });
+    const result = await provider.execute(ref, ["Ada"]);
+    expect(result.version).toBeUndefined();
+    expect(
+      (await provider.variations!.get(result.variation!))?.base,
+    ).toBeUndefined();
+    await provider.variations!.save(ref.variation!);
+    expect(await fileProvider.readFile(FILE)).toContain('"No git"');
   });
 
   it("without a variation store, edits write straight to the file", async () => {

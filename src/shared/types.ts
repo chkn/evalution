@@ -224,7 +224,7 @@ export interface NormalizedPromptBase {
 
 /**
  * An opaque, immutable name for a state of the world — for a git project, a
- * commit (a real one, or a snapshot of a dirty working tree).
+ * commit.
  */
 export type VersionId = string;
 
@@ -243,28 +243,25 @@ export type PromptRef =
   | { promptId: string; version?: undefined; variation?: undefined }
   /** The prompt as it was at a saved version. */
   | { promptId: string; version: VersionId; variation?: undefined }
-  /** A variation, applied to its own base version. */
+  /** A variation, applied to its base commit (or the working tree, without one). */
   | { promptId: string; variation: VariationId; version?: undefined };
 
-/** A saved state of the world. See {@link VersionId}. */
+/** A saved state of the world: a commit. See {@link VersionId}. */
 export interface VersionInfo {
   id: VersionId;
-  /** A real commit, or a snapshot of a dirty working tree. */
-  kind: "commit" | "snapshot";
-  /** For a snapshot: the commit the working tree was dirty against. */
-  parent?: VersionId;
-  /** Commit subject; a fixed description for a snapshot. */
+  /** Commit subject. */
   message?: string;
   author?: string;
   /** When the version was made (ms). */
   time: number;
-  /**
-   * True when the version captures only the prompt's own file rather than the
-   * whole project — the case without git. It reproduces the prompt, not its
-   * tools.
-   */
-  fileOnly?: boolean;
 }
+
+/**
+ * A prompt's field values, keyed like a variation's fields (`system`,
+ * `modelParameters.temperature`, …) — `null` for a field the prompt doesn't
+ * have.
+ */
+export type FieldValues = Record<string, unknown>;
 
 /**
  * One field that could not be merged: both sides changed it, differently.
@@ -286,8 +283,11 @@ export interface VariationConflict {
  * the WIP can neither run nor be saved.
  */
 export interface PendingConflicts {
-  /** The version the resolved WIP will be based on. */
-  onto: VersionId;
+  /**
+   * The working tree's values for every field involved, as they were when
+   * the conflict arose: what the resolved WIP is based on.
+   */
+  targetValues: FieldValues;
   /** Every field that did merge, already applied. */
   updates: NormalizedPromptUpdates;
   conflicts: VariationConflict[];
@@ -296,14 +296,20 @@ export interface PendingConflicts {
 }
 
 /**
- * An immutable set of {@link NormalizedPromptUpdates} for one prompt against
- * one base version — or, when {@link wip}, the one mutable set of unsaved
- * edits per (prompt, base).
+ * An immutable set of {@link NormalizedPromptUpdates} for one prompt — or,
+ * when {@link wip}, the one mutable set of unsaved edits per (prompt, base).
+ * It applies to the working tree; its {@link base} commit, when it has one,
+ * is where it can also be shown (and one day run) as it was made.
  */
 export interface VariationInfo {
   id: VariationId;
   promptId: string;
-  base: VersionId;
+  /**
+   * The commit whose copy of the prompt's file the variation was made
+   * against. Absent when that file had uncommitted changes (or there's no
+   * git), and for a WIP of unsaved edits to the working tree.
+   */
+  base?: VersionId;
   updates: NormalizedPromptUpdates;
   /** Whether this is a work-in-progress (unsaved, mutable) variation. */
   wip: boolean;

@@ -20,7 +20,10 @@ import type {
 } from "../shared/types.ts";
 import type { TraceIngestor } from "../trace/trace-ingestor.ts";
 import type { PromptFileType } from "./file/prompt-file-type.ts";
-import type { VersionHistoryOptions } from "./versioning/versioning-adapter.ts";
+import type {
+  HeadState,
+  VersionHistoryOptions,
+} from "./versioning/versioning-adapter.ts";
 
 /**
  * Optional settings for {@link PromptProvider.execute}.
@@ -87,7 +90,10 @@ export function promptIdOf(ref: PromptRefLike): string {
 
 /** What {@link PromptProvider.execute} ran. */
 export interface ExecuteResult {
-  /** The version the run executed against, when the provider has versions. */
+  /**
+   * The version the run executed against: the commit checked out, when the
+   * provider has versions and the working tree had nothing uncommitted.
+   */
   version?: VersionId;
   /**
    * The variation the run applied on top of {@link version}, if any. Running
@@ -121,15 +127,8 @@ export class VariationConflictError extends Error {
  * `specs/prompt-versions-and-variations.md` §B.
  */
 export interface PromptVersions {
-  /**
-   * Pins head as a version and returns it. Cheap when nothing changed since
-   * the last call.
-   *
-   * @param promptId - The prompt the caller is about to depend on. A
-   *   provider that versions single files rather than the whole project
-   *   needs it.
-   */
-  snapshot(promptId?: string): Promise<VersionInfo>;
+  /** The commit checked out, and whether the working tree has changes on top. */
+  head(): Promise<HeadState>;
   /**
    * Versions that changed this prompt's file, newest first — what a version
    * selector lists. Never every version: most don't touch any one prompt.
@@ -159,7 +158,10 @@ export interface PromptVariations {
   name(id: VariationId, name: string): Promise<VariationInfo>;
   /** Removes a name. */
   unname(promptId: string, name: string): Promise<void>;
-  /** Re-expresses `id` against `onto` (default: head). */
+  /**
+   * Re-expresses `id` against `onto` (default: the working tree), as a new
+   * saved variation. `id` itself — even a WIP — is left as it is.
+   */
   rebase(id: VariationId, onto?: VersionId): Promise<RebaseResult>;
   /**
    * Brings `id`'s changes into the head WIP: rebases onto head, then merges
@@ -182,7 +184,7 @@ export interface PromptVariations {
     version: VersionId,
     options?: OpenOnHeadOptions,
   ): Promise<RebaseResult>;
-  /** Rebases the head WIP onto head, writes it into the source, and deletes it. */
+  /** Rebases a WIP onto the working tree, writes it into the source, and deletes it. */
   save(wipId: VariationId): Promise<RebaseResult>;
   /** Drops a WIP variation. Frozen variations are never deleted. */
   discard(id: VariationId): Promise<void>;

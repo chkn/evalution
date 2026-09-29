@@ -16,6 +16,7 @@ import {
   refBannerNote,
   refChipLabel,
   runDisabledReason,
+  savedAsHead,
 } from "./prompt-ref";
 
 const head: NormalizedChatPrompt = {
@@ -34,7 +35,6 @@ const head: NormalizedChatPrompt = {
 
 const commit: VersionInfo = {
   id: "0123456789abcdef",
-  kind: "commit",
   message: "Tighten tone",
   time: 0,
 };
@@ -150,7 +150,7 @@ describe("runDisabledReason", () => {
         variation: {
           ...wip(true),
           pending: {
-            onto: "v",
+            targetValues: {},
             updates: { style: "chat" },
             conflicts: [],
             labels: { target: "a", variation: "b" },
@@ -173,5 +173,36 @@ describe("fieldText", () => {
     expect(
       fieldText({ kind: "primitive", value: "x".repeat(300) }),
     ).toHaveLength(300);
+  });
+});
+
+describe("savedAsHead", () => {
+  it("shows the saved edits as head, with nothing unsaved", () => {
+    const dirtyHead = {
+      ...head,
+      system: { kind: "primitive", value: "before" },
+      providerId: "fs",
+      dirty: true,
+      wipId: "var_x",
+    } as NormalizedChatPrompt;
+    const shown = {
+      ...head,
+      system: { kind: "primitive", value: "after" },
+      ref: { promptId: head.id, variation: "var_x" },
+      variation: { ...wip(true), base: undefined },
+      atHead: true,
+    } as NormalizedChatPrompt;
+
+    const saved = savedAsHead(dirtyHead, shown) as NormalizedChatPrompt;
+    expect(saved.system).toEqual({ kind: "primitive", value: "after" });
+    expect(saved).toMatchObject({
+      providerId: "fs",
+      ref: { promptId: head.id },
+      atHead: true,
+    });
+    expect(saved.variation).toBeUndefined();
+    expect(saved.dirty).toBeUndefined();
+    expect(saved.wipId).toBeUndefined();
+    expect(isHeadRef(saved.ref)).toBe(true);
   });
 });

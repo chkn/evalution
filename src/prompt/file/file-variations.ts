@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { createHash } from "node:crypto";
 import path from "node:path";
 import type { FileProvider } from "../../file-provider.ts";
 import { OverlayFileProvider } from "../../file-provider-overlay.ts";
-import { shortId, versionLabel } from "../../shared/helpers.ts";
+import { shortId } from "../../shared/helpers.ts";
 import type {
   ConflictChoices,
   NormalizedPromptUpdates,
@@ -15,7 +16,6 @@ import type {
   VariationId,
   VariationInfo,
   VersionId,
-  VersionInfo,
 } from "../../shared/types.ts";
 import {
   type OpenOnHeadOptions,
@@ -28,8 +28,11 @@ import {
 import {
   canonicalizeUpdates,
   fieldUpdatesOf,
+  fieldValuesOf,
+  hasFieldValues,
   isEmptyUpdates,
   mergeUpdates,
+  pickFieldValues,
 } from "../variations/canonical-updates.ts";
 import {
   type MergeOutcome,
@@ -41,7 +44,10 @@ import type {
   StoredVariation,
   VariationStore,
 } from "../variations/variation-store.ts";
-import type { VersioningAdapter } from "../versioning/versioning-adapter.ts";
+import type {
+  HeadState,
+  VersioningAdapter,
+} from "../versioning/versioning-adapter.ts";
 import type {
   NormalizedFilePrompt,
   PromptFileType,
@@ -123,16 +129,26 @@ class BoundedCache<V> {
 
 /** The public face of a stored variation. */
 function toInfo(v: StoredVariation): VariationInfo {
-  const { globalId: _, ...info } = v;
+  const { globalId: _, baseValues: _values, ...info } = v;
   return info;
 }
 
+/** What {@link FileVariations.rebaseOnto} carries a variation with. */
+type Rebaseable = Pick<
+  StoredVariation,
+  "promptId" | "globalId" | "baseValues" | "updates"
+>;
+
 /**
- * Versions and variations for a {@link FilePromptProvider}: it pins versions
+ * Versions and variations for a {@link FilePromptProvider}: it reads commits
  * through a {@link VersioningAdapter}, keeps variations in a
  * {@link VariationStore}, and materializes them — parsing and running a
  * variation's patched source — through an {@link OverlayFileProvider}, so
  * nothing but an explicit save ever writes a prompt file.
+ *
+ * A variation applies to the working tree as it is: the values it recorded
+ * overwriting are the base of the three-way merge that carries it across
+ * changes made there, so uncommitted changes need no version of their own.
  *
  * See `specs/prompt-versions-and-variations.md` §C–§H.
  */
@@ -155,6 +171,11 @@ export class FileVariations {
     string,
     { content: string; prompt: NormalizedFilePrompt }
   >();
+  /** Head prompts' fields alone, by id, with the content they were read from. */
+  private headFieldsCache = new Map<
+    string,
+    { content: string; prompt: NormalizedFilePrompt | undefined }
+  >();
 
   /** The one overlay every materialization goes through, one at a time. */
   private overlay?: OverlayFileProvider;
@@ -165,14 +186,14 @@ export class FileVariations {
   private wipLocks = new Map<string, Promise<void>>();
 
   private readonly host: FileVariationsHost;
-  /** How versions are named. */
-  readonly versioning: VersioningAdapter;
+  /** How versions are named; without it (no git), there are no versions. */
+  readonly versioning: VersioningAdapter | undefined;
   /** Where variations are kept; without one, there are versions but no variations. */
   readonly store: VariationStore | undefined;
 
   constructor(
     host: FileVariationsHost,
-    versioning: VersioningAdapter,
+    versioning: VersioningAdapter | undefined,
     store: VariationStore | undefined,
   ) {
     this.host = host;
@@ -195,6 +216,7 @@ export class FileVariations {
     version: VersionId,
     filePath: string,
   ): Promise<string | undefined> {
+    if (!this.versioning) return Promise.resolve(undefined);
     const rel = this.relativePath(filePath);
     const key = `${version}\0${rel}`;
     const cached = this.contents.get(key);
@@ -221,17 +243,34 @@ export class FileVariations {
     return atVersion !== undefined && atVersion === onDisk;
   }
 
-  /** Pins head as a version, for the file `filePath`. */
-  snapshotFor(filePath: string): Promise<VersionInfo> {
-    return this.versioning.snapshot(this.relativePath(filePath));
+  /**
+   * The commit a variation made against the working tree now is based on:
+   * the one checked out, when the prompt's file has nothing uncommitted — so
+   * that the commit plus the variation reproduces what was seen. Otherwise,
+   * none.
+   */
+  private async baseFor(
+    filePath: string,
+    head?: HeadState,
+  ): Promise<VersionId | undefined> {
+    head ??= await this.versioning?.head();
+    const commit = head?.commit?.id;
+    if (!commit) return undefined;
+    return head!.clean || (await this.isHeadContent(commit, filePath))
+      ? commit
+      : undefined;
   }
 
   /** Forgets memoized state that something on disk may have changed. */
   invalidate(): void {
-    this.versioning.invalidate?.();
     // Types depend on more than the prompt's own file — its playground
     // modules, chiefly — so a change anywhere retires them.
     this.headTypesCache.clear();
+  }
+
+  private requireVersioning(): VersioningAdapter {
+    if (!this.versioning) throw new Error("Prompt versions are unavailable");
+    return this.versioning;
   }
 
   private requireStore(): VariationStore {
@@ -294,9 +333,7 @@ export class FileVariations {
     const content = await this.contentAt(version, filePath);
     if (content === undefined) return undefined;
     if (content === (await this.diskContent(filePath))) {
-      return (
-        await this.host.normalizeWith(this.host.fileType, [filePath], FIELDS)
-      ).find(p => p.name === name);
+      return this.headFields(promptId);
     }
     const key = `${version}\0${promptId}`;
     const cached = this.versionPrompts.get(key);
@@ -311,24 +348,32 @@ export class FileVariations {
   }
 
   /**
-   * A variation's source — its base content with its updates applied through
-   * the ordinary edit pipeline — and the prompt it parses to, fields only.
-   * See {@link withHeadTypes} for the rest.
+   * A variation's source — its base commit's content, or the working tree's
+   * when it has none, with its updates applied through the ordinary edit
+   * pipeline — and the prompt it parses to, fields only. See
+   * {@link withHeadTypes} for the rest.
    */
-  private materialize(v: StoredVariation): Promise<Materialized> {
-    const key = `${v.id}\0${v.updatedAt}`;
+  private async materialize(v: StoredVariation): Promise<Materialized> {
+    const [filePath, name] = this.host.parsePromptId(v.promptId);
+    const content =
+      v.base !== undefined
+        ? await this.contentAt(v.base, filePath)
+        : await this.diskContent(filePath);
+    if (content === undefined) {
+      throw new Error(
+        `Can't read ${this.relativePath(filePath)}` +
+          (v.base !== undefined ? ` at version ${v.base}` : ""),
+      );
+    }
+    // A commit's content never changes; the working tree's may.
+    const key = `${v.id}\0${v.updatedAt}\0${v.base ?? createHash("sha1").update(content).digest("hex")}`;
     const cached = this.materialized.get(key);
     if (cached) return cached;
 
-    const [filePath, name] = this.host.parsePromptId(v.promptId);
-    const result = (async () => {
-      const content = await this.contentAt(v.base, filePath);
-      if (content === undefined) {
-        throw new Error(
-          `Can't read ${this.relativePath(filePath)} at version ${v.base}`,
-        );
-      }
-      return this.withOverlay(filePath, content, async (fileType, overlay) => {
+    const result = this.withOverlay(
+      filePath,
+      content,
+      async (fileType, overlay) => {
         if (!isEmptyUpdates(v.updates)) {
           await this.host.applyUpdates(
             fileType,
@@ -343,8 +388,8 @@ export class FileVariations {
         ).find(p => p.name === name);
         if (!prompt) throw new Error("Prompt not found");
         return { source: overlay.get(filePath) ?? content, prompt };
-      });
-    })();
+      },
+    );
     result.catch(() => this.materialized.delete(key));
     return this.materialized.set(key, result);
   }
@@ -420,6 +465,29 @@ export class FileVariations {
   }
 
   /**
+   * The head prompt's fields, parsed without resolving types and kept until
+   * its file changes — what unsaved edits are merged against.
+   */
+  private async headFields(
+    promptId: string,
+  ): Promise<NormalizedFilePrompt | undefined> {
+    const [filePath, name] = this.host.parsePromptId(promptId);
+    const content = await this.diskContent(filePath);
+    if (content === undefined) return undefined;
+    const typed = this.headTypesCache.get(promptId);
+    if (typed?.content === content) return typed.prompt;
+    const cached = this.headFieldsCache.get(promptId);
+    if (cached?.content === content) return cached.prompt;
+    const prompt = (
+      await this.host
+        .normalizeWith(this.host.fileType, [filePath], FIELDS)
+        .catch(() => [])
+    ).find(p => p.name === name);
+    this.headFieldsCache.set(promptId, { content, prompt });
+    return prompt;
+  }
+
+  /**
    * `prompt` — a variation on head, parsed fields-only — with head's resolved
    * types: its execute parameters, input sources and layout. A variation
    * changes only fields (model, system, messages, parameters), none of which
@@ -463,7 +531,7 @@ export class FileVariations {
     }
     const [prompt, info, wip] = await Promise.all([
       this.promptAtVersion(version, promptId).catch(() => undefined),
-      this.versioning.get(version),
+      this.versioning?.get(version),
       this.store?.getHeadWip(promptId),
     ]);
     if (!prompt) return null;
@@ -494,10 +562,9 @@ export class FileVariations {
     const [filePath] = this.host.parsePromptId(v.promptId);
     const [{ prompt }, info, atHead, wip] = await Promise.all([
       this.materialize(v),
-      this.versioning.get(v.base),
-      v.wip
-        ? Promise.resolve(!!v.onHead)
-        : this.isHeadContent(v.base, filePath),
+      v.base !== undefined ? this.versioning?.get(v.base) : undefined,
+      // Without a base, it's shown on the working tree.
+      v.base === undefined || this.isHeadContent(v.base, filePath),
       v.wip && v.onHead
         ? Promise.resolve(v)
         : this.store?.getHeadWip(v.promptId),
@@ -560,10 +627,11 @@ export class FileVariations {
   }
 
   /**
-   * The prompt's head WIP, rebased onto head first if the file changed under
-   * it since — whether the watcher saw the change or it happened while the
-   * server was down. A clean rebase is silent; a conflicted one leaves the
-   * WIP with pending conflicts. Call with the WIP lock held.
+   * The prompt's head WIP, rebased onto the working tree first if a field it
+   * sets changed there since — whether the watcher saw the change or it
+   * happened while the server was down. A clean rebase is silent; a
+   * conflicted one leaves the WIP with pending conflicts. Call with the WIP
+   * lock held.
    */
   private async currentHeadWip(
     promptId: string,
@@ -571,13 +639,19 @@ export class FileVariations {
     const wip = await this.store?.getHeadWip(promptId);
     if (!wip) return undefined;
     const [filePath] = this.host.parsePromptId(promptId);
-    // Settled against head already: up to date.
-    const settledOn = wip.pending ? wip.pending.onto : wip.base;
-    if (await this.isHeadContent(settledOn, filePath)) return wip;
-    if (!(await this.diskContent(filePath))) return wip; // file gone; leave it be
+    if ((await this.diskContent(filePath)) === undefined) return wip; // file gone; leave it be
+    const head = await this.headFields(promptId);
+    // Settled against the working tree already: up to date.
+    const settledOn = wip.pending?.targetValues ?? wip.baseValues;
+    if (
+      head
+        ? head.style === wip.updates.style && hasFieldValues(head, settledOn)
+        : !!wip.pending
+    ) {
+      return wip;
+    }
 
-    const head = await this.snapshotFor(filePath);
-    const outcome = await this.rebaseOnto(wip, head.id);
+    const outcome = rebaseUpdates(wip, head);
     const store = this.requireStore();
     if (outcome.ok) {
       if (isEmptyUpdates(outcome.updates)) {
@@ -585,14 +659,14 @@ export class FileVariations {
         return undefined;
       }
       return store.updateWip(wip.id, {
-        base: head.id,
         updates: outcome.updates,
+        baseValues: fieldValuesOf(head, outcome.updates),
         pending: null,
       });
     }
     return store.updateWip(wip.id, {
       pending: {
-        onto: head.id,
+        targetValues: fieldValuesOf(head, wip.updates),
         updates: outcome.updates,
         conflicts: outcome.conflicts,
         labels: REBASE_LABELS,
@@ -601,54 +675,46 @@ export class FileVariations {
   }
 
   /**
-   * Where `v`'s prompt lives at head: its own file while that still exists,
-   * else wherever its `prompts()` id is now — a file move. The head version
-   * has to be pinned for that file, which matters when a version is one file.
+   * The id of `v`'s prompt at head: its own while its file still exists,
+   * else whatever its `prompts()` id has now — a file move.
    */
-  private async headLocation(
-    v: StoredVariation,
-  ): Promise<{ promptId: string; filePath: string }> {
+  private async headPromptId(v: Rebaseable): Promise<string> {
     const [filePath] = this.host.parsePromptId(v.promptId);
-    if ((await this.diskContent(filePath)) !== undefined || !v.globalId) {
-      return { promptId: v.promptId, filePath };
+    if (!v.globalId || (await this.diskContent(filePath)) !== undefined) {
+      return v.promptId;
     }
     const moved = (await this.host.parseAll()).find(
       p => p.globalId === v.globalId,
     );
-    return moved
-      ? { promptId: moved.id, filePath: this.host.parsePromptId(moved.id)[0] }
-      : { promptId: v.promptId, filePath };
+    return moved?.id ?? v.promptId;
   }
 
   /**
-   * Re-expresses `v` against `target` (§F), finding the prompt there by its id,
-   * then — at head — by its `prompts()` id, so a rename doesn't lose it.
+   * Re-expresses `v` against `target` — a version, or the working tree when
+   * omitted (§F) — finding the prompt there by its id, then (on the working
+   * tree) by its `prompts()` id, so a rename doesn't lose it. Also returns
+   * the prompt found, which the result's updates apply to.
    */
   private async rebaseOnto(
-    v: StoredVariation,
-    target: VersionId,
+    v: Rebaseable,
+    target?: VersionId,
     targetPromptId?: string,
-  ): Promise<MergeOutcome & { promptId: string }> {
-    const base = await this.promptAtVersion(v.base, v.promptId);
-    if (!base) {
-      throw new Error(`Can't read ${v.promptId} at version ${v.base}`);
+  ): Promise<
+    MergeOutcome & { promptId: string; onto: NormalizedFilePrompt | undefined }
+  > {
+    const promptId = targetPromptId ?? v.promptId;
+    let found =
+      target === undefined
+        ? await this.headFields(promptId)
+        : await this.promptAtVersion(target, promptId).catch(() => undefined);
+    if (!found && v.globalId && target === undefined) {
+      found = (await this.host.parseAll()).find(p => p.globalId === v.globalId);
     }
-    let found = await this.promptAtVersion(
-      target,
-      targetPromptId ?? v.promptId,
-    ).catch(() => undefined);
-    if (!found && v.globalId) {
-      const all = await this.host.parseAll();
-      const candidate = all.find(p => p.globalId === v.globalId);
-      const [candidatePath] = candidate
-        ? this.host.parsePromptId(candidate.id)
-        : [];
-      if (candidatePath && (await this.isHeadContent(target, candidatePath))) {
-        found = candidate;
-      }
-    }
-    const outcome = rebaseUpdates(base, found, v.updates);
-    return { ...outcome, promptId: found?.id ?? v.promptId };
+    return {
+      ...rebaseUpdates(v, found),
+      promptId: found?.id ?? v.promptId,
+      onto: found,
+    };
   }
 
   /** Updates a prompt at `ref` — see `FilePromptProvider.updatePromptProperties`. */
@@ -675,47 +741,45 @@ export class FileVariations {
     const [filePath] = this.host.parsePromptId(promptId);
 
     const landed = await this.withWipLock(promptId, async () => {
-      // Which WIP this edit lands in: its base, whether it's head's, and
-      // what it already holds.
-      let base: VersionId | undefined;
-      let onHead: boolean;
+      // Which WIP this edit lands in: the head one, or one on an old
+      // `version` — and what it already holds.
+      let version: VersionId | undefined;
       let existing: StoredVariation | undefined;
 
       // Re-read under the lock: a save or discard queued ahead of this edit
       // may have changed or deleted the WIP since it was looked up.
       const current = source?.wip ? await store.get(source.id) : undefined;
-      if (current) {
+      if (current && !current.onHead) {
         existing = current;
-        base = current.base;
-        onHead = !!current.onHead;
+        version = current.base;
+      } else if (current) {
+        existing = await this.currentHeadWip(promptId);
       } else {
         // A WIP that's gone lands the edit where it stood: at head, or at the
-        // old version it was based on.
-        const version = source
+        // old version it was on.
+        const asked = source
           ? source.onHead
             ? undefined
             : source.base
           : r.version;
         if (
-          version !== undefined &&
-          !(await this.isHeadContent(version, filePath))
+          asked !== undefined &&
+          !(await this.isHeadContent(asked, filePath))
         ) {
-          onHead = false;
-          base = version;
-          existing = await store.getWip(promptId, base);
+          version = asked;
+          existing = await store.getWip(promptId, asked);
         } else {
-          onHead = true;
           existing = await this.currentHeadWip(promptId);
-          base = existing?.base;
         }
       }
 
       if (existing?.pending) {
         throw new VariationConflictError(existing.pending.conflicts);
       }
-      base ??= (await this.snapshotFor(filePath)).id;
-
-      const basePrompt = await this.promptAtVersion(base, promptId);
+      const basePrompt =
+        version === undefined
+          ? await this.headFields(promptId)
+          : await this.promptAtVersion(version, promptId);
       if (!basePrompt) throw new Error("Prompt not found");
       const canonical = canonicalizeUpdates(
         basePrompt,
@@ -724,18 +788,20 @@ export class FileVariations {
 
       if (isEmptyUpdates(canonical)) {
         if (existing) await store.deleteWip(existing.id);
-        return onHead
+        return version === undefined
           ? ({ promptId } as PromptRef)
-          : ({ promptId, version: base } as PromptRef);
+          : ({ promptId, version } as PromptRef);
       }
+      const baseValues = fieldValuesOf(basePrompt, canonical);
       const wip = existing
-        ? await store.updateWip(existing.id, { updates: canonical })
+        ? await store.updateWip(existing.id, { updates: canonical, baseValues })
         : await store.putWip({
             promptId,
             ...(basePrompt.globalId && { globalId: basePrompt.globalId }),
-            base,
+            ...(version !== undefined && { base: version }),
             updates: canonical,
-            onHead,
+            baseValues,
+            onHead: version === undefined,
           });
       return { promptId, variation: wip.id } as PromptRef;
     });
@@ -747,16 +813,20 @@ export class FileVariations {
   }
 
   /**
-   * What running `ref` runs: the version it pins, and the variation — frozen,
-   * and rebased onto head — applied on top of it, if any.
+   * What running `ref` runs: the working tree — with the commit checked out,
+   * which the run records as its version when nothing is uncommitted — and
+   * the variation applied to it, if any: carried onto the working tree and
+   * frozen, so every trace points at an immutable variation, and running
+   * unchanged edits twice reuses one.
    *
    * @throws {@link VariationConflictError} when the variation can't be applied
-   *   to head without choosing between two changes.
+   *   to the working tree without choosing between two changes.
    */
   async prepareRun(
     ref: PromptRef,
-  ): Promise<{ version: VersionInfo; variation?: StoredVariation }> {
+  ): Promise<{ head?: HeadState; variation?: StoredVariation }> {
     const [filePath] = this.host.parsePromptId(ref.promptId);
+    const head = await this.versioning?.head();
 
     if (ref.variation === undefined) {
       if (
@@ -768,7 +838,7 @@ export class FileVariations {
             "on the working tree to run it.",
         );
       }
-      return { version: await this.snapshotFor(filePath) };
+      return { head };
     }
 
     const store = this.requireStore();
@@ -776,35 +846,23 @@ export class FileVariations {
     if (!v) throw new Error(`No variation ${ref.variation}`);
     if (v.pending) throw new VariationConflictError(v.pending.conflicts);
 
-    // Every trace points at an immutable variation: a WIP runs as the frozen
-    // row of its current updates, and running unchanged edits twice reuses it.
-    const frozen = v.wip
-      ? await store.intern({
-          promptId: v.promptId,
-          globalId: v.globalId,
-          base: v.base,
-          updates: v.updates,
-        })
-      : v;
-
-    const location = await this.headLocation(frozen);
-    const head = await this.snapshotFor(location.filePath);
-    if (frozen.base === head.id) {
-      return {
-        version: head,
-        variation: isEmptyUpdates(frozen.updates) ? undefined : frozen,
-      };
-    }
-    const outcome = await this.rebaseOnto(frozen, head.id, location.promptId);
+    const outcome = await this.rebaseOnto(
+      v,
+      undefined,
+      await this.headPromptId(v),
+    );
     if (!outcome.ok) throw new VariationConflictError(outcome.conflicts);
-    if (isEmptyUpdates(outcome.updates)) return { version: head };
+    if (isEmptyUpdates(outcome.updates)) return { head };
+    const [runPath] = this.host.parsePromptId(outcome.promptId);
+    const base = await this.baseFor(runPath, head);
     return {
-      version: head,
+      head,
       variation: await store.intern({
         promptId: outcome.promptId,
-        globalId: frozen.globalId,
-        base: head.id,
+        globalId: v.globalId,
+        ...(base !== undefined && { base }),
         updates: outcome.updates,
+        baseValues: fieldValuesOf(outcome.onto, outcome.updates),
       }),
     };
   }
@@ -852,22 +910,23 @@ export class FileVariations {
     await this.withWipLock(oldId, async () => {
       const wip = await store.getHeadWip(oldId);
       if (!wip) return;
-      const [filePath] = this.host.parsePromptId(newId);
-      const head = await this.snapshotFor(filePath);
-      const outcome = await this.rebaseOnto(wip, head.id, newId);
+      const outcome = await this.rebaseOnto(wip, undefined, newId);
       await store.deleteWip(wip.id);
       if (outcome.ok && isEmptyUpdates(outcome.updates)) return;
+      // A conflicted WIP moves as it was, with the conflicts pending.
       const moved = await store.putWip({
         promptId: newId,
         ...(wip.globalId && { globalId: wip.globalId }),
-        base: head.id,
-        updates: outcome.updates,
+        updates: outcome.ok ? outcome.updates : wip.updates,
+        baseValues: outcome.ok
+          ? fieldValuesOf(outcome.onto, outcome.updates)
+          : wip.baseValues,
         onHead: true,
       });
       if (!outcome.ok) {
         await store.updateWip(moved.id, {
           pending: {
-            onto: head.id,
+            targetValues: fieldValuesOf(outcome.onto, wip.updates),
             updates: outcome.updates,
             conflicts: outcome.conflicts,
             labels: REBASE_LABELS,
@@ -878,29 +937,28 @@ export class FileVariations {
   }
 
   /**
-   * Brings a variation into the prompt's head WIP (§G): rebases it onto
-   * head — onto the WIP's own base when there is a WIP, since merging needs
-   * both sides against one base — then merges it in field by field.
+   * Brings a variation into the prompt's head WIP (§G): rebases it onto the
+   * working tree, then merges it into the WIP field by field.
    *
    * Changes nothing when a field conflicts, unless `options` says how to
    * settle it: the conflicts come back, labelled, for the caller to choose —
    * throw the unsaved edits away (`replace`), pick a side per field
    * (`choices`), or leave everything as it was.
    *
-   * @param build - The variation to bring, given the version it will land on.
+   * @param build - The variation to bring.
    */
   private openOnHeadFrom(
-    location: { promptId: string; filePath: string },
+    promptId: string,
     { label, originName }: { label: string; originName?: string },
-    build: (target: VersionId) => Promise<StoredVariation>,
+    build: () => Promise<StoredVariation>,
     { choices, replace }: OpenOnHeadOptions = {},
   ): Promise<RebaseResult & { promptId: string }> {
     const store = this.requireStore();
     const settles = (conflicts: VariationConflict[]) =>
       !!choices && conflicts.every(c => choices[c.field]);
 
-    return this.withWipLock(location.promptId, async () => {
-      let wip = await this.currentHeadWip(location.promptId);
+    return this.withWipLock(promptId, async () => {
+      let wip = await this.currentHeadWip(promptId);
       if (wip && replace) {
         await store.deleteWip(wip.id);
         wip = undefined;
@@ -910,13 +968,12 @@ export class FileVariations {
           ok: false,
           conflicts: wip.pending.conflicts,
           labels: wip.pending.labels,
-          promptId: location.promptId,
+          promptId,
         };
       }
-      const target =
-        wip?.base ?? (await this.snapshotFor(location.filePath)).id;
-      const x = await build(target);
-      const rebased = await this.rebaseOnto(x, target, location.promptId);
+      const x = await build();
+      const rebased = await this.rebaseOnto(x, undefined, promptId);
+      const head = rebased.onto;
       let incoming = rebased.updates;
       if (!rebased.ok) {
         const labels = { target: "working tree", variation: label };
@@ -928,12 +985,9 @@ export class FileVariations {
             promptId: rebased.promptId,
           };
         }
-        const headPrompt = await this.promptAtVersion(target, rebased.promptId);
-        if (!headPrompt) throw new Error("Prompt not found");
         incoming = resolveConflicts(
-          headPrompt,
           {
-            onto: target,
+            targetValues: fieldValuesOf(head, x.updates),
             updates: rebased.updates,
             conflicts: rebased.conflicts,
             labels,
@@ -943,19 +997,20 @@ export class FileVariations {
       }
 
       if (!wip) {
+        const { base: _, ...unbased } = x;
         if (isEmptyUpdates(incoming)) {
           // Already applied: nothing to open.
           return {
             ok: true,
-            variation: toInfo({ ...x, base: target, updates: incoming }),
+            variation: toInfo({ ...unbased, updates: incoming }),
             promptId: rebased.promptId,
           };
         }
         const created = await store.putWip({
           promptId: rebased.promptId,
           ...(x.globalId && { globalId: x.globalId }),
-          base: target,
           updates: incoming,
+          baseValues: fieldValuesOf(head, incoming),
           onHead: true,
           ...(originName && { originName }),
         });
@@ -966,9 +1021,8 @@ export class FileVariations {
         };
       }
 
-      const headPrompt = await this.promptAtVersion(target, wip.promptId);
-      if (!headPrompt) throw new Error("Prompt not found");
-      const merged = mergeIntoWip(headPrompt, wip.updates, incoming);
+      if (!head) throw new Error("Prompt not found");
+      const merged = mergeIntoWip(head, wip.updates, incoming);
       let updates = merged.updates;
       if (!merged.ok) {
         const labels = { target: "unsaved edits", variation: label };
@@ -981,9 +1035,11 @@ export class FileVariations {
           };
         }
         updates = resolveConflicts(
-          headPrompt,
           {
-            onto: target,
+            targetValues: fieldValuesOf(
+              head,
+              mergeUpdates(wip.updates, incoming),
+            ),
             updates: merged.updates,
             conflicts: merged.conflicts,
             labels,
@@ -999,7 +1055,10 @@ export class FileVariations {
           promptId: wip.promptId,
         };
       }
-      const updated = await store.updateWip(wip.id, { updates });
+      const updated = await store.updateWip(wip.id, {
+        updates,
+        baseValues: fieldValuesOf(head, updates),
+      });
       return { ok: true, variation: toInfo(updated), promptId: wip.promptId };
     });
   }
@@ -1008,13 +1067,10 @@ export class FileVariations {
 
   /** {@link PromptVersions} over this provider's versioning adapter. */
   readonly versions: PromptVersions = {
-    snapshot: promptId =>
-      this.versioning.snapshot(
-        promptId === undefined ? undefined : this.relativePathOf(promptId),
-      ),
+    head: () => this.requireVersioning().head(),
     history: (promptId, options) =>
-      this.versioning.history(this.relativePathOf(promptId), options),
-    get: id => this.versioning.get(id),
+      this.requireVersioning().history(this.relativePathOf(promptId), options),
+    get: id => this.requireVersioning().get(id),
   };
 
   /** {@link PromptVariations} over this provider's variation store. */
@@ -1034,14 +1090,19 @@ export class FileVariations {
         if (v.pending) throw new VariationConflictError(v.pending.conflicts);
         // Naming a WIP names the frozen row of its current updates; the WIP
         // carries on, as the unsaved edits it still is.
-        const frozen = v.wip
-          ? await store.intern({
-              promptId: v.promptId,
-              globalId: v.globalId,
-              base: v.base,
-              updates: v.updates,
-            })
-          : v;
+        let frozen = v;
+        if (v.wip) {
+          const base = v.onHead
+            ? await this.baseFor(this.host.parsePromptId(v.promptId)[0])
+            : v.base;
+          frozen = await store.intern({
+            promptId: v.promptId,
+            globalId: v.globalId,
+            ...(base !== undefined && { base }),
+            updates: v.updates,
+            baseValues: v.baseValues,
+          });
+        }
         await store.name(frozen.id, frozen.promptId, name.trim());
         if (v.wip && v.originName) {
           await store.updateWip(v.id, { originName: null });
@@ -1058,32 +1119,25 @@ export class FileVariations {
 
     rebase: async (id, onto) => {
       const store = this.requireStore();
-      return this.withVariation(id, async (v): Promise<RebaseResult> => {
-        const location = onto ? undefined : await this.headLocation(v);
-        const target = onto ?? (await this.snapshotFor(location!.filePath)).id;
-        const outcome = await this.rebaseOnto(v, target, location?.promptId);
-        if (!outcome.ok) return { ok: false, conflicts: outcome.conflicts };
-        if (v.wip) {
-          const moved = await store.updateWip(v.id, {
-            base: target,
-            updates: outcome.updates,
-            pending: null,
-          });
-          this.host.emit({
-            type: "change",
-            promptId: v.promptId,
-            ref: { promptId: v.promptId, variation: v.id },
-          });
-          return { ok: true, variation: toInfo(moved) };
-        }
-        const rebased = await store.intern({
-          promptId: outcome.promptId,
-          globalId: v.globalId,
-          base: target,
-          updates: outcome.updates,
-        });
-        return { ok: true, variation: toInfo(rebased) };
+      const v = await store.get(id);
+      if (!v) throw new Error(`No variation ${id}`);
+      const outcome = await this.rebaseOnto(
+        v,
+        onto,
+        onto === undefined ? await this.headPromptId(v) : undefined,
+      );
+      if (!outcome.ok) return { ok: false, conflicts: outcome.conflicts };
+      const base =
+        onto ??
+        (await this.baseFor(this.host.parsePromptId(outcome.promptId)[0]));
+      const rebased = await store.intern({
+        promptId: outcome.promptId,
+        globalId: v.globalId,
+        ...(base !== undefined && { base }),
+        updates: outcome.updates,
+        baseValues: fieldValuesOf(outcome.onto, outcome.updates),
       });
+      return { ok: true, variation: toInfo(rebased) };
     },
 
     openOnHead: async (id, options) => {
@@ -1093,9 +1147,8 @@ export class FileVariations {
         return { ok: false, conflicts: x.pending.conflicts };
       }
       const label = x.names[0] ?? x.originName ?? "variation";
-      const location = await this.headLocation(x);
       const { promptId, ...outcome } = await this.openOnHeadFrom(
-        location,
+        await this.headPromptId(x),
         { label, originName: x.names[0] },
         async () => x,
         options,
@@ -1107,25 +1160,26 @@ export class FileVariations {
     openVersionOnHead: async (promptId, version, options) => {
       const old = await this.promptAtVersion(version, promptId);
       if (!old) throw new Error(`${promptId} doesn't exist at ${version}`);
-      const [filePath] = this.host.parsePromptId(promptId);
-      const info = await this.versioning.get(version);
-      const label = info ? versionLabel(info) : shortId(version);
-      // The old version's values, as edits to head: based on the target
-      // itself, so every field it sets is simply taken.
       const { promptId: landedOn, ...outcome } = await this.openOnHeadFrom(
-        { promptId, filePath },
-        { label },
-        async target => ({
-          id: "",
-          promptId,
-          ...(old.globalId && { globalId: old.globalId }),
-          base: target,
-          updates: fieldUpdatesOf(old),
-          wip: false,
-          names: [],
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        }),
+        promptId,
+        { label: shortId(version) },
+        async () => {
+          // The old version's values, as edits to the working tree: recorded
+          // as overwriting its values, so every field it sets is simply taken.
+          const updates = fieldUpdatesOf(old);
+          return {
+            id: "",
+            promptId,
+            ...(old.globalId && { globalId: old.globalId }),
+            base: version,
+            updates,
+            baseValues: fieldValuesOf(await this.headFields(promptId), updates),
+            wip: false,
+            names: [],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+        },
         options,
       );
       this.host.emit({ type: "change", promptId: landedOn });
@@ -1144,32 +1198,22 @@ export class FileVariations {
               promptId: v.promptId,
             };
           }
-          let [filePath] = this.host.parsePromptId(v.promptId);
-          let promptId = v.promptId;
-          let updates = v.updates;
-          // Onto a fresh head first, unless it's already head's.
-          if (!(await this.isHeadContent(v.base, filePath))) {
-            this.invalidate();
-            const location = await this.headLocation(v);
-            const head = await this.snapshotFor(location.filePath);
-            const outcome = await this.rebaseOnto(
-              v,
-              head.id,
-              location.promptId,
-            );
-            if (!outcome.ok) {
-              return {
-                ok: false,
-                conflicts: outcome.conflicts,
-                promptId: v.promptId,
-              };
-            }
-            promptId = outcome.promptId;
-            updates = outcome.updates;
-            [filePath] = this.host.parsePromptId(promptId);
+          // Onto the working tree as it is now: for settled unsaved edits to
+          // head, that changes nothing.
+          const outcome = await this.rebaseOnto(
+            v,
+            undefined,
+            await this.headPromptId(v),
+          );
+          if (!outcome.ok) {
+            return {
+              ok: false,
+              conflicts: outcome.conflicts,
+              promptId: v.promptId,
+            };
           }
-
-          const [, name] = this.host.parsePromptId(promptId);
+          const { promptId, updates } = outcome;
+          const [filePath, name] = this.host.parsePromptId(promptId);
           if (!isEmptyUpdates(updates)) {
             await this.host.mutateFile(filePath, () =>
               this.host.applyUpdates(
@@ -1215,20 +1259,18 @@ export class FileVariations {
           if (!pending) {
             return { ok: true, variation: toInfo(current), promptId };
           }
-          const target = await this.promptAtVersion(pending.onto, promptId);
-          if (!target) throw new Error("Prompt not found");
-          const updates = resolveConflicts(target, pending, choices);
+          const updates = resolveConflicts(pending, choices);
           if (isEmptyUpdates(updates)) {
             await store.deleteWip(id);
             return {
               ok: true,
-              variation: toInfo({ ...current, base: pending.onto, updates }),
+              variation: toInfo({ ...current, updates }),
               promptId,
             };
           }
           const resolved = await store.updateWip(id, {
-            base: pending.onto,
             updates,
+            baseValues: pickFieldValues(pending.targetValues, updates),
             pending: null,
           });
           return { ok: true, variation: toInfo(resolved), promptId };

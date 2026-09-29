@@ -26,6 +26,9 @@ const system = (text: string): NormalizedPromptUpdates => ({
   system: { kind: "primitive", value: text },
 });
 
+/** What the updates overwrite. */
+const WAS = { system: { kind: "primitive", value: "was" } };
+
 describe("TursoVariationStore", () => {
   it("interns identical content to one frozen row", async () => {
     const store = await makeStore();
@@ -33,11 +36,13 @@ describe("TursoVariationStore", () => {
       promptId: "p.prompt.ts#a",
       base: "v1",
       updates: system("hi"),
+      baseValues: WAS,
     });
     const b = await store.intern({
       promptId: "p.prompt.ts#a",
       base: "v1",
       updates: system("hi"),
+      baseValues: WAS,
     });
     expect(b.id).toBe(a.id);
     expect(a.wip).toBe(false);
@@ -50,32 +55,35 @@ describe("TursoVariationStore", () => {
       promptId: "p#a",
       base: "v1",
       updates: system("hi"),
+      baseValues: WAS,
     });
     const otherPrompt = await store.intern({
       promptId: "p#b",
       base: "v1",
       updates: system("hi"),
+      baseValues: WAS,
     });
     const otherBase = await store.intern({
       promptId: "p#a",
       base: "v2",
       updates: system("hi"),
+      baseValues: WAS,
     });
     expect(new Set([a.id, otherPrompt.id, otherBase.id]).size).toBe(3);
   });
 
-  it("holds one WIP per (prompt, base) and one head WIP per prompt", async () => {
+  it("holds one head WIP per prompt, and one WIP per old version", async () => {
     const store = await makeStore();
     const first = await store.putWip({
       promptId: "p#a",
-      base: "v1",
       updates: system("one"),
+      baseValues: WAS,
       onHead: true,
     });
     const second = await store.putWip({
       promptId: "p#a",
-      base: "v2",
       updates: system("two"),
+      baseValues: WAS,
       onHead: true,
     });
     expect(await store.get(first.id)).toBeUndefined();
@@ -85,6 +93,7 @@ describe("TursoVariationStore", () => {
       promptId: "p#a",
       base: "v0",
       updates: system("old"),
+      baseValues: WAS,
       onHead: false,
     });
     expect((await store.getWip("p#a", "v0"))?.id).toBe(old.id);
@@ -96,27 +105,28 @@ describe("TursoVariationStore", () => {
     const store = await makeStore();
     const wip = await store.putWip({
       promptId: "p#a",
-      base: "v1",
       updates: system("one"),
+      baseValues: WAS,
       onHead: true,
     });
     const pending = {
-      onto: "v2",
+      targetValues: { system: 2 },
       updates: { style: "chat" as const },
       conflicts: [{ field: "system", base: 1, target: 2, variation: 3 }],
       labels: { target: "head", variation: "yours" },
     };
     const moved = await store.updateWip(wip.id, {
-      base: "v2",
       updates: system("two"),
+      baseValues: { system: 2 },
       pending,
     });
     expect(moved).toMatchObject({
       id: wip.id,
-      base: "v2",
       updates: system("two"),
+      baseValues: { system: 2 },
       pending,
     });
+    expect(moved.base).toBeUndefined();
     const cleared = await store.updateWip(wip.id, { pending: null });
     expect(cleared.pending).toBeUndefined();
   });
@@ -127,6 +137,7 @@ describe("TursoVariationStore", () => {
       promptId: "p#a",
       base: "v1",
       updates: system("hi"),
+      baseValues: WAS,
     });
     await store.deleteWip(frozen.id);
     expect(await store.get(frozen.id)).toBeDefined();
@@ -138,17 +149,24 @@ describe("TursoVariationStore", () => {
       promptId: "p#a",
       base: "v1",
       updates: system("a"),
+      baseValues: WAS,
     });
     const b = await store.intern({
       promptId: "p#a",
       base: "v1",
       updates: system("b"),
+      baseValues: WAS,
     });
-    await store.intern({ promptId: "p#a", base: "v1", updates: system("c") });
-    const wip = await store.putWip({
+    await store.intern({
       promptId: "p#a",
       base: "v1",
+      updates: system("c"),
+      baseValues: WAS,
+    });
+    const wip = await store.putWip({
+      promptId: "p#a",
       updates: system("w"),
+      baseValues: WAS,
       onHead: true,
     });
 
@@ -165,17 +183,16 @@ describe("TursoVariationStore", () => {
     expect((await store.list("p#a")).map(v => v.id)).toEqual([wip.id]);
   });
 
-  it("stores blobs and file snapshots", async () => {
+  it("dedupes variations without a base, and tells apart ones that overwrote different values", async () => {
     const store = await makeStore();
-    const sha = await store.putBlob("hello");
-    expect(sha).toMatch(/^[0-9a-f]{64}$/);
-    expect(await store.putBlob("hello")).toBe(sha);
-    expect(await store.getBlob(sha)).toBe("hello");
-
-    const first = await store.recordSnapshot("a.prompt.ts", sha);
-    const again = await store.recordSnapshot("a.prompt.ts", sha);
-    expect(again.createdAt).toBe(first.createdAt);
-    expect(await store.listSnapshots("a.prompt.ts")).toHaveLength(1);
-    expect((await store.getSnapshot(sha))?.path).toBe("a.prompt.ts");
+    const content = { promptId: "p#a", updates: system("hi"), baseValues: WAS };
+    const a = await store.intern(content);
+    expect(a.base).toBeUndefined();
+    expect((await store.intern(content)).id).toBe(a.id);
+    const other = await store.intern({
+      ...content,
+      baseValues: { system: { kind: "primitive", value: "other" } },
+    });
+    expect(other.id).not.toBe(a.id);
   });
 });

@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { shortId, versionLabel } from "../../shared/helpers";
-import type {
-  TraceSummary,
-  VariationInfo,
-  VersionInfo,
-} from "../../shared/types";
+import { shortId } from "../../shared/helpers";
+import type { TraceSummary, VariationInfo } from "../../shared/types";
 import { variationLabel } from "./prompt-ref";
 import { tableModeWidth as baseTableModeWidth } from "./summary-list";
 
@@ -156,18 +152,14 @@ export function tableModeWidth(columns: TraceColumnState[]): number {
 // ─── Prompt version and variation ───────────────────────────────────────────
 
 /**
- * What the Version column shows for a trace: its short sha, or "snapshot of
- * <short sha>" once the version has been looked up; the bare short id until
- * then; `—` for a run that recorded none.
+ * What the Version column shows for a trace: the short sha of the commit it
+ * ran at; `—` for a run that recorded none (one on a dirty working tree).
  */
 export function traceVersionLabel(
   trace: Pick<TraceSummary, "promptVersion">,
-  versions: Record<string, VersionInfo>,
 ): string {
   const id = trace.promptVersion;
-  if (!id) return "—";
-  const info = versions[id];
-  return info ? versionLabel(info) : shortId(id);
+  return id ? shortId(id) : "—";
 }
 
 /**

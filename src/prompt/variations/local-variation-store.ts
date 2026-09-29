@@ -132,19 +132,4 @@ export class LocalVariationStore implements VariationStore {
   async unname(promptId: string, name: string) {
     await (await this.existing())?.unname(promptId, name);
   }
-  async putBlob(content: string) {
-    return (await this.open()).putBlob(content);
-  }
-  async getBlob(sha256: string) {
-    return (await this.existing())?.getBlob(sha256);
-  }
-  async recordSnapshot(path: string, sha256: string) {
-    return (await this.open()).recordSnapshot(path, sha256);
-  }
-  async listSnapshots(path: string) {
-    return (await (await this.existing())?.listSnapshots(path)) ?? [];
-  }
-  async getSnapshot(sha256: string) {
-    return (await this.existing())?.getSnapshot(sha256);
-  }
 }

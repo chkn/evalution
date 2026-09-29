@@ -1402,10 +1402,6 @@ pre {
   font-size: 12px;
 }
 
-.pg-ref-banner-note {
-  opacity: 0.8;
-}
-
 .pg-conflict-bar {
   display: flex;
   flex-direction: column;
