@@ -3780,7 +3780,11 @@ pre {
 }
 
 .trace-table-row td {
+  /* Tall enough for an annotation chip (18px) + padding, so rows don't grow
+     when the annotations column is toggled. `height` acts as a minimum on cells. */
+  height: 32px;
   padding: 6px 8px;
+  vertical-align: middle;
   border-bottom: 1px solid var(--sidebar-border);
   color: var(--tree-text-secondary);
   overflow: hidden;

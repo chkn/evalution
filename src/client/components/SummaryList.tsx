@@ -305,9 +305,11 @@ export function SummaryList<T>({
                   onClick={() => onSelect(item)}
                   title={itemTitle(item)}
                 >
-                  <td className="trace-table-name-cell">
-                    {itemMarker?.(item)}
-                    <span className="trace-list-name">{itemName(item)}</span>
+                  <td>
+                    <div className="trace-table-name-cell">
+                      {itemMarker?.(item)}
+                      <span className="trace-list-name">{itemName(item)}</span>
+                    </div>
                   </td>
                   {columns.map(column => (
                     <td
