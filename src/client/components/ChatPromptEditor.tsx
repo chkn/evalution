@@ -301,11 +301,13 @@ function MessageCard({
 function ParamCard({
   propDef,
   value,
+  editable,
   onDelete,
   onChange,
 }: {
   propDef: PropDefinition;
   value: PropValue | undefined;
+  editable: boolean;
   onDelete: () => void;
   onChange: (v: PropValue) => void;
 }) {
@@ -333,14 +335,16 @@ function ParamCard({
             </div>
           )}
         </div>
-        <button
-          type="button"
-          className="pg-delete-msg"
-          onClick={onDelete}
-          title="Remove parameter"
-        >
-          ×
-        </button>
+        {editable && (
+          <button
+            type="button"
+            className="pg-delete-msg"
+            onClick={onDelete}
+            title="Remove parameter"
+          >
+            ×
+          </button>
+        )}
       </div>
       <div className="pg-param-input-inline">
         <ItemEditor
@@ -348,7 +352,7 @@ function ParamCard({
           value={value}
           onChange={onChange}
           className="pg-param-input"
-          disabled={!canEdit(true, value)}
+          disabled={!canEdit(editable, value)}
         />
       </div>
     </div>
@@ -370,6 +374,7 @@ function SettingsModal({
   onUpdate: (updates: ChatEditorUpdates) => void;
   onClose: () => void;
 }) {
+  const editable = prompt.modelParametersEditable !== false;
   return (
     <div className="pg-modal-backdrop" onClick={onClose}>
       <div className="pg-modal" onClick={e => e.stopPropagation()}>
@@ -397,7 +402,7 @@ function SettingsModal({
                   <div key={param.def.name} className="pg-panel-card">
                     <div className="pg-msg-header">
                       <span className="pg-role-label">{param.def.name}</span>
-                      {param.value && isEditable(param.value) && (
+                      {editable && param.value && isEditable(param.value) && (
                         <button
                           type="button"
                           className="pg-delete-msg"
@@ -428,6 +433,7 @@ function SettingsModal({
                   key={param.def.name}
                   propDef={propDef}
                   value={param.value}
+                  editable={editable}
                   onDelete={() =>
                     onUpdate({ modelParameters: { [param.def.name]: null } })
                   }
@@ -439,7 +445,7 @@ function SettingsModal({
             })
           )}
         </div>
-        {addableParams.length > 0 && (
+        {editable && addableParams.length > 0 && (
           <div className="pg-modal-footer">
             <div className="pg-pill-btn pg-add-param-btn">
               + Add setting

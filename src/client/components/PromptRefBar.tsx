@@ -13,7 +13,12 @@ import type {
   VersionInfo,
 } from "../../shared/types";
 import { getPromptVariations, getPromptVersions } from "../api";
-import { fieldText, refChipLabel, variationLabel } from "./prompt-ref";
+import {
+  fieldText,
+  refBannerNote,
+  refChipLabel,
+  variationLabel,
+} from "./prompt-ref";
 import { diffWords } from "./text-diff";
 import { useAnchoredPopover } from "./use-anchored-popover";
 
@@ -210,12 +215,11 @@ interface ActionsProps {
   onSave: () => void;
   onDiscard: () => void;
   onSaveAs: (name: string) => void;
-  onOpenOnHead: () => void;
 }
 
 /**
- * Save / Discard while there are unsaved edits, "Save as variation…", and
- * "Open on working tree" for a named variation.
+ * Save / Discard while there are unsaved edits, and "Save as variation…".
+ * "Open on working tree" lives in the {@link RefBanner}.
  */
 export function PromptRefActions({
   shown,
@@ -223,7 +227,6 @@ export function PromptRefActions({
   onSave,
   onDiscard,
   onSaveAs,
-  onOpenOnHead,
 }: ActionsProps) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
@@ -309,17 +312,6 @@ export function PromptRefActions({
           Save as variation…
         </button>
       )}
-      {v && !v.wip && shown.atHead && (
-        <button
-          type="button"
-          className="pg-ref-btn"
-          onClick={onOpenOnHead}
-          disabled={busy}
-          title="Bring this variation into the working tree's unsaved edits"
-        >
-          Open on working tree
-        </button>
-      )}
     </div>
   );
 }
@@ -330,25 +322,32 @@ interface BannerProps {
   onOpenOnHead: () => void;
 }
 
-/** "Viewing <sha> · <message>" over an old version, or a variation made on one. */
-export function OldVersionBanner({ shown, busy, onOpenOnHead }: BannerProps) {
-  if (shown.atHead !== false) return null;
+/**
+ * "Viewing <what> · <why not here>" over a prompt that can't be edited or run
+ * as shown — a saved variation, an old version, or both — with the one way
+ * forward: "Open on working tree".
+ */
+export function RefBanner({ shown, busy, onOpenOnHead }: BannerProps) {
+  const note = refBannerNote(shown);
+  if (!note) return null;
   const version = shown.version;
+  const old = shown.atHead === false;
   return (
     <div className="pg-ref-banner" role="status">
       <span>
         Viewing{" "}
-        {shown.variation && (
+        {shown.variation && <strong>{variationLabel(shown.variation)}</strong>}
+        {shown.variation && old && " on "}
+        {old && (
           <>
-            <strong>{variationLabel(shown.variation)}</strong> on{" "}
+            <code>{version ? versionLabel(version) : "an old version"}</code>
+            {version?.message && version.kind === "commit" && (
+              <> · {version.message}</>
+            )}
           </>
         )}
-        <code>{version ? versionLabel(version) : "an old version"}</code>
-        {version?.message && version.kind === "commit" && (
-          <> · {version.message}</>
-        )}
-        . Running is only available on the working tree.
-        {version?.fileOnly && (
+        . {note}
+        {old && version?.fileOnly && (
           <span className="pg-ref-banner-note">
             {" "}
             (File contents only: this version reproduces the prompt, not its
@@ -361,6 +360,7 @@ export function OldVersionBanner({ shown, busy, onOpenOnHead }: BannerProps) {
         className="pg-ref-btn"
         onClick={onOpenOnHead}
         disabled={busy}
+        title="Bring this into the working tree's unsaved edits, to edit and run"
       >
         Open on working tree
       </button>

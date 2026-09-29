@@ -8,6 +8,7 @@ import type {
   PropDefinition,
 } from "../../../shared/types";
 import PlaygroundContent from "../PlaygroundContent";
+import { SAVED_VARIATION_ID } from "./saved-variation";
 
 function makePrompt(
   messagesCount: number,
@@ -59,6 +60,25 @@ export function PlaygroundContentHarness({
     <div className="main-content" style={{ width, height }}>
       <PlaygroundContent
         prompt={prompt}
+        onUpdate={setPrompt}
+        onDirtyChange={() => {}}
+      />
+    </div>
+  );
+}
+
+/** Mounts PlaygroundContent showing a saved variation of a versioned prompt. */
+export function SavedVariationHarness() {
+  const [prompt, setPrompt] = useState<NormalizedPrompt>({
+    ...makePrompt(1, []),
+    ref: { promptId: "test" },
+    atHead: true,
+  });
+  return (
+    <div className="main-content" style={{ width: 900, height: 500 }}>
+      <PlaygroundContent
+        prompt={prompt}
+        promptRef={{ promptId: "test", variation: SAVED_VARIATION_ID }}
         onUpdate={setPrompt}
         onDirtyChange={() => {}}
       />

@@ -269,8 +269,10 @@ export interface PromptProvider<
    *
    * On a provider with {@link variations}, this never writes the source: it
    * updates (or creates) the WIP variation for `ref`'s base, and the source
-   * is written only by an explicit {@link PromptVariations.save}. Without
-   * variations, it writes the source.
+   * is written only by an explicit {@link PromptVariations.save}. A saved
+   * (frozen) variation is read-only: editing one rejects, and
+   * {@link PromptVariations.openOnHead} is how its changes become editable.
+   * Without variations, it writes the source.
    *
    * This method is optional; providers that do not support editing may omit
    * it.

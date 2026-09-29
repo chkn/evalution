@@ -414,6 +414,21 @@ describe("FilePromptProvider WIP variations", () => {
     ).toEqual(str("Keep this"));
   });
 
+  it("a named variation is read-only: editing it leaves it and the unsaved edits alone", async () => {
+    const { provider, edit } = await setup();
+    const { ref } = await edit(ID, "Named");
+    const named = await provider.variations!.name(ref.variation!, "keeper");
+    await edit(ref, "Unsaved");
+
+    await expect(
+      edit({ promptId: ID, variation: named.id }, "Edited"),
+    ).rejects.toThrow(/Open it on the working tree/);
+    expect(
+      systemOf(await provider.getPrompt({ promptId: ID, variation: named.id })),
+    ).toEqual(str("Named"));
+    expect(systemOf(await provider.getPrompt(ref))).toEqual(str("Unsaved"));
+  });
+
   it("reads a prompt back at an old version after the file changed", async () => {
     const { provider, fileProvider } = await setup();
     const { version } = await provider.execute(ID, ["Ada"]);

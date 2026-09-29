@@ -153,6 +153,11 @@ export interface NormalizedPromptBase {
    * part of the style's own authored content).
    */
   modelParameters: NormalizedParameter[];
+  /**
+   * False when the model parameters can't be changed here — a saved
+   * variation shown read-only, say. Absent means they can.
+   */
+  modelParametersEditable?: boolean;
 
   /**
    * Named values the SDK needs to **execute** the config this prompt renders,

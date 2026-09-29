@@ -448,11 +448,16 @@ silent. A conflicted one marks the WIP `conflicted` and the editor shows the con
 WIP can't run until they're resolved, because running would silently drop either the IDE edit or
 the playground edit.
 
-**Editing a non-head ref** follows the same rules against a different base. Editing
-`{ version: v }` creates or updates the WIP for (prompt, `v`). Editing a frozen variation `x`
-creates or updates the WIP for (prompt, `x.base`) with `x.updates` merged underneath the new edit.
-If `x` had a name, the WIP remembers it, and "Save as variation" moves that name to the new frozen
-row.
+**Editing an old version** follows the same rules against a different base: editing
+`{ version: v }` creates or updates the WIP for (prompt, `v`).
+
+**A frozen variation is read-only.** Editing `{ variation: x }` is rejected, and the editor shows
+`x` read-only under a banner whose one action is **Open on working tree**. Editing it in place
+would have to pick a WIP for the edit to land in, and at head that means merging `x` over any
+unsaved edits there, silently, on the first keystroke. Opening on the working tree makes that
+merge an explicit step that reports conflicts (below). A WIP opened from a named `x` remembers the
+name, and "Save as variation" moves that name to the new frozen row. Editing a variation *without*
+bringing it to head (say, a WIP of its own) is left open for later.
 
 **Open on working tree is the only way to bring a variation to head.** `openOnHead(x)` rebases `x`
 onto a fresh head snapshot (§F). If there's no head WIP, the result becomes the WIP. If there is
@@ -506,9 +511,10 @@ and returns the conflicts.
   a conflict bar. Each conflicted field shows base, head, and yours, and offers "keep head" or
   "keep mine" per field.
 - **"Save as variation…"** names the current WIP (it interns it, then names the frozen row).
-- **Opening an old version or its variation** shows a banner: "Viewing <short sha> · <message>.
-  Running is only available on the working tree." One action: **Open on working tree**
-  (`openOnHead`, §G). A named variation on head gets the same action from the ref menu.
+- **Opening an old version, or a frozen variation,** shows a banner: "Viewing <name> on <short
+  sha> · <message>", then why it can't be edited or run from here ("Saved variations are
+  read-only.", "Running is only available on the working tree."). One action: **Open on working
+  tree** (`openOnHead`, §G).
 - **Trace → Open prompt** opens `{ variation }` when the trace recorded one, otherwise
   `{ version }`. When that version is the current head snapshot, it opens head, so the common case
   of opening a trace you just ran lands somewhere editable.

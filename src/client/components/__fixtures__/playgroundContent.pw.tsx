@@ -3,7 +3,11 @@
 
 import { expect, test } from "@playwright/experimental-ct-react";
 import type { Locator } from "@playwright/test";
-import { PlaygroundContentHarness } from "./PlaygroundContentHarness";
+import {
+  PlaygroundContentHarness,
+  SavedVariationHarness,
+} from "./PlaygroundContentHarness";
+import { SAVED_VARIATION_ID, savedVariationPrompt } from "./saved-variation";
 
 const rect = (loc: Locator) =>
   loc.evaluate(el => {
@@ -72,4 +76,36 @@ test("execute panel scrolls its params instead of overflowing the column", async
     el => el.scrollHeight > el.clientHeight + 1,
   );
   expect(overflowing).toBe(true);
+});
+
+test("a saved variation shows read-only, with the way to edit it", async ({
+  mount,
+  page,
+}) => {
+  await page.route("**/api/**", async route => {
+    const url = route.request().url();
+    if (url.includes(`variation=${SAVED_VARIATION_ID}`)) {
+      await route.fulfill({ json: savedVariationPrompt });
+    } else if (url.includes("/model-parameters")) {
+      await route.fulfill({ json: [] });
+    } else {
+      await route.fulfill({ json: null });
+    }
+  });
+  const component = await mount(<SavedVariationHarness />);
+
+  const banner = component.getByRole("status");
+  await expect(banner).toContainText(
+    "Viewing keeper. Saved variations are read-only.",
+  );
+  await expect(
+    banner.getByRole("button", { name: "Open on working tree" }),
+  ).toBeVisible();
+
+  const editor = component.locator(".pg-editor-col");
+  await expect(editor).toContainText("Be brief");
+  await expect(editor.locator('[contenteditable="true"]')).toHaveCount(0);
+  await expect(
+    editor.getByRole("button", { name: /Add message/ }),
+  ).toBeDisabled();
 });

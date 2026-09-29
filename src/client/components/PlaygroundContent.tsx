@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 /*
 function TracesIcon() {
   return (
@@ -72,16 +72,18 @@ import PlaygroundEditor from "./PlaygroundEditor";
 import PlaygroundExecution from "./PlaygroundExecution";
 import {
   ConflictBar,
-  OldVersionBanner,
   type OpenOnHeadConflict,
   OpenOnHeadConflicts,
   PromptRefActions,
   PromptRefChip,
+  RefBanner,
 } from "./PromptRefBar";
 import {
+  asReadOnly,
   effectiveRef,
   isHeadRef,
   isHeadWip,
+  isSavedVariation,
   openingLabel,
   runDisabledReason,
 } from "./prompt-ref";
@@ -373,6 +375,13 @@ function PlaygroundContent({
     [onRefresh],
   );
 
+  // A saved variation shows as it is: its changes are edited by opening it
+  // on the working tree, from the banner.
+  const editorPrompt = useMemo(
+    () => (isSavedVariation(shown) ? asReadOnly(shown) : shown),
+    [shown],
+  );
+
   const providerId = prompt.providerId ?? "";
   const variation = shown.variation;
 
@@ -507,7 +516,6 @@ function PlaygroundContent({
                 onSave={handleSave}
                 onDiscard={handleDiscard}
                 onSaveAs={handleSaveAs}
-                onOpenOnHead={handleOpenOnHead}
               />
             )}
           </div>
@@ -531,7 +539,7 @@ function PlaygroundContent({
             onCombine={choices => openOnHead({ choices })}
           />
         ) : (
-          <OldVersionBanner
+          <RefBanner
             shown={shown}
             busy={busy}
             onOpenOnHead={handleOpenOnHead}
@@ -551,7 +559,7 @@ function PlaygroundContent({
       >
         <div className="pg-editor-col">
           <PlaygroundEditor
-            prompt={shown}
+            prompt={editorPrompt}
             onUpdate={handleUpdate}
             modelDefinition={modelDefinition}
           />

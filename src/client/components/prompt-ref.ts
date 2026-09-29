@@ -77,6 +77,49 @@ export function openingLabel(prompt: NormalizedPrompt): string {
   return "this version";
 }
 
+/**
+ * Whether `prompt` is a saved (named or run) variation: read-only, since
+ * editing one would have to decide where the edit lands. "Open on working
+ * tree" is how its changes become editable.
+ */
+export function isSavedVariation(prompt: NormalizedPrompt): boolean {
+  return !!prompt.variation && !prompt.variation.wip;
+}
+
+/** `prompt` with every field marked read-only, for showing it as it is. */
+export function asReadOnly(prompt: NormalizedPrompt): NormalizedPrompt {
+  const common = { modelEditable: false, modelParametersEditable: false };
+  return prompt.style === "chat"
+    ? {
+        ...prompt,
+        ...common,
+        systemEditable: false,
+        messagesEditable: false,
+      }
+    : {
+        ...prompt,
+        ...common,
+        stateEditable: false,
+        questionsEditable: false,
+      };
+}
+
+/**
+ * What the banner over a prompt says it can't do from here — be edited, as
+ * a saved variation; be run, as an old version — or `undefined` for no
+ * banner.
+ */
+export function refBannerNote(prompt: NormalizedPrompt): string | undefined {
+  const saved = isSavedVariation(prompt);
+  const old = prompt.atHead === false;
+  if (saved && old) {
+    return "Saved variations are read-only, and run only on the working tree.";
+  }
+  if (saved) return "Saved variations are read-only.";
+  if (old) return "Running is only available on the working tree.";
+  return undefined;
+}
+
 /** Why this prompt can't run from here, or `undefined` when it can. */
 export function runDisabledReason(
   prompt: NormalizedPrompt,

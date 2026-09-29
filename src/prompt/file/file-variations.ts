@@ -663,17 +663,23 @@ export class FileVariations {
     if (r.variation !== undefined && !source) {
       throw new Error(`No variation ${r.variation}`);
     }
+    // A saved variation is read-only: editing one would have to decide where
+    // the edit lands — which, at head, means over any unsaved edits there.
+    // Opening it on the working tree makes that an explicit, reviewed step.
+    if (source && !source.wip) {
+      throw new Error(
+        "A saved variation can't be edited. Open it on the working tree to edit it.",
+      );
+    }
     const promptId = source?.promptId ?? r.promptId;
     const [filePath] = this.host.parsePromptId(promptId);
 
     const landed = await this.withWipLock(promptId, async () => {
-      // Which WIP this edit lands in: its base, whether it's head's, what it
-      // already holds, and a frozen variation's updates to merge underneath.
+      // Which WIP this edit lands in: its base, whether it's head's, and
+      // what it already holds.
       let base: VersionId | undefined;
       let onHead: boolean;
       let existing: StoredVariation | undefined;
-      let underneath: NormalizedPromptUpdates | undefined;
-      let originName: string | undefined;
 
       // Re-read under the lock: a save or discard queued ahead of this edit
       // may have changed or deleted the WIP since it was looked up.
@@ -682,14 +688,6 @@ export class FileVariations {
         existing = current;
         base = current.base;
         onHead = !!current.onHead;
-      } else if (source && !source.wip) {
-        onHead = await this.isHeadContent(source.base, filePath);
-        existing = onHead
-          ? await this.currentHeadWip(promptId)
-          : await store.getWip(promptId, source.base);
-        base = existing?.base ?? source.base;
-        underneath = source.updates;
-        originName = source.names[0];
       } else {
         // A WIP that's gone lands the edit where it stood: at head, or at the
         // old version it was based on.
@@ -721,7 +719,7 @@ export class FileVariations {
       if (!basePrompt) throw new Error("Prompt not found");
       const canonical = canonicalizeUpdates(
         basePrompt,
-        mergeUpdates(existing?.updates, underneath, updates),
+        mergeUpdates(existing?.updates, updates),
       );
 
       if (isEmptyUpdates(canonical)) {
@@ -731,17 +729,13 @@ export class FileVariations {
           : ({ promptId, version: base } as PromptRef);
       }
       const wip = existing
-        ? await store.updateWip(existing.id, {
-            updates: canonical,
-            ...(originName !== undefined && { originName }),
-          })
+        ? await store.updateWip(existing.id, { updates: canonical })
         : await store.putWip({
             promptId,
             ...(basePrompt.globalId && { globalId: basePrompt.globalId }),
             base,
             updates: canonical,
             onHead,
-            ...(originName !== undefined && { originName }),
           });
       return { promptId, variation: wip.id } as PromptRef;
     });

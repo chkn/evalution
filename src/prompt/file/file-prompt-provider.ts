@@ -1131,7 +1131,8 @@ export class FilePromptProvider
    * With variations, this never writes the file: the edit lands in the
    * work-in-progress variation for `ref`'s base — created on the first edit,
    * deleted once edits cancel out — and the returned ref names it. Writing the
-   * file is {@link PromptVariations.save}. Without variations, the file is
+   * file is {@link PromptVariations.save}. A saved variation is read-only;
+   * open it on the working tree to edit it. Without variations, the file is
    * written as the edit arrives.
    */
   async updatePromptProperties(

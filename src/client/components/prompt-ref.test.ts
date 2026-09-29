@@ -8,9 +8,12 @@ import type {
   VersionInfo,
 } from "../../shared/types";
 import {
+  asReadOnly,
   effectiveRef,
   fieldText,
   isHeadRef,
+  isSavedVariation,
+  refBannerNote,
   refChipLabel,
   runDisabledReason,
 } from "./prompt-ref";
@@ -94,6 +97,44 @@ describe("refChipLabel", () => {
         atHead: false,
       }),
     ).toBe("terse · on 0123456");
+  });
+});
+
+const saved: VariationInfo = { ...wip(false), wip: false, names: ["keeper"] };
+
+describe("saved variations", () => {
+  it("are the variations that aren't unsaved edits", () => {
+    expect(isSavedVariation({ ...head, variation: saved })).toBe(true);
+    expect(isSavedVariation({ ...head, variation: wip(true) })).toBe(false);
+    expect(isSavedVariation(head)).toBe(false);
+  });
+
+  it("show read-only, model parameters included", () => {
+    expect(asReadOnly(head)).toMatchObject({
+      modelEditable: false,
+      modelParametersEditable: false,
+      systemEditable: false,
+      messagesEditable: false,
+    });
+  });
+});
+
+describe("refBannerNote", () => {
+  it("says what can't be done from here", () => {
+    expect(refBannerNote({ ...head, variation: saved })).toBe(
+      "Saved variations are read-only.",
+    );
+    expect(refBannerNote({ ...head, variation: saved, atHead: false })).toMatch(
+      /read-only, and run only on the working tree/,
+    );
+    expect(refBannerNote({ ...head, atHead: false })).toMatch(
+      /Running is only available on the working tree/,
+    );
+  });
+
+  it("is nothing for head or its unsaved edits", () => {
+    expect(refBannerNote(head)).toBeUndefined();
+    expect(refBannerNote({ ...head, variation: wip(true) })).toBeUndefined();
   });
 });
 
