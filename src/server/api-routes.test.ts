@@ -11,7 +11,11 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
 import { runDatasetMigrations } from "../dataset/db/migrate.ts";
 import { TursoDatasetProvider } from "../dataset/turso-dataset-provider.ts";
-import type { PromptProvider } from "../prompt/prompt-provider.ts";
+import {
+  type PromptProvider,
+  promptIdOf,
+  VariationConflictError,
+} from "../prompt/prompt-provider.ts";
 import { PromptRegistry } from "../prompt/prompt-registry.ts";
 import type { ExecuteRequest, SSEData } from "../shared/types.ts";
 import { runMigrations } from "../trace/db/migrate.ts";
@@ -45,7 +49,8 @@ function fakeProvider(
         },
       ];
     },
-    async getPrompt(id: string) {
+    async getPrompt(ref) {
+      const id = promptIdOf(ref);
       return id === "p#test"
         ? {
             id,
@@ -807,5 +812,90 @@ describe("dataset routes", () => {
       providerId: DATASET_PROVIDER_ID,
       event: { type: "add", datasetId: dataset.id },
     });
+  });
+});
+
+describe("prompt refs on the prompt routes", () => {
+  it("passes ?variation= through to execute and returns what ran", async () => {
+    let received: unknown;
+    const { app } = makeApp(async ref => {
+      received = ref;
+      return { version: "abc123", variation: "var_frozen" };
+    });
+    const res = await app.request(
+      new Request(
+        "http://localhost/api/prompts/fake/cCN0ZXN0/execute?variation=var_wip",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ functionInputs: [] }),
+        },
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(received).toEqual({ promptId: "p#test", variation: "var_wip" });
+    expect(await res.json()).toMatchObject({
+      version: "abc123",
+      variation: "var_frozen",
+    });
+  });
+
+  it("answers a conflicted variation's run with 409 and the conflicts", async () => {
+    const conflicts = [
+      { field: "system", base: "a", target: "b", variation: "c" },
+    ];
+    const { app } = makeApp(async () => {
+      throw new VariationConflictError(conflicts);
+    });
+    const res = await app.request(executeRequest());
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ conflicts });
+  });
+
+  it("answers an update with the prompt and where it landed", async () => {
+    const app = new Hono();
+    const provider: PromptProvider = {
+      ...fakeProvider(),
+      async updatePromptProperties(ref) {
+        const prompt = (await provider.getPrompt(ref))!;
+        return {
+          prompt,
+          ref: { promptId: promptIdOf(ref), variation: "var_wip" },
+        };
+      },
+    };
+    setupRoutes({
+      app,
+      promptProviders: new Map([[PROVIDER_ID, provider]]),
+      traceProviders: new Map(),
+      promptRegistry: new PromptRegistry(),
+      hotReloadSubscribers: new Set(),
+      rootPath: "/demo",
+      hasConfig: true,
+      tracer: trace.getTracer("test"),
+      defaultTraceProviderId: TRACE_PROVIDER_ID,
+    });
+    const res = await app.request(
+      new Request("http://localhost/api/prompts/fake/cCN0ZXN0/update", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ style: "chat", system: null }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      prompt: { id: "p#test", providerId: PROVIDER_ID },
+      ref: { promptId: "p#test", variation: "var_wip" },
+    });
+  });
+
+  it("reports versions and variations as unsupported for a provider without them", async () => {
+    const { app } = makeApp();
+    const versions = await app.request("/api/prompts/fake/cCN0ZXN0/versions");
+    expect(versions.status).toBe(405);
+    const save = await app.request("/api/variations/fake/var_x/save", {
+      method: "POST",
+    });
+    expect(save.status).toBe(405);
   });
 });

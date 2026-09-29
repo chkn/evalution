@@ -15,6 +15,7 @@ import type {
   PromptStyle,
   PropDefinition,
 } from "../../shared/types.ts";
+import type { PromptSpanInfo } from "../../trace/prompt-tracer.ts";
 import {
   collectInputSlots,
   type InputSource,
@@ -30,11 +31,24 @@ import {
   ResourceRegistry,
   resourceParameterNames,
 } from "../playground/resource-registry.ts";
-import type {
-  ExecuteOptions,
-  PromptProvider,
-  ResolvedPromptInputs,
+import {
+  type ExecuteOptions,
+  type ExecuteResult,
+  type PromptProvider,
+  type PromptRefLike,
+  type PromptVariations,
+  type PromptVersions,
+  type ResolvedPromptInputs,
+  toPromptRef,
+  type UpdatePromptResult,
 } from "../prompt-provider.ts";
+import type {
+  StoredVariation,
+  VariationStore,
+} from "../variations/variation-store.ts";
+import { FileSnapshotVersioning } from "../versioning/file-snapshot-versioning.ts";
+import type { VersioningAdapter } from "../versioning/versioning-adapter.ts";
+import { FileVariations } from "./file-variations.ts";
 import type {
   FilePromptMetadata,
   NormalizedFilePrompt,
@@ -137,6 +151,30 @@ export interface FilePromptProviderOptions {
    * SDK adapter that governs prompt structure and execution.
    */
   sdk: SDKAdapter;
+
+  /**
+   * How states of the world are named, so a trace records which content of a
+   * prompt it ran and an old one can be reopened. See
+   * `specs/prompt-versions-and-variations.md`.
+   *
+   * Defaults, when no {@link fileProvider} is given (so files are on the real
+   * disk): a git adapter when `rootDir` is inside a repository, otherwise
+   * {@link FileSnapshotVersioning} over the {@link variationStore}. With a
+   * custom `fileProvider` there is no default. `false` turns versions off.
+   */
+  versioning?: VersioningAdapter | false;
+
+  /**
+   * Where variations — edits held apart from the source — are kept. With one,
+   * editing a prompt never writes its file: edits collect in a work-in-progress
+   * variation until they are explicitly saved.
+   *
+   * Defaults, when no {@link fileProvider} is given, to a database at
+   * `.evalution/variations/variations.db`. With a custom `fileProvider` there
+   * is no default. `false` turns variations off, so edits write straight to
+   * the file.
+   */
+  variationStore?: VariationStore | false;
 }
 
 let defaultIDCounter = 0;
@@ -348,16 +386,47 @@ export class FilePromptProvider
   /** Tail of the in-flight mutation chain per file (see {@link mutateFile}). */
   private fileMutations = new Map<string, Promise<void>>();
 
+  /** Explicit adapters, `false` for off, `undefined` for the default. */
+  private versioningOption: VersioningAdapter | false | undefined;
+  private variationStoreOption: VariationStore | false | undefined;
+  /** Whether the defaults apply: files are on the real disk. */
+  private useDefaultVersioning: boolean;
+  /** Versions and variations, set up on first use. */
+  private variationsReady?: Promise<FileVariations | undefined>;
+  /** Everyone {@link watch}ing, for changes that aren't file events. */
+  private listeners = new Set<(event: PromptChangeEvent) => void>();
+
+  /**
+   * Versions of this provider's prompts: git commits and snapshots of the
+   * working tree, or — outside a repository — snapshots of prompt files.
+   * Absent when versioning is turned off; a method rejects when the default
+   * turns out to be unavailable.
+   */
+  readonly versions: PromptVersions | undefined;
+
+  /**
+   * Variations of this provider's prompts: unsaved edits, and named
+   * alternatives. Absent when turned off; a method rejects when the default
+   * store turns out to be unavailable.
+   */
+  readonly variations: PromptVariations | undefined;
+
   constructor({
     id = "fs" + (defaultIDCounter++ ? defaultIDCounter : ""),
     rootDir = process.cwd(),
-    fileProvider = new LocalFileProvider(),
+    fileProvider,
     fileType,
     includePatterns,
     ignorePatterns = [],
     playgroundIncludePatterns = DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
     sdk,
+    versioning,
+    variationStore,
   }: FilePromptProviderOptions) {
+    this.useDefaultVersioning = !fileProvider;
+    fileProvider ??= new LocalFileProvider();
+    this.versioningOption = versioning;
+    this.variationStoreOption = variationStore;
     fileType ??= new TSPromptFileType(fileProvider);
     this.id = id;
     this.rootDir = rootDir;
@@ -380,17 +449,163 @@ export class FilePromptProvider
       includePatterns: playgroundIncludePatterns,
       ignorePatterns: this.playgroundIgnorePatterns,
     });
+    // Whether each is possible is settled by the options; whether it's
+    // actually available only once `fileVariations` has looked.
+    this.versions = this.versioningPossible
+      ? this.deferredVersions()
+      : undefined;
+    const storePossible =
+      this.variationStoreOption === undefined
+        ? this.useDefaultVersioning
+        : !!this.variationStoreOption;
+    this.variations =
+      this.versioningPossible && storePossible
+        ? this.deferredVariations()
+        : undefined;
   }
 
   async getAllPrompts(): Promise<NormalizedFilePrompt[]> {
     await this.ensureFiles();
-    return this.normalizeAll(this.files!);
+    const prompts = await this.normalizeAll(this.files!);
+    const variations = await this.fileVariations();
+    return variations ? variations.annotateAll(prompts) : prompts;
   }
 
-  async getPrompt(id: string): Promise<NormalizedFilePrompt | null> {
+  async getPrompt(ref: PromptRefLike): Promise<NormalizedFilePrompt | null> {
+    const variations = await this.fileVariations();
+    if (variations) return variations.getPrompt(ref);
+    const r = toPromptRef(ref);
+    // Without versions there is only head.
+    if (r.version !== undefined || r.variation !== undefined) return null;
+    return this.headPrompt(r.promptId);
+  }
+
+  /** The prompt as it is on disk, unannotated. */
+  private async headPrompt(id: string): Promise<NormalizedFilePrompt | null> {
     const [filePath, name] = this.parsePromptId(id);
     const prompts = await this.normalizeAll([filePath]).catch(() => []);
     return prompts.find(p => p.name === name) ?? null;
+  }
+
+  /**
+   * Whether versions (and so possibly variations) can be set up at all: off
+   * when turned off, and when a custom file provider left nothing to default
+   * to.
+   */
+  private get versioningPossible(): boolean {
+    if (this.versioningOption === false) return false;
+    return !!this.versioningOption || this.useDefaultVersioning;
+  }
+
+  /**
+   * This provider's versions and variations, set up on first use — which is
+   * where the defaults are decided, since finding a repository takes a `git`
+   * call. `undefined` when there are none.
+   */
+  private fileVariations(): Promise<FileVariations | undefined> {
+    if (!this.versioningPossible) return Promise.resolve(undefined);
+    this.variationsReady ??= this.setUpVariations().catch(err => {
+      console.warn("⚠️ prompt versions are unavailable:", err?.message ?? err);
+      return undefined;
+    });
+    return this.variationsReady;
+  }
+
+  private async setUpVariations(): Promise<FileVariations | undefined> {
+    let store = this.variationStoreOption || undefined;
+    if (
+      !store &&
+      this.variationStoreOption === undefined &&
+      this.useDefaultVersioning
+    ) {
+      // Imported lazily: the database is a native module a runtime-neutral
+      // host (the in-browser demo) can't load, and never needs.
+      const { LocalVariationStore } = await import(
+        "../variations/local-variation-store.ts"
+      );
+      // Created on the first write, so browsing leaves nothing behind.
+      store = new LocalVariationStore(
+        path.join(this.rootDir, ".evalution", "variations", "variations.db"),
+      );
+    }
+
+    let versioning = this.versioningOption || undefined;
+    if (!versioning && this.useDefaultVersioning) {
+      const { GitVersioning } = await import("../versioning/git-versioning.ts");
+      versioning = await GitVersioning.detect(this.rootDir);
+      if (!versioning && store) {
+        versioning = new FileSnapshotVersioning({
+          rootDir: this.rootDir,
+          fileProvider: this.fileProvider,
+          store,
+        });
+      }
+    }
+    if (!versioning) return undefined;
+
+    return new FileVariations(
+      {
+        rootDir: this.rootDir,
+        fileProvider: this.fileProvider,
+        fileType: this.fileType,
+        parsePromptId: id => this.parsePromptId(id),
+        parseAll: async () => {
+          await this.ensureFiles();
+          return this.normalizeAll(this.files!);
+        },
+        normalizeWith: (fileType, files, options) =>
+          this.normalizeAll(files, fileType, options),
+        applyUpdates: (fileType, filePath, promptName, promptId, updates) =>
+          this.applyUpdates(fileType, filePath, promptName, promptId, updates),
+        mutateFile: (filePath, mutate) => this.mutateFile(filePath, mutate),
+        emit: event => this.emit(event),
+      },
+      versioning,
+      store,
+    );
+  }
+
+  private emit(event: PromptChangeEvent): void {
+    for (const listener of this.listeners) listener(event);
+  }
+
+  /** {@link versions}, forwarding to {@link fileVariations} once it's set up. */
+  private deferredVersions(): PromptVersions {
+    const ready = async () => {
+      const variations = await this.fileVariations();
+      if (!variations) throw new Error("Prompt versions are unavailable");
+      return variations.versions;
+    };
+    return {
+      snapshot: async promptId => (await ready()).snapshot(promptId),
+      history: async (promptId, options) =>
+        (await ready()).history(promptId, options),
+      get: async id => (await ready()).get(id),
+    };
+  }
+
+  /** {@link variations}, forwarding to {@link fileVariations} once it's set up. */
+  private deferredVariations(): PromptVariations {
+    const ready = async () => {
+      const variations = await this.fileVariations();
+      if (!variations?.store)
+        throw new Error("Prompt variations are unavailable");
+      return variations.variations;
+    };
+    return {
+      get: async id => (await ready()).get(id),
+      list: async promptId => (await ready()).list(promptId),
+      name: async (id, name) => (await ready()).name(id, name),
+      unname: async (promptId, name) => (await ready()).unname(promptId, name),
+      rebase: async (id, onto) => (await ready()).rebase(id, onto),
+      openOnHead: async (id, options) =>
+        (await ready()).openOnHead(id, options),
+      openVersionOnHead: async (promptId, version, options) =>
+        (await ready()).openVersionOnHead(promptId, version, options),
+      save: async id => (await ready()).save(id),
+      discard: async id => (await ready()).discard(id),
+      resolve: async (id, choices) => (await ready()).resolve(id, choices),
+    };
   }
 
   /**
@@ -403,11 +618,26 @@ export class FilePromptProvider
    * checker that re-derives every type the files depend on, so a question
    * asked in a build of its own costs far more than the same question batched.
    */
-  private async normalizeAll(files: string[]): Promise<NormalizedFilePrompt[]> {
+  private async normalizeAll(
+    files: string[],
+    fileType: PromptFileType = this.fileType,
+    { resolveTypes = true }: { resolveTypes?: boolean } = {},
+  ): Promise<NormalizedFilePrompt[]> {
     const playgroundFiles = await this.resources.modulePaths();
-    const parsed = await this.fileType.parsePrompts(files, this.rootDir, {
+    const parsed = await fileType.parsePrompts(files, this.rootDir, {
       companionFiles: playgroundFiles,
     });
+
+    // Fields only: skip the type questions, which cost a program build of
+    // their own — most of a read — and are only needed to run the prompt.
+    // Project probes are cached per file type, so they stay.
+    if (!resolveTypes) {
+      const project = await this.resolveProjectProbes();
+      return parsed.map(p => ({
+        ...this.sdkAdapter.normalizePrompt(p, undefined, project),
+        metadata: p.metadata,
+      }));
+    }
 
     // Asked once and threaded through: both the shape of an execute parameter
     // and the slots it contributes are derived from the same probes.
@@ -429,6 +659,7 @@ export class FilePromptProvider
       [...executeRequests, ...parameterRequests],
       [...promptSlotRequests, ...resourceSlotRequests],
       this.projectProbes(),
+      fileType,
     );
     const project = this.projectResults(resolved.project);
 
@@ -476,8 +707,8 @@ export class FilePromptProvider
     probes: TypeProbeRequest[],
     slotMatches: SlotMatchRequest[],
     project?: TypeProbe[],
+    fileType: PromptFileType = this.fileType,
   ): Promise<Partial<TypeResolutionResult>> {
-    const fileType = this.fileType;
     if (fileType.resolveTypes) {
       return fileType.resolveTypes({
         probes,
@@ -894,62 +1125,90 @@ export class FilePromptProvider
     return result;
   }
 
+  /**
+   * Applies `updates` to the prompt `ref` names.
+   *
+   * With variations, this never writes the file: the edit lands in the
+   * work-in-progress variation for `ref`'s base — created on the first edit,
+   * deleted once edits cancel out — and the returned ref names it. Writing the
+   * file is {@link PromptVariations.save}. Without variations, the file is
+   * written as the edit arrives.
+   */
   async updatePromptProperties(
-    promptId: string,
+    ref: PromptRefLike,
     updates: NormalizedPromptUpdates,
-  ): Promise<NormalizedFilePrompt> {
+  ): Promise<UpdatePromptResult<NormalizedFilePrompt>> {
+    const variations = await this.fileVariations();
+    if (variations?.store) return variations.update(ref, updates);
+
+    const r = toPromptRef(ref);
+    if (r.version !== undefined || r.variation !== undefined) {
+      throw new Error("This provider has no variations to edit");
+    }
+    const promptId = r.promptId;
     const [filePath, promptName] = this.parsePromptId(promptId);
-    return this.mutateFile(filePath, async () => {
-      const parsed = (
-        await this.fileType
-          .parsePrompts([filePath], this.rootDir)
-          .catch(() => [] as ParsedFilePrompt[])
-      ).find(p => p.name === promptName);
-      if (!parsed) {
-        throw new Error("Prompt not found");
-      }
-
-      const { definitions, values } = parsed.extractedProps;
-      const rawUpdates = this.sdkAdapter.denormalizeUpdates(updates, values);
-
-      for (const [propertyName, value] of Object.entries(rawUpdates)) {
-        const propDef = definitions.find(d => d.name === propertyName);
-        const currentValue = values?.[propertyName];
-
-        if (value === null) {
-          // null → remove the property
-          if (!propDef) throw new Error(`Property '${propertyName}' not found`);
-          await this.fileType.removeProperty(filePath, propDef);
-        } else if (!propDef) {
-          // unknown key → add as a new property
-          await this.fileType.addProperty(
-            filePath,
-            promptName,
-            propertyName,
-            value,
-          );
-        } else {
-          // existing key → update in place
-          if (currentValue && !isEditable(currentValue)) {
-            throw new Error(`Property '${propertyName}' is not editable`);
-          }
-          if (!propDef.valueSpan) {
-            throw new Error(
-              `Property '${propertyName}' is missing source metadata`,
-            );
-          }
-          await this.fileType.updateProperty(
-            filePath,
-            propDef,
-            value,
-            promptId,
-          );
-        }
-      }
-
+    const prompt = await this.mutateFile(filePath, async () => {
+      await this.applyUpdates(
+        this.fileType,
+        filePath,
+        promptName,
+        promptId,
+        updates,
+      );
       // Re-scan and re-parse to get updated prompt
       return (await this.getPrompt(promptId))!;
     });
+    return { prompt, ref: { promptId } };
+  }
+
+  /**
+   * Writes `updates` into a prompt's source through `fileType` — the one
+   * implementation of "apply updates to source", used to save to disk and to
+   * materialize a variation in an overlay alike.
+   */
+  private async applyUpdates(
+    fileType: PromptFileType,
+    filePath: string,
+    promptName: string,
+    promptId: string,
+    updates: NormalizedPromptUpdates,
+  ): Promise<void> {
+    const parsed = (
+      await fileType
+        .parsePrompts([filePath], this.rootDir)
+        .catch(() => [] as ParsedFilePrompt[])
+    ).find(p => p.name === promptName);
+    if (!parsed) {
+      throw new Error("Prompt not found");
+    }
+
+    const { definitions, values } = parsed.extractedProps;
+    const rawUpdates = this.sdkAdapter.denormalizeUpdates(updates, values);
+
+    for (const [propertyName, value] of Object.entries(rawUpdates)) {
+      const propDef = definitions.find(d => d.name === propertyName);
+      const currentValue = values?.[propertyName];
+
+      if (value === null) {
+        // null → remove the property
+        if (!propDef) throw new Error(`Property '${propertyName}' not found`);
+        await fileType.removeProperty(filePath, propDef);
+      } else if (!propDef) {
+        // unknown key → add as a new property
+        await fileType.addProperty(filePath, promptName, propertyName, value);
+      } else {
+        // existing key → update in place
+        if (currentValue && !isEditable(currentValue)) {
+          throw new Error(`Property '${propertyName}' is not editable`);
+        }
+        if (!propDef.valueSpan) {
+          throw new Error(
+            `Property '${propertyName}' is missing source metadata`,
+          );
+        }
+        await fileType.updateProperty(filePath, propDef, value, promptId);
+      }
+    }
   }
 
   async getModelDefinition(style: PromptStyle): Promise<PropDefinition> {
@@ -964,7 +1223,7 @@ export class FilePromptProvider
   }
 
   async resolveInputs(
-    _promptId: string,
+    _ref: PromptRefLike,
     inputs: {
       functionInputs?: readonly ExecutionInput[];
       executeInputs?: Record<string, ExecutionInput>;
@@ -991,8 +1250,13 @@ export class FilePromptProvider
     }
   }
 
+  /**
+   * Runs the prompt `ref` names. With versions, head is pinned as a version
+   * first and a variation runs on head — rebased onto it if made elsewhere —
+   * and both are recorded on the trace and returned.
+   */
   async execute(
-    promptId: string,
+    ref: PromptRefLike,
     params: any[],
     {
       traceId,
@@ -1001,9 +1265,22 @@ export class FilePromptProvider
       inputs,
       onSettled,
     }: ExecuteOptions = {},
-  ): Promise<void> {
+  ): Promise<ExecuteResult> {
+    const r = toPromptRef(ref);
+    const variations = await this.fileVariations();
+    if (!variations && (r.version !== undefined || r.variation !== undefined)) {
+      throw new Error("This provider has no versions or variations to run");
+    }
+
+    const prepared = variations ? await variations.prepareRun(r) : undefined;
+    const variation: StoredVariation | undefined = prepared?.variation;
+    // A rebase may have found the prompt under a new id (a rename).
+    const promptId = variation?.promptId ?? r.promptId;
     const [filePath, promptName] = this.parsePromptId(promptId);
-    const config = await this.fileType.loadConfig(filePath, promptName, params);
+
+    const config = variation
+      ? await variations!.loadConfig(variation, params)
+      : await this.fileType.loadConfig(filePath, promptName, params);
     // Pass the prompt identity so a config that didn't go through the
     // `prompts()` helper still produces a named trace linked back to the
     // prompt. `promptId` is the provider-scoped id the registry resolves on.
@@ -1012,23 +1289,25 @@ export class FilePromptProvider
     // design one of those entries may be a live database handle, which would
     // serialize into a span as a useless blob, and the recipe is what a replay
     // actually needs. Alongside them goes a snapshot of the signature they
-    // were captured against, so a later replay can diff two known shapes
-    // rather than guess whether they still line up.
-    const snapshot = await this.parameterSnapshot(promptId);
+    // were captured against, and the version (and variation) that ran.
+    const snapshot = await this.parameterSnapshot(promptId, variation);
+    const identity: PromptSpanInfo = {
+      id: promptId,
+      name: promptName,
+      functionInputs: inputs?.functionInputs
+        ? [...inputs.functionInputs]
+        : undefined,
+      executeInputs: inputs?.executeInputs,
+      parameterDefinitions: snapshot?.functionParameters,
+      executeParameterDefinitions: snapshot?.executeParameters,
+      version: prepared?.version.id,
+      variation: variation?.id,
+    };
     const handle = await this.sdkAdapter.executeConfig(config, {
       traceId,
       rootSpanId,
       executeValues,
-      identity: {
-        id: promptId,
-        name: promptName,
-        functionInputs: inputs?.functionInputs
-          ? [...inputs.functionInputs]
-          : undefined,
-        executeInputs: inputs?.executeInputs,
-        parameterDefinitions: snapshot?.functionParameters,
-        executeParameterDefinitions: snapshot?.executeParameters,
-      },
+      identity,
     });
 
     // An adapter that reports completion drives teardown off the real end of
@@ -1038,23 +1317,29 @@ export class FilePromptProvider
       if (handle) void handle.done.then(onSettled, onSettled);
       else onSettled();
     }
+    return {
+      ...(prepared && { version: prepared.version.id }),
+      ...(variation && { variation: variation.id }),
+    };
   }
 
   /**
    * The prompt's parameter definitions as they stand right now, recorded
    * beside a run's inputs.
    *
-   * For a file-based prompt, git is the version — the playground has no
-   * business checking out old commits to replay one — so the cheap equivalent
-   * is to write the shape down at run time. Replay then compares two known
-   * signatures instead of inferring a match, which works with no version store
-   * at all.
+   * Redundant whenever the run's recorded version can be read back, but a
+   * snapshot version outlives nothing if its ref is deleted, and the recorded
+   * signature costs little. Replay then compares two known signatures instead
+   * of inferring a match.
    *
    * Both halves are recorded: the execute parameters are only known after
    * normalization (their shapes come from type probes), and without them a
    * trace's `executeInputs` would have names but no types.
    */
-  private async parameterSnapshot(promptId: string): Promise<
+  private async parameterSnapshot(
+    promptId: string,
+    variation?: StoredVariation,
+  ): Promise<
     | {
         functionParameters: PropDefinition[];
         executeParameters?: PropDefinition[];
@@ -1062,7 +1347,9 @@ export class FilePromptProvider
     | undefined
   > {
     try {
-      const prompt = await this.getPrompt(promptId);
+      const prompt = variation
+        ? await (await this.fileVariations())?.preparedPrompt(variation)
+        : await this.headPrompt(promptId);
       return prompt
         ? {
             functionParameters: prompt.functionParameters,
@@ -1083,14 +1370,16 @@ export class FilePromptProvider
     newName: string,
   ): Promise<NormalizedFilePrompt> {
     const [filePath, oldName] = this.parsePromptId(promptId);
-    return this.mutateFile(filePath, async () => {
+    const renamed = await this.mutateFile(filePath, async () => {
       await this.fileType.renamePrompt(filePath, oldName, newName);
-
       const relFilePath = path.relative(this.rootDir, filePath);
-      const prompt = await this.getPrompt(`${relFilePath}#${newName}`);
-      if (!prompt) throw new Error("Failed to find renamed prompt");
-      return prompt;
+      return `${relFilePath}#${newName}`;
     });
+    // Unsaved edits follow the prompt to its new name.
+    await (await this.fileVariations())?.onPromptRenamed(promptId, renamed);
+    const prompt = await this.getPrompt(renamed);
+    if (!prompt) throw new Error("Failed to find renamed prompt");
+    return prompt;
   }
 
   async addPrompt(
@@ -1174,10 +1463,16 @@ export class FilePromptProvider
   }
 
   watch(callback: (event: PromptChangeEvent) => void): () => void {
+    // Changes that aren't file events — a WIP edited, saved or rebased —
+    // reach watchers through this.
+    this.listeners.add(callback);
+
     const unwatchPlayground = this.fileProvider.watch(
       this.playgroundIncludePatterns,
       { cwd: this.rootDir, ignored: this.playgroundIgnorePatterns },
       async () => {
+        // Playground modules are part of the world a version captures.
+        (await this.fileVariations())?.invalidate();
         // A changed playground module invalidates every prompt that could be
         // offered its resources, and the change stream is keyed by prompt id —
         // so it has to fan out. Server-scoped instances created by the old
@@ -1218,7 +1513,14 @@ export class FilePromptProvider
               promptId: prompt.id,
             });
           });
+          // An edit made outside the playground moves head under any unsaved
+          // edits to these prompts: rebase them onto it.
+          const variations = await this.fileVariations();
+          await variations
+            ?.onPromptsChanged(prompts.map(p => p.id))
+            .catch(err => console.warn("failed to rebase unsaved edits:", err));
         } else {
+          (await this.fileVariations())?.invalidate();
           if (this.files) {
             this.files = this.files.filter(f => f !== absolutePath);
           }
@@ -1229,6 +1531,7 @@ export class FilePromptProvider
     );
 
     return () => {
+      this.listeners.delete(callback);
       unwatchPlayground();
       unwatchPrompts();
     };

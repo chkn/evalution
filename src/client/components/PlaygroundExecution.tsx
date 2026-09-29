@@ -9,6 +9,7 @@ import type {
   ExecutionInput,
   InputLayout,
   NormalizedPrompt,
+  PromptRef,
   PropDefinition,
   ResourceInfo,
 } from "../../shared/types";
@@ -47,6 +48,10 @@ import {
 
 interface Props {
   prompt: NormalizedPrompt;
+  /** The version or variation to run, when not head. */
+  promptRef?: PromptRef;
+  /** Why running is unavailable here (an old version, say), if it is. */
+  runDisabledReason?: string;
   /**
    * Invoked with the trace reference returned by the execute endpoint. Lets
    * the surrounding app open the corresponding trace tab.
@@ -208,6 +213,8 @@ function withEntry<T>(
 
 function PlaygroundExecution({
   prompt,
+  promptRef,
+  runDisabledReason,
   onExecuted,
   fill,
   onOpenFillSource,
@@ -557,7 +564,7 @@ function PlaygroundExecution({
     if (!request) return;
     setExecuting(true);
     try {
-      const result = await executePrompt(prompt, request);
+      const result = await executePrompt(prompt, request, promptRef);
       onExecuted?.({ ...result, label: prompt.name });
     } catch (e: any) {
       setError(e.message);
@@ -787,7 +794,8 @@ function PlaygroundExecution({
             type="button"
             className="pg-run-btn"
             onClick={handleRun}
-            disabled={executing}
+            disabled={executing || !!runDisabledReason}
+            title={runDisabledReason}
           >
             {executing ? "…" : "▶  Run"}
           </button>

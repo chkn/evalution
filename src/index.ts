@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+export {
+  isVariationLoaderHookRegistered,
+  registerVariationLoaderHook,
+} from "./cli/variation-loader-hook.ts";
 /**
  * **evalution** — TypeScript AI Prompt Playground.
  *
@@ -55,6 +59,7 @@ export type {
 } from "./file-provider.ts";
 export { LocalFileProvider } from "./file-provider-local.ts";
 export { MemoryFileProvider } from "./file-provider-memory.ts";
+export { OverlayFileProvider } from "./file-provider-overlay.ts";
 export {
   canonicalArgumentKey,
   collectInputSlots,
@@ -113,11 +118,58 @@ export {
   ResourceRegistry,
   resourceParameterNames,
 } from "./prompt/playground/resource-registry.ts";
-export type {
-  ExecuteOptions,
-  PromptProvider,
-  ResolvedPromptInputs,
+export {
+  type ExecuteOptions,
+  type ExecuteResult,
+  type OpenOnHeadOptions,
+  type PromptProvider,
+  type PromptRefLike,
+  type PromptVariations,
+  type PromptVersions,
+  promptIdOf,
+  type ResolvedPromptInputs,
+  toPromptRef,
+  type UpdatePromptResult,
+  VariationConflictError,
 } from "./prompt/prompt-provider.ts";
+export {
+  canonicalizeUpdates,
+  mergeUpdates,
+  serializeUpdates,
+} from "./prompt/variations/canonical-updates.ts";
+export { runVariationMigrations } from "./prompt/variations/db/migrate.ts";
+export {
+  LocalVariationStore,
+  openLocalVariationStore,
+} from "./prompt/variations/local-variation-store.ts";
+export {
+  type MergeOutcome,
+  mergeIntoWip,
+  PROMPT_FIELD,
+  rebaseUpdates,
+  resolveConflicts,
+} from "./prompt/variations/rebase.ts";
+export { TursoVariationStore } from "./prompt/variations/turso-variation-store.ts";
+export type {
+  NewWip,
+  StoredVariation,
+  VariationContent,
+  VariationStore,
+  WipChanges,
+} from "./prompt/variations/variation-store.ts";
+export {
+  type FileSnapshotRecord,
+  FileSnapshotVersioning,
+  type SnapshotBlobStore,
+} from "./prompt/versioning/file-snapshot-versioning.ts";
+export {
+  GitVersioning,
+  type GitVersioningOptions,
+} from "./prompt/versioning/git-versioning.ts";
+export type {
+  VersionHistoryOptions,
+  VersioningAdapter,
+} from "./prompt/versioning/versioning-adapter.ts";
 export { GeminiInteractionsSDK } from "./sdk/gemini-interactions-sdk.ts";
 export {
   assertUpdateStyle,
@@ -153,6 +205,7 @@ export type {
   CalleeBinding,
   ChangeEventType,
   ChatPromptUpdates,
+  ConflictChoices,
   ExecuteRequest,
   ExecuteResponse,
   ExecutionInput,
@@ -168,15 +221,18 @@ export type {
   NormalizedQuestionsPrompt,
   NormalizedToolCall,
   ParsedPrompt,
+  PendingConflicts,
   PromptChangeEvent,
   PromptID,
   PromptInputSources,
   PromptProviderInfo,
+  PromptRef,
   PromptStyle,
   PropDefinition,
   PropType,
   PropValue,
   QuestionsPromptUpdates,
+  RebaseResult,
   ResourceInfo,
   ResourceScope,
   SourceSpan,
@@ -196,10 +252,16 @@ export type {
   TraceStreamEvent,
   TraceSummary,
   TraceWithSpans,
+  UpdatePromptResponse,
   ValueCatalog,
   ValueCatalogGroup,
   ValueCatalogPreset,
   ValueFactory,
+  VariationConflict,
+  VariationId,
+  VariationInfo,
+  VersionId,
+  VersionInfo,
 } from "./shared/types.ts";
 export {
   createLocalTursoClient,
@@ -223,10 +285,13 @@ export { OtlpTraceIngestor } from "./trace/otlp-trace-ingestor.ts";
 export {
   createTracerForPrompt,
   getPromptSpanAttributes,
+  mergePromptIdentity,
   PROMPT_ID_ATTRIBUTE,
   PROMPT_INPUTS_ATTRIBUTE,
   PROMPT_NAME_ATTRIBUTE,
   PROMPT_PROVIDER_ID_ATTRIBUTE,
+  PROMPT_VARIATION_ATTRIBUTE,
+  PROMPT_VERSION_ATTRIBUTE,
   type PromptSpanInfo,
   type PromptsFactory,
   type PromptsHelper,

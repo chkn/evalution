@@ -22,6 +22,7 @@ import type {
   NormalizedQuestionsPrompt,
   ParsedPrompt,
 } from "../../shared/types.ts";
+import { mergePromptIdentity } from "../../trace/prompt-tracer.ts";
 import {
   assertUpdateStyle,
   type ExecuteConfigOptions,
@@ -346,7 +347,7 @@ export class TypeSafeSDK implements SDKAdapter {
       ? await telemetry.startCall({
           traceId,
           spanId: rootSpanId,
-          identity: promptIdentityOf(config) ?? identity,
+          identity: mergePromptIdentity(promptIdentityOf(config), identity),
           request: config,
           defaultModel: client.defaultModel,
         })

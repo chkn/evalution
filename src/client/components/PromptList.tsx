@@ -308,7 +308,15 @@ function PromptRow({
           onCancel={onCancelRename}
         />
       ) : (
-        <span className="tree-row-label">{prompt.name}</span>
+        <span className="tree-row-label">
+          {prompt.name}
+          {prompt.dirty && (
+            <span className="tree-row-dirty" title="Unsaved edits">
+              {" "}
+              ●
+            </span>
+          )}
+        </span>
       )}
     </div>
   );

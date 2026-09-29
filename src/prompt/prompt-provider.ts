@@ -3,15 +3,24 @@
 
 import type {
   AddPromptContext,
+  ConflictChoices,
   ExecutionInput,
   NormalizedPrompt,
   NormalizedPromptUpdates,
   PromptChangeEvent,
+  PromptRef,
   PromptStyle,
   PropDefinition,
+  RebaseResult,
+  VariationConflict,
+  VariationId,
+  VariationInfo,
+  VersionId,
+  VersionInfo,
 } from "../shared/types.ts";
 import type { TraceIngestor } from "../trace/trace-ingestor.ts";
 import type { PromptFileType } from "./file/prompt-file-type.ts";
+import type { VersionHistoryOptions } from "./versioning/versioning-adapter.ts";
 
 /**
  * Optional settings for {@link PromptProvider.execute}.
@@ -46,6 +55,160 @@ export interface ExecuteOptions {
    * detect completion should call it immediately rather than never.
    */
   onSettled?: () => void;
+}
+
+export type {
+  ConflictChoices,
+  PromptRef,
+  RebaseResult,
+  VariationConflict,
+  VariationId,
+  VariationInfo,
+  VersionId,
+  VersionInfo,
+};
+
+/**
+ * A {@link PromptRef}, or a bare prompt id meaning head — accepted wherever a
+ * ref is, so a provider with no notion of versions, and most call sites, need
+ * not change.
+ */
+export type PromptRefLike = PromptRef | string;
+
+/** `ref` as a {@link PromptRef}: a bare id is head. */
+export function toPromptRef(ref: PromptRefLike): PromptRef {
+  return typeof ref === "string" ? { promptId: ref } : ref;
+}
+
+/** The prompt id `ref` names. */
+export function promptIdOf(ref: PromptRefLike): string {
+  return typeof ref === "string" ? ref : ref.promptId;
+}
+
+/** What {@link PromptProvider.execute} ran. */
+export interface ExecuteResult {
+  /** The version the run executed against, when the provider has versions. */
+  version?: VersionId;
+  /**
+   * The variation the run applied on top of {@link version}, if any. Running
+   * a variation may first rebase it onto head, so this can differ from the
+   * one asked for.
+   */
+  variation?: VariationId;
+}
+
+/**
+ * Thrown when a variation can't be applied — to run it, save it, or rebase it
+ * — without choosing between two changes to the same field.
+ */
+export class VariationConflictError extends Error {
+  /** The fields that conflicted. */
+  readonly conflicts: VariationConflict[];
+
+  constructor(conflicts: VariationConflict[]) {
+    super(
+      `The variation conflicts with the working tree on ${conflicts
+        .map(c => `'${c.field}'`)
+        .join(", ")}`,
+    );
+    this.name = "VariationConflictError";
+    this.conflicts = conflicts;
+  }
+}
+
+/**
+ * A provider's ability to name states of the world. See
+ * `specs/prompt-versions-and-variations.md` §B.
+ */
+export interface PromptVersions {
+  /**
+   * Pins head as a version and returns it. Cheap when nothing changed since
+   * the last call.
+   *
+   * @param promptId - The prompt the caller is about to depend on. A
+   *   provider that versions single files rather than the whole project
+   *   needs it.
+   */
+  snapshot(promptId?: string): Promise<VersionInfo>;
+  /**
+   * Versions that changed this prompt's file, newest first — what a version
+   * selector lists. Never every version: most don't touch any one prompt.
+   */
+  history(
+    promptId: string,
+    options?: VersionHistoryOptions,
+  ): Promise<VersionInfo[]>;
+  /** Describes a version, or `undefined` when there is no such version. */
+  get(id: VersionId): Promise<VersionInfo | undefined>;
+}
+
+/**
+ * A provider's ability to hold edits apart from the source. See
+ * `specs/prompt-versions-and-variations.md` §B and §G.
+ */
+export interface PromptVariations {
+  /** The variation with this id, frozen or WIP. */
+  get(id: VariationId): Promise<VariationInfo | undefined>;
+  /** A prompt's named variations, plus its WIP ones. */
+  list(promptId: string): Promise<VariationInfo[]>;
+  /**
+   * Names a variation. A name is unique per prompt, and naming again moves
+   * it. Naming a WIP freezes its current updates and names the frozen row;
+   * the WIP carries on.
+   */
+  name(id: VariationId, name: string): Promise<VariationInfo>;
+  /** Removes a name. */
+  unname(promptId: string, name: string): Promise<void>;
+  /** Re-expresses `id` against `onto` (default: head). */
+  rebase(id: VariationId, onto?: VersionId): Promise<RebaseResult>;
+  /**
+   * Brings `id`'s changes into the head WIP: rebases onto head, then merges
+   * into the WIP if one exists. Returns the WIP.
+   *
+   * When a field conflicts — the unsaved edits, or head itself, set it
+   * differently — nothing changes: the conflicts come back, labelled, for the
+   * caller to settle through `options` in a second call.
+   */
+  openOnHead(
+    id: VariationId,
+    options?: OpenOnHeadOptions,
+  ): Promise<RebaseResult>;
+  /**
+   * Brings an old version's prompt into the head WIP — its field values, as
+   * edits to head — with the same merge as {@link openOnHead}.
+   */
+  openVersionOnHead(
+    promptId: string,
+    version: VersionId,
+    options?: OpenOnHeadOptions,
+  ): Promise<RebaseResult>;
+  /** Rebases the head WIP onto head, writes it into the source, and deletes it. */
+  save(wipId: VariationId): Promise<RebaseResult>;
+  /** Drops a WIP variation. Frozen variations are never deleted. */
+  discard(id: VariationId): Promise<void>;
+  /** Settles a WIP's pending conflicts with a choice per field. */
+  resolve(id: VariationId, choices: ConflictChoices): Promise<RebaseResult>;
+}
+
+/** How to settle conflicts when opening a variation or version on head. */
+export interface OpenOnHeadOptions {
+  /**
+   * Discard the unsaved edits at head first, so what's opened is exactly the
+   * variation or version.
+   */
+  replace?: boolean;
+  /** Which side to keep for each conflicting field. */
+  choices?: ConflictChoices;
+}
+
+/** What {@link PromptProvider.updatePromptProperties} hands back. */
+export interface UpdatePromptResult<
+  TPrompt extends NormalizedPrompt = NormalizedPrompt,
+> {
+  /** The prompt as the updates left it. */
+  prompt: TPrompt;
+  /** Where the updates landed — the ref to keep editing at. */
+  ref: PromptRef;
 }
 
 /** What {@link PromptProvider.resolveInputs} hands back. */
@@ -94,26 +257,31 @@ export interface PromptProvider<
   getAllPrompts(): Promise<TPrompt[]>;
 
   /**
-   * Returns the prompt with the given ID, or `null` if not found.
-   * @param id - The prompt's unique identifier.
+   * Returns the prompt `ref` names, or `null` if not found.
+   * @param ref - Which prompt, in which state. A bare id means head.
    */
-  getPrompt(id: string): Promise<TPrompt | null>;
+  getPrompt(ref: PromptRefLike): Promise<TPrompt | null>;
 
   /**
-   * Applies normalized updates to a prompt's source and returns the fresh
-   * prompt. Setting any field of `updates` to `null` removes the corresponding
-   * property from the underlying source.
+   * Applies normalized updates to the prompt `ref` names, and returns where
+   * they landed. Setting any field of `updates` to `null` removes the
+   * corresponding property.
    *
-   * This method is optional; providers that do not support in-place editing
-   * may omit it.
+   * On a provider with {@link variations}, this never writes the source: it
+   * updates (or creates) the WIP variation for `ref`'s base, and the source
+   * is written only by an explicit {@link PromptVariations.save}. Without
+   * variations, it writes the source.
    *
-   * @param promptId - ID of the prompt to update.
+   * This method is optional; providers that do not support editing may omit
+   * it.
+   *
+   * @param ref - The prompt to update. A bare id means head.
    * @param updates - Updates expressed in the normalized vocabulary.
    */
   updatePromptProperties?(
-    promptId: string,
+    ref: PromptRefLike,
     updates: NormalizedPromptUpdates,
-  ): Promise<TPrompt>;
+  ): Promise<UpdatePromptResult<TPrompt>>;
 
   /**
    * Executes a prompt.
@@ -123,15 +291,19 @@ export interface PromptProvider<
    * Resolution happens before this is called, through
    * {@link resolveInputs} where a provider offers one.
    *
-   * @param promptId - ID of the prompt to run.
+   * Returns what it ran — the version, and the variation if any — which the
+   * caller records. A provider without versions may return nothing.
+   *
+   * @param ref - The prompt to run. A bare id means head.
    * @param params - Positional arguments forwarded to the prompt function.
    * @param options - Optional execution settings; see {@link ExecuteOptions}.
    */
   execute(
-    promptId: string,
+    ref: PromptRefLike,
     params: any[],
     options?: ExecuteOptions,
-  ): Promise<void>;
+    // biome-ignore lint/suspicious/noConfusingVoidType: a provider with no versions keeps its `async execute() {}` as it was
+  ): Promise<ExecuteResult | void>;
 
   /**
    * Turns the unresolved inputs the playground sends into the concrete values
@@ -146,11 +318,11 @@ export interface PromptProvider<
    * built-in fallback and anything else is rejected — so a provider that has
    * no resources of its own keeps working untouched.
    *
-   * @param promptId - ID of the prompt the inputs are for.
+   * @param ref - The prompt the inputs are for. A bare id means head.
    * @param inputs - The unresolved inputs. See {@link ExecutionInput}.
    */
   resolveInputs?(
-    promptId: string,
+    ref: PromptRefLike,
     inputs: {
       functionInputs?: readonly ExecutionInput[];
       executeInputs?: Record<string, ExecutionInput>;
@@ -217,4 +389,10 @@ export interface PromptProvider<
    * @param newName - The new name for the prompt.
    */
   renamePrompt?(promptId: string, newName: string): Promise<TPrompt>;
+
+  /** Present when this provider can name states of the world. */
+  readonly versions?: PromptVersions;
+
+  /** Present when this provider can hold edits apart from the source. */
+  readonly variations?: PromptVariations;
 }

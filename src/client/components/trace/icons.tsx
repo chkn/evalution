@@ -420,3 +420,47 @@ export function DatasetsIcon({ size = 11 }: { size?: number }) {
     </svg>
   );
 }
+
+/** A commit on a line — a prompt version. */
+export function VersionIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="4" />
+      <line x1="2" y1="12" x2="8" y2="12" />
+      <line x1="16" y1="12" x2="22" y2="12" />
+    </svg>
+  );
+}
+
+/** A branch off a line — a prompt variation. */
+export function VariationIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="6" cy="18" r="2.5" />
+      <circle cx="18" cy="8" r="2.5" />
+      <line x1="6" y1="8.5" x2="6" y2="15.5" />
+      <path d="M18 10.5c0 4-6 3.5-11 6" />
+    </svg>
+  );
+}

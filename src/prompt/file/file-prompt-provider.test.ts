@@ -195,10 +195,13 @@ export function myPrompt() {
     });
 
     const promptId = `${filePath}#myPrompt`;
-    const updatedPrompt = await provider.updatePromptProperties(promptId, {
-      style: "chat",
-      system: { kind: "primitive", value: "New value" },
-    });
+    const { prompt: updatedPrompt } = await provider.updatePromptProperties(
+      promptId,
+      {
+        style: "chat",
+        system: { kind: "primitive", value: "New value" },
+      },
+    );
 
     expect((updatedPrompt as NormalizedChatPrompt).system).toEqual({
       kind: "primitive",
@@ -225,10 +228,13 @@ export function myPrompt() {
     });
 
     const promptId = `${filePath}#myPrompt`;
-    const updatedPrompt = await provider.updatePromptProperties(promptId, {
-      style: "chat",
-      model: { kind: "primitive", value: "openai/gpt-4o" },
-    });
+    const { prompt: updatedPrompt } = await provider.updatePromptProperties(
+      promptId,
+      {
+        style: "chat",
+        model: { kind: "primitive", value: "openai/gpt-4o" },
+      },
+    );
 
     expect(valueToSourceText(updatedPrompt.model!)).toBe('"openai/gpt-4o"');
   });
@@ -322,11 +328,11 @@ export function myPrompt() {
     await tick();
     resume();
 
-    expect(((await firstEdit) as NormalizedChatPrompt).system).toEqual({
+    expect(((await firstEdit).prompt as NormalizedChatPrompt).system).toEqual({
       kind: "primitive",
       value: "First",
     });
-    expect(((await secondEdit) as NormalizedChatPrompt).system).toEqual({
+    expect(((await secondEdit).prompt as NormalizedChatPrompt).system).toEqual({
       kind: "primitive",
       value: "Second",
     });
@@ -348,10 +354,13 @@ export function myPrompt() {
 
     const promptId = `${filePath}#myPrompt`;
 
-    const updated = await provider.updatePromptProperties(promptId, {
-      style: "chat",
-      modelParameters: { temperature: { kind: "primitive", value: 0.7 } },
-    });
+    const { prompt: updated } = await provider.updatePromptProperties(
+      promptId,
+      {
+        style: "chat",
+        modelParameters: { temperature: { kind: "primitive", value: 0.7 } },
+      },
+    );
     const tempValue = getParameter(updated, "temperature");
     expect(tempValue).toBeDefined();
     expect(tempValue).toEqual({ kind: "primitive", value: 0.7 });

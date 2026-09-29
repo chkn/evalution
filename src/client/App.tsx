@@ -14,6 +14,7 @@ import type {
   ExecuteResponse,
   NormalizedPrompt,
   PromptID,
+  PromptRef,
   SSEData,
 } from "../shared/types";
 import { renamePrompt } from "./api";
@@ -28,6 +29,11 @@ import {
 } from "./components/named-inputs";
 import PlaygroundContent from "./components/PlaygroundContent";
 import PromptList from "./components/PromptList";
+import SettingsList, {
+  type SettingsSection,
+  settingsSectionLabel,
+} from "./components/SettingsList";
+import SettingsView from "./components/SettingsView";
 import { Tab } from "./components/Tab";
 import { TerminalView } from "./components/TerminalView";
 import TraceList from "./components/TraceList";
@@ -56,6 +62,11 @@ interface PromptTab {
   promptId: string;
   /** A one-shot request to fill the execute panel — see `PanelFill`. */
   fill?: PanelFill;
+  /**
+   * The version or variation the tab shows instead of head, if any. Head's
+   * unsaved edits aren't one — see `PlaygroundContent`'s `promptRef`.
+   */
+  ref?: PromptRef;
 }
 interface TraceTab {
   type: "trace";
@@ -73,6 +84,10 @@ interface DatasetTab {
 interface WelcomeTab {
   type: "welcome";
 }
+interface SettingsTab {
+  type: "settings";
+  section: SettingsSection;
+}
 interface TerminalTab {
   type: "terminal";
   id: string;
@@ -81,7 +96,13 @@ interface TerminalTab {
   command: string;
   label: string;
 }
-type AppTab = PromptTab | TraceTab | DatasetTab | WelcomeTab | TerminalTab;
+type AppTab =
+  | PromptTab
+  | TraceTab
+  | DatasetTab
+  | WelcomeTab
+  | TerminalTab
+  | SettingsTab;
 
 const WELCOME_TAB_KEY = "welcome";
 
@@ -94,7 +115,9 @@ const tabKey = (t: AppTab) =>
         ? `dataset:${t.providerId}:${t.datasetId}`
         : t.type === "terminal"
           ? `terminal:${t.id}`
-          : WELCOME_TAB_KEY;
+          : t.type === "settings"
+            ? `settings:${t.section}`
+            : WELCOME_TAB_KEY;
 
 let _terminalSeq = 0;
 
@@ -194,6 +217,24 @@ function PromptsIcon() {
   );
 }
 
+function SettingsIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+    </svg>
+  );
+}
+
 function WelcomeIcon() {
   return (
     <span className="welcome-tab-emoji" role="img" aria-label="Welcome">
@@ -257,6 +298,9 @@ function App() {
   } = useDatasets();
   // Bumped on every dataset change event, so open dataset views refetch.
   const [datasetVersion, setDatasetVersion] = useState(0);
+  // Bumped on every prompt change made elsewhere, so a tab showing a version
+  // or variation re-reads it.
+  const [promptsVersion, setPromptsVersion] = useState(0);
   const [panes, setPanes] = useState<Pane[]>([
     { id: INIT_PANE, tabs: [], activeTabKey: null },
   ]);
@@ -264,7 +308,7 @@ function App() {
   const [rootPath, setRootPath] = useState("");
   const [configured, setConfigured] = useState(false);
   const [activeSection, setActiveSection] = useState<
-    "prompts" | "traces" | "datasets"
+    "prompts" | "traces" | "datasets" | "settings"
   >("prompts");
   const [showAddPrompt, setShowAddPrompt] = useState(false);
   const [sectionVisible, setSectionVisible] = useState(
@@ -323,6 +367,7 @@ function App() {
         )
           return;
         refetchPrompts();
+        setPromptsVersion(v => v + 1);
       } else if (data.type === "trace-changed") {
         refetchTraces();
       } else if (data.type === "dataset-changed") {
@@ -427,6 +472,8 @@ function App() {
     });
   }, []);
 
+  // Only edits still in flight are lost by leaving: unsaved edits that
+  // reached the server (a prompt's `dirty`) are still there on return.
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (dirtyTabsRef.current.size > 0) {
@@ -439,6 +486,27 @@ function App() {
   }, []);
 
   // ── Pane operations ──────────────────────────────────────────────────────────
+
+  /** Points the prompt tab `key` at `ref` (head for `undefined`), wherever it is. */
+  const setPromptTabRef = useCallback(
+    (key: string, ref: PromptRef | undefined) => {
+      setPanes(prev =>
+        prev.map(pane =>
+          pane.tabs.some(t => tabKey(t) === key)
+            ? {
+                ...pane,
+                tabs: pane.tabs.map(t => {
+                  if (tabKey(t) !== key || t.type !== "prompt") return t;
+                  const { ref: _, ...rest } = t;
+                  return ref ? { ...rest, ref } : rest;
+                }),
+              }
+            : pane,
+        ),
+      );
+    },
+    [],
+  );
 
   const handleSelectPrompt = (providerId: string, id: string) => {
     const tab: AppTab = { type: "prompt", providerId, promptId: id };
@@ -585,8 +653,9 @@ function App() {
    */
   const openPromptTabRightOf = (
     fromPaneId: string,
-    prompt: PromptID,
+    prompt: Pick<PromptID, "id" | "providerId">,
     fill?: PanelFill,
+    ref?: PromptRef,
   ) => {
     // `prompt` comes from a resolved span or dataset, so `providerId` is set.
     const providerId = requireProviderId(
@@ -598,8 +667,9 @@ function App() {
       providerId,
       promptId: prompt.id,
       ...(fill && { fill }),
+      ...(ref && { ref }),
     };
-    openTabRightOf(fromPaneId, tab, !!fill);
+    openTabRightOf(fromPaneId, tab, !!fill || !!ref);
   };
 
   /** "Open prompt" on a trace: open it with the panel filled from the trace's inputs. */
@@ -619,7 +689,19 @@ function App() {
             traceId,
           })
         : undefined;
-    openPromptTabRightOf(fromPaneId, recorded, fill);
+    // At the variation the run applied, else the version it ran against —
+    // the server opens head when that version is what's on disk now.
+    const ref: PromptRef | undefined = recorded.variation
+      ? { promptId: recorded.id, variation: recorded.variation }
+      : recorded.version
+        ? { promptId: recorded.id, version: recorded.version }
+        : undefined;
+    openPromptTabRightOf(
+      fromPaneId,
+      { id: recorded.id, providerId: recorded.providerId },
+      fill,
+      ref,
+    );
   };
 
   const traceTab = (providerId: string, traceId: string): TraceTab => ({
@@ -809,6 +891,8 @@ function App() {
           id: focusedActiveTab.datasetId,
         })
       : null;
+  const selectedSettingsSection =
+    focusedActiveTab?.type === "settings" ? focusedActiveTab.section : null;
   const sidebarWidth = sidebar.sizes.w;
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -891,6 +975,23 @@ function App() {
               <DatasetsIcon />
             </button>
           </nav>
+          <nav className="icon-nav-bottom">
+            <button
+              type="button"
+              className={`icon-nav-btn ${activeSection === "settings" && sectionVisible ? "active" : ""}`}
+              onClick={() => {
+                if (activeSection === "settings" && sectionVisible)
+                  setSectionVisible(false);
+                else {
+                  setActiveSection("settings");
+                  setSectionVisible(true);
+                }
+              }}
+              title="Settings"
+            >
+              <SettingsIcon />
+            </button>
+          </nav>
         </div>
 
         <div className="content-area">
@@ -947,18 +1048,24 @@ function App() {
                     <div className="pane-tabs-scroll">
                       {pane.tabs.map(tab => {
                         const key = tabKey(tab);
-                        const name =
+                        const tabPrompt =
                           tab.type === "prompt"
-                            ? (prompts.find(
+                            ? prompts.find(
                                 p =>
                                   p.id === tab.promptId &&
                                   p.providerId === tab.providerId,
-                              )?.name ?? tab.promptId)
+                              )
+                            : undefined;
+                        const name =
+                          tab.type === "prompt"
+                            ? (tabPrompt?.name ?? tab.promptId)
                             : tab.type === "trace" || tab.type === "dataset"
                               ? tab.label
                               : tab.type === "terminal"
                                 ? tab.label
-                                : "Welcome";
+                                : tab.type === "settings"
+                                  ? settingsSectionLabel(tab.section)
+                                  : "Welcome";
                         const icon =
                           tab.type === "trace" ? (
                             <TracesIcon />
@@ -968,6 +1075,8 @@ function App() {
                             <WelcomeIcon />
                           ) : tab.type === "terminal" ? (
                             <TerminalIcon />
+                          ) : tab.type === "settings" ? (
+                            <SettingsIcon />
                           ) : undefined;
                         return (
                           <Tab
@@ -975,7 +1084,10 @@ function App() {
                             name={name}
                             icon={icon}
                             active={key === pane.activeTabKey}
-                            dirty={dirtyTabs.has(key)}
+                            // Unsaved edits live on the server, so they're
+                            // dirty for as long as they exist, not just while
+                            // a request is in flight.
+                            dirty={dirtyTabs.has(key) || !!tabPrompt?.dirty}
                             onClick={() => {
                               setFocusedPaneId(pane.id);
                               setPanes(prev =>
@@ -1085,6 +1197,14 @@ function App() {
                       onResizeSidebar={w => sidebar.setSize("w", w)}
                     />
                   )}
+                  {activeSection === "settings" && (
+                    <SettingsList
+                      selectedSection={selectedSettingsSection}
+                      onSelect={section =>
+                        openTabInFocusedPane({ type: "settings", section })
+                      }
+                    />
+                  )}
                 </aside>
                 <div
                   className="resize-handle"
@@ -1176,6 +1296,13 @@ function App() {
                           </div>
                         );
                       }
+                      if (tab.type === "settings") {
+                        return (
+                          <div key={key} style={visible}>
+                            <SettingsView section={tab.section} />
+                          </div>
+                        );
+                      }
                       if (tab.type === "prompt") {
                         const prompt =
                           prompts.find(
@@ -1188,6 +1315,10 @@ function App() {
                           <div key={key} style={visible}>
                             <PlaygroundContent
                               prompt={prompt}
+                              promptRef={tab.ref}
+                              onRefChange={ref => setPromptTabRef(key, ref)}
+                              refreshKey={promptsVersion}
+                              onRefresh={refetchPrompts}
                               onUpdate={patchPrompt}
                               onDirtyChange={dirty =>
                                 handleDirtyChange(key, dirty)

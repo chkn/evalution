@@ -3,6 +3,7 @@
 
 import type { Theme } from "@glideapps/glide-data-grid";
 import { useEffect, useState } from "react";
+import { subscribeAppliedTheme } from "../theme";
 
 /** The monospace family the grid's header draws types in. */
 export const GRID_MONO_FONT = '"Geist Mono", ui-monospace, monospace';
@@ -50,11 +51,6 @@ function readTheme(): Partial<Theme> {
 /** {@link readTheme}, kept current across light/dark switches. */
 export function useGridTheme(): Partial<Theme> {
   const [theme, setTheme] = useState(readTheme);
-  useEffect(() => {
-    const query = window.matchMedia("(prefers-color-scheme: dark)");
-    const update = () => setTheme(readTheme());
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
+  useEffect(() => subscribeAppliedTheme(() => setTheme(readTheme())), []);
   return theme;
 }

@@ -158,6 +158,8 @@ export class TypeSafeTelemetry extends BaseTraceIngestor {
             executeInputs: identity.executeInputs,
             parameterDefinitions: identity.parameterDefinitions,
             executeParameterDefinitions: identity.executeParameterDefinitions,
+            version: identity.version,
+            variation: identity.variation,
           }
         : undefined,
     };

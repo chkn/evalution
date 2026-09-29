@@ -197,17 +197,16 @@ describe("TypeSafeSDK edits", () => {
       kind: "object",
       properties: { ...questionsOf(before), team },
     };
-    const after = (await provider.updatePromptProperties(
-      "typesafe-edit.prompt.ts#triage",
-      {
+    const after = (
+      await provider.updatePromptProperties("typesafe-edit.prompt.ts#triage", {
         style: "questions",
         state: {
           kind: "object",
           properties: { ticket: { kind: "reference", path: ["ticket"] } },
         },
         questions,
-      },
-    )) as NormalizedQuestionsPrompt;
+      })
+    ).prompt as NormalizedQuestionsPrompt;
 
     const source = await fileProvider.readFile(
       path.join(fixturesDir, "typesafe-edit.prompt.ts"),

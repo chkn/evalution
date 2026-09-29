@@ -129,7 +129,7 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
   private async open(): Promise<TursoTraceProvider> {
     // A directory this creates ignores itself, so traces stay out of git
     // without anyone editing their `.gitignore`.
-    await mkdirSelfIgnoring(dirname(this.path), ["*.db*"]);
+    await mkdirSelfIgnoring(dirname(this.path));
     const client = await createLocalTursoClient({ path: this.path });
     await runMigrations(drizzle({ client }));
     const real = new TursoTraceProvider({

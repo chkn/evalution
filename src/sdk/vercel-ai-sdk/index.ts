@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import fs from "node:fs";
+import { trace } from "@opentelemetry/api";
 import type { PropDefinition, PropValue } from "ts-proppy";
 import {
   extractPropertiesFromDeclaration,
@@ -29,6 +30,10 @@ import type {
   PromptStyle,
 } from "../../shared/types.ts";
 import { setupGlobalOTelPipeline } from "../../trace/otel-global-pipeline.ts";
+import {
+  getPromptSpanAttributes,
+  SPAN_KIND_ATTRIBUTE,
+} from "../../trace/prompt-tracer.ts";
 import type { TraceIngestor } from "../../trace/trace-ingestor.ts";
 import {
   assertUpdateStyle,
@@ -335,6 +340,7 @@ export class VercelAISDK implements SDKAdapter {
       if (i >= 0) {
         integration = (integrations[i] as PerPromptTelemetry).withTraceId(
           traceId,
+          identity,
         );
         config = {
           ...config,
@@ -370,6 +376,32 @@ export class VercelAISDK implements SDKAdapter {
             },
           };
         }
+      }
+
+      if (!integration) {
+        // The OTel path (`ai` ≤ v6, or no native telemetry registered): the
+        // route's own span — active here — is the trace's root, and the SDK's
+        // spans become its children. The root is where the run's identity
+        // belongs: its inputs, parameters, version and variation describe
+        // the run, not each span in it. Without this, a playground run is
+        // recorded with no link back to its prompt at all.
+        if (identity) {
+          trace.getActiveSpan()?.setAttributes(
+            getPromptSpanAttributes(identity, {
+              [SPAN_KIND_ATTRIBUTE]: "AGENT",
+            }),
+          );
+        }
+        // And a config that didn't turn telemetry on (one that didn't go
+        // through the `prompts()` helper) would produce no spans to hang
+        // under it.
+        config = {
+          ...config,
+          experimental_telemetry: {
+            isEnabled: true,
+            ...config?.experimental_telemetry,
+          },
+        };
       }
     }
 

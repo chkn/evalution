@@ -21,6 +21,7 @@ import {
 import { watchForConfigCreation } from "./config-watcher.ts";
 import { findAvailablePort } from "./find-port.ts";
 import { openBrowser } from "./open-browser.ts";
+import { registerVariationLoaderHook } from "./variation-loader-hook.ts";
 
 // Make a project's config resolve `import ... from 'evalution'` against this
 // CLI rather than the project's node_modules, so configs load even when
@@ -33,6 +34,11 @@ registerEvalutionResolver(import.meta.url);
 // imports; Node's own loader, which runs them here, does not. Registered
 // once, up front, before any prompt file is ever imported for execution.
 registerBundlerResolutionFallback();
+
+// Prompt variations run without their patched source touching disk: it is
+// imported under the real file's URL plus `?evalution-src=<sha256>`, which
+// this hook answers from memory. See `./variation-loader-hook.ts`.
+registerVariationLoaderHook();
 
 async function findRootDir(
   startDir: string,

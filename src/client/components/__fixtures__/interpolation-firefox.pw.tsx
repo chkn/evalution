@@ -19,16 +19,19 @@ async function mockApiRoutes(page: Page) {
     const body = JSON.parse(route.request().postData() ?? "{}");
     await route.fulfill({
       json: {
-        id: "test",
-        name: "test",
-        functionParameters: [],
-        style: "chat",
-        modelEditable: true,
-        system: body.system ?? { kind: "primitive", value: "" },
-        systemEditable: true,
-        messages: Array.isArray(body.messages) ? body.messages : [],
-        messagesEditable: true,
-        modelParameters: [],
+        prompt: {
+          id: "test",
+          name: "test",
+          functionParameters: [],
+          style: "chat",
+          modelEditable: true,
+          system: body.system ?? { kind: "primitive", value: "" },
+          systemEditable: true,
+          messages: Array.isArray(body.messages) ? body.messages : [],
+          messagesEditable: true,
+          modelParameters: [],
+        },
+        ref: { promptId: "test" },
       },
     });
   });

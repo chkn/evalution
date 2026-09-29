@@ -60,13 +60,15 @@ export function Tab({
     >
       <span className="tab-icon">{icon ?? <PromptTabIcon />}</span>
       <span className="tab-label">{name}</span>
-      {dirty ? (
-        <span className="tab-dirty">●</span>
-      ) : (
-        <span className="tab-close" onClick={onClose}>
-          ×
-        </span>
-      )}
+      {/* Unsaved edits show as a dot that turns into the close button on
+        hover — they're kept on the server, so closing loses nothing. */}
+      {dirty && <span className="tab-dirty">●</span>}
+      <span
+        className={`tab-close${dirty ? " tab-close--dirty" : ""}`}
+        onClick={onClose}
+      >
+        ×
+      </span>
     </button>
   );
 }

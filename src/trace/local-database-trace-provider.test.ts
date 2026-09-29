@@ -105,7 +105,7 @@ describe("LocalDatabaseTraceProvider — deferred creation", () => {
     const provider = new LocalDatabaseTraceProvider({ path: dbPath });
     await provider.recordSpanStart(rootSpan("t1"));
     expect(readFileSync(join(dirname(dbPath), ".gitignore"), "utf8")).toBe(
-      "*.db*\n",
+      "*\n",
     );
   });
 

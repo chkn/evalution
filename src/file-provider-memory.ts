@@ -74,6 +74,14 @@ export class MemoryFileProvider implements FileProvider {
     );
   }
 
+  async importSource(_filePath: string, source: string): Promise<any> {
+    // A `data:` URL has no path to resolve relative imports against, which is
+    // no loss here: in-memory modules can't import each other either.
+    return import(
+      `data:text/javascript;charset=utf-8,${encodeURIComponent(source)}`
+    );
+  }
+
   async *glob(
     pattern: string,
     options: GlobOptions = {},

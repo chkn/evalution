@@ -14,9 +14,11 @@ import {
   resolveExecutionInputs,
   stampReceipts,
 } from "../prompt/execution-inputs.ts";
-import type {
-  PromptProvider,
-  ResolvedPromptInputs,
+import {
+  type OpenOnHeadOptions,
+  type PromptProvider,
+  type ResolvedPromptInputs,
+  VariationConflictError,
 } from "../prompt/prompt-provider.ts";
 import type { PromptRegistry } from "../prompt/prompt-registry.ts";
 import { isPromptStyle } from "../shared/helpers.ts";
@@ -24,8 +26,10 @@ import type { SetupTask } from "../shared/setup-task.ts";
 import type {
   ExecuteRequest,
   ExecuteResponse,
+  PromptRef,
   Span,
   SSEData,
+  UpdatePromptResponse,
 } from "../shared/types.ts";
 import type { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
@@ -56,6 +60,29 @@ import { streamTrace } from "./handlers/trace-stream.ts";
 function decodePromptId(encoded: string): string {
   const b64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
   return atob(b64);
+}
+
+/**
+ * The {@link PromptRef} a prompt route names: head, unless the request carries
+ * `?version=` or `?variation=`.
+ */
+function promptRefFrom(c: Context, promptId: string): PromptRef {
+  const variation = c.req.query("variation");
+  if (variation) return { promptId, variation };
+  const version = c.req.query("version");
+  if (version) return { promptId, version };
+  return { promptId };
+}
+
+/**
+ * The response for an error from a versions or variations call: a conflict is
+ * a 409 carrying the conflicting fields, so the client can show them.
+ */
+function errorResponse(c: Context, error: any, status: ContentfulStatusCode) {
+  if (error instanceof VariationConflictError) {
+    return c.json({ error: error.message, conflicts: error.conflicts }, 409);
+  }
+  return c.json({ error: error?.message ?? String(error) }, status);
 }
 
 /**
@@ -176,6 +203,8 @@ export function setupRoutes({
         description: provider.description,
         icon: provider.icon,
         hasAddPrompt: !!provider.addPrompt,
+        hasVersions: !!provider.versions,
+        hasVariations: !!provider.variations,
       })),
     ),
   );
@@ -256,7 +285,7 @@ export function setupRoutes({
       }
 
       const decodedId = decodePromptId(id);
-      const prompt = await provider.getPrompt(decodedId);
+      const prompt = await provider.getPrompt(promptRefFrom(c, decodedId));
       if (!prompt) {
         return c.json({ error: "Prompt not found" }, 404);
       }
@@ -266,6 +295,210 @@ export function setupRoutes({
       return c.json({ error: error.message }, 500);
     }
   });
+
+  // GET /api/prompts/:providerId/:id/versions?limit=&before= - Versions that
+  // changed this prompt's file, newest first
+  app.get("/api/prompts/:providerId/:id/versions", async c => {
+    const { providerId, id } = c.req.param();
+    const provider = promptProviders.get(providerId);
+    if (!provider) return c.json({ error: "Provider not found" }, 404);
+    if (!provider.versions) {
+      return c.json({ error: "This provider has no versions" }, 405);
+    }
+    try {
+      const limit = Number(c.req.query("limit"));
+      return c.json(
+        await provider.versions.history(decodePromptId(id), {
+          ...(Number.isInteger(limit) && limit > 0 && { limit }),
+          ...(c.req.query("before") && { before: c.req.query("before") }),
+        }),
+      );
+    } catch (error: any) {
+      return errorResponse(c, error, 500);
+    }
+  });
+
+  // GET /api/prompts/:providerId/:id/variations - Named variations and WIPs
+  app.get("/api/prompts/:providerId/:id/variations", async c => {
+    const { providerId, id } = c.req.param();
+    const provider = promptProviders.get(providerId);
+    if (!provider) return c.json({ error: "Provider not found" }, 404);
+    if (!provider.variations) {
+      return c.json({ error: "This provider has no variations" }, 405);
+    }
+    try {
+      return c.json(await provider.variations.list(decodePromptId(id)));
+    } catch (error: any) {
+      return errorResponse(c, error, 500);
+    }
+  });
+
+  // POST /api/prompts/:providerId/:id/open-on-head?version= - Bring an old
+  // version's prompt into the unsaved edits at head
+  app.post("/api/prompts/:providerId/:id/open-on-head", async c => {
+    const { providerId, id } = c.req.param();
+    const provider = promptProviders.get(providerId);
+    if (!provider) return c.json({ error: "Provider not found" }, 404);
+    if (!provider.variations) {
+      return c.json({ error: "This provider has no variations" }, 405);
+    }
+    const version = c.req.query("version");
+    if (!version) return c.json({ error: "A version is required" }, 400);
+    try {
+      return c.json(
+        await provider.variations.openVersionOnHead(
+          decodePromptId(id),
+          version,
+          (await c.req.json().catch(() => ({}))) as OpenOnHeadOptions,
+        ),
+      );
+    } catch (error: any) {
+      return errorResponse(c, error, 400);
+    }
+  });
+
+  // GET /api/versions?ids=a,b - Describe versions, across providers (for
+  // labelling traces, which don't say which provider ran them)
+  app.get("/api/versions", async c => {
+    const ids = (c.req.query("ids") ?? "").split(",").filter(Boolean);
+    const found: Record<string, unknown> = {};
+    for (const provider of promptProviders.values()) {
+      if (!provider.versions) continue;
+      for (const id of ids) {
+        if (found[id]) continue;
+        const info = await provider.versions.get(id).catch(() => undefined);
+        if (info) found[id] = info;
+      }
+    }
+    return c.json(found);
+  });
+
+  // GET /api/variations?ids=a,b - Describe variations, across providers
+  app.get("/api/variations", async c => {
+    const ids = (c.req.query("ids") ?? "").split(",").filter(Boolean);
+    const found: Record<string, unknown> = {};
+    for (const [providerId, provider] of promptProviders) {
+      if (!provider.variations) continue;
+      for (const id of ids) {
+        if (found[id]) continue;
+        const info = await provider.variations.get(id).catch(() => undefined);
+        if (info) found[id] = { ...info, providerId };
+      }
+    }
+    return c.json(found);
+  });
+
+  // Variation routes: resolve the provider's variations capability, then run
+  // the matching method.
+  const variationRoute =
+    (
+      handle: (
+        variations: NonNullable<PromptProvider["variations"]>,
+        params: Record<string, string>,
+        c: Context,
+      ) => Promise<Response>,
+    ) =>
+    async (c: Context) => {
+      const params = c.req.param();
+      const provider = promptProviders.get(params.providerId);
+      if (!provider) return c.json({ error: "Provider not found" }, 404);
+      if (!provider.variations) {
+        return c.json({ error: "This provider has no variations" }, 405);
+      }
+      try {
+        return await handle(provider.variations, params, c);
+      } catch (error: any) {
+        return errorResponse(c, error, 400);
+      }
+    };
+
+  // GET /api/variations/:providerId/:vid - One variation
+  app.get(
+    "/api/variations/:providerId/:vid",
+    variationRoute(async (variations, { vid }, c) => {
+      const info = await variations.get(vid);
+      return info
+        ? c.json(info)
+        : c.json({ error: "Variation not found" }, 404);
+    }),
+  );
+
+  // POST /api/variations/:providerId/:vid/open-on-head - Bring into the head WIP
+  app.post(
+    "/api/variations/:providerId/:vid/open-on-head",
+    variationRoute(async (variations, { vid }, c) =>
+      c.json(
+        await variations.openOnHead(
+          vid,
+          (await c.req.json().catch(() => ({}))) as OpenOnHeadOptions,
+        ),
+      ),
+    ),
+  );
+
+  // POST /api/variations/:providerId/:vid/save - Write a WIP into the source
+  app.post(
+    "/api/variations/:providerId/:vid/save",
+    variationRoute(async (variations, { vid }, c) =>
+      c.json(await variations.save(vid)),
+    ),
+  );
+
+  // POST /api/variations/:providerId/:vid/discard - Drop a WIP
+  app.post(
+    "/api/variations/:providerId/:vid/discard",
+    variationRoute(async (variations, { vid }, c) => {
+      await variations.discard(vid);
+      return c.body(null, 204);
+    }),
+  );
+
+  // POST /api/variations/:providerId/:vid/rebase - Re-express against `onto` (default: head)
+  app.post(
+    "/api/variations/:providerId/:vid/rebase",
+    variationRoute(async (variations, { vid }, c) => {
+      const { onto } = (await c.req.json().catch(() => ({}))) as {
+        onto?: string;
+      };
+      return c.json(await variations.rebase(vid, onto));
+    }),
+  );
+
+  // POST /api/variations/:providerId/:vid/resolve - Settle a WIP's conflicts
+  app.post(
+    "/api/variations/:providerId/:vid/resolve",
+    variationRoute(async (variations, { vid }, c) => {
+      const { choices } = (await c.req.json().catch(() => ({}))) as {
+        choices?: Record<string, "target" | "variation">;
+      };
+      return c.json(await variations.resolve(vid, choices ?? {}));
+    }),
+  );
+
+  // PUT /api/variations/:providerId/:vid/name - Name a variation
+  app.put(
+    "/api/variations/:providerId/:vid/name",
+    variationRoute(async (variations, { vid }, c) => {
+      const { name } = (await c.req.json().catch(() => ({}))) as {
+        name?: string;
+      };
+      if (typeof name !== "string" || !name.trim()) {
+        return c.json({ error: "A name is required" }, 400);
+      }
+      return c.json(await variations.name(vid, name));
+    }),
+  );
+
+  // DELETE /api/variations/:providerId/:vid/name/:name - Remove a name
+  app.delete(
+    "/api/variations/:providerId/:vid/name/:name",
+    variationRoute(async (variations, { vid, name }, c) => {
+      const info = await variations.get(vid);
+      if (!info) return c.json({ error: "Variation not found" }, 404);
+      await variations.unname(info.promptId, name);
+      return c.body(null, 204);
+    }),
+  );
 
   // POST /api/prompts/:providerId/:id/rename - Rename a prompt
   app.post("/api/prompts/:providerId/:id/rename", async c => {
@@ -301,13 +534,16 @@ export function setupRoutes({
       }
 
       const decodedId = decodePromptId(id);
-      const updatedPrompt = await provider.updatePromptProperties(
-        decodedId,
+      const { prompt, ref } = await provider.updatePromptProperties(
+        promptRefFrom(c, decodedId),
         await c.req.json(),
       );
-      return c.json({ ...updatedPrompt, providerId });
+      return c.json({
+        prompt: { ...prompt, providerId },
+        ref,
+      } satisfies UpdatePromptResponse);
     } catch (error: any) {
-      return c.json({ error: error.message }, 400);
+      return errorResponse(c, error, 400);
     }
   });
 
@@ -330,11 +566,12 @@ export function setupRoutes({
       }
 
       const decodedId = decodePromptId(id);
+      const ref = promptRefFrom(c, decodedId);
       const { functionInputs = [], executeInputs = {} } = (await c.req
         .json()
         .catch(() => ({}))) as ExecuteRequest;
 
-      const prompt = await provider.getPrompt(decodedId);
+      const prompt = await provider.getPrompt(ref);
       if (!prompt) {
         return c.json({ error: "Prompt not found" }, 404);
       }
@@ -349,7 +586,7 @@ export function setupRoutes({
       let resolved: ResolvedPromptInputs;
       try {
         resolved = provider.resolveInputs
-          ? await provider.resolveInputs(decodedId, inputs)
+          ? await provider.resolveInputs(ref, inputs)
           : { ...(await resolveExecutionInputs(inputs)), release: undefined };
       } catch (err: any) {
         // The request named something that cannot be turned into a value — a
@@ -386,8 +623,9 @@ export function setupRoutes({
         // span starts. A client that opens the returned trace id before then
         // polls `GET /api/traces/:p/:id` until it appears (see the client's
         // `getTrace`), so no server-side pre-creation is needed.
+        let ran: Awaited<ReturnType<PromptProvider["execute"]>>;
         try {
-          await provider.execute(decodedId, functionParams, {
+          ran = await provider.execute(ref, functionParams, {
             traceId,
             rootSpanId,
             executeValues,
@@ -417,12 +655,14 @@ export function setupRoutes({
           traceId,
           rootSpanId,
           tracerProviderId: defaultTraceProviderId,
+          ...(ran?.version && { version: ran.version }),
+          ...(ran?.variation && { variation: ran.variation }),
         } satisfies ExecuteResponse;
       });
 
       return c.json(response);
     } catch (error: any) {
-      return c.json({ error: error.message }, 500);
+      return errorResponse(c, error, 500);
     }
   });
 

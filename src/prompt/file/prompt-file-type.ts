@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type { PropDefinition, ValueFactory } from "ts-proppy";
+import type { FileProvider } from "../../file-provider.ts";
 import type {
   NormalizedPrompt,
   ParsedPrompt,
@@ -407,4 +408,16 @@ export interface PromptFileType {
    * @param requests - See {@link TypeResolutionRequest}.
    */
   resolveTypes?(requests: TypeResolutionRequest): Promise<TypeResolutionResult>;
+
+  /**
+   * A file type like this one that does all its file I/O — reading, writing
+   * and importing prompt files — through `fileProvider` instead.
+   *
+   * How a prompt variation is materialized: the provider hands the copy an
+   * {@link OverlayFileProvider} holding the variation's source at the
+   * prompt's real path, and parses, edits and runs it through that.
+   *
+   * Optional. A file type without it can't show or run variations.
+   */
+  withFileProvider?(fileProvider: FileProvider): PromptFileType;
 }

@@ -3,7 +3,13 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import type { AnnotationKind, TraceSummary } from "../../shared/types";
+import type {
+  AnnotationKind,
+  TraceSummary,
+  VariationInfo,
+  VersionInfo,
+} from "../../shared/types";
+import { lookupVariations, lookupVersions } from "../api";
 import {
   type SummaryColumn,
   SummaryList,
@@ -24,6 +30,8 @@ import {
   SpansIcon,
   StopwatchIcon,
   TokensIcon,
+  VariationIcon,
+  VersionIcon,
 } from "./trace/icons.tsx";
 import {
   DEFAULT_TRACE_COLUMNS,
@@ -34,6 +42,8 @@ import {
   type TraceColumnState,
   tableModeWidth,
   toggleTraceColumn,
+  traceVariationLabel,
+  traceVersionLabel,
 } from "./trace-columns";
 import { useAnchoredPopover } from "./use-anchored-popover";
 
@@ -57,6 +67,8 @@ const COLUMN_LABELS: Record<TraceColumnKey, string> = {
   model: "Model",
   cost: "Cost",
   annotations: "Annotations",
+  version: "Version",
+  variation: "Variation",
 };
 
 function columnIcon(key: TraceColumnKey) {
@@ -75,6 +87,10 @@ function columnIcon(key: TraceColumnKey) {
       return <CostIcon />;
     case "annotations":
       return <AnnotationsIcon />;
+    case "version":
+      return <VersionIcon />;
+    case "variation":
+      return <VariationIcon />;
   }
 }
 
@@ -248,7 +264,7 @@ function traceDuration(t: TraceSummary): number | undefined {
 
 /** How each {@link TraceColumnKey} renders and sorts — every column except `annotations` is sortable, since its three counts don't collapse into one value. */
 const COLUMN_DEFS: Record<
-  TraceColumnKey,
+  Exclude<TraceColumnKey, "version" | "variation">,
   Omit<SummaryColumn<TraceSummary>, "key" | "label" | "icon" | "width">
 > = {
   startTime: {
@@ -286,6 +302,48 @@ const COLUMN_DEFS: Record<
   },
 };
 
+/**
+ * Descriptions of the prompt versions and variations the listed traces ran,
+ * looked up only while their columns are shown, and only for ids not already
+ * known — both are immutable, so nothing ever needs re-fetching.
+ */
+function usePromptRefLookups(
+  traces: TraceSummary[],
+  columns: TraceColumnState[],
+) {
+  const [versions, setVersions] = useState<Record<string, VersionInfo>>({});
+  const [variations, setVariations] = useState<Record<string, VariationInfo>>(
+    {},
+  );
+  const showVersions = columns.some(c => c.key === "version" && c.visible);
+  const showVariations = columns.some(c => c.key === "variation" && c.visible);
+  const versionIds = showVersions
+    ? [...new Set(traces.flatMap(t => t.promptVersion ?? []))]
+        .filter(id => !(id in versions))
+        .join(",")
+    : "";
+  const variationIds = showVariations
+    ? [...new Set(traces.flatMap(t => t.promptVariation ?? []))]
+        .filter(id => !(id in variations))
+        .join(",")
+    : "";
+
+  useEffect(() => {
+    if (!versionIds) return;
+    lookupVersions(versionIds.split(","))
+      .then(found => setVersions(prev => ({ ...prev, ...found })))
+      .catch(() => {});
+  }, [versionIds]);
+  useEffect(() => {
+    if (!variationIds) return;
+    lookupVariations(variationIds.split(","))
+      .then(found => setVariations(prev => ({ ...prev, ...found })))
+      .catch(() => {});
+  }, [variationIds]);
+
+  return { versions, variations };
+}
+
 function TraceList({
   traces,
   loading,
@@ -296,6 +354,7 @@ function TraceList({
   onResizeSidebar,
 }: TraceListProps) {
   const [columns, setColumns] = useState<TraceColumnState[]>(loadColumnState);
+  const { versions, variations } = usePromptRefLookups(traces, columns);
 
   useEffect(() => {
     try {
@@ -312,7 +371,18 @@ function TraceList({
       label: COLUMN_LABELS[key],
       icon: columnIcon(key),
       width: TRACE_COLUMN_WIDTH_PX[key],
-      ...COLUMN_DEFS[key],
+      ...(key === "version"
+        ? {
+            cell: (t: TraceSummary) => traceVersionLabel(t, versions),
+            sortValue: (t: TraceSummary) => t.promptVersion,
+          }
+        : key === "variation"
+          ? {
+              cell: (t: TraceSummary) => traceVariationLabel(t, variations),
+              sortValue: (t: TraceSummary) =>
+                traceVariationLabel(t, variations),
+            }
+          : COLUMN_DEFS[key]),
     }));
 
   return (

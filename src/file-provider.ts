@@ -91,6 +91,19 @@ export interface FileProvider {
   import(filePath: string, options?: ImportOptions): Promise<any>;
 
   /**
+   * Imports `source` as though it were the content of the module at
+   * `filePath`, without writing it anywhere — so its relative imports resolve
+   * exactly as the real file's would. How a prompt variation runs.
+   *
+   * Optional. A provider that can't do this can't run variations; callers
+   * report that rather than silently running the file on disk.
+   *
+   * @param filePath - Absolute path the module should behave as if it had.
+   * @param source - The module's source text.
+   */
+  importSource?(filePath: string, source: string): Promise<any>;
+
+  /**
    * Returns an async iterator that yields paths matching `pattern`.
    * @param pattern - A glob pattern (e.g. `'**\/*.prompt.ts'`).
    * @param options - See {@link GlobOptions}.

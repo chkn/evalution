@@ -6,6 +6,7 @@ import type {
   AddPromptContext,
   Annotation,
   AnnotationKind,
+  ConflictChoices,
   Dataset,
   DatasetField,
   DatasetProviderInfo,
@@ -18,18 +19,36 @@ import type {
   NormalizedPromptUpdates,
   PromptID,
   PromptProviderInfo,
+  PromptRef,
   PromptStyle,
   PropDefinition,
+  RebaseResult,
   TraceLiveEvent,
   TraceProviderInfo,
   TraceSummary,
   TraceWithSpans,
+  UpdatePromptResponse,
+  VariationInfo,
+  VersionInfo,
 } from "../shared/types";
 import { markSelfEdit } from "./self-edits.ts";
 import { encodePromptId } from "./utils";
 
-function promptUrl(prompt: NormalizedPrompt, suffix: string): string {
-  return `/api/prompts/${prompt.providerId}/${encodePromptId(prompt.id)}/${suffix}`;
+function promptUrl(
+  prompt: Pick<NormalizedPrompt, "id" | "providerId">,
+  suffix: string,
+  ref?: Partial<Pick<PromptRef, "version" | "variation">>,
+): string {
+  return `/api/prompts/${prompt.providerId}/${encodePromptId(prompt.id)}/${suffix}${refQuery(ref)}`;
+}
+
+/** `?version=` / `?variation=` for a non-head ref; nothing for head. */
+export function refQuery(
+  ref?: Partial<Pick<PromptRef, "version" | "variation">>,
+): string {
+  if (ref?.variation) return `?variation=${encodeURIComponent(ref.variation)}`;
+  if (ref?.version) return `?version=${encodeURIComponent(ref.version)}`;
+  return "";
 }
 
 async function throwIfError(res: Response): Promise<void> {
@@ -145,13 +164,35 @@ export async function renamePrompt(
   return res.json();
 }
 
+/**
+ * The prompt `ref` names — a version, or a variation — as the server reads it.
+ * A version that is what's on disk now comes back as head.
+ */
+export async function getPromptAt(
+  providerId: string,
+  promptId: string,
+  ref: PromptRef,
+): Promise<NormalizedPrompt> {
+  const res = await fetch(
+    `/api/prompts/${providerId}/${encodePromptId(promptId)}${refQuery(ref)}`,
+  );
+  await throwIfError(res);
+  return res.json();
+}
+
+/**
+ * Applies `updates` at `ref` (head when omitted). With variations, the server
+ * collects them in a work-in-progress variation rather than writing the file;
+ * the response says where they landed.
+ */
 export async function updatePromptProperties(
   prompt: NormalizedPrompt,
   updates: NormalizedPromptUpdates,
-): Promise<NormalizedPrompt> {
-  // Updating rewrites the file; ignore the resulting echo for this prompt.
+  ref?: PromptRef,
+): Promise<UpdatePromptResponse> {
+  // Updating changes the prompt; ignore the resulting echo for this prompt.
   if (prompt.providerId) markSelfEdit("change", prompt.providerId, prompt.id);
-  const res = await fetch(promptUrl(prompt, "update"), {
+  const res = await fetch(promptUrl(prompt, "update", ref), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
@@ -174,12 +215,153 @@ export async function updatePromptProperties(
 export async function executePrompt(
   prompt: NormalizedPrompt,
   inputs: ExecuteRequest,
+  ref?: PromptRef,
 ): Promise<ExecuteResponse> {
-  const res = await fetch(promptUrl(prompt, "execute"), {
+  const res = await fetch(promptUrl(prompt, "execute", ref), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(inputs),
   });
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Versions that changed `prompt`'s file, newest first. */
+export async function getPromptVersions(
+  prompt: Pick<NormalizedPrompt, "id" | "providerId">,
+  { limit, before }: { limit?: number; before?: string } = {},
+): Promise<VersionInfo[]> {
+  const params = new URLSearchParams();
+  if (limit) params.set("limit", String(limit));
+  if (before) params.set("before", before);
+  const query = params.size ? `?${params}` : "";
+  const res = await fetch(promptUrl(prompt, "versions") + query);
+  await throwIfError(res);
+  return res.json();
+}
+
+/** `prompt`'s named variations and unsaved edits. */
+export async function getPromptVariations(
+  prompt: Pick<NormalizedPrompt, "id" | "providerId">,
+): Promise<VariationInfo[]> {
+  const res = await fetch(promptUrl(prompt, "variations"));
+  await throwIfError(res);
+  return res.json();
+}
+
+function variationUrl(providerId: string, id: string, suffix = ""): string {
+  return `/api/variations/${encodeURIComponent(providerId)}/${encodeURIComponent(id)}${suffix}`;
+}
+
+async function postVariation<T>(
+  providerId: string,
+  id: string,
+  action: string,
+  body?: unknown,
+): Promise<T> {
+  const res = await fetch(variationUrl(providerId, id, `/${action}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+  await throwIfError(res);
+  return res.status === 204 ? (undefined as T) : res.json();
+}
+
+/** Writes a WIP variation into the prompt's source, and drops it. */
+export function saveVariation(
+  providerId: string,
+  id: string,
+): Promise<RebaseResult> {
+  return postVariation(providerId, id, "save");
+}
+
+/** Drops a WIP variation. */
+export function discardVariation(
+  providerId: string,
+  id: string,
+): Promise<void> {
+  return postVariation(providerId, id, "discard");
+}
+
+/** Brings a variation's changes into the unsaved edits at head. */
+export function openVariationOnHead(
+  providerId: string,
+  id: string,
+  options: OpenOnHeadRequest = {},
+): Promise<RebaseResult> {
+  return postVariation(providerId, id, "open-on-head", options);
+}
+
+/**
+ * How to settle conflicts when opening on head: discard the unsaved edits
+ * there first, or pick a side per field. Without either, a conflict changes
+ * nothing and is reported back.
+ */
+export interface OpenOnHeadRequest {
+  replace?: boolean;
+  choices?: ConflictChoices;
+}
+
+/** Brings an old version's prompt into the unsaved edits at head. */
+export async function openVersionOnHead(
+  prompt: Pick<NormalizedPrompt, "id" | "providerId">,
+  version: string,
+  options: OpenOnHeadRequest = {},
+): Promise<RebaseResult> {
+  const res = await fetch(promptUrl(prompt, "open-on-head", { version }), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Settles a WIP's conflicts with a choice per field. */
+export function resolveVariation(
+  providerId: string,
+  id: string,
+  choices: ConflictChoices,
+): Promise<RebaseResult> {
+  return postVariation(providerId, id, "resolve", { choices });
+}
+
+/** Names a variation (a WIP's current edits are frozen and named). */
+export async function nameVariation(
+  providerId: string,
+  id: string,
+  name: string,
+): Promise<VariationInfo> {
+  const res = await fetch(variationUrl(providerId, id, "/name"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Describes versions by id, across providers. Unknown ids are absent. */
+export async function lookupVersions(
+  ids: string[],
+): Promise<Record<string, VersionInfo>> {
+  if (ids.length === 0) return {};
+  const res = await fetch(
+    `/api/versions?ids=${ids.map(encodeURIComponent).join(",")}`,
+  );
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Describes variations by id, across providers. Unknown ids are absent. */
+export async function lookupVariations(
+  ids: string[],
+): Promise<Record<string, VariationInfo & { providerId: string }>> {
+  if (ids.length === 0) return {};
+  const res = await fetch(
+    `/api/variations?ids=${ids.map(encodeURIComponent).join(",")}`,
+  );
   await throwIfError(res);
   return res.json();
 }

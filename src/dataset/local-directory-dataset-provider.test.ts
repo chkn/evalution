@@ -81,7 +81,7 @@ describe("LocalDirectoryDatasetProvider — files", () => {
   it("creates the directory with a self-ignoring .gitignore", async () => {
     const { provider, dir } = await makeProvider();
     await provider.createDataset({ name: "Tickets", fields: [] });
-    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe("*.db*\n");
+    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe("*\n");
   });
 
   it("leaves a directory that already existed without a .gitignore", async () => {

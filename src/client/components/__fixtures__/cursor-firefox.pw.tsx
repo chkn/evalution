@@ -21,16 +21,19 @@ async function mockApiRoutes(page: Page) {
     const system = body.system ?? undefined;
     await route.fulfill({
       json: {
-        id: "test",
-        name: "test",
-        functionParameters: [],
-        style: "chat",
-        modelEditable: true,
-        system,
-        systemEditable: true,
-        messages,
-        messagesEditable: true,
-        modelParameters: [],
+        prompt: {
+          id: "test",
+          name: "test",
+          functionParameters: [],
+          style: "chat",
+          modelEditable: true,
+          system,
+          systemEditable: true,
+          messages,
+          messagesEditable: true,
+          modelParameters: [],
+        },
+        ref: { promptId: "test" },
       },
     });
   });

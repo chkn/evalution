@@ -6,6 +6,11 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import chokidar from "chokidar";
 import { makeRe, minimatch } from "minimatch";
+import {
+  isVariationLoaderHookRegistered,
+  registerVariationSource,
+  VARIATION_SOURCE_PARAM,
+} from "./cli/variation-loader-hook.ts";
 import type {
   FileProvider,
   FileWatchCallback,
@@ -73,6 +78,33 @@ export class LocalFileProvider implements FileProvider {
       this.#cacheBustingUnsupported = true;
       return loaded;
     }
+  }
+
+  /**
+   * Imports `source` under the real file's URL plus `?evalution-src=<sha256>`,
+   * which the variation load hook answers with `source` (see
+   * `registerVariationLoaderHook`). Node resolves the module's relative
+   * imports against the URL's path, so they land where the real file's would.
+   */
+  async importSource(filePath: string, source: string): Promise<any> {
+    if (!isVariationLoaderHookRegistered()) {
+      throw new Error(
+        "Running a prompt variation needs evalution's module loader hook, " +
+          "which is registered by the evalution CLI. Call " +
+          "`registerVariationLoaderHook()` first when running prompts from " +
+          "your own process.",
+      );
+    }
+    if (this.#cacheBustingUnsupported) {
+      throw new Error(
+        "This host's module loader rejects query strings on imports, so " +
+          "prompt variations can't be run here. Save the variation to the " +
+          "file to run it.",
+      );
+    }
+    const url = pathToFileURL(filePath);
+    url.search = `?${VARIATION_SOURCE_PARAM}=${registerVariationSource(source)}`;
+    return import(url.href);
   }
 
   async *glob(

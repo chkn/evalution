@@ -23,7 +23,10 @@ import { answersWithConfidence } from "./evaluation-answers.ts";
 import {
   PROMPT_ID_ATTRIBUTE,
   PROMPT_INPUTS_ATTRIBUTE,
+  PROMPT_NAME_ATTRIBUTE,
   PROMPT_PROVIDER_ID_ATTRIBUTE,
+  PROMPT_VARIATION_ATTRIBUTE,
+  PROMPT_VERSION_ATTRIBUTE,
   SPAN_KIND_ATTRIBUTE,
 } from "./prompt-tracer.ts";
 import type {
@@ -50,10 +53,44 @@ const KNOWN_KINDS: readonly SpanKind[] = [
  * OTel GenAI semconv `gen_ai.operation.name`. Falls back to `'DEFAULT'`.
  */
 export function readKind(attributes: Record<string, unknown>): SpanKind {
+  attributes = liftTelemetryMetadata(attributes);
   const raw =
     (attributes[SPAN_KIND_ATTRIBUTE] as SpanKind | undefined) ??
     otelOperationToSpanKind(attributes["gen_ai.operation.name"]);
   return typeof raw === "string" && KNOWN_KINDS.includes(raw) ? raw : "DEFAULT";
+}
+
+/** Where the Vercel AI SDK (≤ v6) records `experimental_telemetry.metadata`. */
+const TELEMETRY_METADATA_PREFIX = "ai.telemetry.metadata.";
+
+/** The attributes evalution itself defines, which may arrive as metadata. */
+const EVALUTION_ATTRIBUTES = [
+  SPAN_KIND_ATTRIBUTE,
+  PROMPT_NAME_ATTRIBUTE,
+  PROMPT_ID_ATTRIBUTE,
+  PROMPT_PROVIDER_ID_ATTRIBUTE,
+  PROMPT_INPUTS_ATTRIBUTE,
+  PROMPT_VERSION_ATTRIBUTE,
+  PROMPT_VARIATION_ATTRIBUTE,
+];
+
+/**
+ * `attributes` with evalution's own attributes lifted out of
+ * `ai.telemetry.metadata.*`, where the Vercel AI SDK's OTel spans (≤ v6)
+ * record whatever `experimental_telemetry.metadata` held — which is how the
+ * `prompts()` helper tags them. An attribute set directly wins.
+ */
+export function liftTelemetryMetadata(
+  attributes: Record<string, unknown>,
+): Record<string, unknown> {
+  let lifted: Record<string, unknown> | undefined;
+  for (const name of EVALUTION_ATTRIBUTES) {
+    const value = attributes[TELEMETRY_METADATA_PREFIX + name];
+    if (value === undefined || attributes[name] !== undefined) continue;
+    lifted ??= { ...attributes };
+    lifted[name] = value;
+  }
+  return lifted ?? attributes;
 }
 
 /** Maps an OTel `SpanStatus` to evalution's `ok | error | undefined`. */
@@ -398,12 +435,14 @@ export function readTool(
 /**
  * Reads {@link LLMSpanDetails} ({@link readLLM}), {@link ToolSpanDetails}
  * ({@link readTool}), and the prompt reference (`evalution.prompt.id` /
- * `evalution.prompt.provider.id` / the inputs {@link readInputs} parses) out
+ * `evalution.prompt.provider.id` / `evalution.prompt.version` /
+ * `evalution.prompt.variation` / the inputs {@link readInputs} parses) out
  * of an attribute bag, ready to spread onto a `Span`.
  */
 export function llmAndPrompt(
   attributes: Record<string, unknown>,
 ): Partial<Span> {
+  attributes = liftTelemetryMetadata(attributes);
   const llm = readLLM(attributes);
   const tool = readTool(attributes);
   // Store the prompt reference exactly as emitted: `id` is global unless a
@@ -411,8 +450,16 @@ export function llmAndPrompt(
   // a trace is served, so the stored (possibly global) id stays stable.
   const id = str(attributes[PROMPT_ID_ATTRIBUTE]);
   const providerId = str(attributes[PROMPT_PROVIDER_ID_ATTRIBUTE]);
+  const version = str(attributes[PROMPT_VERSION_ATTRIBUTE]);
+  const variation = str(attributes[PROMPT_VARIATION_ATTRIBUTE]);
   const prompt: PromptID | undefined = id
-    ? { id, ...(providerId && { providerId }), ...readInputs(attributes) }
+    ? {
+        id,
+        ...(providerId && { providerId }),
+        ...readInputs(attributes),
+        ...(version && { version }),
+        ...(variation && { variation }),
+      }
     : undefined;
   return {
     ...(llm && { llm }),

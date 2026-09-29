@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { shortId, versionLabel } from "../../shared/helpers";
+import type {
+  TraceSummary,
+  VariationInfo,
+  VersionInfo,
+} from "../../shared/types";
+import { variationLabel } from "./prompt-ref";
 import { tableModeWidth as baseTableModeWidth } from "./summary-list";
 
 const ALL_KEYS = [
@@ -11,6 +18,8 @@ const ALL_KEYS = [
   "model",
   "cost",
   "annotations",
+  "version",
+  "variation",
 ] as const;
 
 /** A configurable trace-list column — every one besides the always-shown Name. */
@@ -37,6 +46,8 @@ const DEFAULT_VISIBLE: Record<TraceColumnKey, boolean> = {
   model: false,
   cost: false,
   annotations: false,
+  version: false,
+  variation: false,
 };
 
 /** Order and visibility a fresh install (or corrupted storage) falls back to. */
@@ -127,6 +138,8 @@ export const TRACE_COLUMN_WIDTH_PX: Record<TraceColumnKey, number> = {
   model: 110,
   cost: 64,
   annotations: 90,
+  version: 120,
+  variation: 110,
 };
 
 /**
@@ -138,4 +151,35 @@ export function tableModeWidth(columns: TraceColumnState[]): number {
   return baseTableModeWidth(
     columns.filter(c => c.visible).map(c => TRACE_COLUMN_WIDTH_PX[c.key]),
   );
+}
+
+// ─── Prompt version and variation ───────────────────────────────────────────
+
+/**
+ * What the Version column shows for a trace: its short sha, or "snapshot of
+ * <short sha>" once the version has been looked up; the bare short id until
+ * then; `—` for a run that recorded none.
+ */
+export function traceVersionLabel(
+  trace: Pick<TraceSummary, "promptVersion">,
+  versions: Record<string, VersionInfo>,
+): string {
+  const id = trace.promptVersion;
+  if (!id) return "—";
+  const info = versions[id];
+  return info ? versionLabel(info) : shortId(id);
+}
+
+/**
+ * What the Variation column shows for a trace: the variation's name when it
+ * has one, else its short id; `—` for a run of the source as it was.
+ */
+export function traceVariationLabel(
+  trace: Pick<TraceSummary, "promptVariation">,
+  variations: Record<string, VariationInfo>,
+): string {
+  const id = trace.promptVariation;
+  if (!id) return "—";
+  const info = variations[id];
+  return info?.names.length ? variationLabel(info) : shortId(id);
 }

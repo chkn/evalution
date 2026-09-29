@@ -213,10 +213,12 @@ export default prompts({ id: 'triage' }, () => ({
       fileProvider,
       sdk: new VercelAISDK(),
     });
-    const updated = (await provider.updatePromptProperties(
-      "triage.prompt.ts#triage",
-      { style: "questions", ...updates },
-    )) as NormalizedQuestionsPrompt;
+    const updated = (
+      await provider.updatePromptProperties("triage.prompt.ts#triage", {
+        style: "questions",
+        ...updates,
+      })
+    ).prompt as NormalizedQuestionsPrompt;
     return { updated, text: await fileProvider.readFile(filePath) };
   }
 

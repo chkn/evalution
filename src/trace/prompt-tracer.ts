@@ -67,6 +67,18 @@ export const PROMPT_PROVIDER_ID_ATTRIBUTE = "evalution.prompt.provider.id";
  */
 export const PROMPT_INPUTS_ATTRIBUTE = "evalution.prompt.inputs";
 
+/**
+ * Attribute name a span can set to record which version of its prompt ran —
+ * for a file-based prompt, a commit or a snapshot of the working tree.
+ */
+export const PROMPT_VERSION_ATTRIBUTE = "evalution.prompt.version";
+
+/**
+ * Attribute name a span can set to record which variation of its prompt ran,
+ * on top of its {@link PROMPT_VERSION_ATTRIBUTE}.
+ */
+export const PROMPT_VARIATION_ATTRIBUTE = "evalution.prompt.variation";
+
 export interface PromptSpanInfo {
   /** Globally-unique prompt id (e.g. `${groupId}#${name}`). */
   id?: string;
@@ -110,6 +122,29 @@ export interface PromptSpanInfo {
    * {@link executeInputs} has a name but no type.
    */
   executeParameterDefinitions?: unknown[];
+  /** The version the run executed against. See {@link PROMPT_VERSION_ATTRIBUTE}. */
+  version?: string;
+  /** The variation the run applied. See {@link PROMPT_VARIATION_ATTRIBUTE}. */
+  variation?: string;
+}
+
+/**
+ * `identity` with any field it leaves unset filled from `fallback`.
+ *
+ * A config built by the `prompts()` helper carries an identity of its own —
+ * the one to keep, since its id is the global one — but only the playground
+ * knows what the run was launched with and against which version.
+ */
+export function mergePromptIdentity(
+  identity: PromptSpanInfo | undefined,
+  fallback: PromptSpanInfo | undefined,
+): PromptSpanInfo | undefined {
+  if (!identity || !fallback) return identity ?? fallback;
+  const merged: PromptSpanInfo = { ...fallback };
+  for (const [key, value] of Object.entries(identity)) {
+    if (value !== undefined) (merged as any)[key] = value;
+  }
+  return merged;
 }
 
 /**
@@ -145,6 +180,8 @@ export function getPromptSpanAttributes(
       [PROMPT_NAME_ATTRIBUTE, prompt.name],
       [PROMPT_ID_ATTRIBUTE, prompt.id],
       [PROMPT_INPUTS_ATTRIBUTE, inputs],
+      [PROMPT_VERSION_ATTRIBUTE, prompt.version],
+      [PROMPT_VARIATION_ATTRIBUTE, prompt.variation],
       ...Object.entries(attributes),
     ].filter(([, v]) => v !== undefined && v !== null),
   );

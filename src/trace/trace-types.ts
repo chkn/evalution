@@ -45,6 +45,10 @@ export interface PromptID {
    * {@link parameterDefinitions} is for {@link functionInputs}.
    */
   executeParameterDefinitions?: unknown[];
+  /** The version the run executed against. */
+  version?: string;
+  /** The variation applied on top of {@link version}, if any. */
+  variation?: string;
 }
 
 /**
@@ -223,6 +227,10 @@ export interface TraceSummary extends TraceBase {
   cost?: number;
   /** The model name, if every LLM span that reports one reports the same one. */
   model?: string;
+  /** The prompt version the run executed against (`PromptID.version`). */
+  promptVersion?: string;
+  /** The prompt variation the run applied (`PromptID.variation`). */
+  promptVariation?: string;
   /** How many annotations of each kind are attached to the trace (trace-level or on any of its spans). */
   annotationCounts: Record<AnnotationKind, number>;
 }

@@ -170,10 +170,12 @@ export default prompts({ id: 'triage' }, ({ openai }) => ({
       fileProvider,
       sdk: new VercelAISDK(),
     });
-    const updated = (await provider.updatePromptProperties(
-      "triage.prompt.ts#triage",
-      { style: "chat", model },
-    )) as NormalizedChatPrompt;
+    const updated = (
+      await provider.updatePromptProperties("triage.prompt.ts#triage", {
+        style: "chat",
+        model,
+      })
+    ).prompt as NormalizedChatPrompt;
     return { updated, text: await fileProvider.readFile(filePath) };
   }
 

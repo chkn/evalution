@@ -1,18 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import {
-  access,
-  constants,
-  open,
-  readdir,
-  stat,
-  unlink,
-} from "node:fs/promises";
+import { access, constants, readdir, stat, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
-import { createLocalTursoClient } from "../trace/db/local-turso-client.ts";
+import {
+  assertSqliteFile,
+  createLocalTursoClient,
+} from "../trace/db/local-turso-client.ts";
 import { mkdirSelfIgnoring } from "../trace/db/self-ignoring-dir.ts";
 import {
   isValidDatasetId,
@@ -44,33 +40,6 @@ const DB_EXT = ".db";
  * own, listed in case a file was last opened by another SQLite build.
  */
 const SIDECARS = ["-wal", "-shm", "-info", "-changes"];
-
-/** The first 16 bytes of every SQLite database file. */
-const SQLITE_HEADER = "SQLite format 3\0";
-
-/**
- * Throws unless `path` is empty (about to be created) or starts with the
- * SQLite header. Checked before connecting because the pinned
- * `@tursodatabase/sync` never settles `connect()` on a file that isn't a
- * database — it hangs instead of failing, which would hang every list.
- */
-async function assertSqliteFile(path: string): Promise<void> {
-  const handle = await open(path, "r").catch((err: any) => {
-    if (err?.code === "ENOENT") return undefined;
-    throw err;
-  });
-  if (!handle) return;
-  try {
-    const buffer = Buffer.alloc(SQLITE_HEADER.length);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    if (bytesRead === 0) return;
-    if (buffer.toString("latin1", 0, bytesRead) !== SQLITE_HEADER) {
-      throw new Error("not a SQLite database");
-    }
-  } finally {
-    await handle.close();
-  }
-}
 
 /** What opening one dataset file produced. */
 type Entry =
@@ -110,8 +79,8 @@ export interface LocalDirectoryDatasetProviderOptions {
  * - Lists by scanning the directory, so a file copied in by hand shows up on
  *   the next list without a watcher.
  * - Writes nothing to disk until the first dataset is created; the directory
- *   is then created with a `.gitignore` of `*.db*`, so it ignores its own
- *   contents.
+ *   is then created with a `.gitignore` of `*`, so it ignores its own
+ *   contents, `.gitignore` included.
  * - A file that won't open, or doesn't hold exactly one dataset, is listed
  *   with an `error` and reported once — never thrown from a list.
  */
@@ -337,7 +306,7 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
   private async createNow(input: CreateDatasetInput): Promise<Dataset> {
     // A directory that ignores its own contents is the only version that
     // works without telling anyone to edit their own `.gitignore`.
-    await mkdirSelfIgnoring(this.dir, ["*.db*"]);
+    await mkdirSelfIgnoring(this.dir);
     const existing = new Set(await this.fileIds());
     const id = uniqueDatasetId(
       slugifyDatasetName(input.name),

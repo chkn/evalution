@@ -99,6 +99,13 @@ export default prompts(
     this.fileProvider = fileProvider;
   }
 
+  withFileProvider(fileProvider: FileProvider): TSPromptFileType {
+    const copy = new TSPromptFileType(fileProvider);
+    copy.defaultIncludePatterns = this.defaultIncludePatterns;
+    copy.defaultFileExtension = this.defaultFileExtension;
+    return copy;
+  }
+
   async parsePrompts(
     files: string[],
     rootDir: string = "",

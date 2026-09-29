@@ -9,7 +9,10 @@
 
 import type { Instructions, ModelMessage, Telemetry } from "ai"; // type-only: keeps `ai` an optional peer dep
 
-import type { PromptSpanInfo } from "../../trace/prompt-tracer.ts";
+import {
+  mergePromptIdentity,
+  type PromptSpanInfo,
+} from "../../trace/prompt-tracer.ts";
 
 type Arrayable<T> = T | T[];
 
@@ -25,8 +28,12 @@ import type {
 export interface PerPromptTelemetry extends Telemetry {
   /**
    * Returns a new instance that will use the given trace ID.
+   *
+   * @param runIdentity - What the caller knows about this run that the
+   *   integration's own identity doesn't — the playground's inputs and the
+   *   version it ran — filled in wherever the integration's identity is unset.
    */
-  withTraceId(traceId: string): PerTraceTelemetry;
+  withTraceId(traceId: string, runIdentity?: PromptSpanInfo): PerTraceTelemetry;
 }
 const { brand: brandPerPrompt, isBranded: isPerPromptTelemetry } =
   makeBrand<PerPromptTelemetry>(
@@ -270,18 +277,22 @@ export class VercelAISDKTelemetry
       experimental_onEvaluateEnd: event => this.handleEvaluateEnd(event),
       // The brand is non-enumerable, so the spread below drops it — the result
       // is re-branded by `brandPerPrompt`.
-      withTraceId: traceId => {
+      withTraceId: (traceId, runIdentity) => {
+        const merged = mergePromptIdentity(identity, runIdentity);
         let started = false;
         let errored = false;
         return brandPerPrompt({
           ...perPromptTelemetry,
           onStart: event => {
             started = true;
-            return this.handleStart(event, { identity, traceId });
+            return this.handleStart(event, { identity: merged, traceId });
           },
           experimental_onEvaluateStart: event => {
             started = true;
-            return this.handleEvaluateStart(event, { identity, traceId });
+            return this.handleEvaluateStart(event, {
+              identity: merged,
+              traceId,
+            });
           },
           onError: async event => {
             if (await this.handleError(event)) errored = true;
@@ -327,6 +338,8 @@ export class VercelAISDKTelemetry
             executeInputs: identity.executeInputs,
             parameterDefinitions: identity.parameterDefinitions,
             executeParameterDefinitions: identity.executeParameterDefinitions,
+            version: identity.version,
+            variation: identity.variation,
           }
         : undefined,
     };
@@ -375,6 +388,8 @@ export class VercelAISDKTelemetry
             functionInputs: identity.functionInputs,
             executeInputs: identity.executeInputs,
             parameterDefinitions: identity.parameterDefinitions,
+            version: identity.version,
+            variation: identity.variation,
           }
         : undefined,
     };

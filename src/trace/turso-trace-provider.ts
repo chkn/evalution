@@ -223,7 +223,9 @@ export class TursoTraceProvider extends BaseTraceProvider {
     // NULL — when a span reports no token usage at all. `cost` sums
     // `llm_cost_prompt + llm_cost_completion`, NULL (and so excluded) unless a
     // span set both. `model` is the one model every model-reporting span
-    // agrees on (`model_count = 1`), else NULL.
+    // agrees on (`model_count = 1`), else NULL. `promptVersion` and
+    // `promptVariation` come off whichever span recorded the run's prompt
+    // reference — its root, in practice.
     const spanRollups = this.db
       .select({
         traceId: spans.traceId,
@@ -237,6 +239,13 @@ export class TursoTraceProvider extends BaseTraceProvider {
         ),
         modelCount: sql`count(distinct ${spans.llmModel})`.as("modelCount"),
         model: sql`min(${spans.llmModel})`.as("model"),
+        promptVersion: sql`min(json_extract(${spans.prompt}, '$.version'))`.as(
+          "promptVersion",
+        ),
+        promptVariation:
+          sql`min(json_extract(${spans.prompt}, '$.variation'))`.as(
+            "promptVariation",
+          ),
       })
       .from(spans)
       .groupBy(spans.traceId)
@@ -273,6 +282,8 @@ export class TursoTraceProvider extends BaseTraceProvider {
         cost: sql<number | null>`${spanRollups.cost}`,
         modelCount: sql<number>`coalesce(${spanRollups.modelCount}, 0)`,
         model: sql<string | null>`${spanRollups.model}`,
+        promptVersion: sql<string | null>`${spanRollups.promptVersion}`,
+        promptVariation: sql<string | null>`${spanRollups.promptVariation}`,
         annotIssue: sql<number>`coalesce(${annotationCounts.issue}, 0)`,
         annotGood: sql<number>`coalesce(${annotationCounts.good}, 0)`,
         annotNote: sql<number>`coalesce(${annotationCounts.note}, 0)`,
@@ -294,6 +305,10 @@ export class TursoTraceProvider extends BaseTraceProvider {
       ...(row.cost != null && { cost: Number(row.cost) }),
       ...(Number(row.modelCount) === 1 &&
         row.model != null && { model: row.model }),
+      ...(row.promptVersion != null && { promptVersion: row.promptVersion }),
+      ...(row.promptVariation != null && {
+        promptVariation: row.promptVariation,
+      }),
       annotationCounts: {
         issue: Number(row.annotIssue),
         good: Number(row.annotGood),

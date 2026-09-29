@@ -8,6 +8,7 @@
  * `specs/trace-workshopping.md` §B.3.
  */
 
+import { open } from "node:fs/promises";
 import { connect, type Database } from "@tursodatabase/sync";
 
 export interface LocalTursoClientOptions {
@@ -64,4 +65,31 @@ export async function createLocalTursoClient({
   // `ON DELETE CASCADE`s (see ./schema.ts) are inert without this.
   await db.exec("PRAGMA foreign_keys = ON");
   return db;
+}
+
+/** The first 16 bytes of every SQLite database file. */
+const SQLITE_HEADER = "SQLite format 3\0";
+
+/**
+ * Throws unless `path` is empty (about to be created) or starts with the
+ * SQLite header. Checked before connecting because the pinned
+ * `@tursodatabase/sync` never settles `connect()` on a file that isn't a
+ * database — it hangs instead of failing, which would hang every list.
+ */
+export async function assertSqliteFile(path: string): Promise<void> {
+  const handle = await open(path, "r").catch((err: any) => {
+    if (err?.code === "ENOENT") return undefined;
+    throw err;
+  });
+  if (!handle) return;
+  try {
+    const buffer = Buffer.alloc(SQLITE_HEADER.length);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead === 0) return;
+    if (buffer.toString("latin1", 0, bytesRead) !== SQLITE_HEADER) {
+      throw new Error("not a SQLite database");
+    }
+  } finally {
+    await handle.close();
+  }
 }

@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  llmAndPrompt,
   parseMessages,
   readKind,
   readLLM,
@@ -290,5 +291,31 @@ describe("experimental_evaluate spans from @ai-sdk/otel", () => {
     expect(readLLM(rest)?.output).toEqual({
       team: { type: "choice", choice: "billing" },
     });
+  });
+});
+
+describe("evalution attributes recorded as telemetry metadata", () => {
+  it("reads the prompt reference and kind from ai.telemetry.metadata.*", () => {
+    const attributes = {
+      "ai.telemetry.metadata.evalution.span.type": "LLM",
+      "ai.telemetry.metadata.evalution.prompt.id": "support#triage",
+      "ai.telemetry.metadata.evalution.prompt.version": "abc123",
+      "ai.telemetry.metadata.evalution.prompt.variation": "var_x",
+    };
+    expect(readKind(attributes)).toBe("LLM");
+    expect(llmAndPrompt(attributes).prompt).toEqual({
+      id: "support#triage",
+      version: "abc123",
+      variation: "var_x",
+    });
+  });
+
+  it("prefers an attribute set directly over its metadata twin", () => {
+    expect(
+      llmAndPrompt({
+        "evalution.prompt.id": "direct#p",
+        "ai.telemetry.metadata.evalution.prompt.id": "metadata#p",
+      }).prompt?.id,
+    ).toBe("direct#p");
   });
 });

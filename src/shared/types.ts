@@ -193,7 +193,142 @@ export interface NormalizedPromptBase {
     functionSlots?: Record<string, InputLayout>;
     executeSlots?: Record<string, InputLayout>;
   };
+
+  /**
+   * Where this prompt was read from. Absent when the provider has no notion
+   * of versions, in which case the prompt is always head.
+   */
+  ref?: PromptRef;
+  /** The base version, when {@link ref} is a version or a variation. */
+  version?: VersionInfo;
+  /** The variation, when {@link ref} names one. */
+  variation?: VariationInfo;
+  /**
+   * True when a WIP variation exists for this prompt at head — the dirty
+   * indicator. Reported on the head prompt, whatever ref is open.
+   */
+  dirty?: boolean;
+  /** The id of the head WIP variation, when {@link dirty}. */
+  wipId?: VariationId;
+  /**
+   * True when this prompt's base is the working tree, so it can run. False
+   * for an old version, or a variation made against one.
+   */
+  atHead?: boolean;
 }
+
+/**
+ * An opaque, immutable name for a state of the world — for a git project, a
+ * commit (a real one, or a snapshot of a dirty working tree).
+ */
+export type VersionId = string;
+
+/** An opaque id for a {@link VariationInfo | variation}. */
+export type VariationId = string;
+
+/**
+ * Which prompt, in which state.
+ *
+ * A variation already knows its base, so `{ variation }` is complete. There is
+ * deliberately no `{ version, variation }` pair: that is a rebase, which
+ * produces a new variation with its own id.
+ */
+export type PromptRef =
+  /** Head: the prompt as it is on disk now. */
+  | { promptId: string; version?: undefined; variation?: undefined }
+  /** The prompt as it was at a saved version. */
+  | { promptId: string; version: VersionId; variation?: undefined }
+  /** A variation, applied to its own base version. */
+  | { promptId: string; variation: VariationId; version?: undefined };
+
+/** A saved state of the world. See {@link VersionId}. */
+export interface VersionInfo {
+  id: VersionId;
+  /** A real commit, or a snapshot of a dirty working tree. */
+  kind: "commit" | "snapshot";
+  /** For a snapshot: the commit the working tree was dirty against. */
+  parent?: VersionId;
+  /** Commit subject; a fixed description for a snapshot. */
+  message?: string;
+  author?: string;
+  /** When the version was made (ms). */
+  time: number;
+  /**
+   * True when the version captures only the prompt's own file rather than the
+   * whole project — the case without git. It reproduces the prompt, not its
+   * tools.
+   */
+  fileOnly?: boolean;
+}
+
+/**
+ * One field that could not be merged: both sides changed it, differently.
+ * `field` is `"system"`, `"modelParameters.temperature"`, or the pseudo-field
+ * `"prompt"` when the prompt itself no longer exists at the target.
+ */
+export interface VariationConflict {
+  field: string;
+  /** The value both sides started from. */
+  base: unknown;
+  /** The value on the side being merged into (head, or the unsaved edits). */
+  target: unknown;
+  /** The value the variation wants. */
+  variation: unknown;
+}
+
+/**
+ * Conflicts a WIP variation is waiting on the user to resolve. While present,
+ * the WIP can neither run nor be saved.
+ */
+export interface PendingConflicts {
+  /** The version the resolved WIP will be based on. */
+  onto: VersionId;
+  /** Every field that did merge, already applied. */
+  updates: NormalizedPromptUpdates;
+  conflicts: VariationConflict[];
+  /** How to label each side in the UI. */
+  labels: { target: string; variation: string };
+}
+
+/**
+ * An immutable set of {@link NormalizedPromptUpdates} for one prompt against
+ * one base version — or, when {@link wip}, the one mutable set of unsaved
+ * edits per (prompt, base).
+ */
+export interface VariationInfo {
+  id: VariationId;
+  promptId: string;
+  base: VersionId;
+  updates: NormalizedPromptUpdates;
+  /** Whether this is a work-in-progress (unsaved, mutable) variation. */
+  wip: boolean;
+  /** For a WIP: whether it holds the unsaved edits to head. */
+  onHead?: boolean;
+  /** Names pointing at this variation. */
+  names: string[];
+  /** For a WIP opened from a named variation: that name. */
+  originName?: string;
+  /** For a WIP: conflicts awaiting resolution. */
+  pending?: PendingConflicts;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** What rebasing or merging a variation produced. */
+export type RebaseResult =
+  | { ok: true; variation: VariationInfo }
+  | {
+      ok: false;
+      conflicts: VariationConflict[];
+      /** How to label each side of the conflicts in the UI. */
+      labels?: { target: string; variation: string };
+    };
+
+/**
+ * How to resolve each of a WIP's {@link PendingConflicts}, keyed by field:
+ * keep the target's value, or the variation's.
+ */
+export type ConflictChoices = Record<string, "target" | "variation">;
 
 /**
  * Which kind of editor a prompt is authored in. Chosen by the
@@ -440,6 +575,11 @@ export interface PromptChangeEvent {
   type: ChangeEventType;
   /** The ID of the affected prompt ({@link ParsedPrompt.id}) */
   promptId: string;
+  /**
+   * Which state of the prompt changed, when it was a variation rather than the
+   * source — a WIP edit, or a WIP rebased after an external edit.
+   */
+  ref?: PromptRef;
 }
 
 /** Describes a single form field rendered by the Add Prompt dialog. */
@@ -476,6 +616,10 @@ export interface PromptProviderInfo {
   description?: string;
   icon?: string;
   hasAddPrompt: boolean;
+  /** Whether the provider can name versions of its prompts. */
+  hasVersions?: boolean;
+  /** Whether the provider holds edits apart from the source (see `PromptProvider.variations`). */
+  hasVariations?: boolean;
 }
 
 /**
@@ -506,6 +650,18 @@ export interface ExecuteResponse {
   tracerProviderId: string;
   /** Span ID of the root span for this execution. */
   rootSpanId: string;
+  /** The version the run executed against, when the provider has versions. */
+  version?: VersionId;
+  /** The variation the run applied, if any. */
+  variation?: VariationId;
+}
+
+/** Response body of `POST /api/prompts/:providerId/:id/update`. */
+export interface UpdatePromptResponse {
+  /** The prompt as the updates left it. */
+  prompt: NormalizedPrompt;
+  /** Where the updates landed — adopt it as the editor's ref. */
+  ref: PromptRef;
 }
 
 // #endregion

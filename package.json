@@ -43,8 +43,8 @@
     "test:coverage": "vitest run --coverage",
     "test:ui": "playwright test --config playwright.config.ts",
     "docs": "typedoc",
-    "db:generate": "drizzle-kit generate && drizzle-kit generate --config drizzle.datasets.config.ts",
-    "db:bundle": "node scripts/generate-migration-bundle.ts src/trace/db/migrations && node scripts/generate-migration-bundle.ts src/dataset/db/migrations"
+    "db:generate": "drizzle-kit generate && drizzle-kit generate --config drizzle.datasets.config.ts && drizzle-kit generate --config drizzle.variations.config.ts",
+    "db:bundle": "node scripts/generate-migration-bundle.ts src/trace/db/migrations && node scripts/generate-migration-bundle.ts src/dataset/db/migrations && node scripts/generate-migration-bundle.ts src/prompt/variations/db/migrations"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.4",

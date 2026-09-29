@@ -9,6 +9,8 @@ import {
   type TraceColumnState,
   tableModeWidth,
   toggleTraceColumn,
+  traceVariationLabel,
+  traceVersionLabel,
 } from "./trace-columns";
 
 const ALL_KEYS = DEFAULT_TRACE_COLUMNS.map(c => c.key);
@@ -23,6 +25,8 @@ describe("DEFAULT_TRACE_COLUMNS", () => {
       { key: "model", visible: false },
       { key: "cost", visible: false },
       { key: "annotations", visible: false },
+      { key: "version", visible: false },
+      { key: "variation", visible: false },
     ]);
   });
 });
@@ -37,6 +41,8 @@ describe("parseTraceColumns", () => {
       { key: "totalTokens", visible: true },
       { key: "model", visible: false },
       { key: "annotations", visible: true },
+      { key: "variation", visible: true },
+      { key: "version", visible: false },
     ];
     expect(parseTraceColumns(stored)).toEqual(stored);
   });
@@ -73,6 +79,8 @@ describe("parseTraceColumns", () => {
       { key: "model", visible: false },
       { key: "cost", visible: false },
       { key: "annotations", visible: false },
+      { key: "version", visible: false },
+      { key: "variation", visible: false },
     ]);
   });
 
@@ -114,6 +122,8 @@ describe("toggleTraceColumn", () => {
       { key: "model", visible: false },
       { key: "cost", visible: false },
       { key: "annotations", visible: false },
+      { key: "version", visible: false },
+      { key: "variation", visible: false },
     ]);
   });
 });
@@ -129,6 +139,8 @@ describe("reorderTraceColumns", () => {
       "model",
       "cost",
       "annotations",
+      "version",
+      "variation",
     ]);
   });
 
@@ -142,6 +154,8 @@ describe("reorderTraceColumns", () => {
       "model",
       "cost",
       "annotations",
+      "version",
+      "variation",
     ]);
   });
 
@@ -212,5 +226,43 @@ describe("tableModeWidth", () => {
     const forward = withVisible("startTime", "model", "cost");
     const backward = [...forward].reverse();
     expect(tableModeWidth(forward)).toBe(tableModeWidth(backward));
+  });
+});
+
+describe("traceVersionLabel / traceVariationLabel", () => {
+  it("label a trace's version by what it was, once looked up", () => {
+    const trace = { promptVersion: "fedcba9876543210" };
+    expect(traceVersionLabel(trace, {})).toBe("fedcba9");
+    expect(
+      traceVersionLabel(trace, {
+        fedcba9876543210: {
+          id: "fedcba9876543210",
+          kind: "snapshot",
+          parent: "0123456789",
+          time: 0,
+        },
+      }),
+    ).toBe("snapshot of 0123456");
+    expect(traceVersionLabel({}, {})).toBe("—");
+  });
+
+  it("label a trace's variation by its name when it has one", () => {
+    const trace = { promptVariation: "var_abcdefghij" };
+    expect(traceVariationLabel(trace, {})).toBe("abcdefg");
+    expect(
+      traceVariationLabel(trace, {
+        var_abcdefghij: {
+          id: "var_abcdefghij",
+          promptId: "p#p",
+          base: "v",
+          updates: { style: "chat" },
+          wip: false,
+          names: ["terse"],
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      }),
+    ).toBe("terse");
+    expect(traceVariationLabel({}, {})).toBe("—");
   });
 });

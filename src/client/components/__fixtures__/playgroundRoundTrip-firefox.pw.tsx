@@ -24,17 +24,20 @@ async function mockApi(page: Page, updateLatencyMs = 80) {
       }));
       await route.fulfill({
         json: {
-          id: "p1",
-          providerId: "prov",
-          name: "test",
-          functionParameters: [],
-          style: "chat",
-          modelEditable: true,
-          systemEditable: true,
-          messages,
-          messagesEditable: true,
-          modelParameters: [],
-          ...("system" in updates ? { system: updates.system } : {}),
+          prompt: {
+            id: "p1",
+            providerId: "prov",
+            name: "test",
+            functionParameters: [],
+            style: "chat",
+            modelEditable: true,
+            systemEditable: true,
+            messages,
+            messagesEditable: true,
+            modelParameters: [],
+            ...("system" in updates ? { system: updates.system } : {}),
+          },
+          ref: { promptId: "p1" },
         },
       });
       return;
