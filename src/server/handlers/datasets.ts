@@ -11,7 +11,6 @@
 import {
   DatasetNotFoundError,
   type DatasetProvider,
-  type DatasetRowUpdate,
   DatasetValidationError,
   type NewDatasetRow,
 } from "../../dataset/dataset-provider.ts";
@@ -20,6 +19,7 @@ import type {
   DatasetField,
   DatasetRowSource,
   DatasetRowsOverview,
+  DatasetRowUpdate,
   DatasetSummary,
 } from "../../dataset/dataset-types.ts";
 import {

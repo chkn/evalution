@@ -74,6 +74,15 @@ export interface DatasetRow {
 }
 
 /**
+ * One row's changes in `DatasetProvider.updateRows`: field id → the cell to
+ * set, or `null` to clear it. Fields not named are left as they are.
+ */
+export interface DatasetRowUpdate {
+  rowId: string;
+  cells: Record<string, ExecutionInput | null>;
+}
+
+/**
  * What one field's cells hold, beyond a single value — found in the rows,
  * not the schema: a field's `def` is the slot's type (`Db`), which says
  * nothing about which resource a row picked to fill it or what arguments

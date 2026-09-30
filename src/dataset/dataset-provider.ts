@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { ExecutionInput } from "../shared/types.ts";
 import type { PromptID } from "../trace/trace-types.ts";
 import type {
   Dataset,
@@ -9,6 +8,7 @@ import type {
   DatasetField,
   DatasetRow,
   DatasetRowsOverview,
+  DatasetRowUpdate,
   DatasetSummary,
 } from "./dataset-types.ts";
 
@@ -36,15 +36,6 @@ export interface ListRowsOptions {
 
 /** A row as {@link DatasetProvider.addRows} takes it: id and timestamp are minted. */
 export type NewDatasetRow = Pick<DatasetRow, "cells" | "source">;
-
-/**
- * One row's changes in {@link DatasetProvider.updateRows}: field id → the cell
- * to set, or `null` to clear it. Fields not named are left as they are.
- */
-export interface DatasetRowUpdate {
-  rowId: string;
-  cells: Record<string, ExecutionInput | null>;
-}
 
 /** Thrown by a {@link DatasetProvider} when the dataset named doesn't exist. */
 export class DatasetNotFoundError extends Error {

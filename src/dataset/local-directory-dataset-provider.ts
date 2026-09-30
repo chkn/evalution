@@ -19,7 +19,6 @@ import {
   type CreateDatasetInput,
   DatasetNotFoundError,
   type DatasetProvider,
-  type DatasetRowUpdate,
   type ListRowsOptions,
   type NewDatasetRow,
 } from "./dataset-provider.ts";
@@ -28,6 +27,7 @@ import type {
   DatasetChangeEvent,
   DatasetRow,
   DatasetRowsOverview,
+  DatasetRowUpdate,
   DatasetSummary,
 } from "./dataset-types.ts";
 import { runDatasetMigrations } from "./db/migrate.ts";

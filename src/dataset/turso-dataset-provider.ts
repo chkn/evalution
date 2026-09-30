@@ -23,7 +23,6 @@ import {
   type CreateDatasetInput,
   DatasetNotFoundError,
   type DatasetProvider,
-  type DatasetRowUpdate,
   DatasetValidationError,
   type ListRowsOptions,
   type NewDatasetRow,
@@ -36,6 +35,7 @@ import type {
   DatasetRow,
   DatasetRowSource,
   DatasetRowsOverview,
+  DatasetRowUpdate,
   DatasetSummary,
 } from "./dataset-types.ts";
 import { datasetRows, datasets, jsonColumn } from "./db/schema.ts";

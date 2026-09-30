@@ -162,15 +162,17 @@ test("DatasetView draws value and resource cells, sparse cells as dashes", async
 
   await expect(component.getByText("Support tickets")).toBeVisible();
   await expect(component.getByText("3 rows")).toBeVisible();
+  // `ticket` is typed into in place, so its cell reads as its raw text.
   await expect(
-    inGrid(component, "gridcell", '"My order never arrived"'),
+    inGrid(component, "gridcell", "My order never arrived"),
   ).toBeAttached();
   await expect(
     inGrid(component, "gridcell", '◆ seededTask(title: "Buy milk")'),
   ).toBeAttached();
   await expect(inGrid(component, "gridcell", "trace ↗")).toBeAttached();
-  // Row 3 has nothing in either field, nor a source; row 2 has no source.
-  await expect(inGrid(component, "gridcell", "—")).toHaveCount(4);
+  // Row 3 has nothing in `task`, nor a source; row 2 has no source. (Its
+  // empty `ticket` is an editor's, which reads as empty.)
+  await expect(inGrid(component, "gridcell", "—")).toHaveCount(3);
 });
 
 test("the table ends after its last row, with nothing ruled below it", async ({
@@ -314,6 +316,9 @@ test("expanding a field and resizing a column are remembered per dataset", async
 
   await clickGrid(page, GRID.marker + 240 + 60, GRID.group / 2);
   await expect(inGrid(component, "columnheader", "title")).toBeAttached();
+  // Glide reads a mouse-up within 500ms of the last as a double-click, and
+  // a double-click on a column's edge sizes it to fit its cells.
+  await page.waitForTimeout(600);
   // Drag the right edge of `ticket` 120px wider.
   await dragGrid(page, GRID.marker + 240, GRID.group + GRID.header / 2, 120);
 
@@ -436,7 +441,7 @@ test("DatasetView pages rows in as they scroll into view", async ({
   const component = await mount(
     <DatasetViewHarness providerId="local" datasetId="tickets" />,
   );
-  await expect(inGrid(component, "gridcell", '"ticket 1"')).toBeAttached();
+  await expect(inGrid(component, "gridcell", "ticket 1")).toBeAttached();
   // Only the first page: the rest haven't been scrolled to.
   expect(pages).toEqual([[0, 100]]);
 
@@ -444,8 +449,195 @@ test("DatasetView pages rows in as they scroll into view", async ({
   if (!box) throw new Error("grid canvas not laid out");
   await page.mouse.move(box.x + 100, box.y + 100);
   await page.mouse.wheel(0, 250 * GRID.row);
-  await expect(inGrid(component, "gridcell", '"ticket 250"')).toBeAttached();
+  await expect(inGrid(component, "gridcell", "ticket 250")).toBeAttached();
   expect(pages).toContainEqual([200, 100]);
+});
+
+/**
+ * Types `value` into the selected cell's editor and saves it with Enter.
+ * Enter opens the editor first, rather than typing straight onto the grid:
+ * the first key typed there opens it, and the keys after it can land before
+ * it has focus.
+ */
+async function typeIntoCell(page: Page, value: string) {
+  await page.keyboard.press("Enter");
+  const editor = page.locator(".dataset-grid-portal textarea");
+  await editor.fill(value);
+  await editor.press("Enter");
+}
+
+/**
+ * Answers `PATCH …/rows` with `status`, returning the body of every request —
+ * the batches of cell updates the view sent.
+ */
+async function mockUpdates(page: Page, status = 204) {
+  const sent: unknown[] = [];
+  await page.route("**/api/datasets/local/tickets/rows", route => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    sent.push(route.request().postDataJSON());
+    return status === 204
+      ? route.fulfill({ status })
+      : route.fulfill({ status, json: { error: "disk full" } });
+  });
+  return sent;
+}
+
+test("typing into a string cell saves it, showing it at once", async ({
+  mount,
+  page,
+}) => {
+  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const sent = await mockUpdates(page);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+
+  // Row 3's `ticket` is empty.
+  await clickCell(page, 40, 2, true);
+  await typeIntoCell(page, "Late delivery");
+
+  await expect
+    .poll(() => sent)
+    .toEqual([
+      { updates: [{ rowId: "r3", cells: { "0": text("Late delivery") } }] },
+    ]);
+  await expect(inGrid(component, "gridcell", "Late delivery")).toBeAttached();
+
+  // A resource cell is read-only in the grid: no editor opens there.
+  await clickCell(page, 240 + 40, 0, true);
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".dataset-grid-portal textarea")).toHaveCount(0);
+  // Delete clears an editable cell to `null`, and skips a read-only one.
+  await clickCell(page, 40, 1, true);
+  await page.keyboard.press("Delete");
+  await expect.poll(() => sent).toHaveLength(2);
+  expect(sent[1]).toEqual({
+    updates: [{ rowId: "r2", cells: { "0": null } }],
+  });
+});
+
+test("a failed save puts the cell back and says why under the header", async ({
+  mount,
+  page,
+}) => {
+  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const sent = await mockUpdates(page, 500);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+
+  await clickCell(page, 40, 1, true);
+  await typeIntoCell(page, "Changed");
+
+  await expect.poll(() => sent).toHaveLength(1);
+  await expect(component.locator(".dataset-view-action-error")).toContainText(
+    "disk full",
+  );
+  await expect(inGrid(component, "gridcell", "Refund please")).toBeAttached();
+  await expect(inGrid(component, "gridcell", "Changed")).toHaveCount(0);
+});
+
+test("pasting a block fills the editable cells it covers, in one batch", async ({
+  mount,
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const expected: PropDefinition = {
+    name: "expected",
+    type: { kind: "primitive", syntax: "number", base: "number" },
+    optional: true,
+  };
+  await mockDataset(
+    page,
+    { ...SUPPORT, fields: [...SUPPORT.fields, { id: "2", def: expected }] },
+    SUPPORT_ROWS,
+  );
+  const sent = await mockUpdates(page);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+
+  // Three rows of `ticket`, `task`, `expected`, as a spreadsheet copies them.
+  await page.evaluate(
+    text => navigator.clipboard.writeText(text),
+    [
+      "Lost parcel\tignored\t1",
+      "Refund\tignored\t2",
+      "Wrong size\tignored\tnot a number",
+    ].join("\n"),
+  );
+  await clickCell(page, 40, 0, false);
+  await page.keyboard.press("ControlOrMeta+v");
+
+  // `task` holds resources, so it's skipped; so is the value that isn't a
+  // number. Everything else lands, grouped by row.
+  await expect
+    .poll(() => sent)
+    .toEqual([
+      {
+        updates: [
+          {
+            rowId: "r1",
+            cells: {
+              "0": text("Lost parcel"),
+              "2": { kind: "value", value: { kind: "primitive", value: 1 } },
+            },
+          },
+          {
+            rowId: "r2",
+            cells: {
+              "0": text("Refund"),
+              "2": { kind: "value", value: { kind: "primitive", value: 2 } },
+            },
+          },
+          { rowId: "r3", cells: { "0": text("Wrong size") } },
+        ],
+      },
+    ]);
+  await expect(inGrid(component, "gridcell", "Wrong size")).toBeAttached();
+  await expect(inGrid(component, "gridcell", "2")).toBeAttached();
+});
+
+test("the details pane edits a value cell, committing on Enter, and clears any cell", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const sent = await mockUpdates(page);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+
+  await clickCell(page, 40, 1, true);
+  const pane = component.getByRole("region", { name: "Row details" });
+  const editor = pane.locator(".dataset-detail-editor textarea");
+  await expect(editor).toHaveValue("Refund please");
+
+  // Typing is a draft: nothing is sent until Enter.
+  await editor.fill("Refund now");
+  expect(sent).toEqual([]);
+  await editor.press("Enter");
+  await expect
+    .poll(() => sent)
+    .toEqual([
+      { updates: [{ rowId: "r2", cells: { "0": text("Refund now") } }] },
+    ]);
+  await expect(inGrid(component, "gridcell", "Refund now")).toBeAttached();
+
+  // The resource is read-only here too, but can be cleared.
+  await expect(pane.getByText("blank")).toBeVisible();
+  await pane.getByRole("button", { name: "Clear task" }).click();
+  await expect.poll(() => sent).toHaveLength(2);
+  expect(sent[1]).toEqual({
+    updates: [{ rowId: "r2", cells: { "1": null } }],
+  });
+  await expect(pane.getByRole("button", { name: "Clear task" })).toHaveCount(0);
 });
 
 /** Serves one dataset, `tickets`, linked to a prompt, with a single row. */

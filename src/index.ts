@@ -25,7 +25,6 @@ export {
   type CreateDatasetInput,
   DatasetNotFoundError,
   type DatasetProvider,
-  type DatasetRowUpdate,
   DatasetValidationError,
   type ListRowsOptions,
   type NewDatasetRow,
@@ -40,6 +39,7 @@ export type {
   DatasetRow,
   DatasetRowSource,
   DatasetRowsOverview,
+  DatasetRowUpdate,
   DatasetSummary,
 } from "./dataset/dataset-types.ts";
 export { runDatasetMigrations } from "./dataset/db/migrate.ts";

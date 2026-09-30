@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { shortSyntax } from "ts-proppy/react";
+import { type FocusEvent, type KeyboardEvent, useState } from "react";
+import { ItemEditor, shortSyntax } from "ts-proppy/react";
 import type {
   Dataset,
   DatasetRow,
   ExecutionInput,
+  PropDefinition,
   PropValue,
 } from "../../shared/types";
 import { DetailRow, type Fact, FactGroup, FactsGrid } from "./DetailsPane";
+import { committedCell } from "./dataset-grid";
 import { propValueToJson, resourceName } from "./dataset-preview";
 import { formatTimestamp } from "./trace/format.ts";
 import { CalendarIcon, SpansIcon } from "./trace/icons.tsx";
@@ -84,17 +87,91 @@ export function InputView({ input }: { input: ExecutionInput }) {
 }
 
 /**
+ * A field's value in `ItemEditor`, against the field's `def` as the execute
+ * panel edits a parameter. Edits stay a local draft and are committed on
+ * blur, or on Enter (Shift+Enter still types a newline), rather than on
+ * every keystroke — each commit is a save.
+ */
+function CellEditor({
+  def,
+  value,
+  onCommit,
+}: {
+  def: PropDefinition;
+  value: PropValue | undefined;
+  onCommit: (cell: ExecutionInput | null) => void;
+}) {
+  const [draft, setDraft] = useState<PropValue | undefined>(value);
+  const [dirty, setDirty] = useState(false);
+  // A new stored value — the refetch after a save — replaces a clean draft.
+  const [stored, setStored] = useState(value);
+  if (stored !== value) {
+    setStored(value);
+    if (!dirty) setDraft(value);
+  }
+
+  const commit = () => {
+    if (!dirty || draft === undefined) return;
+    setDirty(false);
+    if (JSON.stringify(draft) === JSON.stringify(value)) return;
+    onCommit(committedCell(draft));
+  };
+
+  return (
+    <div
+      className="dataset-detail-editor"
+      onBlur={(e: FocusEvent<HTMLDivElement>) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) commit();
+      }}
+      onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+        // An editor that used Enter itself — to pick a suggestion, say —
+        // has already claimed it.
+        if (
+          e.key !== "Enter" ||
+          e.shiftKey ||
+          e.defaultPrevented ||
+          e.nativeEvent.isComposing
+        ) {
+          return;
+        }
+        e.preventDefault();
+        commit();
+      }}
+    >
+      <ItemEditor
+        propDef={def}
+        value={draft}
+        onChange={next => {
+          setDraft(next);
+          setDirty(true);
+        }}
+        path={[def.name]}
+      />
+    </div>
+  );
+}
+
+/**
  * One dataset row in the details pane: when it was added and where from,
  * then every field — the same facts-over-blocks layout as a span's details.
+ *
+ * With `onChangeCell`, a field that's empty or holds a typed-in value is
+ * edited in place, and any cell can be cleared. An `object` or `resource`
+ * cell stays read-only: editing one means offering resources, which needs a
+ * prompt's `inputSources`, and a dataset has none. See `specs/datasets.md`
+ * §P.2.
  */
 export function DatasetRowDetails({
   dataset,
   row,
   onOpenTrace,
+  onChangeCell,
 }: {
   dataset: Dataset;
   row: DatasetRow;
   onOpenTrace: (providerId: string, traceId: string) => void;
+  /** Sets a field's cell, or clears it with `null`. Read-only without. */
+  onChangeCell?: (fieldId: string, cell: ExecutionInput | null) => void;
 }) {
   const facts: Fact[] = [
     {
@@ -147,11 +224,32 @@ export function DatasetRowDetails({
                 </>
               }
             >
-              {input ? (
-                <InputView input={input} />
-              ) : (
-                <span className="dataset-cell-empty">—</span>
-              )}
+              <div className="dataset-detail-cell">
+                {onChangeCell && (!input || input.kind === "value") ? (
+                  <CellEditor
+                    // Per row, so a draft never carries over to the next one.
+                    key={row.id}
+                    def={field.def}
+                    value={input?.value}
+                    onCommit={cell => onChangeCell(field.id, cell)}
+                  />
+                ) : input ? (
+                  <InputView input={input} />
+                ) : (
+                  <span className="dataset-cell-empty">—</span>
+                )}
+                {onChangeCell && input && (
+                  <button
+                    type="button"
+                    className="dataset-detail-clear"
+                    title={`Clear ${field.def.name}`}
+                    aria-label={`Clear ${field.def.name}`}
+                    onClick={() => onChangeCell(field.id, null)}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             </DetailRow>
           );
         })}

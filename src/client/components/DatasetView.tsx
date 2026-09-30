@@ -3,10 +3,13 @@
 
 import "@glideapps/glide-data-grid/dist/index.css";
 import {
+  booleanCellRenderer,
   bubbleCellRenderer,
   CompactSelection,
   DataEditorCore,
   type DrawHeaderCallback,
+  type EditableGridCell,
+  type EditListItem,
   type GridCell,
   GridCellKind,
   type GridColumn,
@@ -17,17 +20,26 @@ import {
   type Item,
   loadingCellRenderer,
   markerCellRenderer,
+  numberCellRenderer,
   type Rectangle,
   type Theme,
   textCellRenderer,
 } from "@glideapps/glide-data-grid";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { shortSyntax } from "ts-proppy/react";
 import type {
   Dataset,
   DatasetRow,
   DatasetRowsOverview,
+  ExecutionInput,
   NormalizedPrompt,
   PromptID,
 } from "../../shared/types";
@@ -37,17 +49,26 @@ import {
   getDataset,
   getDatasetRows,
   renameDataset,
+  updateDatasetRows,
 } from "../api";
 import { DatasetRowDetails } from "./DatasetRowDetails";
 import { DetailsPane, DetailsPaneHeader, useIsWide } from "./DetailsPane";
 import {
   buildColumns,
+  type CellEdit,
   type CellView,
+  cellEdits,
   cellView,
+  clearEdits,
   type DatasetColumn,
   type DatasetLayout,
   DEFAULT_LAYOUT,
+  type EditorValue,
+  editableBase,
   fieldIdsByGroup,
+  fitsEditor,
+  type GridEdit,
+  groupEdits,
   groupHeader,
   layoutStorageKey,
   parseDatasetLayout,
@@ -95,14 +116,34 @@ interface Props {
 /**
  * The only cell kinds the table draws — so the rest (markdown, images) aren't
  * bundled. Glide types its own full list the same way: each renderer is
- * narrower than the union it's looked up by.
+ * narrower than the union it's looked up by. Number and boolean are here for
+ * their editors (§P.2); a renderer brings its cell's editor with it.
  */
 const RENDERERS = [
   markerCellRenderer,
   textCellRenderer,
+  numberCellRenderer,
+  booleanCellRenderer,
   bubbleCellRenderer,
   loadingCellRenderer,
 ] as readonly InternalCellRenderer<InnerGridCell>[];
+
+/**
+ * What an edited Glide cell holds, as `{ value }` — or `undefined` for a
+ * kind the table never edits, which is then skipped.
+ */
+function editorValue(
+  cell: EditableGridCell,
+): { value: EditorValue } | undefined {
+  switch (cell.kind) {
+    case GridCellKind.Text:
+    case GridCellKind.Number:
+    case GridCellKind.Boolean:
+      return { value: cell.data };
+    default:
+      return undefined;
+  }
+}
 
 /** The table draws no images, so the loader Glide requires loads none. */
 const NO_IMAGES: ImageWindowLoader = {
@@ -156,6 +197,46 @@ const NO_SELECTION: GridSelection = {
   rows: CompactSelection.empty(),
 };
 
+/**
+ * A cell typed into in place, as the Glide cell whose editor fits its type.
+ * An empty one draws a dim dash but opens its editor empty.
+ */
+function editorCell(
+  view: Extract<CellView, { kind: "edit" }>,
+  theme: Partial<Theme>,
+): GridCell {
+  const dim = view.value === undefined && {
+    themeOverride: { textDark: theme.textLight },
+  };
+  switch (view.base) {
+    case "boolean":
+      return {
+        kind: GridCellKind.Boolean,
+        data: typeof view.value === "boolean" ? view.value : null,
+        allowOverlay: false,
+        readonly: false,
+      };
+    case "number":
+      return {
+        kind: GridCellKind.Number,
+        data: typeof view.value === "number" ? view.value : undefined,
+        displayData: view.text,
+        allowOverlay: true,
+        readonly: false,
+        ...dim,
+      };
+    case "string":
+      return {
+        kind: GridCellKind.Text,
+        data: typeof view.value === "string" ? view.value : "",
+        displayData: view.text,
+        allowOverlay: true,
+        readonly: false,
+        ...dim,
+      };
+  }
+}
+
 /** A {@link CellView} as a Glide cell. */
 function toGridCell(view: CellView, theme: Partial<Theme>): GridCell {
   const text = (
@@ -172,6 +253,8 @@ function toGridCell(view: CellView, theme: Partial<Theme>): GridCell {
   switch (view.kind) {
     case "loading":
       return { kind: GridCellKind.Loading, allowOverlay: false };
+    case "edit":
+      return editorCell(view, theme);
     case "empty":
       return text("—", { themeOverride: { textDark: theme.textLight } });
     case "n/a":
@@ -206,6 +289,11 @@ function toGridCell(view: CellView, theme: Partial<Theme>): GridCell {
  * expanded, from its group header, into a column per argument or property.
  * Selecting a row shows it in full in the details pane, which is also where
  * it's opened in the playground or deleted. See `specs/datasets.md` §J.
+ *
+ * Cells of `string`, `number`, and `boolean` fields are typed into in place,
+ * pasted over, and cleared with Delete; every other value cell is edited in
+ * the details pane. An edit shows at once and is undone if the save fails.
+ * See `specs/datasets.md` §P.2.
  */
 function DatasetView({
   providerId,
@@ -262,6 +350,8 @@ function DatasetView({
     matchTriggerWidth: false,
   });
   const theme = useGridTheme();
+  /** Where Glide opens a cell's editor — see the portal below the header. */
+  const editorPortalRef = useRef<HTMLDivElement>(null);
   const { ref: bodyRef, isWide: showSidePane } = useIsWide(760);
 
   const pager = useMemo(
@@ -374,19 +464,11 @@ function DatasetView({
     [columnsById],
   );
 
-  const onGridSelectionChange = useCallback((newSelection: GridSelection) => {
-    const rows = newSelection.current
-      ? CompactSelection.fromSingleSelection(newSelection.current.range.y)
-      : newSelection.rows;
-    setSelection({
-      ...newSelection,
-      current: undefined,
-      rows,
-    });
-  }, []);
-
-  // `onGridSelectionChange` folds a selected cell into its row.
-  const selectedIndex = selection.rows.first() ?? null;
+  // The row shown in the details pane is the selected cell's, or the row
+  // selected by its marker. A selected cell stays a cell selection — not
+  // folded into its row — so it can be typed into, pasted over, and cleared.
+  const selectedIndex =
+    selection.current?.cell[1] ?? selection.rows.first() ?? null;
   const inRange = selectedIndex !== null && selectedIndex < overview.rowCount;
   const loadedRow = inRange ? pager.get(selectedIndex) : undefined;
   // The pane keeps showing its row even once the pager drops that row's page
@@ -422,6 +504,78 @@ function DatasetView({
     HEADER_HEIGHT +
     overview.rowCount * ROW_HEIGHT +
     1;
+
+  /**
+   * Saves a batch of edits as one `updateRows`, a row per update. The pages
+   * they land on are patched first, so an edit shows at once; the
+   * `dataset-changed` refetch then replaces them, and a failure puts them
+   * back and says why.
+   */
+  const saveEdits = useCallback(
+    (edits: CellEdit[]) => {
+      const updates = groupEdits(edits);
+      if (updates.length === 0) return;
+      const undo = pager.patch(updates);
+      setLoaded(n => n + 1);
+      updateDatasetRows(providerId, datasetId, updates).catch(err => {
+        undo();
+        setLoaded(n => n + 1);
+        setError(`Couldn't save: ${err.message}`);
+      });
+    },
+    [pager, providerId, datasetId],
+  );
+
+  /** Sets or clears one cell of one row — the details pane's edits. */
+  const saveCell = useCallback(
+    (rowId: string, fieldId: string, cell: ExecutionInput | null) =>
+      saveEdits([{ rowId, fieldId, cell }]),
+    [saveEdits],
+  );
+
+  /** A single edit, a paste over a range, or a fill — one batch either way. */
+  const onCellsEdited = useCallback(
+    (items: readonly EditListItem[]) => {
+      const edits: GridEdit[] = [];
+      for (const { location, value } of items) {
+        const typed = editorValue(value);
+        if (typed) edits.push({ col: location[0], row: location[1], ...typed });
+      }
+      saveEdits(cellEdits(edits, columns, i => pager.get(i)));
+      return true;
+    },
+    [columns, pager, saveEdits],
+  );
+
+  /** Refuses, before it's sent, a value that doesn't fit the cell's type. */
+  const validateCell = useCallback(
+    ([col, row]: Item, newValue: EditableGridCell) => {
+      const base = editableBase(pager.get(row), columns[col]);
+      const typed = editorValue(newValue);
+      return base !== undefined && !!typed && fitsEditor(base, typed.value);
+    },
+    [columns, pager],
+  );
+
+  /**
+   * Delete/Backspace clears the selected cells to `null`. Handled here
+   * rather than left to Glide, which would clear a boolean to `false`, and
+   * a selected row to every one of its cells.
+   */
+  const onDelete = useCallback(
+    (selected: GridSelection) => {
+      const { current } = selected;
+      if (current) {
+        saveEdits(
+          clearEdits([current.range, ...current.rangeStack], columns, i =>
+            pager.get(i),
+          ),
+        );
+      }
+      return false;
+    },
+    [columns, pager, saveEdits],
+  );
 
   const onCellClicked = useCallback(
     ([col, row]: Item) => {
@@ -557,6 +711,9 @@ function DatasetView({
         dataset={dataset}
         row={selectedRow}
         onOpenTrace={onOpenTrace}
+        onChangeCell={(fieldId, cell) =>
+          saveCell(selectedRow.id, fieldId, cell)
+        }
       />
     </>
   );
@@ -649,6 +806,13 @@ function DatasetView({
         </div>
       </div>
       {menu}
+      {createPortal(
+        // Glide draws a cell's editor over the canvas, into this layer: at
+        // the viewport's origin, above everything, and placed from the
+        // cell's on-screen position.
+        <div ref={editorPortalRef} className="dataset-grid-portal" />,
+        document.body,
+      )}
       {error && (
         <div className="pg-exec-error dataset-view-action-error">
           {error}
@@ -696,12 +860,23 @@ function DatasetView({
                 drawHeader={drawHeader}
                 rowMarkers="clickable-number"
                 rowSelect="single"
-                rangeSelect="cell"
+                rangeSelect="rect"
                 columnSelect="none"
                 gridSelection={selection}
-                onGridSelectionChange={onGridSelectionChange}
+                onGridSelectionChange={setSelection}
                 onCellClicked={onCellClicked}
                 onGroupHeaderClicked={onGroupHeaderClicked}
+                onCellsEdited={onCellsEdited}
+                validateCell={validateCell}
+                onDelete={onDelete}
+                // Split a pasted block over the cells from the selected one
+                // on. Left unset, Glide pastes the whole clipboard into the
+                // one selected cell.
+                onPaste
+                // Read cells out through `getCellContent`, which copying and
+                // the fill handle both need.
+                getCellsForSelection
+                fillHandle
                 onColumnResize={(column, width) =>
                   column.id &&
                   updateLayout({
@@ -714,6 +889,8 @@ function DatasetView({
                 groupHeaderHeight={GROUP_HEADER_HEIGHT}
                 smoothScrollX
                 smoothScrollY
+                // Glide types this ref as never null.
+                portalElementRef={editorPortalRef as RefObject<HTMLElement>}
               />
               {/*
                * Glide rules the whole canvas, not just the rows: its
