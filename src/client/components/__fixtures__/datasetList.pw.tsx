@@ -173,3 +173,35 @@ test("“New dataset…” keeps the name box open with the error when creating 
     page.getByRole("textbox", { name: "New dataset name" }),
   ).toHaveValue("x");
 });
+
+test("“New dataset…” stays open while creating, and reopens without an old error", async ({
+  mount,
+  page,
+}) => {
+  await page.route("**/api/dataset-providers", route =>
+    route.fulfill({ json: [{ id: "local" }] }),
+  );
+  await page.route("**/api/datasets/local", async route => {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return route.fulfill({ status: 409, json: { error: "already exists" } });
+  });
+  const component = await mount(<DatasetListHarness datasets={[]} />);
+  const nameBox = page.getByRole("textbox", { name: "New dataset name" });
+
+  await component.getByRole("button", { name: "New dataset" }).click();
+  await nameBox.fill("x");
+  await page.keyboard.press("Enter");
+  await expect(nameBox).toBeDisabled();
+  // Neither Escape nor a click outside dismisses it while the create runs.
+  await page.keyboard.press("Escape");
+  await page.mouse.click(5, 690);
+  await expect(nameBox).toBeVisible();
+  await expect(page.getByText("already exists")).toBeVisible();
+
+  // Once it's settled, it closes — and opens again clean.
+  await page.keyboard.press("Escape");
+  await expect(nameBox).toBeHidden();
+  await component.getByRole("button", { name: "New dataset" }).click();
+  await expect(nameBox).toBeVisible();
+  await expect(page.getByText("already exists")).toBeHidden();
+});

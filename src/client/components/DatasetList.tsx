@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { DatasetSummary, PromptID } from "../../shared/types";
 import { createEmptyDataset } from "../api";
@@ -55,11 +55,24 @@ function NewDatasetButton({
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const close = useCallback(() => {
+  /** Mirrors `busy` for `close`, which the popover hook captures once. */
+  const busyRef = useRef(false);
+  const reset = useCallback(() => {
     setOpen(false);
     setName("");
-    setError(null);
   }, []);
+  /**
+   * A click outside, `Escape`, or the trigger. Ignored while a create is in
+   * flight, so its outcome (the new dataset opening, or its error) isn't lost
+   * or left to turn up on the next open.
+   */
+  const close = useCallback(() => {
+    if (!busyRef.current) reset();
+  }, [reset]);
+  const openPopover = () => {
+    setError(null);
+    setOpen(true);
+  };
   const { triggerRef, popoverRef, style } =
     useAnchoredPopover<HTMLButtonElement>({
       open,
@@ -70,14 +83,16 @@ function NewDatasetButton({
   const create = async () => {
     const trimmed = name.trim();
     if (!trimmed) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const created = await createEmptyDataset(trimmed);
-      close();
+      reset();
       onCreated(created);
     } catch (err: any) {
       setError(err.message);
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -90,7 +105,7 @@ function NewDatasetButton({
         className={`tree-toolbar-btn${open ? " tree-toolbar-btn-active" : ""}`}
         title="New dataset…"
         aria-label="New dataset"
-        onClick={() => (open ? close() : setOpen(true))}
+        onClick={() => (open ? close() : openPopover())}
       >
         <PlusIcon />
       </button>

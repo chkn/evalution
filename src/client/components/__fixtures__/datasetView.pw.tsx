@@ -154,19 +154,24 @@ const SUPPORT_SHAPE = { "1": { keys: ["title"], resource: true } };
 /**
  * Serves `POST …/:id/rows` — what the trailing row sends — appending to
  * `rows`, so the refetch that follows sees the new row, after `delay` ms (or
- * failing, given `fail`). Returns every request body.
+ * failing, given `fail`). A list of delays gives one per request, in order.
+ * Returns every request body.
  */
 async function mockAppend(
   page: Page,
   datasetId: string,
   rows: DatasetRow[],
-  { delay = 0, fail = false }: { delay?: number; fail?: boolean } = {},
+  {
+    delay = 0,
+    fail = false,
+  }: { delay?: number | number[]; fail?: boolean } = {},
 ) {
   const bodies: unknown[] = [];
   await page.route(`**/api/datasets/local/${datasetId}/rows`, async route => {
     if (route.request().method() !== "POST") return route.fallback();
+    const wait = Array.isArray(delay) ? (delay[bodies.length] ?? 0) : delay;
     bodies.push(route.request().postDataJSON());
-    await new Promise(resolve => setTimeout(resolve, delay));
+    await new Promise(resolve => setTimeout(resolve, wait));
     if (fail) {
       return route.fulfill({ status: 500, json: { error: "disk full" } });
     }
@@ -694,6 +699,40 @@ test("a dataset with no fields points at adding one, with no grid", async ({
   await expect(component.getByText("No fields yet.")).toBeVisible();
   await expect(component.getByText(/Add a field/)).toBeVisible();
   await expect(component.getByTestId("data-grid-canvas")).toHaveCount(0);
+});
+
+test("two rows appended at once both stay while the first one's refetch lands", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  const rows = [...SUPPORT_ROWS];
+  await mockDataset(page, SUPPORT, rows, SUPPORT_SHAPE);
+  // The second append is still in flight when the first one's refetch lands.
+  const bodies = await mockAppend(page, "tickets", rows, {
+    delay: [300, 3000],
+  });
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+
+  await clickCell(page, 40, 3, true);
+  await expect(component.getByText("4 rows")).toBeVisible();
+  const refetched = page.waitForResponse(
+    r =>
+      r.request().method() === "GET" &&
+      r.url().endsWith("/api/datasets/local/tickets"),
+  );
+  await clickCell(page, 40, 4, true);
+  await expect(component.getByText("5 rows")).toBeVisible();
+  await expect.poll(() => bodies).toHaveLength(2);
+
+  await refetched;
+  await expect(component.getByText("5 rows")).toBeVisible({ timeout: 500 });
+  await expect(component.getByText("4 rows")).toHaveCount(0);
+  await expect.poll(() => rows.length, { timeout: 5000 }).toBe(5);
+  await expect(component.getByText("5 rows")).toBeVisible();
 });
 
 test("a row that fails to append is taken back, with the error shown", async ({
