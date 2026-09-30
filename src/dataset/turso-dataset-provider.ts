@@ -431,7 +431,11 @@ export class TursoDatasetProvider implements DatasetProvider {
             `\`${def.name}: ${def.type.syntax}\` already exists`,
           );
         }
-        const added: DatasetField = { id: fieldIdFor(row.nextFieldId), def };
+        const added: DatasetField = {
+          id: fieldIdFor(row.nextFieldId),
+          def,
+          added: true,
+        };
         await tx
           .update(datasets)
           .set({

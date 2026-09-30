@@ -828,6 +828,7 @@ describe("dataset routes", () => {
         optional: true,
         type: { kind: "primitive", syntax: "string", base: "string" },
       },
+      added: true,
     });
     expect(events).toContainEqual({
       type: "dataset-changed",
@@ -844,7 +845,11 @@ describe("dataset routes", () => {
     );
     expect(copied.status).toBe(201);
     const { valueSpan: _span, ...portable } = title;
-    expect(await copied.json()).toEqual({ id: "2", def: portable });
+    expect(await copied.json()).toEqual({
+      id: "2",
+      def: portable,
+      added: true,
+    });
 
     const missing = await app.request(
       fieldsUrl,

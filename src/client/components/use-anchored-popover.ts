@@ -25,7 +25,7 @@ export interface AnchoredPopoverOptions {
    * portals of its own (a flyout submenu, say) that aren't DOM descendants
    * of `popoverRef` even though they're logically part of it: without this,
    * a click inside one is seen as an outside click and closes everything on
-   * `mousedown`, before the click that would have chosen something even
+   * `pointerdown`, before the click that would have chosen something even
    * fires.
    */
   extraContains?: (target: Node) => boolean;
@@ -37,7 +37,7 @@ export interface AnchoredPopoverOptions {
  * it.
  *
  * Extracted from `ModelPicker`, which was the first component to need this —
- * fixed positioning off `getBoundingClientRect`, outside-`mousedown` and
+ * fixed positioning off `getBoundingClientRect`, outside-`pointerdown` and
  * `Escape` to close, reposition on capture-phase scroll and resize. A nested
  * flyout submenu (`SourcePicker`) has its own, different anchoring (against
  * a hovered row rather than a single trigger, with edge-flipping) and does
@@ -118,7 +118,7 @@ export function useAnchoredPopover<T extends HTMLElement = HTMLElement>({
   useLayoutEffect(() => {
     if (!open) return;
     updatePosition();
-    const handleClick = (e: MouseEvent) => {
+    const handleClick = (e: PointerEvent) => {
       const target = e.target as Node;
       if (triggerRef.current?.contains(target)) return;
       if (popoverRef.current?.contains(target)) return;
@@ -128,12 +128,15 @@ export function useAnchoredPopover<T extends HTMLElement = HTMLElement>({
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    document.addEventListener("mousedown", handleClick);
+    // `pointerdown`, not `mousedown`: Glide's grid cancels `pointerdown` on its
+    // canvas, which stops the browser from firing `mousedown` at all, so a
+    // click on the grid would never close the popover.
+    document.addEventListener("pointerdown", handleClick);
     document.addEventListener("keydown", handleKey);
     window.addEventListener("scroll", updatePosition, true);
     window.addEventListener("resize", updatePosition);
     return () => {
-      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("pointerdown", handleClick);
       document.removeEventListener("keydown", handleKey);
       window.removeEventListener("scroll", updatePosition, true);
       window.removeEventListener("resize", updatePosition);

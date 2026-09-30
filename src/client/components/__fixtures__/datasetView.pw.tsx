@@ -727,3 +727,22 @@ test("an empty dataset still draws its header, so a field can be added", async (
     component.getByRole("button", { name: "Add field" }),
   ).toBeVisible();
 });
+
+test("clicking the grid closes the add-field popover", async ({
+  mount,
+  page,
+}) => {
+  await mockFields(page, { ...SUPPORT, fields: [{ id: "0", def: TICKET }] });
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+
+  await component.getByRole("button", { name: "Add field" }).click();
+  const popover = page.getByRole("dialog", { name: "Add field" });
+  await expect(popover).toBeVisible();
+
+  // Glide cancels `pointerdown` on its canvas, which suppresses `mousedown`.
+  await clickGrid(page, 40, 10);
+  await expect(popover).toHaveCount(0);
+});

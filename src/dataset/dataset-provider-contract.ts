@@ -330,8 +330,9 @@ export function runDatasetProviderContractTests(
       const c = await provider.addField(dataset.id, def("c"));
       const d = await provider.addField(dataset.id, def("d", "number"));
 
-      expect(c).toEqual({ id: "2", def: def("c") });
-      expect(d).toEqual({ id: "3", def: def("d", "number") });
+      // Marked as added by hand, unlike the fields it was created with.
+      expect(c).toEqual({ id: "2", def: def("c"), added: true });
+      expect(d).toEqual({ id: "3", def: def("d", "number"), added: true });
       expect((await provider.getDataset(dataset.id))?.fields).toEqual([
         { id: "0", def: def("a") },
         { id: "1", def: def("b") },

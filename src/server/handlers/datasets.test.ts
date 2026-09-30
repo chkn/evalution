@@ -99,6 +99,7 @@ describe("handleAddField", () => {
             optional: true,
             type: { kind: "primitive", syntax: type, base: type },
           },
+          added: true,
         },
       });
     }
@@ -152,7 +153,10 @@ describe("handleAddField", () => {
       from: { providerId: "files", promptId: "odin.ts#plan", path: "taskId" },
     });
     const { valueSpan: _v, fullSpan: _f, ...portable } = TASK_ID;
-    expect(res).toEqual({ status: 201, body: { id: "1", def: portable } });
+    expect(res).toEqual({
+      status: 201,
+      body: { id: "1", def: portable, added: true },
+    });
 
     // A structured type, which only a lookup can produce.
     const msgs = await add({
@@ -163,7 +167,7 @@ describe("handleAddField", () => {
         path: "threadMsgs",
       },
     });
-    expect(msgs.body).toEqual({ id: "2", def: THREAD_MSGS });
+    expect(msgs.body).toEqual({ id: "2", def: THREAD_MSGS, added: true });
   });
 
   it("names a copied field after its parameter unless the body names it", async () => {
@@ -195,6 +199,7 @@ describe("handleAddField", () => {
         type: { kind: "primitive", syntax: "Db" },
         optional: false,
       },
+      added: true,
     });
   });
 

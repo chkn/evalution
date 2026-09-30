@@ -330,7 +330,8 @@ export function countMatches(
 
 /**
  * Fields of `dataset` that no longer match any of `prompt`'s parameters —
- * the "N fields no longer match" line above a linked dataset's table.
+ * the "N fields no longer match" line above a linked dataset's table. Fields
+ * added by hand never came from the prompt, so they're never stale.
  */
 export function staleFields(
   fields: readonly DatasetField[],
@@ -341,7 +342,7 @@ export function staleFields(
       matchKey,
     ),
   );
-  return fields.filter(f => !keys.has(matchKey(f.def)));
+  return fields.filter(f => !f.added && !keys.has(matchKey(f.def)));
 }
 
 // ── filling the panel from outside ───────────────────────────────────────

@@ -113,7 +113,7 @@ export function DatasetAddField({
               className="add-to-dataset-name"
               aria-label="Field name"
               value={name}
-              placeholder={defaultFieldName(choice) || "expectedTitle"}
+              placeholder={defaultFieldName(choice) || undefined}
               onChange={e => {
                 setName(e.target.value);
                 setError(null);
