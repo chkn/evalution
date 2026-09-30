@@ -2,12 +2,9 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { useCallback, useEffect, useState } from "react";
+import { samePrompt } from "../../shared/dataset-fields";
 import type { NormalizedPrompt } from "../../shared/types";
 import { getPrompts } from "../api";
-
-function samePrompt(a: NormalizedPrompt, b: NormalizedPrompt): boolean {
-  return a.id === b.id && a.providerId === b.providerId;
-}
 
 /**
  * Fetches every provider's prompts. `loading` covers only the initial fetch:

@@ -11,7 +11,8 @@
 import type { Database } from "@tursodatabase/sync";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
-import type { ExecutionInput } from "../shared/types.ts";
+import { matchKey } from "../shared/dataset-fields.ts";
+import type { ExecutionInput, PropDefinition } from "../shared/types.ts";
 import type { PromptID } from "../trace/trace-types.ts";
 import {
   fieldIdFor,
@@ -404,5 +405,48 @@ export class TursoDatasetProvider implements DatasetProvider {
       }),
     );
     if (deleted) this.emit({ type: "update", datasetId });
+  }
+
+  async addField(
+    datasetId: string,
+    def: PropDefinition,
+  ): Promise<DatasetField> {
+    const field = await this.serializeWrite(() =>
+      this.db.transaction(async tx => {
+        const [row] = await tx
+          .select({
+            fields: datasets.fields,
+            nextFieldId: datasets.nextFieldId,
+          })
+          .from(datasets)
+          .where(eq(datasets.id, datasetId));
+        if (!row) throw new DatasetNotFoundError(datasetId);
+        const fields = JSON.parse(row.fields) as DatasetField[];
+        // Unique by §B's key, as derived fields are: the same name with a
+        // different type is a different field.
+        const exists = fields.some(f => matchKey(f.def) === matchKey(def));
+        if (exists) {
+          throw new DatasetValidationError(
+            `\`${def.name}: ${def.type.syntax}\` already exists`,
+          );
+        }
+        const added: DatasetField = {
+          id: fieldIdFor(row.nextFieldId),
+          def,
+          added: true,
+        };
+        await tx
+          .update(datasets)
+          .set({
+            fields: JSON.stringify([...fields, added]),
+            nextFieldId: row.nextFieldId + 1,
+            updatedAt: Date.now(),
+          })
+          .where(eq(datasets.id, datasetId));
+        return added;
+      }),
+    );
+    this.emit({ type: "update", datasetId });
+    return field;
   }
 }

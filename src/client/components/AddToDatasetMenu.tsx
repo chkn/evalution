@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { samePrompt } from "../../shared/dataset-fields";
 import type {
   DatasetField,
   DatasetRowSource,
@@ -74,10 +75,6 @@ function describeSkipped(skipped: SkippedInput[]): string {
   if (skipped.length === 0) return "";
   const names = [...new Set(skipped.map(s => s.name))];
   return ` · skipped ${names.join(", ")} (no matching field)`;
-}
-
-function samePrompt(a: PromptID | undefined, b: PromptID | undefined) {
-  return !!a && !!b && a.id === b.id && a.providerId === b.providerId;
 }
 
 /**

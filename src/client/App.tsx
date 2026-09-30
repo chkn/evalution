@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { samePrompt } from "../shared/dataset-fields";
 import type {
   ExecuteResponse,
   NormalizedPrompt,
@@ -644,7 +645,7 @@ function App() {
 
   /** The loaded prompt a provider-scoped reference names, if any. */
   const findPrompt = (ref: PromptID): NormalizedPrompt | undefined =>
-    prompts.find(p => p.id === ref.id && p.providerId === ref.providerId);
+    prompts.find(p => samePrompt(p, ref));
 
   /**
    * Opens a prompt tab to the right, optionally carrying a `fill` for its
@@ -1343,6 +1344,7 @@ function App() {
                                 datasetId={tab.datasetId}
                                 version={datasetVersion}
                                 findPrompt={findPrompt}
+                                prompts={prompts}
                                 onOpenPrompt={prompt =>
                                   openPromptTabRightOf(pane.id, prompt)
                                 }
