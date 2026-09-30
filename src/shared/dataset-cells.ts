@@ -7,6 +7,10 @@
  * storing). Pure — no runtime dependencies. See `specs/datasets.md` §A, §F.
  */
 
+import {
+  isPrimitiveFieldType,
+  type PrimitiveFieldType,
+} from "./dataset-fields.ts";
 import type { ExecutionInput, PropType, PropValue } from "./types.ts";
 
 /**
@@ -138,14 +142,11 @@ export function committedCell(value: PropValue): ExecutionInput | null {
   return { kind: "value", value };
 }
 
-/** The primitive types a dataset cell can be typed straight into. */
-export type EditableBase = "string" | "number" | "boolean";
-
-const EDITABLE_BASES: ReadonlySet<string> = new Set([
-  "string",
-  "number",
-  "boolean",
-]);
+/**
+ * The primitive types a dataset cell can be typed straight into — the same
+ * ones a field can be given by hand.
+ */
+export type EditableBase = PrimitiveFieldType;
 
 /**
  * The base of a field typed `string`, `number`, or `boolean`, or `undefined`
@@ -155,7 +156,7 @@ const EDITABLE_BASES: ReadonlySet<string> = new Set([
 export function primitiveBase(type: PropType): EditableBase | undefined {
   if (type.kind !== "primitive") return undefined;
   const base = type.base ?? type.syntax;
-  return EDITABLE_BASES.has(base) ? (base as EditableBase) : undefined;
+  return isPrimitiveFieldType(base) ? base : undefined;
 }
 
 /**
