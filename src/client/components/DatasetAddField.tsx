@@ -109,6 +109,7 @@ export function DatasetAddField({
             <span>Name</span>
             <input
               autoFocus
+              data-1p-ignore
               className="add-to-dataset-name"
               aria-label="Field name"
               value={name}

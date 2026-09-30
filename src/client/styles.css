@@ -6736,6 +6736,7 @@ pre {
 .dataset-grid .dvn-scroller {
   position: relative;
   z-index: 1;
+  overscroll-behavior: none;
 }
 
 .dataset-grid-empty {

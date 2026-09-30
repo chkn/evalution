@@ -735,8 +735,8 @@ function DatasetView({
                 />
               }
               // Filled rather than spaced, so the "＋" follows the last
-              // column; sticky, so it stays in view while they scroll.
-              rightElementProps={{ sticky: true, fill: true }}
+              // column; not sticky, so it scrolls with the rest of the grid
+              rightElementProps={{ sticky: false, fill: true }}
             />
             {/*
              * Glide rules the whole canvas, not just the rows: its
