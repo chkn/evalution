@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getTrace } from "./api.ts";
+import { addDatasetField, getTrace } from "./api.ts";
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -78,5 +78,36 @@ describe("getTrace", () => {
     controller.abort();
 
     await expect(promise).rejects.toThrow(/abort/i);
+  });
+});
+
+describe("addDatasetField", () => {
+  it("posts the request to the dataset's fields route", async () => {
+    const field = { id: "2", def: { name: "expectedTitle" } };
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) =>
+      jsonResponse(field, 201),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request = { name: "expectedTitle", type: "string" } as const;
+    expect(await addDatasetField("local", "odin tasks", request)).toEqual(
+      field,
+    );
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/datasets/local/odin%20tasks/fields");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual(request);
+  });
+
+  it("rejects with the server's message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ error: "`title: string` already exists" }, 400),
+      ),
+    );
+    await expect(
+      addDatasetField("local", "d", { name: "title", type: "string" }),
+    ).rejects.toThrow("`title: string` already exists");
   });
 });

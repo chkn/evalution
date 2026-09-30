@@ -10,6 +10,7 @@
  */
 
 import { stripReceipts } from "../../shared/dataset-cells";
+import { matchKey, portableDef } from "../../shared/dataset-fields";
 import type {
   Dataset,
   DatasetField,
@@ -50,25 +51,6 @@ export interface SkippedInput {
 export interface PartialExecuteRequest {
   functionInputs: Record<string, ExecutionInput>;
   executeInputs: Record<string, ExecutionInput>;
-}
-
-/**
- * The matching rule, and the only one: a source input and a target slot
- * match when their `name` is equal **and** their `type.syntax` is equal.
- * Plain string comparison over data the client already has — no checker —
- * and it fails closed.
- */
-export function matchKey(def: PropDefinition): string {
-  return `${def.name}\u0000${def.type?.syntax ?? ""}`;
-}
-
-/**
- * A definition fit for a dataset schema: the file-specific source spans
- * dropped, since a dataset belongs to no file.
- */
-function portableDef(def: PropDefinition): PropDefinition {
-  const { valueSpan: _v, fullSpan: _f, ...rest } = def;
-  return rest;
 }
 
 /**
@@ -330,7 +312,8 @@ export function countMatches(
 
 /**
  * Fields of `dataset` that no longer match any of `prompt`'s parameters —
- * the "N fields no longer match" line above a linked dataset's table.
+ * the "N fields no longer match" line above a linked dataset's table. Fields
+ * added by hand never came from the prompt, so they're never stale.
  */
 export function staleFields(
   fields: readonly DatasetField[],
@@ -341,7 +324,7 @@ export function staleFields(
       matchKey,
     ),
   );
-  return fields.filter(f => !keys.has(matchKey(f.def)));
+  return fields.filter(f => !f.added && !keys.has(matchKey(f.def)));
 }
 
 // ── filling the panel from outside ───────────────────────────────────────
