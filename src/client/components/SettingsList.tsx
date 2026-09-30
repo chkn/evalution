@@ -52,7 +52,7 @@ function LoadSaveIcon() {
 export const SETTINGS_SECTIONS: {
   id: SettingsSection;
   label: string;
-  icon: () => JSX.Element;
+  icon: () => React.JSX.Element;
 }[] = [
   { id: "appearance", label: "Appearance", icon: AppearanceIcon },
   { id: "load-save", label: "Load/Save", icon: LoadSaveIcon },
