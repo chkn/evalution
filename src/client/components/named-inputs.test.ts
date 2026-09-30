@@ -322,4 +322,11 @@ describe("schemas", () => {
       "legacyFlag",
     ]);
   });
+
+  it("never reports a field added by hand as stale", () => {
+    const [ticket, expected] = fields(def("ticket"), def("expectedTitle"));
+    expect(
+      staleFields([ticket, { ...expected, added: true }], prompt()),
+    ).toEqual([]);
+  });
 });

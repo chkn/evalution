@@ -5,8 +5,10 @@ import { expect, test } from "@playwright/experimental-ct-react";
 import type { Locator, Page } from "@playwright/test";
 import type {
   Dataset,
+  DatasetField,
   DatasetRow,
   ExecutionInput,
+  NormalizedPrompt,
   PropDefinition,
 } from "../../../shared/types";
 import { DatasetViewHarness } from "./DatasetViewHarness";
@@ -687,20 +689,6 @@ test("a dataset with fields but no rows shows the grid, to add the first row", a
   await expect(pane).toContainText("r1");
 });
 
-test("a dataset with no fields points at adding one, with no grid", async ({
-  mount,
-  page,
-}) => {
-  const bare: Dataset = { ...SUPPORT, id: "bare", name: "Bare", fields: [] };
-  await mockDataset(page, bare, []);
-  const component = await mount(
-    <DatasetViewHarness providerId="local" datasetId="bare" />,
-  );
-  await expect(component.getByText("No fields yet.")).toBeVisible();
-  await expect(component.getByText(/Add a field/)).toBeVisible();
-  await expect(component.getByTestId("data-grid-canvas")).toHaveCount(0);
-});
-
 test("two rows appended at once both stay while the first one's refetch lands", async ({
   mount,
   page,
@@ -776,4 +764,184 @@ test("once the rows overflow, the trailing row sticks to the bottom", async ({
   await clickGrid(page, GRID.marker + 40, canvas.height - GRID.row / 2);
   await expect(component.getByText("41 rows")).toBeVisible();
   await expect.poll(() => bodies).toHaveLength(1);
+});
+
+/**
+ * Serves `tickets` with one row, and `POST …/fields` as the server would:
+ * appending a field, or rejecting a name already taken. Returns the bodies
+ * posted.
+ */
+async function mockFields(page: Page, initial: Dataset) {
+  let dataset = initial;
+  const posted: unknown[] = [];
+  const base = "**/api/datasets/local/tickets";
+  await page.route(base, route =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: { dataset, rowCount: 1, fields: {} } })
+      : route.fallback(),
+  );
+  await page.route(`${base}/rows?*`, route =>
+    route.fulfill({
+      json: [{ id: "r1", cells: { "0": text("Hi") }, createdAt: 1 }],
+    }),
+  );
+  await page.route(`${base}/fields`, route => {
+    const body = route.request().postDataJSON();
+    posted.push(body);
+    const name: string = body.name ?? body.from?.path;
+    if (dataset.fields.some(f => f.def.name === name)) {
+      return route.fulfill({
+        status: 400,
+        json: { error: `\`${name}: string\` already exists` },
+      });
+    }
+    const field: DatasetField = {
+      id: String(dataset.fields.length),
+      def: {
+        name,
+        optional: true,
+        type: { kind: "primitive", syntax: body.type ?? "TaskId" },
+      },
+    };
+    dataset = { ...dataset, fields: [...dataset.fields, field] };
+    return route.fulfill({ status: 201, json: field });
+  });
+  return posted;
+}
+
+test("the header's ＋ adds a field, which shows up as a column", async ({
+  mount,
+  page,
+}) => {
+  const posted = await mockFields(page, {
+    ...SUPPORT,
+    fields: [{ id: "0", def: TICKET }],
+  });
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(inGrid(component, "columnheader", "ticket")).toBeAttached();
+
+  await component.getByRole("button", { name: "Add field" }).click();
+  const popover = page.getByRole("dialog", { name: "Add field" });
+  const name = popover.getByLabel("Field name");
+  await expect(name).toBeFocused();
+  const submit = popover.getByRole("button", { name: "Add field" });
+  // A primitive has to be named.
+  await expect(submit).toBeDisabled();
+
+  // A rejected add says why, in the popover.
+  await name.fill("ticket");
+  await submit.click();
+  await expect(popover.getByRole("alert")).toHaveText(
+    "`ticket: string` already exists",
+  );
+
+  await name.fill("expectedTitle");
+  await popover.getByLabel("Field type").selectOption("number");
+  await submit.click();
+  await expect(popover).toHaveCount(0);
+  await expect(
+    inGrid(component, "columnheader", "expectedTitle"),
+  ).toBeAttached();
+  expect(posted).toEqual([
+    { name: "ticket", type: "string" },
+    { name: "expectedTitle", type: "number" },
+  ]);
+});
+
+test("a field can copy a prompt parameter's type, the linked prompt's listed first", async ({
+  mount,
+  page,
+}) => {
+  const posted = await mockFields(page, {
+    ...SUPPORT,
+    fields: [{ id: "0", def: TICKET }],
+    prompt: { id: "src/support.ts#triage", providerId: "files" },
+  });
+  const prompt = (id: string, name: string, param: PropDefinition) =>
+    ({
+      id,
+      providerId: "files",
+      name,
+      functionParameters: [param],
+    }) as unknown as NormalizedPrompt;
+  const component = await mount(
+    <DatasetViewHarness
+      providerId="local"
+      datasetId="tickets"
+      prompts={[
+        prompt("src/odin.ts#plan", "plan", {
+          name: "taskId",
+          type: { kind: "primitive", syntax: "TaskId" },
+          optional: false,
+        }),
+        prompt("src/support.ts#triage", "triage", TICKET),
+      ]}
+    />,
+  );
+
+  await component.getByRole("button", { name: "Add field" }).click();
+  const popover = page.getByRole("dialog", { name: "Add field" });
+  const type = popover.getByLabel("Field type");
+  expect(
+    await type
+      .locator("optgroup")
+      .evaluateAll(groups => groups.map(g => g.getAttribute("label"))),
+  ).toEqual([
+    "Same type as a parameter of triage (linked)",
+    "Same type as a parameter of plan",
+  ]);
+
+  await type.selectOption({ label: "taskId: TaskId" });
+  // Named after the parameter unless named otherwise.
+  await expect(popover.getByLabel("Field name")).toHaveAttribute(
+    "placeholder",
+    "taskId",
+  );
+  await popover.getByRole("button", { name: "Add field" }).click();
+  await expect(inGrid(component, "columnheader", "taskId")).toBeAttached();
+  expect(posted).toEqual([
+    {
+      from: {
+        providerId: "files",
+        promptId: "src/odin.ts#plan",
+        half: "function",
+        path: "taskId",
+      },
+    },
+  ]);
+});
+
+test("a dataset with no fields still draws its header, so a field can be added", async ({
+  mount,
+  page,
+}) => {
+  await mockDataset(page, { ...SUPPORT, fields: [] }, []);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByText(/^No fields yet\./)).toBeVisible();
+  await expect(
+    component.getByRole("button", { name: "Add field" }),
+  ).toBeVisible();
+});
+
+test("clicking the grid closes the add-field popover", async ({
+  mount,
+  page,
+}) => {
+  await mockFields(page, { ...SUPPORT, fields: [{ id: "0", def: TICKET }] });
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+
+  await component.getByRole("button", { name: "Add field" }).click();
+  const popover = page.getByRole("dialog", { name: "Add field" });
+  await expect(popover).toBeVisible();
+
+  // Glide cancels `pointerdown` on its canvas, which suppresses `mousedown`.
+  await clickGrid(page, 40, 10);
+  await expect(popover).toHaveCount(0);
 });

@@ -40,6 +40,7 @@ import {
   getDatasetRows,
   renameDataset,
 } from "../api";
+import { DatasetAddField } from "./DatasetAddField";
 import { DatasetRowDetails } from "./DatasetRowDetails";
 import { DetailsPane, DetailsPaneHeader, useIsWide } from "./DetailsPane";
 import {
@@ -85,6 +86,11 @@ interface Props {
   version: number;
   /** Looks up the prompt a (resolved) prompt reference names, if loaded. */
   findPrompt: (prompt: PromptID) => NormalizedPrompt | undefined;
+  /**
+   * Every loaded prompt, whose parameters a new field can copy the type of.
+   * Defaults to none: only the primitive types are offered.
+   */
+  prompts?: readonly NormalizedPrompt[];
   /** Opens `prompt` in a split pane, as it is. */
   onOpenPrompt: (prompt: NormalizedPrompt) => void;
   /** Opens `prompt` in a split pane with its execute panel filled. */
@@ -156,6 +162,8 @@ const ROW_HEIGHT = 32;
 const HEADER_HEIGHT = 32;
 const GROUP_HEADER_HEIGHT = 26;
 
+const NO_PROMPTS: readonly NormalizedPrompt[] = [];
+
 const NO_SELECTION: GridSelection = {
   columns: CompactSelection.empty(),
   rows: CompactSelection.empty(),
@@ -217,6 +225,7 @@ function DatasetView({
   datasetId,
   version,
   findPrompt,
+  prompts = NO_PROMPTS,
   onOpenPrompt,
   onOpenInPlayground,
   onOpenTrace,
@@ -450,9 +459,10 @@ function DatasetView({
    */
   const canAppend = !!dataset && dataset.fields.length > 0;
 
+  const grouped = columns.some(c => c.group !== undefined);
   /** Where the table's last row ends, leaving its closing rule in place. */
   const contentBottom =
-    (columns.some(c => c.group !== undefined) ? GROUP_HEADER_HEIGHT : 0) +
+    (grouped ? GROUP_HEADER_HEIGHT : 0) +
     HEADER_HEIGHT +
     (overview.rowCount + (canAppend ? 1 : 0)) * ROW_HEIGHT +
     1;
@@ -757,66 +767,78 @@ function DatasetView({
       )}
       <div className="trace-view-body dataset-view-body" ref={bodyRef}>
         <div className="trace-view-main-column">
-          {rowCount === 0 && !canAppend ? (
-            <div className="tree-empty-state">
-              <p>No fields yet.</p>
-              <p className="trace-list-hint">
-                Add a field to start filling this dataset in by hand.
-              </p>
+          {/*
+           * Drawn even with no rows, so the header's "＋" can add a field to
+           * an empty dataset and the trailing row can add its first row.
+           */}
+          <div className="dataset-grid" ref={gridRef}>
+            <DataEditorCore
+              renderers={RENDERERS}
+              imageWindowLoader={NO_IMAGES}
+              headerIcons={GRID_HEADER_ICONS}
+              getGroupDetails={getGroupDetails}
+              width="100%"
+              height="100%"
+              theme={theme}
+              columns={gridColumns}
+              rows={rowCount}
+              trailingRowOptions={trailingRow}
+              onRowAppended={canAppend ? onRowAppended : undefined}
+              getCellContent={getCellContent}
+              onVisibleRegionChanged={onVisibleRegionChanged}
+              drawHeader={drawHeader}
+              rowMarkers="clickable-number"
+              rowSelect="single"
+              rangeSelect="cell"
+              columnSelect="none"
+              gridSelection={selection}
+              onGridSelectionChange={onGridSelectionChange}
+              onCellClicked={onCellClicked}
+              onGroupHeaderClicked={onGroupHeaderClicked}
+              onColumnResize={(column, width) =>
+                column.id &&
+                updateLayout({
+                  ...layout,
+                  widths: { ...widths, [column.id]: width },
+                })
+              }
+              rowHeight={ROW_HEIGHT}
+              headerHeight={HEADER_HEIGHT}
+              groupHeaderHeight={GROUP_HEADER_HEIGHT}
+              smoothScrollX
+              smoothScrollY
+              rightElement={
+                <DatasetAddField
+                  providerId={providerId}
+                  datasetId={datasetId}
+                  prompts={prompts}
+                  linked={dataset.prompt}
+                  top={grouped ? GROUP_HEADER_HEIGHT : 0}
+                  height={HEADER_HEIGHT}
+                  onAdded={() => setReload(n => n + 1)}
+                />
+              }
+              // Filled rather than spaced, so the "＋" follows the last
+              // column; not sticky, so it scrolls with the rest of the grid
+              rightElementProps={{ sticky: false, fill: true }}
+            />
+            {/*
+             * Glide rules the whole canvas, not just the rows: its
+             * horizontal lines are drawn past the last row and its vertical
+             * ones run the full height. Covering what's below the last row
+             * ends the table there, while the grid still fills the pane so
+             * the horizontal scrollbar stays at the bottom. Sits under the
+             * scroller (see `styles.css`) so that scrollbar stays visible.
+             */}
+            <div className="dataset-grid-fill" style={{ top: contentBottom }}>
+              {rowCount === 0 && !canAppend && (
+                <p className="dataset-grid-empty">
+                  No fields yet. Add one with the “＋” to start filling this
+                  dataset in by hand.
+                </p>
+              )}
             </div>
-          ) : (
-            <div className="dataset-grid" ref={gridRef}>
-              <DataEditorCore
-                renderers={RENDERERS}
-                imageWindowLoader={NO_IMAGES}
-                headerIcons={GRID_HEADER_ICONS}
-                getGroupDetails={getGroupDetails}
-                width="100%"
-                height="100%"
-                theme={theme}
-                columns={gridColumns}
-                rows={rowCount}
-                trailingRowOptions={trailingRow}
-                onRowAppended={canAppend ? onRowAppended : undefined}
-                getCellContent={getCellContent}
-                onVisibleRegionChanged={onVisibleRegionChanged}
-                drawHeader={drawHeader}
-                rowMarkers="clickable-number"
-                rowSelect="single"
-                rangeSelect="cell"
-                columnSelect="none"
-                gridSelection={selection}
-                onGridSelectionChange={onGridSelectionChange}
-                onCellClicked={onCellClicked}
-                onGroupHeaderClicked={onGroupHeaderClicked}
-                onColumnResize={(column, width) =>
-                  column.id &&
-                  updateLayout({
-                    ...layout,
-                    widths: { ...widths, [column.id]: width },
-                  })
-                }
-                rowHeight={ROW_HEIGHT}
-                headerHeight={HEADER_HEIGHT}
-                groupHeaderHeight={GROUP_HEADER_HEIGHT}
-                smoothScrollX
-                smoothScrollY
-              />
-              {/*
-               * Glide rules the whole canvas, not just the rows: its
-               * horizontal lines are drawn past the last row and its vertical
-               * ones run the full height. Covering what's below the last row
-               * ends the table there, while the grid still fills the pane so
-               * the horizontal scrollbar stays at the bottom. Sits under the
-               * scroller (see `styles.css`) so that scrollbar stays visible.
-               */}
-              <div
-                className="dataset-grid-fill"
-                style={{ top: contentBottom }}
-                aria-hidden
-              />
-            </div>
-          )}
+          </div>
           {!showSidePane && rowDetails && (
             <DetailsPane placement="bottom" label="Row details">
               {rowDetails}

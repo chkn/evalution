@@ -5,6 +5,7 @@ import { access, constants, readdir, stat, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
+import type { PropDefinition } from "../shared/types.ts";
 import {
   assertSqliteFile,
   createLocalTursoClient,
@@ -25,6 +26,7 @@ import {
 import type {
   Dataset,
   DatasetChangeEvent,
+  DatasetField,
   DatasetRow,
   DatasetRowsOverview,
   DatasetSummary,
@@ -364,6 +366,14 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
     const entry = await this.entryFor(datasetId);
     if (!entry?.ok) return;
     await entry.inner.deleteRow(entry.innerId, rowId);
+  }
+
+  async addField(
+    datasetId: string,
+    def: PropDefinition,
+  ): Promise<DatasetField> {
+    const entry = await this.requireEntry(datasetId);
+    return entry.inner.addField(entry.innerId, def);
   }
 
   /** Closes every open file. The provider reopens them on next use. */
