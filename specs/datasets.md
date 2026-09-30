@@ -545,6 +545,8 @@ Where it appears:
   will have to face `resource-arguments.md` §F (resettable resources serialize a fan-out) and
   `resource-observation.md` §F (scorers want resource timelines).
 - In-table cell editing, reordering rows, editing a schema, and hand-typed field types (§B).
+  *Partly lifted 2026-09-29:* user-added fields, value-cell editing (inline and in the details pane),
+  and appending rows (§P).
 - Expected outputs. PLAN §3.2 mentions them, and they'll likely arrive as a field role
   (`role: "expected"`) alongside the schema here, but nothing in v1 reads them.
 - Cloud sync, import/export (CSV, JSONL), and watching `.evalution/datasets/` for external changes
@@ -676,3 +678,122 @@ Where it appears:
    `name`. A dataset renamed from "Tickets" to "Refunds" keeps `tickets.db` on disk, which matters
    only to someone poking at the directory. Renaming the file too is possible (close, rename
    file and sidecars, reopen) if it bothers anyone.
+
+## P. Follow-up (2026-09-29): user-added fields and cell editing
+
+Evals bind expected values from dataset columns (`specs/evals.md` §B.2). The Odin eval needs an
+`expectedTitle` column, and no prompt parameter or trace produces one. With every prompt input bound
+explicitly (`evals.md` §A), a dataset can also be entirely plain data (`title`, `description`,
+`threadMsgs`), with the eval building `seededTask` over those columns rather than storing a
+resource ref in each row. Both need fields a person adds and values a person types.
+
+### P.1 Add field
+
+"＋" sits at the right end of the grid's header row. It's Glide's `rightElement`, so it stays put
+while the columns scroll. It opens a popover with a name box and a type picker:
+
+- **string**, **number**, or **boolean**. The `def` is built directly: `{ name, optional: true,
+  type: { kind: "primitive", syntax: type, base: type } }`. §B objected to typed-in field types
+  because a free-form type string has no checker to resolve it. A primitive doesn't need one,
+  because its syntax and its structure are the same thing.
+- **Same type as a parameter…**: a prompt's function or execute parameter, or a check's parameter
+  (`evals.md` §B.4). The field copies that `PropDefinition`, which the checker already resolved in
+  a real program, so §B's objection doesn't apply here either. The parameter's name is the default
+  field name. This is how a column gets a structured type, such as `threadMsgs:
+  readonly Pick<ThreadMessage, "excerpt">[]`, and why a separate JSON type isn't needed yet.
+  The linked prompt's parameters are listed first.
+
+```ts
+// DatasetProvider
+/** Appends a field. Rows are untouched: the new column starts empty. */
+addField(datasetId: string, def: PropDefinition): Promise<DatasetField>;
+```
+
+The server accepts a primitive `def` only in the exact shape above. It accepts any other `def`
+only if it arrived from a parameter lookup the server did itself (`POST …/fields` with
+`{ from: { providerId, promptId | checkUri, half?, path } }`), never as a hand-written structure.
+
+Glide's `onColumnAppended` is the wrong hook for this. It fires when the user tabs past the last
+column mid-edit, and a field needs a name and type before it can exist.
+
+- **Uniqueness uses §B's key.** A field with the same name and syntax as an existing one is
+  rejected ("`title: string` already exists"). The same name with a different type is allowed, as
+  it is for derived fields.
+- **It matches like any field.** A user-added `title: string` matches a prompt's `title: string`
+  parameter by §B's rule. So it fills the panel through "Open in playground", and pre-fills an eval
+  binding (`evals.md` §F.1).
+- **No rename, retype, or removal yet.** `nextFieldId` already makes removal safe to add later
+  (§B). Renaming a field can quietly break the evals bound to it, so it waits for a reason.
+
+### P.2 Cell editing: inline in the grid, and in the details pane
+
+**Inline, with Glide's own editors**, for the cells they can edit faithfully. That means a
+top-level field column (not a split path, §J) whose field type is a primitive with base
+`string`, `number`, or `boolean`, and whose cell is empty or holds a `value` that's a plain
+primitive. Those cells are served as editable `Text`, `Number`, or `Boolean` grid cells
+(`allowOverlay: true`, `readonly: false`). Everything else stays read-only in the grid, including a
+string cell holding a template: the text editor would flatten its interpolation tokens.
+
+- **`onCellsEdited`** receives every edit as one batch: a single edit, a paste over a range, or a
+  fill-handle drag. The batch is grouped by row into one `updateRows` call. `onPaste` is left at
+  its default, so pasting a column of expected values from a spreadsheet just works, and cells
+  outside the editable set are skipped.
+- **Delete/Backspace over a selection clears it.** Glide routes the cleared cells through the same
+  batch, and an empty value becomes `null`.
+- **`validateCell`** rejects a value that doesn't fit the cell's base type (Glide's `Number` cell
+  already parses) before it's sent.
+- **Optimistic.** The edited page in `RowPager` is patched at once, and the `dataset-changed`
+  refetch replaces it. A failed save restores the page and shows the error under the header.
+
+**In the row details pane** for everything inline can't do. Every `value` cell of any field gets
+`ItemEditor` against the field's `def`, as the panel does, and commits on blur or Enter rather than
+per keystroke. That covers templates, objects, and arrays such as `threadMsgs`. An empty cell of
+any field can be given a value the same way. `object` and `resource` cells stay read-only in both
+places: editing them means offering resources, which needs a prompt's `inputSources`, and a dataset
+has none (§J). A read-only cell can still be cleared.
+
+**Clearing a cell removes its key**, keeping rows sparse (§A).
+
+```ts
+// DatasetProvider
+/**
+ * Sets or clears cells on several rows at once. `null` clears. Only `value`
+ * cells may be set: nothing in the dataset view can produce any other kind.
+ */
+updateRows(datasetId: string, updates: { rowId: string; cells: Record<string, ExecutionInput | null> }[]): Promise<void>;
+```
+
+The server validates each set cell against its field. For a primitive field, the value's
+`PropValue` must be a primitive of that base. For any other field it gets the shape check `addRows`
+already applies. Both providers merge into the JSONB blob (`json_patch`) in one transaction, so an
+edit rewrites only the rows it touches.
+
+### P.3 Rows and datasets by hand
+
+- **Glide's trailing row adds rows.** `trailingRowOptions: { hint: "New row", sticky: true }`
+  shows a blank row after the last one. Clicking it, or pressing ↓ past the last row while editing,
+  calls `onRowAppended`, which `addRows` an empty row (no cells, no `source`, which already reads
+  as "added by hand") and returns `"bottom"`. Glide then waits for `rows` to grow before focusing
+  the new row's cell. It gives up after about half a second, so `DatasetView` bumps the overview's
+  `rowCount` optimistically rather than waiting for the server round trip.
+- **"New dataset…" in the sidebar** creates a dataset with a name, no fields, and no prompt link.
+  With P.1 and P.2 it can be filled entirely by hand.
+
+### P.4 Wire and phasing
+
+`POST /api/datasets/:p/:id/fields` (`{ name, type }` or `{ from }`), and
+`PATCH /api/datasets/:p/:id/rows` (the batch). The trailing row reuses the existing add-rows
+route. All of them emit `dataset-changed`, so an open grid refetches its overview and visible pages
+as it does today.
+
+1. `addField` and `updateRows` in both providers, with contract tests in
+   `dataset-provider-contract.ts`: minted ids stay unique, duplicate keys are rejected, a merge
+   leaves other cells untouched, `null` removes the key, non-`value` cells are rejected, and a
+   batch is all-or-nothing.
+2. Routes, server validation, and the parameter lookup behind `{ from }`.
+3. UI: the "＋" field popover, inline editors with batch edits, paste and delete, the trailing row,
+   details-pane editing, and "New dataset…" in the sidebar.
+
+This doesn't depend on evals and can ship first. Evals depend on it only for the Odin example.
+Inline editing is the one piece to cover with a Playwright component test: an edit, a paste over a
+range, and an append that focuses the new row all need the real grid.
