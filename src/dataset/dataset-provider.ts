@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { ExecutionInput } from "../shared/types.ts";
 import type { PromptID } from "../trace/trace-types.ts";
 import type {
   Dataset,
@@ -35,6 +36,15 @@ export interface ListRowsOptions {
 
 /** A row as {@link DatasetProvider.addRows} takes it: id and timestamp are minted. */
 export type NewDatasetRow = Pick<DatasetRow, "cells" | "source">;
+
+/**
+ * One row's changes in {@link DatasetProvider.updateRows}: field id → the cell
+ * to set, or `null` to clear it. Fields not named are left as they are.
+ */
+export interface DatasetRowUpdate {
+  rowId: string;
+  cells: Record<string, ExecutionInput | null>;
+}
 
 /** Thrown by a {@link DatasetProvider} when the dataset named doesn't exist. */
 export class DatasetNotFoundError extends Error {
@@ -105,6 +115,17 @@ export interface DatasetProvider {
    * existing field id; a row that doesn't is rejected, and none are added.
    */
   addRows(datasetId: string, rows: NewDatasetRow[]): Promise<DatasetRow[]>;
+
+  /**
+   * Sets or clears cells on several rows at once. `null` clears, removing the
+   * key so rows stay sparse; cells not named are untouched. Only `value`
+   * cells may be set: nothing in the dataset view can produce any other kind.
+   *
+   * All or nothing: an update naming a row or field the dataset doesn't have,
+   * or setting a non-`value` cell, rejects the whole batch with a
+   * {@link DatasetValidationError}, and no row changes.
+   */
+  updateRows(datasetId: string, updates: DatasetRowUpdate[]): Promise<void>;
 
   /** Deletes one row. A no-op if it doesn't exist. */
   deleteRow(datasetId: string, rowId: string): Promise<void>;

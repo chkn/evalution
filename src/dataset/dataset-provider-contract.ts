@@ -300,6 +300,135 @@ export function runDatasetProviderContractTests(
       await provider.deleteRow(dataset.id, first.id);
     });
 
+    describe("updateRows", () => {
+      /** A dataset of two fields, with two rows. */
+      async function seeded(provider: DatasetProvider) {
+        const dataset = await provider.createDataset({
+          name: "Edits",
+          fields: [{ def: def("a") }, { def: def("b", "Task") }],
+        });
+        const resource: ExecutionInput = {
+          kind: "resource",
+          uri: "pg.ts#seededTask",
+          args: { title: text("Milk") },
+        };
+        const [first, second] = await provider.addRows(dataset.id, [
+          { cells: { "0": text("one"), "1": resource } },
+          { cells: { "0": text("two") } },
+        ]);
+        return { dataset, first, second, resource };
+      }
+
+      it("sets cells, leaving other cells and rows untouched", async () => {
+        const provider = await makeProvider();
+        const { dataset, first, second, resource } = await seeded(provider);
+        await provider.updateRows(dataset.id, [
+          { rowId: first.id, cells: { "0": text("uno") } },
+        ]);
+        const rows = await provider.listRows(dataset.id);
+        expect(rows[0]).toEqual({
+          ...first,
+          cells: { "0": text("uno"), "1": resource },
+        });
+        expect(rows[1]).toEqual(second);
+      });
+
+      it("replaces a cell whole, rather than merging into it", async () => {
+        const provider = await makeProvider();
+        const { dataset, first } = await seeded(provider);
+        // A `null` inside a value is data, not a deletion.
+        const replacement: ExecutionInput = {
+          kind: "value",
+          value: {
+            kind: "object",
+            properties: { title: { kind: "primitive", value: null } },
+          },
+        };
+        await provider.updateRows(dataset.id, [
+          { rowId: first.id, cells: { "1": replacement } },
+        ]);
+        const [row] = await provider.listRows(dataset.id);
+        expect(row.cells["1"]).toEqual(replacement);
+      });
+
+      it("fills an empty cell, and clears one by removing its key", async () => {
+        const provider = await makeProvider();
+        const { dataset, first, second } = await seeded(provider);
+        await provider.updateRows(dataset.id, [
+          { rowId: first.id, cells: { "0": null, "1": null } },
+          { rowId: second.id, cells: { "1": text("filled") } },
+        ]);
+        const rows = await provider.listRows(dataset.id);
+        expect(rows[0].cells).toEqual({});
+        expect(Object.keys(rows[0].cells)).toEqual([]);
+        expect(rows[1].cells).toEqual({
+          "0": text("two"),
+          "1": text("filled"),
+        });
+      });
+
+      it.each([
+        [
+          "a resource cell",
+          { kind: "resource", uri: "pg.ts#db" } satisfies ExecutionInput,
+        ],
+        [
+          "an object cell",
+          { kind: "object", properties: {} } satisfies ExecutionInput,
+        ],
+      ])("rejects setting %s, changing nothing", async (_label, cell) => {
+        const provider = await makeProvider();
+        const { dataset, first, second } = await seeded(provider);
+        const before = await provider.listRows(dataset.id);
+        await expect(
+          provider.updateRows(dataset.id, [
+            { rowId: second.id, cells: { "0": text("changed") } },
+            { rowId: first.id, cells: { "1": cell } },
+          ]),
+        ).rejects.toBeInstanceOf(DatasetValidationError);
+        expect(await provider.listRows(dataset.id)).toEqual(before);
+      });
+
+      it("rejects an unknown field or row, changing nothing", async () => {
+        const provider = await makeProvider();
+        const { dataset, first } = await seeded(provider);
+        const before = await provider.listRows(dataset.id);
+        await expect(
+          provider.updateRows(dataset.id, [
+            { rowId: first.id, cells: { "0": text("changed") } },
+            { rowId: first.id, cells: { z: text("unknown") } },
+          ]),
+        ).rejects.toBeInstanceOf(DatasetValidationError);
+        await expect(
+          provider.updateRows(dataset.id, [
+            { rowId: first.id, cells: { "0": text("changed") } },
+            { rowId: "nope", cells: { "0": text("unknown") } },
+          ]),
+        ).rejects.toBeInstanceOf(DatasetValidationError);
+        expect(await provider.listRows(dataset.id)).toEqual(before);
+      });
+
+      it("rejects updates to a dataset that doesn't exist", async () => {
+        const provider = await makeProvider();
+        await expect(provider.updateRows("missing", [])).rejects.toThrow(
+          /not found/,
+        );
+      });
+
+      it("emits an update", async () => {
+        const provider = await makeProvider();
+        const { dataset, first } = await seeded(provider);
+        const events: DatasetChangeEvent[] = [];
+        provider.watch?.(e => events.push(e));
+        await provider.updateRows(dataset.id, [
+          { rowId: first.id, cells: { "0": text("uno") } },
+        ]);
+        if (provider.watch) {
+          expect(events).toEqual([{ type: "update", datasetId: dataset.id }]);
+        }
+      });
+    });
+
     it("deletes a dataset along with its rows", async () => {
       const provider = await makeProvider();
       const dataset = await provider.createDataset({

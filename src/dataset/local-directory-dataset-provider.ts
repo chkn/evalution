@@ -19,6 +19,7 @@ import {
   type CreateDatasetInput,
   DatasetNotFoundError,
   type DatasetProvider,
+  type DatasetRowUpdate,
   type ListRowsOptions,
   type NewDatasetRow,
 } from "./dataset-provider.ts";
@@ -358,6 +359,14 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
   ): Promise<DatasetRow[]> {
     const entry = await this.requireEntry(datasetId);
     return entry.inner.addRows(entry.innerId, rows);
+  }
+
+  async updateRows(
+    datasetId: string,
+    updates: DatasetRowUpdate[],
+  ): Promise<void> {
+    const entry = await this.requireEntry(datasetId);
+    await entry.inner.updateRows(entry.innerId, updates);
   }
 
   async deleteRow(datasetId: string, rowId: string): Promise<void> {

@@ -25,6 +25,7 @@ export {
   type CreateDatasetInput,
   DatasetNotFoundError,
   type DatasetProvider,
+  type DatasetRowUpdate,
   DatasetValidationError,
   type ListRowsOptions,
   type NewDatasetRow,

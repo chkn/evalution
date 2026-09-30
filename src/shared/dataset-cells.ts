@@ -7,7 +7,7 @@
  * storing). Pure — no runtime dependencies. See `specs/datasets.md` §A, §F.
  */
 
-import type { ExecutionInput } from "./types.ts";
+import type { ExecutionInput, PropType, PropValue } from "./types.ts";
 
 /**
  * `input` without any resource receipt, at any depth.
@@ -120,4 +120,38 @@ export function parseCell(value: unknown, path = "cell"): ExecutionInput {
         `${path}.kind must be "value", "object", or "resource"`,
       );
   }
+}
+
+/** The primitive types a dataset cell can be typed straight into. */
+export type EditableBase = "string" | "number" | "boolean";
+
+const EDITABLE_BASES: ReadonlySet<string> = new Set([
+  "string",
+  "number",
+  "boolean",
+]);
+
+/**
+ * The base of a field typed `string`, `number`, or `boolean`, or `undefined`
+ * for any other type. Read from `base` when the checker recorded one, and
+ * otherwise from the syntax, which for a bare primitive is the same thing.
+ */
+export function primitiveBase(type: PropType): EditableBase | undefined {
+  if (type.kind !== "primitive") return undefined;
+  const base = type.base ?? type.syntax;
+  return EDITABLE_BASES.has(base) ? (base as EditableBase) : undefined;
+}
+
+/**
+ * Whether `value` is something a field of primitive type `base` may hold as
+ * a typed-in value: a primitive of that type, or — for a string — a template,
+ * which is how a string with interpolations is stored. See
+ * `specs/datasets.md` §P.2.
+ */
+export function fitsPrimitiveBase(
+  value: PropValue,
+  base: EditableBase,
+): boolean {
+  if (value.kind === "primitive") return typeof value.value === base;
+  return base === "string" && value.kind === "template";
 }
