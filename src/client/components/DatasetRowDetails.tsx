@@ -18,7 +18,7 @@ import type {
   PropValue,
 } from "../../shared/types";
 import { DetailRow, type Fact, FactGroup, FactsGrid } from "./DetailsPane";
-import { propValueToJson, resourceName } from "./dataset-preview";
+import { previewCell, propValueToJson, resourceName } from "./dataset-preview";
 import { formatTimestamp } from "./trace/format.ts";
 import { CalendarIcon, SpansIcon } from "./trace/icons.tsx";
 import { JsonView } from "./trace/JsonView.tsx";
@@ -88,7 +88,8 @@ export function InputView({ input }: { input: ExecutionInput }) {
         </div>
       );
     case "dataset":
-      return <code className="dataset-detail-scalar">{input.uri}</code>;
+    case "input":
+      return <code className="dataset-detail-scalar">{previewCell(input)}</code>;
   }
 }
 

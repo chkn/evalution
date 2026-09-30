@@ -1,23 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import {
-  isSpanContextValid,
-  SpanStatusCode,
-  type Tracer,
-} from "@opentelemetry/api";
+import type { Tracer } from "@opentelemetry/api";
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { DatasetProvider } from "../dataset/dataset-provider.ts";
 import {
-  resolveExecutionInputs,
-  stampReceipts,
-} from "../prompt/execution-inputs.ts";
-import {
   type OpenOnHeadOptions,
   type PromptProvider,
-  type ResolvedPromptInputs,
   VariationConflictError,
 } from "../prompt/prompt-provider.ts";
 import type { PromptRegistry } from "../prompt/prompt-registry.ts";
@@ -55,6 +46,7 @@ import {
 } from "./handlers/datasets.ts";
 import { handleOtlpTraces } from "./handlers/otlp-ingest.ts";
 import { streamTrace } from "./handlers/trace-stream.ts";
+import { InputResolutionError, runPrompt } from "./run-prompt.ts";
 
 /** Decodes a URL-safe base64 prompt id produced by `encodePromptId`. Uses the
  * Web `atob` (rather than Node's `Buffer`) so it works in browser/worker
@@ -562,89 +554,26 @@ export function setupRoutes({
         return c.json({ error: "Prompt not found" }, 404);
       }
 
-      // Inputs arrive unresolved, so resolution happens here — server-side,
-      // where a resource can actually be created and where a value's import
-      // bindings can actually be imported. A provider that offers non-value
-      // sources interprets its own `uri` grammar through `resolveInputs`;
-      // every other provider gets the value-only fallback and never has to
-      // know an `ExecutionInput` exists.
-      const inputs = { functionInputs, executeInputs };
-      let resolved: ResolvedPromptInputs;
+      let response: ExecuteResponse;
       try {
-        resolved = provider.resolveInputs
-          ? await provider.resolveInputs(ref, inputs)
-          : { ...(await resolveExecutionInputs(inputs)), release: undefined };
+        ({ response } = await runPrompt(
+          provider,
+          ref,
+          prompt,
+          { functionInputs, executeInputs },
+          { tracer, traceProviderId: defaultTraceProviderId },
+        ));
       } catch (err: any) {
         // The request named something that cannot be turned into a value — a
-        // dataset cell, a resource that no longer exists. That is a bad
-        // request, not a failed run: nothing has been dispatched and no trace
-        // exists to carry the error, so it has to be answered here — and
-        // logged, since the response carries only the message.
+        // dataset cell, an unknown slot, a resource that no longer exists.
+        // That is a bad request, not a failed run: nothing has been
+        // dispatched and no trace exists to carry the error, so it has to be
+        // answered here — and logged, since the response carries only the
+        // message.
+        if (!(err instanceof InputResolutionError)) throw err;
         console.error("failed to resolve prompt inputs:", err);
-        return c.json({ error: err?.message ?? String(err) }, 400);
+        return c.json({ error: err.message }, 400);
       }
-      const { functionParams, executeValues } = resolved;
-      // What actually gets recorded on the trace: the request as sent, with
-      // each resource reference's receipt filled in from what this run's
-      // resolution produced — see `specs/resource-arguments.md` §K. A receipt
-      // arriving on a replay request already survived resolution above
-      // (`resolveInputs` passes it to `create`); this is what makes the *new*
-      // run's own receipt the one a later replay of *this* trace would see.
-      const recordedInputs = stampReceipts(inputs, resolved.receipts);
-
-      const response = await tracer.startActiveSpan(prompt.name, async span => {
-        const ctx = span.spanContext();
-        // On the native (v7) path no OTel tracer provider is registered, so the
-        // no-op tracer hands back the all-zero *invalid* span context — the same
-        // value for every call. Mint our own unique id then, and name the root
-        // span the way the native ingestor does (`${traceId}:root`) so the
-        // client's initial span selection resolves. On the OTel/v6 path the span
-        // context is real and must be reused: the OTel ingestor records its
-        // spans under that same trace id.
-        const native = !isSpanContextValid(ctx);
-        const traceId = native ? crypto.randomUUID() : ctx.traceId;
-        const rootSpanId = native ? `${traceId}:root` : ctx.spanId;
-
-        // The trace is created lazily by the telemetry ingestor when the root
-        // span starts. A client that opens the returned trace id before then
-        // polls `GET /api/traces/:p/:id` until it appears (see the client's
-        // `getTrace`), so no server-side pre-creation is needed.
-        let ran: Awaited<ReturnType<PromptProvider["execute"]>>;
-        try {
-          ran = await provider.execute(ref, functionParams, {
-            traceId,
-            rootSpanId,
-            executeValues,
-            inputs: recordedInputs,
-            // Run-scoped resources outlive this response: `execute` returns as
-            // soon as the run is dispatched, so teardown hangs off completion
-            // rather than off the HTTP request.
-            onSettled: () => void resolved.release?.(),
-          });
-        } catch (err: any) {
-          void resolved.release?.();
-          console.error("prompt execution failed:", err);
-          span.recordException(err);
-          span.setStatus({
-            code: SpanStatusCode.ERROR,
-            message: err?.error
-              ? JSON.stringify(err.error, null, 2)
-              : (err?.message ?? String(err)),
-          });
-          span.end();
-          throw err;
-        }
-
-        span.setStatus({ code: SpanStatusCode.OK });
-        span.end();
-        return {
-          traceId,
-          rootSpanId,
-          tracerProviderId: defaultTraceProviderId,
-          ...(ran?.version && { version: ran.version }),
-          ...(ran?.variation && { variation: ran.variation }),
-        } satisfies ExecuteResponse;
-      });
 
       return c.json(response);
     } catch (error: any) {

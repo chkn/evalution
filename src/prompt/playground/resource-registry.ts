@@ -6,6 +6,7 @@ import path from "node:path";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { FileProvider } from "../../file-provider.ts";
 import type { ResourceInfo, ResourceScope } from "../../shared/types.ts";
+import { type Check, isCheck } from "./check.ts";
 import {
   isResource,
   isStandardSchema,
@@ -35,6 +36,18 @@ export interface RegisteredResource {
   scopeDir?: string;
   /** The `resource()` object itself. */
   resource: Resource<unknown>;
+}
+
+/** One discovered check. See `specs/evals.md` §B.4. */
+export interface RegisteredCheck {
+  /** `<module path relative to rootDir>#<export name>`. */
+  uri: string;
+  /** The export name within its module. */
+  key: string;
+  /** Absolute path of the playground module that exported it. */
+  modulePath: string;
+  /** The `check()` object itself. */
+  check: Check;
 }
 
 /** A playground module that could not be loaded. */
@@ -78,7 +91,10 @@ function describeInvalidInput(value: unknown): string {
  * so `create()` runs with the entry simply missing rather than an error
  * pointing at it.
  */
-function partitionInputs(target: Resource<unknown>): PartitionedInputs {
+function partitionInputs(
+  target: { inputs?: ResourceInputs; label?: string },
+  noun = "Resource",
+): PartitionedInputs {
   const inputs: ResourceInputs =
     "inputs" in target ? (target.inputs ?? {}) : {};
   const deps: [string, Resource<unknown>][] = [];
@@ -87,9 +103,9 @@ function partitionInputs(target: Resource<unknown>): PartitionedInputs {
     if (isResource(value)) deps.push([name, value]);
     else if (isStandardSchema(value)) params.push([name, value]);
     else {
-      const label = target.label ?? "resource";
+      const label = target.label ?? noun.toLowerCase();
       throw new Error(
-        `Resource '${label}': input '${name}' must be another resource or a ` +
+        `${noun} '${label}': input '${name}' must be a resource or a ` +
           `Standard Schema (https://standardschema.dev), not ${describeInvalidInput(value)}.`,
       );
     }
@@ -105,7 +121,10 @@ function partitionInputs(target: Resource<unknown>): PartitionedInputs {
  * uses this to know which parameters to probe or, lacking a checker, to
  * report with an unresolved type — see `specs/resource-arguments.md` §G, §H.
  */
-export function resourceParameterNames(target: Resource<unknown>): string[] {
+export function resourceParameterNames(target: {
+  inputs?: ResourceInputs;
+  label?: string;
+}): string[] {
   return partitionInputs(target).params.map(([name]) => name);
 }
 
@@ -463,6 +482,30 @@ function resourceFailure(label: string, phase: string, err: unknown): Error {
   });
 }
 
+/**
+ * Validates `values` against each schema-valued input, returning the
+ * validated values by name — or throwing, naming the input and the issue.
+ *
+ * @param owner - What the inputs belong to, for the message
+ *   (`Resource 'db.ts#seeded'`, `Check 'checks.ts#createsTask'`).
+ */
+async function validateArguments(
+  params: readonly [string, StandardSchemaV1][],
+  values: Record<string, unknown>,
+  owner: string,
+): Promise<Record<string, unknown>> {
+  const validated: Record<string, unknown> = {};
+  for (const [name, schema] of params) {
+    const result = await schema["~standard"].validate(values[name]);
+    if (result.issues) {
+      const message = result.issues.map(i => i.message).join(", ");
+      throw new Error(`${owner}: invalid value for '${name}' — ${message}`);
+    }
+    validated[name] = result.value;
+  }
+  return validated;
+}
+
 /** Resources already warned about a `reset` that will never run, so the message appears once each. */
 const warnedRunScopedReset = new WeakSet<Resource<unknown>>();
 
@@ -504,6 +547,21 @@ export interface ResourceLease {
    * the {@link ResourceBinding.key} that produced the instance).
    */
   receipts(): Record<string, unknown>;
+  /**
+   * Resolves a check's declared `inputs` within this lease: each resource
+   * entry is the instance this lease already has (or creates it, as a
+   * dependency would be), and each schema entry is read from `args` and
+   * validated. See `specs/evals.md` §B.1.
+   *
+   * @param label - What to call the check in an error.
+   * @param args - Resolves the eval's bindings for the schema entries.
+   *   Called at most once, and only when there are any.
+   */
+  resolveDeclared(
+    inputs: ResourceInputs | undefined,
+    label: string,
+    args: () => Promise<Record<string, unknown>>,
+  ): Promise<Record<string, unknown>>;
   /** Disposes this lease's run-scoped instances. Safe to call more than once. */
   release(): Promise<void>;
 }
@@ -541,6 +599,8 @@ export class ResourceRegistry {
 
   /** Discovered resources by `uri`, or `null` before the first scan. */
   private resources: Map<string, RegisteredResource> | null = null;
+  /** Discovered checks by `uri`, from the same scan. */
+  private checkMap = new Map<string, RegisteredCheck>();
   /**
    * Every resource *object* that stands for a discovered resource, mapped to
    * what it was registered as. A resource has more than one such object
@@ -577,6 +637,7 @@ export class ResourceRegistry {
   async modulePaths(): Promise<string[]> {
     const all = await this.all();
     const paths = new Set(all.map(r => r.modulePath));
+    for (const c of this.checkMap.values()) paths.add(c.modulePath);
     for (const e of this.moduleErrors) paths.add(e.modulePath);
     return [...paths].sort();
   }
@@ -584,6 +645,12 @@ export class ResourceRegistry {
   /** Every resource discovered, across all playground modules. */
   async all(): Promise<RegisteredResource[]> {
     return [...(await this.byUri()).values()];
+  }
+
+  /** Every check discovered, across all playground modules, by `uri`. See `specs/evals.md` §B.4. */
+  async checks(): Promise<RegisteredCheck[]> {
+    await this.byUri();
+    return [...this.checkMap.values()];
   }
 
   /** Every selectable source, across all playground modules: every resource, plus one per declared output. */
@@ -750,8 +817,32 @@ export class ResourceRegistry {
       return read.value;
     };
 
+    const resolveDeclared = async (
+      inputs: ResourceInputs | undefined,
+      label: string,
+      args: () => Promise<Record<string, unknown>>,
+    ): Promise<Record<string, unknown>> => {
+      const { deps, params } = partitionInputs({ inputs, label }, "Check");
+      const resolved = await this.resolveDeps(
+        deps,
+        label,
+        "run",
+        runInstances,
+        chainContext.getStore() ?? [],
+        resetLocks,
+      );
+      if (params.length > 0) {
+        Object.assign(
+          resolved,
+          await validateArguments(params, await args(), `Check '${label}'`),
+        );
+      }
+      return resolved;
+    };
+
     return {
       acquire,
+      resolveDeclared,
       receipts: () =>
         Object.fromEntries(
           [...acquired].flatMap(([uri, e]) =>
@@ -919,8 +1010,54 @@ export class ResourceRegistry {
       throw new Error(serverScopedArgumentsError(label));
     }
 
-    const resolved: Record<string, unknown> = {};
+    const resolved = await this.resolveDeps(
+      deps,
+      label,
+      scope,
+      runInstances,
+      chain,
+      resetLocks,
+    );
 
+    if (params.length > 0) {
+      // Lazy, and only evaluated here — never for a binding that hits the
+      // memo — because arguments must not be resolved (and a resource used
+      // as one of them must not be created) for a slot no one is actually
+      // filling from this call.
+      const argValues = (await binding?.resolve()) ?? {};
+      Object.assign(
+        resolved,
+        await validateArguments(params, argValues, `Resource '${label}'`),
+      );
+    }
+
+    let instance: Instance;
+    try {
+      instance = await target.create(resolved, binding?.receipt);
+    } catch (err) {
+      throw resourceFailure(label, "create()", err);
+    }
+    if (!instance || typeof instance !== "object" || !("value" in instance)) {
+      throw new Error(
+        `Resource '${label}': create() must return { value, dispose? }`,
+      );
+    }
+    return instance;
+  }
+
+  /**
+   * Creates (or reuses) each of `deps` — code-wired dependencies, named by
+   * resource object — for something `label` names, which lives for `scope`.
+   */
+  private async resolveDeps(
+    deps: readonly [string, Resource<unknown>][],
+    label: string,
+    scope: ResourceScope,
+    runInstances: Map<Resource<unknown>, InstancesByKey>,
+    chain: readonly ChainLink[],
+    resetLocks: LeaseResetLocks,
+  ): Promise<Record<string, unknown>> {
+    const resolved: Record<string, unknown> = {};
     for (const [name, dep] of deps) {
       // A dependency arrives as whichever object the depending module's own
       // import produced, which is not necessarily the one discovery
@@ -949,37 +1086,7 @@ export class ResourceRegistry {
         )
       ).value;
     }
-
-    if (params.length > 0) {
-      // Lazy, and only evaluated here — never for a binding that hits the
-      // memo — because arguments must not be resolved (and a resource used
-      // as one of them must not be created) for a slot no one is actually
-      // filling from this call.
-      const argValues = (await binding?.resolve()) ?? {};
-      for (const [name, schema] of params) {
-        const result = await schema["~standard"].validate(argValues[name]);
-        if (result.issues) {
-          const message = result.issues.map(i => i.message).join(", ");
-          throw new Error(
-            `Resource '${label}': invalid value for '${name}' — ${message}`,
-          );
-        }
-        resolved[name] = result.value;
-      }
-    }
-
-    let instance: Instance;
-    try {
-      instance = await target.create(resolved, binding?.receipt);
-    } catch (err) {
-      throw resourceFailure(label, "create()", err);
-    }
-    if (!instance || typeof instance !== "object" || !("value" in instance)) {
-      throw new Error(
-        `Resource '${label}': create() must return { value, dispose? }`,
-      );
-    }
-    return instance;
+    return resolved;
   }
 
   /** {@link identities}, after making sure a scan has happened. */
@@ -1006,6 +1113,7 @@ export class ResourceRegistry {
 
   private async scan(): Promise<void> {
     const found = new Map<string, RegisteredResource>();
+    const checks = new Map<string, RegisteredCheck>();
     const identities = new Map<Resource<unknown>, RegisteredResource>();
     const errors: PlaygroundModuleError[] = [];
 
@@ -1042,10 +1150,14 @@ export class ResourceRegistry {
         : false;
 
       for (const [key, value] of Object.entries(namespace)) {
+        const uri = `${relativePath.replace(/\\/g, "/")}#${key}`;
+        if (isCheck(value)) {
+          checks.set(uri, { uri, key, modulePath, check: value });
+          continue;
+        }
         // The export surface is open: anything unrecognised is a helper, a
         // type, or a constant the author colocated, and is simply skipped.
         if (!isResource(value)) continue;
-        const uri = `${relativePath.replace(/\\/g, "/")}#${key}`;
         const registered: RegisteredResource = {
           uri,
           key,
@@ -1064,6 +1176,7 @@ export class ResourceRegistry {
     }
 
     this.resources = found;
+    this.checkMap = checks;
     this.identities = identities;
     this.moduleErrors = errors;
   }

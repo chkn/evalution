@@ -543,8 +543,51 @@ export type ExecutionInput =
        */
       receipt?: unknown;
     }
-  /** A cell from a dataset row. Declared, not yet implemented. */
-  | { kind: "dataset"; uri: string };
+  /**
+   * A cell of the dataset row being run, by `DatasetField.id`. Only
+   * meaningful in an eval run, where the row is implicit; anywhere else it
+   * fails with a message that says so. The cell may itself hold a resource
+   * or an object, and resolves recursively. See `specs/evals.md` §B.2.
+   */
+  | { kind: "dataset"; field: string }
+  /**
+   * Whatever the same run bound to one of the prompt's own slots, resolved
+   * in the run's lease — so a resource comes back as the same instance, and
+   * two slots can say they hold the same id rather than repeat one recipe.
+   * Works anywhere a run is assembled: the execute panel and an eval alike.
+   * See `specs/evals.md` §B.2.
+   */
+  | {
+      kind: "input";
+      /** Which half of the prompt's slots `path` is in. */
+      half: "function" | "execute";
+      /** The dotted slot path (`taskId`, `toolsContext.list_tasks.db`). */
+      path: string;
+    };
+
+/**
+ * What the client knows about a check — a playground export made with
+ * `check()`, or a built-in from `evalution/checks`. See `specs/evals.md`
+ * §B.4.
+ */
+export interface CheckInfo {
+  /** `<module>#<export>`, or `evalution/checks#<name>` for a built-in. */
+  uri: string;
+  /** Human-readable label. Defaults to the export name. */
+  label: string;
+  /** Display group, `/`-separated for nesting. Built-ins are `Built-in`. */
+  group?: string;
+  description?: string;
+  /**
+   * The schema-valued inputs, as the probe resolved them, in declaration
+   * order. Resource inputs are bound in code and not listed.
+   */
+  parameters: PropDefinition[];
+  /** Whether the check still runs when the prompt run itself errored. */
+  runsOnError?: boolean;
+  /** Set when the module failed to load or the definition is invalid. */
+  error?: string;
+}
 
 /** Updates to a {@link NormalizedChatPrompt}. `null` removes a field. */
 export interface ChatPromptUpdates {

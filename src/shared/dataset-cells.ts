@@ -115,13 +115,27 @@ export function parseCell(value: unknown, path = "cell"): ExecutionInput {
         }),
       };
     }
+    case "input": {
+      // A row captured from the panel keeps an `input` recipe as-is: slot
+      // paths are the prompt's own, so it means the same wherever the row
+      // is run (`specs/evals.md` §B.2.1).
+      if (value.half !== "function" && value.half !== "execute") {
+        throw new InvalidCellError(
+          `${path}.half must be "function" or "execute"`,
+        );
+      }
+      if (typeof value.path !== "string" || value.path === "") {
+        throw new InvalidCellError(`${path}.path must be a non-empty string`);
+      }
+      return { kind: "input", half: value.half, path: value.path };
+    }
     case "dataset":
       throw new InvalidCellError(
-        `${path} is a dataset reference; a dataset cell must hold a value, object, or resource`,
+        `${path} is a column reference; a dataset cell must hold a value, object, resource, or slot reference`,
       );
     default:
       throw new InvalidCellError(
-        `${path}.kind must be "value", "object", or "resource"`,
+        `${path}.kind must be "value", "object", "resource", or "input"`,
       );
   }
 }
