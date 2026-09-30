@@ -8,7 +8,6 @@ import {
   checkParameterSources,
   columnUri,
   describePseudoSource,
-  emptyBindings,
   inputUri,
   NEW_COLUMN_URI,
   pseudoInput,
@@ -27,6 +26,9 @@ const functionParameters = [
   def("title", "string"),
   def("count", "number"),
 ];
+
+/** No slot bound at all. */
+const NO_BINDINGS = { functionInputs: {}, executeInputs: {} };
 
 describe("pseudo-source URIs", () => {
   it("round-trip through the panel's selection state", () => {
@@ -70,7 +72,7 @@ describe("withPseudoSources", () => {
   it("offers the panel only other slots whose type fits", () => {
     const sources = withPseudoSources(undefined, {
       functionParameters,
-      bindings: emptyBindings(),
+      bindings: NO_BINDINGS,
     });
     expect(sources.functionSlots).toEqual({
       taskId: [inputUri("function", "title")],
@@ -98,7 +100,7 @@ describe("withPseudoSources", () => {
   it("offers the eval editor every column and slot, and a new column", () => {
     const sources = withPseudoSources(undefined, {
       functionParameters,
-      bindings: emptyBindings(),
+      bindings: NO_BINDINGS,
       fields: [{ id: "0", def: def("question", "string") }],
       offerMismatches: true,
       newColumn: true,
@@ -122,7 +124,7 @@ describe("withPseudoSources", () => {
       { resources: [seeded], functionSlots: {}, executeSlots: {} },
       {
         functionParameters,
-        bindings: emptyBindings(),
+        bindings: NO_BINDINGS,
         fields: [{ id: "0", def: def("t", "string") }],
       },
     );

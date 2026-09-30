@@ -819,3 +819,25 @@ describe("FilePromptProvider resource inputs", () => {
     ]);
   });
 });
+
+describe("listChecks", () => {
+  it("lists a check whose inputs are declared wrongly with its error, leaving the rest", async () => {
+    const helper = pathToFileURL(
+      path.join(import.meta.dirname, "../playground/check.ts"),
+    ).href;
+    const { provider } = setup({
+      [p("x.playground.ts")]:
+        `import { check } from ${JSON.stringify(helper)};\n` +
+        "export const broken = check({ inputs: { max: 5 }, run: () => true });\n",
+    });
+    const checks = await provider.listChecks();
+    expect(checks.find(c => c.uri === "x.playground.ts#broken")).toEqual({
+      uri: "x.playground.ts#broken",
+      label: "broken",
+      parameters: [],
+      error: expect.stringContaining("max"),
+    });
+    // The built-ins are still there.
+    expect(checks.some(c => c.uri.startsWith("evalution/checks#"))).toBe(true);
+  });
+});

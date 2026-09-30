@@ -917,6 +917,17 @@ export function setupRoutes({
       },
     });
 
+  // A run still `running` in storage was cut off when the server last
+  // stopped — no runner owns it now. Marked before any new run starts, so a
+  // new one can't be caught up in it.
+  const runsInterrupted = Promise.all(
+    Array.from(evalProviders.values(), p =>
+      p.interruptRuns().catch(err => {
+        console.error(`failed to mark ${p.id}'s interrupted runs:`, err);
+      }),
+    ),
+  );
+
   // Eval changes ride the hot-reload stream too.
   for (const [providerId, provider] of evalProviders) {
     provider.watch?.(event => {
@@ -1008,9 +1019,10 @@ export function setupRoutes({
   // POST /api/evals/:providerId/:id/runs - Start a run: `{ arms?, concurrency? }`
   app.post(
     "/api/evals/:providerId/:id/runs",
-    runnerRoute(async (runner, provider, { id }, c) =>
-      handleStartRun(runner, provider, id, await jsonBody(c)),
-    ),
+    runnerRoute(async (runner, provider, { id }, c) => {
+      await runsInterrupted;
+      return handleStartRun(runner, provider, id, await jsonBody(c));
+    }),
   );
 
   // GET /api/evals/:providerId/:id/runs - An eval's runs, newest first

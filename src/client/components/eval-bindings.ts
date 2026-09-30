@@ -99,7 +99,6 @@ function fillSlot(
     }
   }
   if (def.type.kind === "object") {
-    const before = matched.length;
     const properties: Record<string, ExecutionInput> = {
       ...(current?.kind === "object" ? current.properties : {}),
     };
@@ -120,7 +119,7 @@ function fillSlot(
       matched.push(path);
       return stored;
     }
-    matched.splice(before, 0, ...nested);
+    matched.push(...nested);
     if (Object.keys(properties).length === 0) return current;
     return { kind: "object", properties };
   }

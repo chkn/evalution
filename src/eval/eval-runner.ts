@@ -22,6 +22,8 @@ import {
   type CheckRun,
   DEFAULT_CHECK_TIMEOUT_MS,
 } from "../prompt/playground/check.ts";
+import { isStandardSchema } from "../prompt/playground/resource.ts";
+import { validateArguments } from "../prompt/playground/resource-registry.ts";
 import type {
   PreparedCheck,
   PromptProvider,
@@ -100,7 +102,18 @@ export interface EvalRunnerOptions {
    * @default { intervalMs: 100, timeoutMs: 10_000 }
    */
   traceWait?: { intervalMs: number; timeoutMs: number };
+  /**
+   * How long one row's generation may take before the row is an `error`, so
+   * a generation that never settles can't hold its worker, and the run,
+   * forever.
+   *
+   * @default DEFAULT_ROW_TIMEOUT_MS
+   */
+  rowTimeoutMs?: number;
 }
+
+/** How long one row's generation may take by default: five minutes. */
+export const DEFAULT_ROW_TIMEOUT_MS = 5 * 60_000;
 
 /** One (arm, row) run waiting its turn. */
 interface Job {
@@ -114,6 +127,11 @@ interface ActiveRun {
   run: EvalRun;
   provider: EvalProvider;
   cancelled: boolean;
+  /** Resolves on cancel, so rows in flight stop waiting on their generation. */
+  onCancel: Promise<void>;
+  cancel: () => void;
+  /** Why the run failed, once a worker hit an error it can't record. */
+  failure?: unknown;
   done: number;
   counts: EvalCounts;
   drifted: boolean;
@@ -152,13 +170,27 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]).finally(() => clearTimeout(timer));
 }
 
-/** Whether `value` is a Standard Schema. */
-function isSchema(value: unknown): value is StandardSchemaV1 {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "~standard" in (value as object)
-  );
+/**
+ * Waits for `settled`, `onCancel`, or `ms`, whichever comes first: resolves
+ * `undefined` when `settled` won, else why it didn't.
+ */
+async function raceSettled(
+  settled: Promise<void>,
+  onCancel: Promise<unknown>,
+  ms: number,
+): Promise<"cancelled" | "timeout" | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      settled.then(() => undefined),
+      onCancel.then(() => "cancelled" as const),
+      new Promise<"timeout">(resolve => {
+        timer = setTimeout(() => resolve("timeout"), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -241,10 +273,16 @@ export class EvalRunner {
       total: runnable.length * rows.length,
     });
 
+    let cancel = () => {};
+    const onCancel = new Promise<void>(resolve => {
+      cancel = resolve;
+    });
     const active: ActiveRun = {
       run,
       provider,
       cancelled: false,
+      onCancel,
+      cancel,
       done: 0,
       counts: emptyCounts(),
       drifted: false,
@@ -281,12 +319,14 @@ export class EvalRunner {
 
   /**
    * Cancels a run: queued rows become `skipped`, and rows in flight finish
-   * and are recorded. Returns whether the run was in flight.
+   * and are recorded — or, when their generation doesn't settle within the
+   * trace wait, are recorded as errors. Returns whether the run was in flight.
    */
   cancel(runId: string): boolean {
     const active = this.active.get(runId);
     if (!active) return false;
     active.cancelled = true;
+    active.cancel();
     return true;
   }
 
@@ -376,16 +416,22 @@ export class EvalRunner {
   ): Promise<void> {
     let next = 0;
     const worker = async () => {
-      while (next < jobs.length) {
+      // A failed worker stops the others too: the run is then over, and
+      // they'd be spending model calls on a run marked `error`.
+      while (next < jobs.length && active.failure === undefined) {
         const job = jobs[next++]!;
-        const results = active.cancelled
-          ? this.skipped(active, ctx.definition, job, "The run was cancelled")
-          : await this.runRow(active, job, ctx);
-        await active.provider.recordRowResult(results.row);
-        await active.provider.recordCheckResults(results.checks);
-        active.done++;
-        for (const c of results.checks) active.counts[c.outcome]++;
-        this.progress(active, "running");
+        try {
+          const results = active.cancelled
+            ? this.skipped(active, ctx.definition, job, "The run was cancelled")
+            : await this.runRow(active, job, ctx);
+          await active.provider.recordRowResult(results.row);
+          await active.provider.recordCheckResults(results.checks);
+          active.done++;
+          for (const c of results.checks) active.counts[c.outcome]++;
+          this.progress(active, "running");
+        } catch (err) {
+          active.failure ??= err;
+        }
       }
     };
     await Promise.all(
@@ -394,6 +440,7 @@ export class EvalRunner {
         worker,
       ),
     );
+    if (active.failure !== undefined) throw active.failure;
   }
 
   /** A row that never ran, and its checks all `skipped`. */
@@ -513,8 +560,26 @@ export class EvalRunner {
     }
 
     try {
-      // 3. Wait for the trace.
-      await settled;
+      // 3. Wait for the generation to settle — but not forever, nor for long
+      // after a cancel: a row in flight gets as long to finish as a trace
+      // gets to arrive — then for its trace.
+      const timeoutMs = this.options.rowTimeoutMs ?? DEFAULT_ROW_TIMEOUT_MS;
+      const stopped = await raceSettled(
+        settled,
+        active.onCancel.then(() => sleep(this.traceWait().timeoutMs)),
+        timeoutMs,
+      );
+      if (stopped) {
+        return this.skipped(
+          active,
+          definition,
+          job,
+          stopped === "cancelled"
+            ? "The run was cancelled before this row finished"
+            : `The prompt didn't finish within ${timeoutMs < 1000 ? `${timeoutMs}ms` : `${Math.round(timeoutMs / 1000)}s`}`,
+          "error",
+        );
+      }
       const { trace, incomplete } = await this.waitForTrace(traceId);
       const status: "ok" | "error" =
         trace.trace.status === "error" ? "error" : "ok";
@@ -621,22 +686,24 @@ export class EvalRunner {
     const values = resolved.resolveMore
       ? await resolved.resolveMore(check.args)
       : {};
-    const validated: Record<string, unknown> = {};
-    for (const [name, schema] of Object.entries(target.inputs ?? {})) {
-      if (!isSchema(schema)) continue;
-      const result = await schema["~standard"].validate(values[name]);
-      if (result.issues) {
-        throw new Error(
-          `Check '${check.uri}': invalid value for '${name}' — ${result.issues.map(i => i.message).join(", ")}`,
-        );
-      }
-      validated[name] = result.value;
-    }
+    const validated = await validateArguments(
+      Object.entries(target.inputs ?? {}).filter(
+        (entry): entry is [string, StandardSchemaV1] =>
+          isStandardSchema(entry[1]),
+      ),
+      values,
+      `Check '${target.label ?? check.uri}'`,
+    );
     return {
       run: run => target.run(validated as never, run),
       timeoutMs: target.timeoutMs,
       runsOnError: target.runsOnError,
     };
+  }
+
+  /** How long to wait for a trace, and how often to look. */
+  private traceWait(): { intervalMs: number; timeoutMs: number } {
+    return this.options.traceWait ?? { intervalMs: 100, timeoutMs: 10_000 };
   }
 
   /**
@@ -646,10 +713,7 @@ export class EvalRunner {
   private async waitForTrace(
     traceId: string,
   ): Promise<{ trace: TraceWithSpans; incomplete: boolean }> {
-    const { intervalMs, timeoutMs } = this.options.traceWait ?? {
-      intervalMs: 100,
-      timeoutMs: 10_000,
-    };
+    const { intervalMs, timeoutMs } = this.traceWait();
     const deadline = Date.now() + timeoutMs;
     let trace: TraceWithSpans | undefined;
     for (;;) {

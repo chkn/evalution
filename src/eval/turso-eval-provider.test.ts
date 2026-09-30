@@ -172,6 +172,35 @@ describe("TursoEvalProvider", () => {
     });
   });
 
+  it("marks runs left running as errors, leaving finished ones", async () => {
+    const provider = await makeProvider();
+    const evalDef = await provider.createEval(def);
+    const newRun = () =>
+      provider.createRun(evalDef.id, {
+        definition: evalDef,
+        arms: [],
+        dirty: false,
+        concurrency: 1,
+        total: 0,
+      });
+    const cutOff = await newRun();
+    const finished = await newRun();
+    await provider.finishRun(finished.id, "done");
+    const events: string[] = [];
+    provider.watch(e => events.push(`${e.type}:${e.runId}`));
+
+    expect(await provider.interruptRuns()).toBe(1);
+    expect(await provider.getRun(cutOff.id)).toMatchObject({
+      status: "error",
+      endedAt: expect.any(Number),
+    });
+    expect((await provider.getRun(finished.id))?.status).toBe("done");
+    expect(events).toEqual([`update:${cutOff.id}`]);
+    // The sidebar's summary no longer shows a run in flight.
+    const [summary] = await provider.listEvals();
+    expect(summary.lastRun?.status).not.toBe("running");
+  });
+
   it("refuses a run of an eval that doesn't exist", async () => {
     const provider = await makeProvider();
     await expect(

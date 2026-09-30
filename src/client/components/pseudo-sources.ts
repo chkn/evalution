@@ -14,6 +14,7 @@ import {
   collectInputSlots,
   findInputCycle,
   type InputBindings,
+  overlaps,
 } from "../../shared/input-references";
 import type {
   ExecutionInput,
@@ -100,11 +101,6 @@ interface Target {
   type: PropType;
 }
 
-/** Whether one dotted path is the other, or contains it. */
-function overlaps(a: string, b: string): boolean {
-  return a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
-}
-
 /** `bindings`, with slot `path` in `half` bound to `ref` instead. */
 function withRefAt(
   bindings: InputBindings,
@@ -150,7 +146,12 @@ export interface PseudoSourceOptions {
 }
 
 /** Every slot of the prompt an `input` reference can name. */
-function targetsOf(options: PseudoSourceOptions): Target[] {
+function targetsOf(
+  options: Pick<
+    PseudoSourceOptions,
+    "functionParameters" | "executeParameters"
+  >,
+): Target[] {
   return [
     ...collectInputSlots(options.functionParameters).map(s => ({
       half: "function" as const,
@@ -304,7 +305,7 @@ export function checkParameterSources(
     "functionParameters" | "executeParameters" | "fields"
   >,
 ): PromptInputSources {
-  const targets = targetsOf({ ...options, bindings: emptyBindings() });
+  const targets = targetsOf(options);
   const resources = pseudoResources(
     options.fields ?? [],
     targets,
@@ -318,11 +319,6 @@ export function checkParameterSources(
     ),
     executeSlots: {},
   };
-}
-
-/** No bindings at all. */
-export function emptyBindings(): InputBindings {
-  return { functionInputs: {}, executeInputs: {} };
 }
 
 /**
@@ -346,7 +342,7 @@ export function describePseudoSource(
     note = type ? "column of each row" : "column no longer exists";
   } else if (input.kind === "input") {
     const { half, path } = input;
-    type = targetsOf({ ...options, bindings: emptyBindings() }).find(
+    type = targetsOf(options).find(
       t => t.half === half && t.path === path,
     )?.type;
     note = type ? "same value as that input" : "input no longer exists";

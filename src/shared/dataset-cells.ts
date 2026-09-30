@@ -91,7 +91,7 @@ function parseInput(
   path: string,
   columns: boolean,
 ): ExecutionInput {
-  const parseCell = (v: unknown, p: string) => parseInput(v, p, columns);
+  const recurse = (v: unknown, p: string) => parseInput(v, p, columns);
   if (!isRecord(value)) {
     throw new InvalidCellError(`${path} must be an object`);
   }
@@ -110,7 +110,7 @@ function parseInput(
         properties: Object.fromEntries(
           Object.entries(value.properties).map(([k, v]) => [
             k,
-            parseCell(v, `${path}.properties.${k}`),
+            recurse(v, `${path}.properties.${k}`),
           ]),
         ),
       };
@@ -130,7 +130,7 @@ function parseInput(
           args: Object.fromEntries(
             Object.entries(args).map(([k, v]) => [
               k,
-              parseCell(v, `${path}.args.${k}`),
+              recurse(v, `${path}.args.${k}`),
             ]),
           ),
         }),

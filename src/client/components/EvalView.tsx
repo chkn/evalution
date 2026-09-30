@@ -45,6 +45,7 @@ import { formatRate, passRate } from "./eval-summary";
 import {
   fromExecutionInput,
   type ResourceArgs,
+  readStoredInputs,
   resourceArgsFor,
   type Selections,
   type SlotSelection,
@@ -99,23 +100,6 @@ interface EditorState {
   checks: Record<string, Selections>;
   /** Shared by every slot and check parameter, as in the panel. */
   args: ResourceArgs;
-}
-
-/** The execute panel's persisted inputs for `prompt` — what the playground last ran it with. */
-function storedPanelInputs(prompt: NormalizedPrompt) {
-  try {
-    const raw = localStorage.getItem(
-      `pg-exec-params:${prompt.globalId ?? prompt.id}`,
-    );
-    return raw
-      ? (JSON.parse(raw) as {
-          functionInputs?: Record<string, ExecutionInput>;
-          executeInputs?: Record<string, ExecutionInput>;
-        })
-      : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /** Editor state recovered from saved bindings. */
@@ -317,7 +301,15 @@ function EvalView({
     }));
   };
 
-  const commit = (next: EditorState, checks = def?.checks ?? []) => {
+  // The latest state and definition, for a change that lands after an
+  // `await` (a new column), when the render's own `state` may be stale.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const defRef = useRef(def);
+  defRef.current = def;
+
+  const commit = (next: EditorState, checks = defRef.current?.checks ?? []) => {
+    stateRef.current = next;
     setState(next);
     save({ inputs: foldInputs(next), checks: foldChecks(next, checks) });
   };
@@ -338,7 +330,7 @@ function EvalView({
       inputs: current.inputs,
       checks: current.checks,
       checkInfos,
-      stored: storedPanelInputs(prompt),
+      stored: readStoredInputs(prompt),
     });
     if (proposed.matched.length === 0) return;
     const next = editorStateOf(
@@ -469,13 +461,10 @@ function EvalView({
           if (uri) resources[relPath] = uri;
           else delete resources[relPath];
         }
-        setState(prev => {
-          const next = {
-            ...prev,
-            [which]: { ...prev[which], [name]: { ...selection, resources } },
-          };
-          save({ inputs: foldInputs(next) });
-          return next;
+        const prev = stateRef.current;
+        commit({
+          ...prev,
+          [which]: { ...prev[which], [name]: { ...selection, resources } },
         });
       };
       if (relPath === undefined) {
@@ -495,18 +484,16 @@ function EvalView({
     (check: EvalCheck) => (name: string, selection: SlotSelection) => {
       touch(`check:${check.id}:${name}`);
       const relPath = newColumnPath(selection);
-      const set = (sel: SlotSelection) =>
-        setState(prev => {
-          const next = {
-            ...prev,
-            checks: {
-              ...prev.checks,
-              [check.id]: { ...prev.checks[check.id], [name]: sel },
-            },
-          };
-          save({ checks: foldChecks(next, def?.checks ?? []) });
-          return next;
+      const set = (sel: SlotSelection) => {
+        const prev = stateRef.current;
+        commit({
+          ...prev,
+          checks: {
+            ...prev.checks,
+            [check.id]: { ...prev.checks[check.id], [name]: sel },
+          },
         });
+      };
       if (relPath === undefined) return set(selection);
       void addColumn(
         { checkUri: check.uri, path: relPath ? `${name}.${relPath}` : name },
@@ -818,26 +805,8 @@ function EvalView({
             onRun={async options => {
               await flush();
               try {
-                const run = await startEvalRun(providerId, evalId, options);
-                setRuns(prev => [
-                  {
-                    ...run,
-                    arms: run.arms.map(a => ({
-                      id: a.id,
-                      label: a.label,
-                      ...(a.error && { error: a.error }),
-                    })),
-                    done: 0,
-                    counts: {
-                      pass: 0,
-                      fail: 0,
-                      error: 0,
-                      skipped: 0,
-                      scored: 0,
-                    },
-                  },
-                  ...prev,
-                ]);
+                // The run's own change event refetches the runs list.
+                await startEvalRun(providerId, evalId, options);
               } catch (err: any) {
                 setError(
                   err instanceof EvalRunRefused

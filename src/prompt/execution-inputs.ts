@@ -18,6 +18,7 @@ export {
   collectInputSlots,
   findInputCycle,
   type InputBindings,
+  type InputSignature,
   type InputSlot,
   inputReferenceProblems,
   MAX_SLOT_DEPTH,

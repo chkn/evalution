@@ -1300,10 +1300,22 @@ export class FilePromptProvider
   async listChecks(): Promise<CheckInfo[]> {
     const registered = await this.resources.checks();
     const moduleErrors = await this.resources.errors();
-    const withNames = registered.map(c => ({
-      registered: c,
-      names: resourceParameterNames(c.check),
-    }));
+    // A check whose inputs are declared wrongly is listed with its error,
+    // like a module that failed to load, rather than failing the listing.
+    const broken: CheckInfo[] = [];
+    const withNames = registered.flatMap(c => {
+      try {
+        return [{ registered: c, names: resourceParameterNames(c.check) }];
+      } catch (err) {
+        broken.push({
+          uri: c.uri,
+          label: c.check.label ?? c.key,
+          parameters: [],
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return [];
+      }
+    });
     const requests = withNames.flatMap(({ registered: c, names }) =>
       names.map(name => ({
         probe: {
@@ -1337,6 +1349,7 @@ export class FilePromptProvider
     return [
       ...builtinCheckInfos(),
       ...user,
+      ...broken,
       ...moduleErrors.map(e => ({
         uri: path.relative(this.rootDir, e.modulePath),
         label: path.basename(e.modulePath),

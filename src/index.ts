@@ -106,6 +106,7 @@ export {
   collectInputSlots,
   findInputCycle,
   type InputBindings,
+  type InputSignature,
   type InputSlot,
   type InputSource,
   inputReferenceProblems,

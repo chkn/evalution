@@ -70,6 +70,8 @@ function fakeProvider(
   options: {
     fail?: (question: string) => boolean;
     leaveOpen?: boolean;
+    /** Never settles the generation for these questions — a hung SDK call. */
+    hang?: (question: string) => boolean;
     variations?: PromptVariations;
   } = {},
 ): PromptProvider & { calls: { question: string; variation?: string }[] } {
@@ -100,6 +102,7 @@ function fakeProvider(
         startTime: start,
       };
       await traces.recordSpanStart(root);
+      if (options.hang?.(question)) return {};
       setTimeout(async () => {
         if (!options.leaveOpen) {
           const failed = options.fail?.(question);
@@ -398,5 +401,63 @@ describe("EvalRunner", () => {
     // The fake records no version, so the row can't have run on c1.
     const [summary] = await evals.listRuns(def.id);
     expect(summary).toMatchObject({ drifted: true });
+  });
+
+  describe("a row that never settles", () => {
+    it("errors after the row timeout, and the run still finishes", async () => {
+      const { runner, evals, def } = await setUp({
+        provider: { hang: q => q === "dogs" },
+        runner: { rowTimeoutMs: 50 },
+      });
+      const run = await runner.start(evals, def.id);
+      await runner.finished(run.id);
+
+      expect((await evals.getRun(run.id))?.status).toBe("done");
+      const { rows, checks } = await evals.listResults(run.id);
+      const hung = rows.find(r => r.rowIndex === 1)!;
+      expect(hung).toMatchObject({
+        status: "error",
+        error: "The prompt didn't finish within 50ms",
+      });
+      expect(checks.find(c => c.rowId === hung.rowId)?.outcome).toBe("skipped");
+    });
+
+    it("stops waiting when the run is cancelled", async () => {
+      const { runner, evals, def, prompts } = await setUp({
+        provider: { hang: () => true },
+        runner: { traceWait: { intervalMs: 5, timeoutMs: 20 } },
+      });
+      const run = await runner.start(evals, def.id, { concurrency: 1 });
+      while (prompts.calls.length === 0)
+        await new Promise(r => setTimeout(r, 5));
+      runner.cancel(run.id);
+      await runner.finished(run.id);
+
+      expect((await evals.getRun(run.id))?.status).toBe("cancelled");
+      const { rows } = await evals.listResults(run.id);
+      expect(rows.map(r => r.error)).toEqual([
+        "The run was cancelled before this row finished",
+        "The run was cancelled",
+      ]);
+      expect(prompts.calls).toHaveLength(1);
+    });
+  });
+
+  it("stops every worker once one fails to record, and marks the run an error", async () => {
+    const { runner, evals, def, prompts } = await setUp({
+      rows: [
+        { "0": text("a"), "1": text("a") },
+        { "0": text("b"), "1": text("b") },
+        { "0": text("c"), "1": text("c") },
+      ],
+    });
+    evals.recordRowResult = async () => {
+      throw new Error("disk full");
+    };
+    const run = await runner.start(evals, def.id, { concurrency: 1 });
+    await runner.finished(run.id);
+
+    expect((await evals.getRun(run.id))?.status).toBe("error");
+    expect(prompts.calls).toHaveLength(1);
   });
 });

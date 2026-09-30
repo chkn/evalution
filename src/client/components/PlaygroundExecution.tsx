@@ -28,10 +28,12 @@ import {
 import { brokenResources, ExecutionInputEditor } from "./ExecutionInputEditor";
 import {
   fromExecutionInput,
+  paramStorageKey,
   type ResourceArgs,
   resourceArgsFor,
   type Selections,
   type SlotSelection,
+  type StoredInputs,
   toExecutionInput,
 } from "./execution-input-state";
 import {
@@ -106,17 +108,6 @@ type OverwrittenNotes = {
   exec: Record<string, Record<string, string[]>>;
 };
 
-/** What is persisted between sessions: the inputs themselves, not the values. */
-interface StoredInputs {
-  functionInputs?: Record<string, ExecutionInput>;
-  executeInputs?: Record<string, ExecutionInput>;
-  /** The user's explicit layout choice, by slot path. Absent until they touch the toggle. */
-  layout?: {
-    functionSlots?: Record<string, InputLayout>;
-    executeSlots?: Record<string, InputLayout>;
-  };
-}
-
 /**
  * A top-level slot's own unique position — the root every nested
  * {@link ResourceArgsContext.path} within it is built from. Namespaced by
@@ -135,12 +126,6 @@ const NO_PARAMETERS: PropDefinition[] = [];
 /** Whether `el` is scrolled short of its bottom edge. */
 function hasMoreBelow(el: HTMLElement): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight > 1;
-}
-
-// `globalId` survives file moves/renames, so it's the more stable key when
-// present; `id` (always present) is the fallback.
-function paramStorageKey(prompt: NormalizedPrompt): string {
-  return `pg-exec-params:${prompt.globalId ?? prompt.id}`;
 }
 
 /**

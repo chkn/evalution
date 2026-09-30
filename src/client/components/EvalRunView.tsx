@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   EvalCheckResult,
   EvalResults,
@@ -35,6 +35,9 @@ interface Props {
   progress?: EvalRunProgress;
   onOpenTrace: (traceProviderId: string, traceId: string) => void;
 }
+
+/** The least time between refetches of a run in flight. */
+const REFRESH_MS = 500;
 
 /** The glyph a cell shows for its outcome. */
 const OUTCOME_GLYPH: Record<EvalCheckResult["outcome"], string> = {
@@ -75,9 +78,28 @@ function EvalRunView({
   const [selected, setSelected] = useState<string | null>(null);
   const [others, setOthers] = useState<EvalRunSummary[]>([]);
   const [compareId, setCompareId] = useState("");
-  const [changes, setChanges] = useState<OutcomeChange[] | null>(null);
+  const [other, setOther] = useState<{
+    run: EvalRun;
+    results: EvalResults;
+  } | null>(null);
 
+  // While the run is in flight, refetch at most once per REFRESH_MS as rows
+  // finish — not once per row, which moves the whole run each time. The
+  // run's end is a change event, which refetches once more.
+  const [tick, setTick] = useState(0);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   const done = progress?.done;
+  useEffect(() => {
+    if (done === undefined || refreshTimer.current) return;
+    refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = undefined;
+      setTick(n => n + 1);
+    }, REFRESH_MS);
+  }, [done]);
+  useEffect(() => () => clearTimeout(refreshTimer.current), []);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: refetch as the run progresses and on its change events.
   useEffect(() => {
     let cancelled = false;
@@ -91,7 +113,7 @@ function EvalRunView({
     return () => {
       cancelled = true;
     };
-  }, [providerId, runId, version, done]);
+  }, [providerId, runId, version, tick]);
 
   const evalId = run?.evalId;
   useEffect(() => {
@@ -101,27 +123,29 @@ function EvalRunView({
       .catch(() => {});
   }, [providerId, evalId, runId]);
 
+  // The run compared against is finished, so it's fetched once per pick.
   useEffect(() => {
-    if (!compareId || !run) {
-      setChanges(null);
-      return;
-    }
+    setOther(null);
+    if (!compareId) return;
     let cancelled = false;
     getEvalRun(providerId, compareId)
-      .then(other => {
-        if (cancelled) return;
-        setChanges(
-          compareRuns(
-            { results, arms: run.arms },
-            { results: other.results, arms: other.run.arms },
-          ),
-        );
-      })
+      .then(r => !cancelled && setOther(r))
       .catch(err => !cancelled && setError(err.message));
     return () => {
       cancelled = true;
     };
-  }, [providerId, compareId, run, results]);
+  }, [providerId, compareId]);
+
+  const changes = useMemo<OutcomeChange[] | null>(
+    () =>
+      run && other
+        ? compareRuns(
+            { results, arms: run.arms },
+            { results: other.results, arms: other.run.arms },
+          )
+        : null,
+    [run, results, other],
+  );
 
   if (error && !run) {
     return <div className="eval-view eval-view-error">Error: {error}</div>;

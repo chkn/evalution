@@ -27,10 +27,9 @@ function scored(
   return {
     outcome: score >= threshold ? "pass" : "fail",
     score,
-    ...(score < threshold &&
-      rest.message === undefined && {
-        message: `Score ${score} is below the threshold of ${threshold}`,
-      }),
+    ...(score < threshold && {
+      message: `Score ${score} is below the threshold of ${threshold}`,
+    }),
     ...rest,
   };
 }

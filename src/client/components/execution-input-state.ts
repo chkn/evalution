@@ -3,10 +3,48 @@
 
 import type {
   ExecutionInput,
+  InputLayout,
+  NormalizedPrompt,
   PropValue,
   ResourceInfo,
 } from "../../shared/types";
 import { pseudoInput, pseudoUriOf } from "./pseudo-sources";
+
+/**
+ * What the execute panel persists between sessions, per prompt: the inputs
+ * themselves, not the values.
+ */
+export interface StoredInputs {
+  functionInputs?: Record<string, ExecutionInput>;
+  executeInputs?: Record<string, ExecutionInput>;
+  /** The user's explicit layout choice, by slot path. Absent until they touch the toggle. */
+  layout?: {
+    functionSlots?: Record<string, InputLayout>;
+    executeSlots?: Record<string, InputLayout>;
+  };
+}
+
+/**
+ * Where the execute panel persists `prompt`'s inputs. `globalId` survives
+ * file moves/renames, so it's the more stable key when present; `id`
+ * (always present) is the fallback.
+ */
+export function paramStorageKey(prompt: NormalizedPrompt): string {
+  return `pg-exec-params:${prompt.globalId ?? prompt.id}`;
+}
+
+/** The panel's persisted inputs for `prompt`, if any parse. */
+export function readStoredInputs(
+  prompt: NormalizedPrompt,
+): StoredInputs | undefined {
+  try {
+    const raw = localStorage.getItem(paramStorageKey(prompt));
+    const parsed = raw ? JSON.parse(raw) : undefined;
+    return parsed && typeof parsed === "object" ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * What the panel holds for one top-level slot while it is being edited.

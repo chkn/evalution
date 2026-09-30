@@ -7,12 +7,13 @@
  * See `specs/evals.md` §F.
  */
 
-import type {
-  EvalCheckOutcome,
-  EvalCheckResult,
-  EvalCounts,
-  EvalResults,
-  EvalRowResult,
+import {
+  type EvalCheckOutcome,
+  type EvalCheckResult,
+  type EvalCounts,
+  type EvalResults,
+  type EvalRowResult,
+  emptyCounts,
 } from "../../eval/eval-types";
 
 /** One check's line in an arm's summary. */
@@ -35,11 +36,6 @@ export interface ArmSummary {
   totalCost?: number;
   p50Duration?: number;
   p95Duration?: number;
-}
-
-/** A fresh zeroed {@link EvalCounts}. */
-function zero(): EvalCounts {
-  return { pass: 0, fail: 0, error: 0, skipped: 0, scored: 0 };
 }
 
 /** The `p`th percentile (0–1) of `values`, nearest-rank; `undefined` when empty. */
@@ -71,7 +67,7 @@ export function summarizeArm(
   return {
     armId,
     checks: checkIds.map(checkId => {
-      const counts = zero();
+      const counts = emptyCounts();
       const scores: number[] = [];
       for (const c of checks) {
         if (c.checkId !== checkId) continue;

@@ -148,7 +148,7 @@ function findInputRefs(bindings: InputBindings): FoundInputRef[] {
 }
 
 /** Whether one dotted path is the other, or contains it. */
-function overlaps(a: string, b: string): boolean {
+export function overlaps(a: string, b: string): boolean {
   return a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
 }
 
@@ -196,6 +196,26 @@ export function findInputCycle(bindings: InputBindings): string[] | undefined {
   return undefined;
 }
 
+/** A prompt's parameters, as far as `input` references care. */
+export interface InputSignature {
+  functionParameters: readonly PropDefinition[];
+  executeParameters?: readonly PropDefinition[];
+}
+
+/** Every slot path an `input` reference into `signature` can name, by half. */
+export function slotPaths(
+  signature: InputSignature,
+): Record<"function" | "execute", Set<string>> {
+  return {
+    function: new Set(
+      collectInputSlots(signature.functionParameters).map(s => s.path),
+    ),
+    execute: new Set(
+      collectInputSlots(signature.executeParameters ?? []).map(s => s.path),
+    ),
+  };
+}
+
 /**
  * What's wrong with `bindings`' `input` references against a prompt's
  * signature: a target slot that doesn't exist, and a cycle. Empty when
@@ -204,19 +224,9 @@ export function findInputCycle(bindings: InputBindings): string[] | undefined {
  */
 export function inputReferenceProblems(
   bindings: InputBindings,
-  signature: {
-    functionParameters: readonly PropDefinition[];
-    executeParameters?: readonly PropDefinition[];
-  },
+  signature: InputSignature,
 ): string[] {
-  const slots = {
-    function: new Set(
-      collectInputSlots(signature.functionParameters).map(s => s.path),
-    ),
-    execute: new Set(
-      collectInputSlots(signature.executeParameters ?? []).map(s => s.path),
-    ),
-  };
+  const slots = slotPaths(signature);
   const problems: string[] = [];
   for (const ref of findInputRefs(bindings)) {
     if (!slots[ref.target.half].has(ref.target.path)) {

@@ -3,7 +3,7 @@
 
 /**
  * {@link EvalProvider} backed by a Turso/libSQL database. fs-free: takes a
- * connected client, never a path — `openLocalEvalStore` is the Node-side
+ * connected client, never a path — `openLocalEvalProvider` is the Node-side
  * bootstrap. See `specs/evals.md` §E.
  */
 
@@ -188,7 +188,13 @@ export class TursoEvalProvider implements EvalProvider {
       // The newest run of each eval, then its counts, in two queries rather
       // than one per eval.
       const runs = await this.db
-        .select()
+        .select({
+          id: evalRuns.id,
+          evalId: evalRuns.evalId,
+          status: evalRuns.status,
+          startedAt: evalRuns.startedAt,
+          total: evalRuns.total,
+        })
         .from(evalRuns)
         .where(
           inArray(
@@ -197,7 +203,7 @@ export class TursoEvalProvider implements EvalProvider {
           ),
         )
         .orderBy(desc(evalRuns.startedAt));
-      const latest = new Map<string, RunRow>();
+      const latest = new Map<string, (typeof runs)[number]>();
       for (const run of runs) {
         if (!latest.has(run.evalId)) latest.set(run.evalId, run);
       }
@@ -382,6 +388,20 @@ export class TursoEvalProvider implements EvalProvider {
       return run?.evalId;
     });
     if (evalId) this.emit({ type: "update", evalId, runId });
+  }
+
+  async interruptRuns(): Promise<number> {
+    const interrupted = await this.serialize(() =>
+      this.db
+        .update(evalRuns)
+        .set({ status: "error", endedAt: Date.now() })
+        .where(eq(evalRuns.status, "running"))
+        .returning({ id: evalRuns.id, evalId: evalRuns.evalId }),
+    );
+    for (const run of interrupted) {
+      this.emit({ type: "update", evalId: run.evalId, runId: run.id });
+    }
+    return interrupted.length;
   }
 
   listRuns(evalId: string): Promise<EvalRunSummary[]> {

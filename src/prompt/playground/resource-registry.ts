@@ -489,7 +489,7 @@ function resourceFailure(label: string, phase: string, err: unknown): Error {
  * @param owner - What the inputs belong to, for the message
  *   (`Resource 'db.ts#seeded'`, `Check 'checks.ts#createsTask'`).
  */
-async function validateArguments(
+export async function validateArguments(
   params: readonly [string, StandardSchemaV1][],
   values: Record<string, unknown>,
   owner: string,

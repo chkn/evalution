@@ -9,7 +9,11 @@
 
 import type { DatasetField } from "../dataset/dataset-types.ts";
 import type { EvalCheck, EvalInputs } from "../eval/eval-types.ts";
-import { inputKey, inputReferenceProblems } from "./input-references.ts";
+import {
+  inputKey,
+  inputReferenceProblems,
+  slotPaths,
+} from "./input-references.ts";
 import type { CheckInfo, ExecutionInput, PropDefinition } from "./types.ts";
 
 /** What {@link evalProblems} checks an eval's bindings against. */
@@ -133,6 +137,7 @@ export function evalProblems(
   }
   if (prompt) problems.push(...inputReferenceProblems(inputs, prompt));
 
+  const slots = prompt && slotPaths(prompt);
   for (const check of checks) {
     const info = context.checks?.find(c => c.uri === check.uri);
     const label = `Check '${check.label ?? info?.label ?? check.uri}'`;
@@ -147,14 +152,9 @@ export function evalProblems(
     for (const [name, binding] of Object.entries(check.args)) {
       const owner = `${label}: '${name}'`;
       missingColumns(binding, owner);
-      if (!prompt) continue;
+      if (!slots) continue;
       for (const ref of slotRefs(binding)) {
-        const params =
-          ref.half === "function"
-            ? prompt.functionParameters
-            : (prompt.executeParameters ?? []);
-        const root = ref.path.split(".")[0];
-        if (!params.some(p => p.name === root)) {
+        if (!slots[ref.half].has(ref.path)) {
           problems.push(
             `${owner} names input '${inputKey(ref.half, ref.path)}', which the prompt doesn't have`,
           );

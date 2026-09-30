@@ -138,6 +138,9 @@ export class LocalEvalProvider implements EvalProvider {
   ) {
     await (await this.open()).finishRun(runId, status, options);
   }
+  async interruptRuns() {
+    return (await (await this.existing())?.interruptRuns()) ?? 0;
+  }
   async listRuns(evalId: string) {
     return (await (await this.existing())?.listRuns(evalId)) ?? [];
   }

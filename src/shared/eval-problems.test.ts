@@ -131,4 +131,29 @@ describe("evalProblems", () => {
       "Check 'Output contains': 'text' is required but unbound",
     ]);
   });
+
+  it("checks a check argument's input reference by its whole path, as a binding's", () => {
+    const bound = {
+      functionInputs: {
+        question: { kind: "dataset", field: "0" },
+        ctx: { kind: "value", value: { kind: "object", properties: {} } },
+      },
+      executeInputs: {},
+    } as const;
+    const withText = (path: string) => [
+      {
+        id: "c",
+        uri: "evalution/checks#outputContains",
+        args: { text: { kind: "input", half: "function", path } } as const,
+      },
+    ];
+    expect(
+      evalProblems(bound, withText("ctx.nope"), { prompt, fields, checks }),
+    ).toEqual([
+      "Check 'Output contains': 'text' names input 'ctx.nope', which the prompt doesn't have",
+    ]);
+    expect(
+      evalProblems(bound, withText("ctx.user"), { prompt, fields, checks }),
+    ).toEqual([]);
+  });
 });

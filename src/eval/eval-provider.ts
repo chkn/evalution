@@ -62,6 +62,14 @@ export interface EvalProvider {
     options?: { drifted?: boolean },
   ): Promise<void>;
 
+  /**
+   * Marks every run still `running` as `error`, returning how many. The
+   * server calls it once at startup, before its runner starts any: a run
+   * `running` then was cut off when the server last stopped, and would
+   * otherwise show as running forever.
+   */
+  interruptRuns(): Promise<number>;
+
   /** An eval's runs, newest first. */
   listRuns(evalId: string): Promise<EvalRunSummary[]>;
 
