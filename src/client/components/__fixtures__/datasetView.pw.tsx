@@ -620,6 +620,46 @@ test("clicking the trailing row appends an empty row and selects it", async ({
   await expect(pane).toContainText("r4");
 });
 
+/**
+ * How many distinct colours the grid canvas holds in a rect (CSS px from its
+ * top-left) — 1 when nothing is drawn there but the background.
+ */
+function coloursIn(page: Page, x: number, y: number, w: number, h: number) {
+  return page.getByTestId("data-grid-canvas").evaluate(
+    (canvas: HTMLCanvasElement, [x, y, w, h]) => {
+      const scale = canvas.width / canvas.getBoundingClientRect().width;
+      const { data } = canvas
+        .getContext("2d")!
+        .getImageData(x * scale, y * scale, w * scale, h * scale);
+      const seen = new Set<number>();
+      for (let i = 0; i < data.length; i += 4) {
+        seen.add((data[i] << 16) | (data[i + 1] << 8) | data[i + 2]);
+      }
+      return seen.size;
+    },
+    [x, y, w, h],
+  );
+}
+
+test("the trailing row shows a ＋ and a hint without hovering", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  const empty: Dataset = { ...SUPPORT, id: "empty", name: "Empty" };
+  await mockDataset(page, empty, []);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="empty" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+  await page.mouse.move(0, 0);
+
+  // The first column of the row below the header, inside its rules.
+  await expect
+    .poll(() => coloursIn(page, GRID.marker + 4, GRID.header + 4, 140, 24))
+    .toBeGreaterThan(2);
+});
+
 test("a dataset with fields but no rows shows the grid, to add the first row", async ({
   mount,
   page,

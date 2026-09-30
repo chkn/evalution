@@ -17,6 +17,7 @@ import {
   type Item,
   loadingCellRenderer,
   markerCellRenderer,
+  newRowCellRenderer,
   type Rectangle,
   type Theme,
   textCellRenderer,
@@ -103,6 +104,8 @@ const RENDERERS = [
   textCellRenderer,
   bubbleCellRenderer,
   loadingCellRenderer,
+  // The trailing "New row": its ＋ and hint draw nothing without it.
+  newRowCellRenderer,
 ] as readonly InternalCellRenderer<InnerGridCell>[];
 
 /** The table draws no images, so the loader Glide requires loads none. */
