@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { type FocusEvent, type KeyboardEvent, useState } from "react";
+import {
+  type FocusEvent,
+  type KeyboardEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { ItemEditor, shortSyntax } from "ts-proppy/react";
 import type {
   Dataset,
@@ -89,8 +95,8 @@ export function InputView({ input }: { input: ExecutionInput }) {
 /**
  * A field's value in `ItemEditor`, against the field's `def` as the execute
  * panel edits a parameter. Edits stay a local draft and are committed on
- * blur, or on Enter (Shift+Enter still types a newline), rather than on
- * every keystroke — each commit is a save.
+ * blur, on Enter (Shift+Enter still types a newline), or when the editor
+ * goes away, rather than on every keystroke — each commit is a save.
  */
 function CellEditor({
   def,
@@ -116,6 +122,14 @@ function CellEditor({
     if (JSON.stringify(draft) === JSON.stringify(value)) return;
     onCommit(committedCell(draft));
   };
+
+  // Selecting another row in the grid swaps this editor out (it's keyed by
+  // row) without a blur: the focused textarea is simply removed. So a draft
+  // still pending then is committed on the way out, to the row it was made
+  // on — `onCommit` is bound to that row.
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
+  useEffect(() => () => commitRef.current(), []);
 
   return (
     <div

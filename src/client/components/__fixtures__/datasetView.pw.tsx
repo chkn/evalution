@@ -640,6 +640,42 @@ test("the details pane edits a value cell, committing on Enter, and clears any c
   await expect(pane.getByRole("button", { name: "Clear task" })).toHaveCount(0);
 });
 
+test("a details-pane edit is saved when the grid is clicked, on the same row or another", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const sent = await mockUpdates(page);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+  const pane = component.getByRole("region", { name: "Row details" });
+  const editor = pane.locator(".dataset-detail-editor textarea");
+
+  // Another cell of the same row: the pane stays, and the edit is saved.
+  await clickCell(page, 40, 1, true);
+  await editor.fill("Refund now");
+  await clickCell(page, 300, 1, true);
+  await expect
+    .poll(() => sent)
+    .toEqual([
+      { updates: [{ rowId: "r2", cells: { "0": text("Refund now") } }] },
+    ]);
+
+  // Another row: the pane moves on, and the edit is saved to the row it
+  // was made on.
+  await clickCell(page, 40, 1, true);
+  await editor.fill("Refund today");
+  await clickCell(page, 40, 0, true);
+  await expect(editor).toHaveValue("My order never arrived");
+  await expect.poll(() => sent).toHaveLength(2);
+  expect(sent[1]).toEqual({
+    updates: [{ rowId: "r2", cells: { "0": text("Refund today") } }],
+  });
+});
+
 /** Serves one dataset, `tickets`, linked to a prompt, with a single row. */
 function mockLinkedDataset(page: Page) {
   return mockDataset(
