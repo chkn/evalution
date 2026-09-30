@@ -611,6 +611,41 @@ export async function addDatasetRows(
   return res.json();
 }
 
+/**
+ * What {@link addDatasetField} sends: a name and a primitive type, or a
+ * prompt parameter for the server to copy the type of (named after it unless
+ * `name` is given). Never a definition — see `specs/datasets.md` §P.1.
+ */
+export type AddDatasetFieldRequest =
+  | { name: string; type: "string" | "number" | "boolean" }
+  | {
+      from: {
+        providerId: string;
+        promptId: string;
+        half?: "function" | "execute";
+        path: string;
+      };
+      name?: string;
+    };
+
+/**
+ * Appends a field to a dataset. Rejected (with the server's message) when a
+ * field of the same name and type already exists.
+ */
+export async function addDatasetField(
+  providerId: string,
+  datasetId: string,
+  request: AddDatasetFieldRequest,
+): Promise<DatasetField> {
+  const res = await fetch(datasetUrl(providerId, datasetId, "/fields"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  await throwIfError(res);
+  return res.json();
+}
+
 /** Deletes one row of a dataset. */
 export async function deleteDatasetRow(
   providerId: string,

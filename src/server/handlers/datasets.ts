@@ -24,6 +24,7 @@ import type {
 import { InvalidCellError, parseCell } from "../../shared/dataset-cells.ts";
 import type {
   ExecutionInput,
+  NormalizedPrompt,
   PromptID,
   PropDefinition,
 } from "../../shared/types.ts";
@@ -332,6 +333,173 @@ export async function handleAddRows(
     const rows = parseRows(body);
     const added = await provider.addRows(datasetId, rows);
     return { status: 201, body: added };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
+/** The types a field can be given by hand: the ones whose syntax is their structure. */
+const PRIMITIVE_FIELD_TYPES = ["string", "number", "boolean"] as const;
+
+/** One of {@link PRIMITIVE_FIELD_TYPES}. */
+export type PrimitiveFieldType = (typeof PRIMITIVE_FIELD_TYPES)[number];
+
+/**
+ * The parameters a `{ from }` field lookup can copy — the server's own view of
+ * a prompt, never one the client sends.
+ */
+export type FieldSourcePrompt = Pick<
+  NormalizedPrompt,
+  "functionParameters" | "executeParameters"
+>;
+
+/**
+ * Looks up the prompt a `POST …/fields` `{ from }` names, `null` or
+ * `undefined` when it doesn't exist.
+ */
+export type LookupFieldSourcePrompt = (
+  providerId: string,
+  promptId: string,
+) => Promise<FieldSourcePrompt | null | undefined>;
+
+/**
+ * A primitive field's definition, built rather than accepted: its syntax and
+ * its structure are the same thing, so there's nothing for a checker to
+ * resolve. The only shape the server takes without a parameter lookup
+ * (`specs/datasets.md` §P.1).
+ */
+export function primitiveFieldDef(
+  name: string,
+  type: PrimitiveFieldType,
+): PropDefinition {
+  return {
+    name,
+    optional: true,
+    type: { kind: "primitive", syntax: type, base: type },
+  };
+}
+
+/**
+ * The definition at dotted slot `path` (`taskId`, `ctx.db`) among `defs` —
+ * the path grammar `PromptInputSources` uses — descending into object
+ * properties.
+ */
+function defAtPath(
+  defs: readonly PropDefinition[],
+  path: string,
+): PropDefinition | undefined {
+  let level: readonly PropDefinition[] = defs;
+  let found: PropDefinition | undefined;
+  for (const segment of path.split(".")) {
+    found = level.find(d => d.name === segment);
+    if (!found) return undefined;
+    level = found.type.kind === "object" ? found.type.properties : [];
+  }
+  return found;
+}
+
+/**
+ * A copied definition fit for a dataset: the file-specific source spans
+ * dropped, since a dataset belongs to no file — as `named-inputs.ts` does for
+ * the fields a new dataset is created with.
+ */
+function portableDef(def: PropDefinition): PropDefinition {
+  const { valueSpan: _v, fullSpan: _f, ...rest } = def;
+  return rest;
+}
+
+/**
+ * The definition a `POST …/fields` body asks for: built for `{ name, type }`,
+ * looked up for `{ from }`. Never a definition the client wrote.
+ */
+async function parseNewField(
+  body: unknown,
+  lookupPrompt: LookupFieldSourcePrompt,
+): Promise<PropDefinition> {
+  if (!isRecord(body)) {
+    throw new BadRequest("body must be { name, type } or { from }");
+  }
+  if (body.def !== undefined) {
+    throw new BadRequest(
+      "a field's definition is built by the server: send { name, type } or { from }",
+    );
+  }
+  if (body.from === undefined) {
+    const name = parseName(body);
+    const type = body.type;
+    if (!PRIMITIVE_FIELD_TYPES.includes(type as PrimitiveFieldType)) {
+      throw new BadRequest(
+        `type must be one of ${PRIMITIVE_FIELD_TYPES.join(", ")}`,
+      );
+    }
+    return primitiveFieldDef(name, type as PrimitiveFieldType);
+  }
+
+  if (body.type !== undefined) {
+    throw new BadRequest("send either type or from, not both");
+  }
+  const from = body.from;
+  if (!isRecord(from)) {
+    throw new BadRequest("from must be { providerId, promptId, half?, path }");
+  }
+  if (from.checkUri !== undefined) {
+    // `specs/evals.md` §B.4: checks don't exist yet, so neither does a
+    // registry to look their parameters up in.
+    throw new BadRequest(
+      "copying a check's parameter isn't supported yet: from must name a prompt",
+    );
+  }
+  if (
+    typeof from.providerId !== "string" ||
+    typeof from.promptId !== "string" ||
+    typeof from.path !== "string" ||
+    !from.path
+  ) {
+    throw new BadRequest(
+      "from must be { providerId, promptId, half?, path } with string values",
+    );
+  }
+  const half = from.half ?? "function";
+  if (half !== "function" && half !== "execute") {
+    throw new BadRequest('from.half must be "function" or "execute"');
+  }
+  const prompt = await lookupPrompt(from.providerId, from.promptId);
+  if (!prompt) {
+    throw new BadRequest(
+      `Prompt not found: ${from.promptId} (provider ${from.providerId})`,
+    );
+  }
+  const params =
+    half === "function"
+      ? prompt.functionParameters
+      : (prompt.executeParameters ?? []);
+  const found = defAtPath(params, from.path);
+  if (!found) {
+    throw new BadRequest(
+      `${from.promptId} has no ${half} parameter at "${from.path}"`,
+    );
+  }
+  const def = portableDef(found);
+  // The parameter's own name is the default; a name in the body overrides it.
+  return body.name === undefined ? def : { ...def, name: parseName(body) };
+}
+
+/**
+ * `POST /api/datasets/:providerId/:id/fields` — body `{ name, type }` with a
+ * `type` of `string`, `number`, or `boolean`, or `{ from: { providerId,
+ * promptId, half?, path }, name? }` to copy a prompt parameter's definition.
+ * See `specs/datasets.md` §P.1.
+ */
+export async function handleAddField(
+  provider: DatasetProvider,
+  datasetId: string,
+  body: unknown,
+  lookupPrompt: LookupFieldSourcePrompt,
+): Promise<DatasetHandlerResult> {
+  try {
+    const def = await parseNewField(body, lookupPrompt);
+    const field = await provider.addField(datasetId, def);
+    return { status: 201, body: field };
   } catch (err) {
     return failure(err);
   }

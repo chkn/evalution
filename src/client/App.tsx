@@ -1343,6 +1343,7 @@ function App() {
                                 datasetId={tab.datasetId}
                                 version={datasetVersion}
                                 findPrompt={findPrompt}
+                                prompts={prompts}
                                 onOpenPrompt={prompt =>
                                   openPromptTabRightOf(pane.id, prompt)
                                 }

@@ -11,6 +11,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import type { ExecutionInput, PropDefinition } from "../shared/types.ts";
 import {
+  DatasetNotFoundError,
   type DatasetProvider,
   DatasetValidationError,
 } from "./dataset-provider.ts";
@@ -320,6 +321,84 @@ export function runDatasetProviderContractTests(
       expect(await provider.listRows(again.id)).toEqual([]);
     });
 
+    it("adds a field, minting an id after the existing ones", async () => {
+      const provider = await makeProvider();
+      const dataset = await provider.createDataset({
+        name: "Grow",
+        fields: [{ def: def("a") }, { def: def("b") }],
+      });
+      const c = await provider.addField(dataset.id, def("c"));
+      const d = await provider.addField(dataset.id, def("d", "number"));
+
+      expect(c).toEqual({ id: "2", def: def("c") });
+      expect(d).toEqual({ id: "3", def: def("d", "number") });
+      expect((await provider.getDataset(dataset.id))?.fields).toEqual([
+        { id: "0", def: def("a") },
+        { id: "1", def: def("b") },
+        c,
+        d,
+      ]);
+      const [summary] = await provider.listDatasets();
+      expect(summary.fields.map(f => f.id)).toEqual(["0", "1", "2", "3"]);
+    });
+
+    it("keeps minted field ids unique on a dataset created without fields", async () => {
+      const provider = await makeProvider();
+      const dataset = await provider.createDataset({
+        name: "Blank",
+        fields: [],
+      });
+      const ids = [];
+      for (let i = 0; i < 12; i++) {
+        ids.push((await provider.addField(dataset.id, def(`f${i}`))).id);
+      }
+      expect(ids).toEqual([..."0123456789ab".split("")]);
+    });
+
+    it("rejects a field with the same name and type as an existing one", async () => {
+      const provider = await makeProvider();
+      const dataset = await provider.createDataset({
+        name: "Dup",
+        fields: [{ def: def("title") }],
+      });
+      await expect(provider.addField(dataset.id, def("title"))).rejects.toThrow(
+        "`title: string` already exists",
+      );
+      await expect(
+        provider.addField(dataset.id, def("title")),
+      ).rejects.toBeInstanceOf(DatasetValidationError);
+      // The same name with a different type is a different field.
+      const other = await provider.addField(dataset.id, def("title", "number"));
+      expect(other.id).toBe("1");
+      expect((await provider.getDataset(dataset.id))?.fields).toHaveLength(2);
+    });
+
+    it("leaves rows untouched when adding a field", async () => {
+      const provider = await makeProvider();
+      const dataset = await provider.createDataset({
+        name: "Rows stay",
+        fields: [{ def: def("a") }],
+      });
+      const added = await provider.addRows(dataset.id, [
+        { cells: { "0": text("x") } },
+        { cells: {} },
+      ]);
+      const field = await provider.addField(dataset.id, def("b"));
+      expect(await provider.listRows(dataset.id)).toEqual(added);
+      // The new column can be filled like any other.
+      const [row] = await provider.addRows(dataset.id, [
+        { cells: { [field.id]: text("y") } },
+      ]);
+      expect(row.cells).toEqual({ [field.id]: text("y") });
+    });
+
+    it("rejects a field for a dataset that doesn't exist", async () => {
+      const provider = await makeProvider();
+      await expect(
+        provider.addField("missing", def("a")),
+      ).rejects.toBeInstanceOf(DatasetNotFoundError);
+    });
+
     it("emits change events", async () => {
       const provider = await makeProvider();
       const events: DatasetChangeEvent[] = [];
@@ -327,9 +406,11 @@ export function runDatasetProviderContractTests(
       const dataset = await provider.createDataset({ name: "W", fields: [] });
       await provider.addRows(dataset.id, [{ cells: {} }]);
       await provider.renameDataset(dataset.id, "W2");
+      await provider.addField(dataset.id, def("a"));
       await provider.deleteDataset(dataset.id);
       expect(events).toEqual([
         { type: "add", datasetId: "w" },
+        { type: "update", datasetId: "w" },
         { type: "update", datasetId: "w" },
         { type: "update", datasetId: "w" },
         { type: "remove", datasetId: "w" },

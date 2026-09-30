@@ -41,6 +41,7 @@ import {
 } from "./handlers/annotations.ts";
 import {
   type DatasetHandlerResult,
+  handleAddField,
   handleAddRows,
   handleCreateDataset,
   handleDeleteDataset,
@@ -881,6 +882,22 @@ export function setupRoutes({
     "/api/datasets/:providerId/:id/rows",
     datasetRoute(async (provider, { id }, c) =>
       handleAddRows(provider, id, await jsonBody(c)),
+    ),
+  );
+
+  // POST /api/datasets/:providerId/:id/fields - Add a field, by type or by
+  // copying a prompt parameter the server looks up itself
+  app.post(
+    "/api/datasets/:providerId/:id/fields",
+    datasetRoute(async (provider, { id }, c) =>
+      handleAddField(
+        provider,
+        id,
+        await jsonBody(c),
+        (providerId, promptId) =>
+          promptProviders.get(providerId)?.getPrompt({ promptId }) ??
+          Promise.resolve(undefined),
+      ),
     ),
   );
 

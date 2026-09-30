@@ -12,9 +12,13 @@ import type { PromptID } from "../trace/trace-types.ts";
 /**
  * One column of a {@link Dataset}.
  *
- * Fields are always derived — copied from a prompt parameter or from a trace's
- * recorded definition — never typed in: a dataset belongs to no file, so there
- * is no checker to resolve a hand-written type against.
+ * A field's type is never typed in as free-form syntax: a dataset belongs to
+ * no file, so there is no checker to resolve a hand-written type against.
+ * Most fields are derived — copied from a prompt parameter or from a trace's
+ * recorded definition. A field added by hand (`DatasetProvider.addField`) is
+ * either a `string`, `number`, or `boolean` primitive, whose syntax is its
+ * structure, or a copy of a prompt parameter's definition that the server
+ * looked up itself. See `specs/datasets.md` §B, §P.1.
  */
 export interface DatasetField {
   /**
