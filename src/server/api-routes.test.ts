@@ -577,14 +577,14 @@ describe("dataset routes", () => {
     client = undefined;
   });
 
-  async function makeDatasetApp() {
+  async function makeDatasetApp(promptProvider = fakeProvider()) {
     client = await connect({ path: ":memory:", url: () => null });
     await runDatasetMigrations(drizzle({ client }));
     const datasetProvider = new TursoDatasetProvider({
       client,
       id: DATASET_PROVIDER_ID,
     });
-    const promptProviders = new Map([[PROVIDER_ID, fakeProvider()]]);
+    const promptProviders = new Map([[PROVIDER_ID, promptProvider]]);
     const promptRegistry = new PromptRegistry();
     await promptRegistry.rebuild(promptProviders);
     const events: SSEData[] = [];
@@ -824,6 +824,32 @@ describe("dataset routes", () => {
     expect(await (await app.request(rowsUrl)).json()).toEqual(rows);
   });
 
+  it("creates a dataset by hand, with no fields and no prompt, and appends an empty row", async () => {
+    const { app } = await makeDatasetApp();
+    const { res, body: dataset } = await create(app, {
+      name: "Scratch",
+      fields: [],
+    });
+    expect(res.status).toBe(201);
+    expect(dataset.fields).toEqual([]);
+    expect(dataset.prompt).toBeUndefined();
+
+    // What the grid's trailing row sends: no cells, no source.
+    const added = await app.request(
+      `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/rows`,
+      json("POST", { rows: [{ cells: {} }] }),
+    );
+    expect(added.status).toBe(201);
+    const [row] = (await added.json()) as any[];
+    expect(row.cells).toEqual({});
+    expect(row.source).toBeUndefined();
+
+    const got = (await (
+      await app.request(`/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}`)
+    ).json()) as any;
+    expect(got.rowCount).toBe(1);
+  });
+
   it("rejects fields that aren't unique by name and type", async () => {
     const { app } = await makeDatasetApp();
     const { res } = await create(app, {
@@ -856,6 +882,84 @@ describe("dataset routes", () => {
       providerId: PROVIDER_ID,
     });
     expect(byName.Orphan.prompt).toBeUndefined();
+  });
+
+  it("adds fields by type and by copying a prompt parameter", async () => {
+    const title = {
+      name: "title",
+      type: { kind: "primitive", syntax: "TaskTitle", base: "string" },
+      optional: false,
+      valueSpan: { start: 1, end: 2 },
+    };
+    const base = fakeProvider();
+    const { app, events } = await makeDatasetApp({
+      ...base,
+      async getPrompt(ref) {
+        const prompt = await base.getPrompt(ref);
+        return prompt && { ...prompt, functionParameters: [title as any] };
+      },
+    });
+    const { body: dataset } = await create(app);
+    const fieldsUrl = `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/fields`;
+
+    const typed = await app.request(
+      fieldsUrl,
+      json("POST", { name: "expectedTitle", type: "string" }),
+    );
+    expect(typed.status).toBe(201);
+    expect(await typed.json()).toEqual({
+      id: "1",
+      def: {
+        name: "expectedTitle",
+        optional: true,
+        type: { kind: "primitive", syntax: "string", base: "string" },
+      },
+      added: true,
+    });
+    expect(events).toContainEqual({
+      type: "dataset-changed",
+      providerId: DATASET_PROVIDER_ID,
+      event: { type: "update", datasetId: dataset.id },
+    });
+
+    // The server looks the parameter up itself, in the prompt provider.
+    const copied = await app.request(
+      fieldsUrl,
+      json("POST", {
+        from: { providerId: PROVIDER_ID, promptId: "p#test", path: "title" },
+      }),
+    );
+    expect(copied.status).toBe(201);
+    const { valueSpan: _span, ...portable } = title;
+    expect(await copied.json()).toEqual({
+      id: "2",
+      def: portable,
+      added: true,
+    });
+
+    const missing = await app.request(
+      fieldsUrl,
+      json("POST", {
+        from: { providerId: "nope", promptId: "p#test", path: "title" },
+      }),
+    );
+    expect(missing.status).toBe(400);
+    const duplicate = await app.request(
+      fieldsUrl,
+      json("POST", { name: "expectedTitle", type: "string" }),
+    );
+    expect(await duplicate.json()).toEqual({
+      error: "`expectedTitle: string` already exists",
+    });
+
+    const got = (await (
+      await app.request(`/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}`)
+    ).json()) as any;
+    expect(got.dataset.fields.map((f: any) => f.def.name)).toEqual([
+      "ticket",
+      "expectedTitle",
+      "title",
+    ]);
   });
 
   it("responds 404 for an unknown dataset provider", async () => {

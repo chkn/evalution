@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { PropDefinition } from "../shared/types.ts";
 import type { PromptID } from "../trace/trace-types.ts";
 import type {
   Dataset,
@@ -120,6 +121,15 @@ export interface DatasetProvider {
 
   /** Deletes one row. A no-op if it doesn't exist. */
   deleteRow(datasetId: string, rowId: string): Promise<void>;
+
+  /**
+   * Appends a field, minting its id from the dataset's never-decreasing
+   * counter. Rows are untouched: the new column starts empty. A field with
+   * the same name and `type.syntax` as an existing one is rejected with a
+   * {@link DatasetValidationError}; the same name with a different type is
+   * allowed. See `specs/datasets.md` §B, §P.1.
+   */
+  addField(datasetId: string, def: PropDefinition): Promise<DatasetField>;
 
   /**
    * Registers a callback invoked whenever a dataset is added, changed, or

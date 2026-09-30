@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getTrace } from "./api.ts";
+import { addDatasetField, createEmptyDataset, getTrace } from "./api.ts";
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -78,5 +78,80 @@ describe("getTrace", () => {
     controller.abort();
 
     await expect(promise).rejects.toThrow(/abort/i);
+  });
+});
+
+describe("createEmptyDataset", () => {
+  it("creates a dataset with no fields and no prompt on the first provider", async () => {
+    const created = {
+      id: "scratch",
+      name: "Scratch",
+      fields: [],
+      createdAt: 5,
+      updatedAt: 5,
+    };
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) =>
+      url === "/api/dataset-providers"
+        ? jsonResponse([{ id: "local" }, { id: "remote" }], 200)
+        : jsonResponse(created, 201),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createEmptyDataset("Scratch")).resolves.toEqual({
+      providerId: "local",
+      id: "scratch",
+      name: "Scratch",
+      rowCount: 0,
+      fields: [],
+      updatedAt: 5,
+    });
+    const [url, init] = fetchMock.mock.calls[1];
+    expect(url).toBe("/api/datasets/local");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      name: "Scratch",
+      fields: [],
+    });
+  });
+
+  it("fails without creating anything when no dataset provider is configured", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse([], 200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createEmptyDataset("Scratch")).rejects.toThrow(
+      "No dataset provider is configured",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("addDatasetField", () => {
+  it("posts the request to the dataset's fields route", async () => {
+    const field = { id: "2", def: { name: "expectedTitle" } };
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) =>
+      jsonResponse(field, 201),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request = { name: "expectedTitle", type: "string" } as const;
+    expect(await addDatasetField("local", "odin tasks", request)).toEqual(
+      field,
+    );
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/datasets/local/odin%20tasks/fields");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual(request);
+  });
+
+  it("rejects with the server's message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ error: "`title: string` already exists" }, 400),
+      ),
+    );
+    await expect(
+      addDatasetField("local", "d", { name: "title", type: "string" }),
+    ).rejects.toThrow("`title: string` already exists");
   });
 });

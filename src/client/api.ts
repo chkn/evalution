@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { AddDatasetFieldRequest } from "../shared/dataset-fields";
 import type { SetupTask } from "../shared/setup-task";
 import type {
   AddPromptContext,
@@ -571,6 +572,27 @@ export async function createDataset(
   return res.json();
 }
 
+/**
+ * Creates a dataset from nothing but a name — no fields, no prompt link — on
+ * the first dataset provider (the one "Add to dataset" creates in too), as
+ * the sidebar's "New dataset…" does. Returns it as the sidebar lists it.
+ */
+export async function createEmptyDataset(
+  name: string,
+): Promise<DatasetSummary> {
+  const [provider] = await getDatasetProviders();
+  if (!provider) throw new Error("No dataset provider is configured");
+  const dataset = await createDataset(provider.id, { name, fields: [] });
+  return {
+    providerId: provider.id,
+    id: dataset.id,
+    name: dataset.name,
+    rowCount: 0,
+    fields: dataset.fields,
+    updatedAt: dataset.updatedAt,
+  };
+}
+
 /** Renames a dataset. */
 export async function renameDataset(
   providerId: string,
@@ -627,6 +649,24 @@ export async function updateDatasetRows(
     body: JSON.stringify({ updates }),
   });
   await throwIfError(res);
+}
+
+/**
+ * Appends a field to a dataset. Rejected (with the server's message) when a
+ * field of the same name and type already exists.
+ */
+export async function addDatasetField(
+  providerId: string,
+  datasetId: string,
+  request: AddDatasetFieldRequest,
+): Promise<DatasetField> {
+  const res = await fetch(datasetUrl(providerId, datasetId, "/fields"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  await throwIfError(res);
+  return res.json();
 }
 
 /** Deletes one row of a dataset. */

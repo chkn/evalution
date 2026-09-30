@@ -6736,6 +6736,75 @@ pre {
 .dataset-grid .dvn-scroller {
   position: relative;
   z-index: 1;
+  overscroll-behavior: none;
+}
+
+.dataset-grid-empty {
+  margin: 16px;
+  color: var(--trace-text-dim);
+  font-size: 12.5px;
+}
+
+/* The "＋" after the last column header — Glide's `rightElement`. Only the
+   button takes clicks, so the rest of the slot doesn't block the grid. */
+.dataset-add-field-slot {
+  pointer-events: none;
+}
+
+.dataset-add-field-trigger {
+  pointer-events: auto;
+  width: 32px;
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  color: var(--trace-text-dim);
+  background: var(--trace-bg);
+  border: none;
+  border-left: 1px solid var(--trace-border);
+  border-bottom: 1px solid var(--trace-border);
+  cursor: pointer;
+}
+
+.dataset-add-field-trigger:hover,
+.dataset-add-field-trigger[aria-expanded="true"] {
+  color: var(--trace-text);
+  background: var(--trace-row-hover);
+}
+
+.dataset-add-field {
+  width: 260px;
+  padding: 8px;
+  background: var(--dropdown-bg);
+  border: 1px solid var(--dropdown-border);
+  border-radius: 8px;
+  box-shadow: var(--dropdown-shadow);
+  font-size: 12.5px;
+}
+
+.dataset-add-field form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dataset-add-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dataset-add-field-row > span {
+  width: 36px;
+  color: var(--trace-text-dim);
+}
+
+.dataset-add-field-error {
+  color: var(--error-text);
+}
+
+.dataset-add-field-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .dataset-cell-empty {

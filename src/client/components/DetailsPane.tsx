@@ -8,36 +8,18 @@
  * icon + label + value facts and labelled blocks.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback } from "react";
+import { useContentRectTest } from "./use-content-rect-test";
 
 /**
  * `true` once the observed element is at least `minWidth` wide. Backs the
  * details pane's layout: a side pane alongside the content when there's room
- * for one, a bottom pane below it otherwise.
- *
- * Uses a callback ref rather than `useRef` + `useEffect([])`: a view may
- * render a loading placeholder (without the element this attaches to) until
- * its data arrives, so the element mounts on a later render, not the first
- * one — an effect keyed on `ref.current` would miss that.
+ * for one, a bottom pane below it otherwise. See {@link useContentRectTest}.
  */
 export function useIsWide(minWidth: number) {
-  const [isWide, setIsWide] = useState(false);
-  const observerRef = useRef<ResizeObserver | null>(null);
-
-  const ref = useCallback(
-    (el: HTMLDivElement | null) => {
-      observerRef.current?.disconnect();
-      observerRef.current = null;
-      if (!el) return;
-      const observer = new ResizeObserver(([entry]) => {
-        setIsWide(entry.contentRect.width >= minWidth);
-      });
-      observer.observe(el);
-      observerRef.current = observer;
-    },
-    [minWidth],
+  const { ref, matches: isWide } = useContentRectTest(
+    useCallback(rect => rect.width >= minWidth, [minWidth]),
   );
-
   return { ref, isWide };
 }
 

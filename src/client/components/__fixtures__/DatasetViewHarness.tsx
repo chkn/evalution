@@ -8,7 +8,8 @@ import type { PanelFill } from "../named-inputs";
 /**
  * Mounts DatasetView for one dataset. With `promptName`, the dataset's
  * linked prompt resolves to a loaded prompt of that name; otherwise no
- * prompts are loaded.
+ * prompts are loaded. `prompts` are what a new field can copy a parameter's
+ * type from.
  *
  * Wrapped in a fixed-height div, as `TraceViewHarness` is: in the app the
  * view's `height: 100%` resolves against the `.app` layout, and without a
@@ -18,6 +19,7 @@ export function DatasetViewHarness({
   providerId,
   datasetId,
   promptName,
+  prompts,
   onOpenPrompt = () => {},
   onOpenInPlayground = () => {},
   onOpenTrace = () => {},
@@ -26,6 +28,7 @@ export function DatasetViewHarness({
   providerId: string;
   datasetId: string;
   promptName?: string;
+  prompts?: NormalizedPrompt[];
   onOpenPrompt?: (prompt: NormalizedPrompt) => void;
   onOpenInPlayground?: (prompt: NormalizedPrompt, fill: PanelFill) => void;
   onOpenTrace?: (providerId: string, traceId: string) => void;
@@ -46,6 +49,7 @@ export function DatasetViewHarness({
               } as unknown as NormalizedPrompt)
             : undefined
         }
+        prompts={prompts}
         onOpenPrompt={onOpenPrompt}
         onOpenInPlayground={onOpenInPlayground}
         onOpenTrace={onOpenTrace}
