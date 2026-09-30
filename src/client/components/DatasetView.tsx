@@ -17,6 +17,7 @@ import {
   type Item,
   loadingCellRenderer,
   markerCellRenderer,
+  newRowCellRenderer,
   type Rectangle,
   type Theme,
   textCellRenderer,
@@ -32,6 +33,7 @@ import type {
   PromptID,
 } from "../../shared/types";
 import {
+  addDatasetRows,
   deleteDataset,
   deleteDatasetRow,
   getDataset,
@@ -71,6 +73,7 @@ import {
   TrashIcon,
 } from "./trace/icons.tsx";
 import { useAnchoredPopover } from "./use-anchored-popover";
+import { useContentRectTest } from "./use-content-rect-test";
 import { GRID_MONO_FONT, useGridTheme } from "./use-grid-theme";
 
 interface Props {
@@ -108,6 +111,8 @@ const RENDERERS = [
   textCellRenderer,
   bubbleCellRenderer,
   loadingCellRenderer,
+  // The trailing "New row": its ＋ and hint draw nothing without it.
+  newRowCellRenderer,
 ] as readonly InternalCellRenderer<InnerGridCell>[];
 
 /** The table draws no images, so the loader Glide requires loads none. */
@@ -236,6 +241,19 @@ function DatasetView({
   const [reload, setReload] = useState(0);
   /** Bumped whenever a page of rows lands, so the grid and pane redraw. */
   const [loaded, setLoaded] = useState(0);
+  /**
+   * Rows appended from the trailing row that the server hasn't answered for
+   * yet. A refetch adds them to the server's count, so one landing while
+   * another append is in flight doesn't take that row away. Replaced, not
+   * zeroed, when the dataset changes, so an append still in flight for the
+   * last one settles against its own count.
+   */
+  const pendingAppends = useRef({ count: 0 });
+  /**
+   * Why the last append failed, kept for the refetch that follows it — which
+   * would otherwise clear the error before it's seen.
+   */
+  const appendError = useRef<string | null>(null);
   const layoutKey = layoutStorageKey(providerId, datasetId);
   const [layout, setLayout] = useState<DatasetLayout>(() =>
     loadLayout(layoutKey),
@@ -285,6 +303,12 @@ function DatasetView({
   /** The rows last on screen, so a refetch knows what to reload first. */
   const visibleRef = useRef({ start: 0, end: 0 });
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `providerId` and `datasetId` are what the count belongs to.
+  useEffect(() => {
+    pendingAppends.current = { count: 0 };
+    appendError.current = null;
+  }, [providerId, datasetId]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: `version` and `reload` are the refetch signals.
   useEffect(() => {
     let cancelled = false;
@@ -292,8 +316,12 @@ function DatasetView({
       .then(({ dataset, rowCount, fields }) => {
         if (cancelled) return;
         setDataset(dataset);
-        setOverview({ rowCount, fields });
-        setError(null);
+        setOverview({
+          rowCount: rowCount + pendingAppends.current.count,
+          fields,
+        });
+        setError(appendError.current);
+        appendError.current = null;
         pager.invalidate();
         const { start, end } = visibleRef.current;
         pager.ensure(start, Math.min(end, rowCount));
@@ -425,13 +453,67 @@ function DatasetView({
     );
   };
 
+  /**
+   * Whether the grid offers its trailing "New row". A dataset with no fields
+   * has nothing a hand-added row could hold.
+   */
+  const canAppend = !!dataset && dataset.fields.length > 0;
+
   const grouped = columns.some(c => c.group !== undefined);
   /** Where the table's last row ends, leaving its closing rule in place. */
   const contentBottom =
     (grouped ? GROUP_HEADER_HEIGHT : 0) +
     HEADER_HEIGHT +
-    overview.rowCount * ROW_HEIGHT +
+    (overview.rowCount + (canAppend ? 1 : 0)) * ROW_HEIGHT +
     1;
+  /** Whether the rows run past the bottom of the grid. */
+  const { ref: gridRef, matches: overflows } = useContentRectTest(
+    useCallback(rect => contentBottom > rect.height, [contentBottom]),
+  );
+
+  /**
+   * The blank row Glide draws after the last one, which adds a row when
+   * clicked (or when ↓ is pressed past the last row). Sticky once the rows
+   * overflow the grid, so it stays in reach however far it's scrolled. Not
+   * before: Glide pins a sticky trailing row to the canvas's bottom edge,
+   * which would leave it under the cover below the last row, apart from the
+   * rows.
+   */
+  const trailingRow = useMemo(
+    () => (canAppend ? { hint: "New row", sticky: overflows } : undefined),
+    [canAppend, overflows],
+  );
+
+  /**
+   * The trailing row was clicked: adds an empty row — no cells, and no
+   * `source`, which is what "added by hand" looks like (§P.3). Glide focuses
+   * the new row only once `rows` has grown, and gives up after about half a
+   * second, so the count is bumped at once rather than after the round trip,
+   * and counted in {@link pendingAppends} until the server answers. Either
+   * way, a refetch then reconciles it — a failed row drops out of the count,
+   * and its error is left showing.
+   */
+  const onRowAppended = useCallback((): Promise<"bottom"> => {
+    const pending = pendingAppends.current;
+    pending.count++;
+    setOverview(o => ({ ...o, rowCount: o.rowCount + 1 }));
+    const settled = () => {
+      pending.count--;
+      if (pending !== pendingAppends.current) return;
+      setReload(n => n + 1);
+    };
+    addDatasetRows(providerId, datasetId, [{ cells: {} }]).then(
+      settled,
+      (err: Error) => {
+        if (pending === pendingAppends.current) {
+          appendError.current = err.message;
+          setError(err.message);
+        }
+        settled();
+      },
+    );
+    return Promise.resolve("bottom");
+  }, [providerId, datasetId]);
 
   const onCellClicked = useCallback(
     ([col, row]: Item) => {
@@ -687,9 +769,9 @@ function DatasetView({
         <div className="trace-view-main-column">
           {/*
            * Drawn even with no rows, so the header's "＋" can add a field to
-           * an empty dataset.
+           * an empty dataset and the trailing row can add its first row.
            */}
-          <div className="dataset-grid">
+          <div className="dataset-grid" ref={gridRef}>
             <DataEditorCore
               renderers={RENDERERS}
               imageWindowLoader={NO_IMAGES}
@@ -700,6 +782,8 @@ function DatasetView({
               theme={theme}
               columns={gridColumns}
               rows={rowCount}
+              trailingRowOptions={trailingRow}
+              onRowAppended={canAppend ? onRowAppended : undefined}
               getCellContent={getCellContent}
               onVisibleRegionChanged={onVisibleRegionChanged}
               drawHeader={drawHeader}
@@ -747,8 +831,11 @@ function DatasetView({
              * scroller (see `styles.css`) so that scrollbar stays visible.
              */}
             <div className="dataset-grid-fill" style={{ top: contentBottom }}>
-              {rowCount === 0 && (
-                <p className="dataset-grid-empty">No rows yet.</p>
+              {rowCount === 0 && !canAppend && (
+                <p className="dataset-grid-empty">
+                  No fields yet. Add one with the “＋” to start filling this
+                  dataset in by hand.
+                </p>
               )}
             </div>
           </div>

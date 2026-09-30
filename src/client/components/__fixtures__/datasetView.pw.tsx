@@ -153,6 +153,41 @@ const SUPPORT_ROWS: DatasetRow[] = [
 
 const SUPPORT_SHAPE = { "1": { keys: ["title"], resource: true } };
 
+/**
+ * Serves `POST …/:id/rows` — what the trailing row sends — appending to
+ * `rows`, so the refetch that follows sees the new row, after `delay` ms (or
+ * failing, given `fail`). A list of delays gives one per request, in order.
+ * Returns every request body.
+ */
+async function mockAppend(
+  page: Page,
+  datasetId: string,
+  rows: DatasetRow[],
+  {
+    delay = 0,
+    fail = false,
+  }: { delay?: number | number[]; fail?: boolean } = {},
+) {
+  const bodies: unknown[] = [];
+  await page.route(`**/api/datasets/local/${datasetId}/rows`, async route => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const wait = Array.isArray(delay) ? (delay[bodies.length] ?? 0) : delay;
+    bodies.push(route.request().postDataJSON());
+    await new Promise(resolve => setTimeout(resolve, wait));
+    if (fail) {
+      return route.fulfill({ status: 500, json: { error: "disk full" } });
+    }
+    const row: DatasetRow = {
+      id: `r${rows.length + 1}`,
+      cells: {},
+      createdAt: rows.length + 1,
+    };
+    rows.push(row);
+    return route.fulfill({ status: 201, json: [row] });
+  });
+  return bodies;
+}
+
 test("DatasetView draws value and resource cells, sparse cells as dashes", async ({
   mount,
   page,
@@ -186,12 +221,13 @@ test("the table ends after its last row, with nothing ruled below it", async ({
   await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
 
   // Glide rules its whole canvas, so what's below the last row is covered:
-  // group header + header + 3 rows, one past the closing rule.
+  // group header + header + 3 rows and the trailing "New row", one past the
+  // closing rule.
   const cover = component.locator(".dataset-grid-fill");
   const box = await cover.boundingBox();
   const grid = await component.locator(".dataset-grid").boundingBox();
   if (!box || !grid) throw new Error("grid not laid out");
-  expect(box.y - grid.y).toBe(GRID.group + GRID.header + 3 * GRID.row + 1);
+  expect(box.y - grid.y).toBe(GRID.group + GRID.header + 4 * GRID.row + 1);
   // It reaches the bottom, so no ruled lines survive below it.
   expect(Math.round(box.y + box.height)).toBe(Math.round(grid.y + grid.height));
 
@@ -567,6 +603,169 @@ test("DatasetView shows Delete inline when wide, in the ⋯ menu when narrow", a
   ).toBeVisible();
 });
 
+test("clicking the trailing row appends an empty row and selects it", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  const rows = [...SUPPORT_ROWS];
+  await mockDataset(page, SUPPORT, rows, SUPPORT_SHAPE);
+  // Slower than the half second Glide waits for `rows` to grow, so the new
+  // row is only focused if the count was bumped before the server answered.
+  const bodies = await mockAppend(page, "tickets", rows, { delay: 1000 });
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+
+  await clickCell(page, 40, 3, true);
+  await expect(component.getByText("4 rows")).toBeVisible();
+  await expect.poll(() => bodies).toEqual([{ rows: [{ cells: {} }] }]);
+
+  const pane = component.getByRole("region", { name: "Row details" });
+  await expect(pane).toContainText("Row 4");
+  await expect(pane).toContainText("r4");
+});
+
+/**
+ * How many distinct colours the grid canvas holds in a rect (CSS px from its
+ * top-left) — 1 when nothing is drawn there but the background.
+ */
+function coloursIn(page: Page, x: number, y: number, w: number, h: number) {
+  return page.getByTestId("data-grid-canvas").evaluate(
+    (canvas: HTMLCanvasElement, [x, y, w, h]) => {
+      const scale = canvas.width / canvas.getBoundingClientRect().width;
+      const { data } = canvas
+        .getContext("2d")!
+        .getImageData(x * scale, y * scale, w * scale, h * scale);
+      const seen = new Set<number>();
+      for (let i = 0; i < data.length; i += 4) {
+        seen.add((data[i] << 16) | (data[i + 1] << 8) | data[i + 2]);
+      }
+      return seen.size;
+    },
+    [x, y, w, h],
+  );
+}
+
+test("the trailing row shows a ＋ and a hint without hovering", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  const empty: Dataset = { ...SUPPORT, id: "empty", name: "Empty" };
+  await mockDataset(page, empty, []);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="empty" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+  await page.mouse.move(0, 0);
+
+  // The first column of the row below the header, inside its rules.
+  await expect
+    .poll(() => coloursIn(page, GRID.marker + 4, GRID.header + 4, 140, 24))
+    .toBeGreaterThan(2);
+});
+
+test("a dataset with fields but no rows shows the grid, to add the first row", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  const empty: Dataset = { ...SUPPORT, id: "empty", name: "Empty" };
+  const rows: DatasetRow[] = [];
+  await mockDataset(page, empty, rows);
+  await mockAppend(page, "empty", rows);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="empty" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+  await expect(component.getByText("0 rows")).toBeVisible();
+
+  await clickCell(page, 40, 0, false);
+  await expect(component.getByText("1 row", { exact: true })).toBeVisible();
+  const pane = component.getByRole("region", { name: "Row details" });
+  await expect(pane).toContainText("Row 1");
+  await expect(pane).toContainText("r1");
+});
+
+test("two rows appended at once both stay while the first one's refetch lands", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  const rows = [...SUPPORT_ROWS];
+  await mockDataset(page, SUPPORT, rows, SUPPORT_SHAPE);
+  // The second append is still in flight when the first one's refetch lands.
+  const bodies = await mockAppend(page, "tickets", rows, {
+    delay: [300, 3000],
+  });
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+
+  await clickCell(page, 40, 3, true);
+  await expect(component.getByText("4 rows")).toBeVisible();
+  const refetched = page.waitForResponse(
+    r =>
+      r.request().method() === "GET" &&
+      r.url().endsWith("/api/datasets/local/tickets"),
+  );
+  await clickCell(page, 40, 4, true);
+  await expect(component.getByText("5 rows")).toBeVisible();
+  await expect.poll(() => bodies).toHaveLength(2);
+
+  await refetched;
+  await expect(component.getByText("5 rows")).toBeVisible({ timeout: 500 });
+  await expect(component.getByText("4 rows")).toHaveCount(0);
+  await expect.poll(() => rows.length, { timeout: 5000 }).toBe(5);
+  await expect(component.getByText("5 rows")).toBeVisible();
+});
+
+test("a row that fails to append is taken back, with the error shown", async ({
+  mount,
+  page,
+}) => {
+  const rows = [...SUPPORT_ROWS];
+  await mockDataset(page, SUPPORT, rows, SUPPORT_SHAPE);
+  await mockAppend(page, "tickets", rows, { delay: 300, fail: true });
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+
+  await clickCell(page, 40, 3, true);
+  await expect(component.getByText("4 rows")).toBeVisible();
+  await expect(component.getByText("disk full")).toBeVisible();
+  await expect(component.getByText("3 rows")).toBeVisible();
+});
+
+test("once the rows overflow, the trailing row sticks to the bottom", async ({
+  mount,
+  page,
+}) => {
+  const rows: DatasetRow[] = Array.from({ length: 40 }, (_, i) => ({
+    id: `r${i + 1}`,
+    cells: { "0": text(`ticket ${i + 1}`) },
+    createdAt: i + 1,
+  }));
+  await mockDataset(page, SUPPORT, rows);
+  const bodies = await mockAppend(page, "tickets", rows);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+  await expect(component.getByText("40 rows")).toBeVisible();
+
+  // Pinned to the canvas's bottom edge, well short of row 40.
+  const canvas = await page.getByTestId("data-grid-canvas").boundingBox();
+  if (!canvas) throw new Error("grid canvas not laid out");
+  await clickGrid(page, GRID.marker + 40, canvas.height - GRID.row / 2);
+  await expect(component.getByText("41 rows")).toBeVisible();
+  await expect.poll(() => bodies).toHaveLength(1);
+});
+
 /**
  * Serves `tickets` with one row, and `POST …/fields` as the server would:
  * appending a field, or rejecting a name already taken. Returns the bodies
@@ -714,7 +913,7 @@ test("a field can copy a prompt parameter's type, the linked prompt's listed fir
   ]);
 });
 
-test("an empty dataset still draws its header, so a field can be added", async ({
+test("a dataset with no fields still draws its header, so a field can be added", async ({
   mount,
   page,
 }) => {
@@ -722,7 +921,7 @@ test("an empty dataset still draws its header, so a field can be added", async (
   const component = await mount(
     <DatasetViewHarness providerId="local" datasetId="tickets" />,
   );
-  await expect(component.getByText("No rows yet.")).toBeVisible();
+  await expect(component.getByText(/^No fields yet\./)).toBeVisible();
   await expect(
     component.getByRole("button", { name: "Add field" }),
   ).toBeVisible();
