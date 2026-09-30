@@ -112,3 +112,64 @@ test("the table-mode toggle widens the sidebar into table mode and back", async 
   await expect(component.locator(".trace-table")).toBeHidden();
   await expect(component.locator(".trace-list-cards")).toBeVisible();
 });
+
+test("“New dataset…” creates an empty dataset and selects it", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 260, height: 700 });
+  await page.route("**/api/dataset-providers", route =>
+    route.fulfill({ json: [{ id: "local" }, { id: "other" }] }),
+  );
+  const created: unknown[] = [];
+  await page.route("**/api/datasets/local", route => {
+    created.push(route.request().postDataJSON());
+    return route.fulfill({
+      status: 201,
+      json: {
+        id: "scratch",
+        name: "Scratch",
+        fields: [],
+        createdAt: 1_757_400_000_000,
+        updatedAt: 1_757_400_000_000,
+      },
+    });
+  });
+  const component = await mount(<DatasetListHarness datasets={DATASETS} />);
+
+  await component.getByRole("button", { name: "New dataset" }).click();
+  const nameBox = page.getByRole("textbox", { name: "New dataset name" });
+  await expect(nameBox).toBeFocused();
+  const create = page.getByRole("button", { name: "Create" });
+  await expect(create).toBeDisabled();
+  await nameBox.fill("  Scratch ");
+  await create.click();
+
+  await expect.poll(() => created).toEqual([{ name: "Scratch", fields: [] }]);
+  await expect(nameBox).toBeHidden();
+  const scratch = component.locator(".trace-list-row", { hasText: "Scratch" });
+  await expect(scratch).toContainText("0 rows");
+  await expect(scratch).toHaveClass(/trace-list-row-selected/);
+});
+
+test("“New dataset…” keeps the name box open with the error when creating fails", async ({
+  mount,
+  page,
+}) => {
+  await page.route("**/api/dataset-providers", route =>
+    route.fulfill({ json: [{ id: "local" }] }),
+  );
+  await page.route("**/api/datasets/local", route =>
+    route.fulfill({ status: 400, json: { error: "name must not be empty" } }),
+  );
+  const component = await mount(<DatasetListHarness datasets={[]} />);
+  await expect(component.getByText(/Start one by hand/)).toBeVisible();
+
+  await component.getByRole("button", { name: "New dataset" }).click();
+  await page.getByRole("textbox", { name: "New dataset name" }).fill("x");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("name must not be empty")).toBeVisible();
+  await expect(
+    page.getByRole("textbox", { name: "New dataset name" }),
+  ).toHaveValue("x");
+});

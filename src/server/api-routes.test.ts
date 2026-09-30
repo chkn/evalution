@@ -764,6 +764,32 @@ describe("dataset routes", () => {
     expect(res.status).toBe(400);
   });
 
+  it("creates a dataset by hand, with no fields and no prompt, and appends an empty row", async () => {
+    const { app } = await makeDatasetApp();
+    const { res, body: dataset } = await create(app, {
+      name: "Scratch",
+      fields: [],
+    });
+    expect(res.status).toBe(201);
+    expect(dataset.fields).toEqual([]);
+    expect(dataset.prompt).toBeUndefined();
+
+    // What the grid's trailing row sends: no cells, no source.
+    const added = await app.request(
+      `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/rows`,
+      json("POST", { rows: [{ cells: {} }] }),
+    );
+    expect(added.status).toBe(201);
+    const [row] = (await added.json()) as any[];
+    expect(row.cells).toEqual({});
+    expect(row.source).toBeUndefined();
+
+    const got = (await (
+      await app.request(`/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}`)
+    ).json()) as any;
+    expect(got.rowCount).toBe(1);
+  });
+
   it("rejects fields that aren't unique by name and type", async () => {
     const { app } = await makeDatasetApp();
     const { res } = await create(app, {

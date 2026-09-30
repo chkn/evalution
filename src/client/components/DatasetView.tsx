@@ -32,6 +32,7 @@ import type {
   PromptID,
 } from "../../shared/types";
 import {
+  addDatasetRows,
   deleteDataset,
   deleteDatasetRow,
   getDataset,
@@ -156,6 +157,36 @@ const NO_SELECTION: GridSelection = {
   rows: CompactSelection.empty(),
 };
 
+/**
+ * The blank row Glide draws after the last one, which adds a row when
+ * clicked (or when ↓ is pressed past the last row). Sticky once the rows
+ * overflow the grid, so it stays in reach however far it's scrolled. Not
+ * before: Glide pins a sticky trailing row to the canvas's bottom edge, which
+ * would leave it under the cover below the last row, apart from the rows.
+ */
+const TRAILING_ROW = { hint: "New row", sticky: true } as const;
+const TRAILING_ROW_INLINE = { ...TRAILING_ROW, sticky: false } as const;
+
+/**
+ * The height of the element `ref` is attached to, kept current as it
+ * resizes — `Infinity` until it's measured.
+ */
+function useHeight() {
+  const [height, setHeight] = useState(Number.POSITIVE_INFINITY);
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const ref = useCallback((el: HTMLDivElement | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) =>
+      setHeight(entry.contentRect.height),
+    );
+    observer.observe(el);
+    observerRef.current = observer;
+  }, []);
+  return { ref, height };
+}
+
 /** A {@link CellView} as a Glide cell. */
 function toGridCell(view: CellView, theme: Partial<Theme>): GridCell {
   const text = (
@@ -263,6 +294,7 @@ function DatasetView({
   });
   const theme = useGridTheme();
   const { ref: bodyRef, isWide: showSidePane } = useIsWide(760);
+  const { ref: gridRef, height: gridHeight } = useHeight();
 
   const pager = useMemo(
     () =>
@@ -416,12 +448,38 @@ function DatasetView({
     );
   };
 
+  /**
+   * Whether the grid offers its trailing "New row". A dataset with no fields
+   * has nothing a hand-added row could hold.
+   */
+  const canAppend = !!dataset && dataset.fields.length > 0;
+
   /** Where the table's last row ends, leaving its closing rule in place. */
   const contentBottom =
     (columns.some(c => c.group !== undefined) ? GROUP_HEADER_HEIGHT : 0) +
     HEADER_HEIGHT +
-    overview.rowCount * ROW_HEIGHT +
+    (overview.rowCount + (canAppend ? 1 : 0)) * ROW_HEIGHT +
     1;
+
+  /**
+   * The trailing row was clicked: adds an empty row — no cells, and no
+   * `source`, which is what "added by hand" looks like (§P.3). Glide focuses
+   * the new row only once `rows` has grown, and gives up after about half a
+   * second, so the count is bumped at once rather than after the round trip.
+   * The refetch that follows reconciles it; a failure takes it back, and
+   * leaves the error showing.
+   */
+  const onRowAppended = useCallback((): Promise<"bottom"> => {
+    setOverview(o => ({ ...o, rowCount: o.rowCount + 1 }));
+    addDatasetRows(providerId, datasetId, [{ cells: {} }]).then(
+      () => setReload(n => n + 1),
+      (err: Error) => {
+        setOverview(o => ({ ...o, rowCount: Math.max(0, o.rowCount - 1) }));
+        setError(err.message);
+      },
+    );
+    return Promise.resolve("bottom");
+  }, [providerId, datasetId]);
 
   const onCellClicked = useCallback(
     ([col, row]: Item) => {
@@ -675,12 +733,15 @@ function DatasetView({
       )}
       <div className="trace-view-body dataset-view-body" ref={bodyRef}>
         <div className="trace-view-main-column">
-          {rowCount === 0 ? (
+          {rowCount === 0 && !canAppend ? (
             <div className="tree-empty-state">
-              <p>No rows yet.</p>
+              <p>No fields yet.</p>
+              <p className="trace-list-hint">
+                Add a field to start filling this dataset in by hand.
+              </p>
             </div>
           ) : (
-            <div className="dataset-grid">
+            <div className="dataset-grid" ref={gridRef}>
               <DataEditorCore
                 renderers={RENDERERS}
                 imageWindowLoader={NO_IMAGES}
@@ -691,6 +752,13 @@ function DatasetView({
                 theme={theme}
                 columns={gridColumns}
                 rows={rowCount}
+                {...(canAppend && {
+                  trailingRowOptions:
+                    contentBottom > gridHeight
+                      ? TRAILING_ROW
+                      : TRAILING_ROW_INLINE,
+                  onRowAppended,
+                })}
                 getCellContent={getCellContent}
                 onVisibleRegionChanged={onVisibleRegionChanged}
                 drawHeader={drawHeader}
