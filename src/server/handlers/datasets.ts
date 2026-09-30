@@ -19,9 +19,15 @@ import type {
   DatasetField,
   DatasetRowSource,
   DatasetRowsOverview,
+  DatasetRowUpdate,
   DatasetSummary,
 } from "../../dataset/dataset-types.ts";
-import { InvalidCellError, parseCell } from "../../shared/dataset-cells.ts";
+import {
+  fitsPrimitiveBase,
+  InvalidCellError,
+  parseCell,
+  primitiveBase,
+} from "../../shared/dataset-cells.ts";
 import {
   isPrimitiveFieldType,
   PRIMITIVE_FIELD_TYPES,
@@ -182,6 +188,54 @@ function parseRows(value: unknown): NewDatasetRow[] {
   });
 }
 
+/**
+ * Checks an update body against the dataset's fields. A cell set on a field
+ * of type `string`, `number`, or `boolean` must be a typed-in value of that
+ * type, since it's what the grid's editors write; any other field's cell gets
+ * the shape check {@link parseRows} applies. `null` clears. Unknown field ids
+ * and non-`value` cells are left for the provider to reject, so the rule
+ * lives in one place.
+ */
+function parseUpdates(
+  value: unknown,
+  fields: DatasetField[],
+): DatasetRowUpdate[] {
+  if (!isRecord(value) || !Array.isArray(value.updates)) {
+    throw new BadRequest("body must be { updates: [...] }");
+  }
+  const byId = new Map(fields.map(f => [f.id, f]));
+  return value.updates.map((update, i) => {
+    if (
+      !isRecord(update) ||
+      typeof update.rowId !== "string" ||
+      !isRecord(update.cells)
+    ) {
+      throw new BadRequest(`updates[${i}] must be { rowId, cells }`);
+    }
+    const cells: Record<string, ExecutionInput | null> = {};
+    for (const [fieldId, cell] of Object.entries(update.cells)) {
+      const path = `updates[${i}].cells.${fieldId}`;
+      if (cell === null) {
+        cells[fieldId] = null;
+        continue;
+      }
+      const parsed = parseCell(cell, path);
+      const field = byId.get(fieldId);
+      const base = field && primitiveBase(field.def.type);
+      if (
+        base &&
+        (parsed.kind !== "value" || !fitsPrimitiveBase(parsed.value, base))
+      ) {
+        throw new BadRequest(
+          `${path} must be a ${base} value for "${field.def.name}: ${field.def.type.syntax}"`,
+        );
+      }
+      cells[fieldId] = parsed;
+    }
+    return { rowId: update.rowId, cells };
+  });
+}
+
 function parseName(body: unknown): string {
   const name = isRecord(body) ? body.name : undefined;
   if (typeof name !== "string" || !name.trim()) {
@@ -339,6 +393,26 @@ export async function handleAddRows(
     const rows = parseRows(body);
     const added = await provider.addRows(datasetId, rows);
     return { status: 201, body: added };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
+/**
+ * `PATCH /api/datasets/:providerId/:id/rows` — body
+ * `{ updates: [{ rowId, cells }] }`, where a `null` cell clears. All or
+ * nothing: one bad update rejects the batch.
+ */
+export async function handleUpdateRows(
+  provider: DatasetProvider,
+  datasetId: string,
+  body: unknown,
+): Promise<DatasetHandlerResult> {
+  try {
+    const dataset = await provider.getDataset(datasetId);
+    if (!dataset) throw new DatasetNotFoundError(datasetId);
+    await provider.updateRows(datasetId, parseUpdates(body, dataset.fields));
+    return { status: 204, body: undefined };
   } catch (err) {
     return failure(err);
   }

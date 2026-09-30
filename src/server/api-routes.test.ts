@@ -764,6 +764,66 @@ describe("dataset routes", () => {
     expect(res.status).toBe(400);
   });
 
+  it("sets and clears cells over PATCH …/rows, broadcasting the change", async () => {
+    const { app, events } = await makeDatasetApp();
+    const { body: dataset } = await create(app, {
+      name: "Tickets",
+      fields: [stringField("ticket"), stringField("expected")],
+    });
+    const rowsUrl = `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/rows`;
+    await app.request(
+      rowsUrl,
+      json("POST", {
+        rows: [{ cells: { "0": text("a") } }, { cells: { "0": text("b") } }],
+      }),
+    );
+    const [first, second] = (await (
+      await app.request(rowsUrl)
+    ).json()) as any[];
+    events.length = 0;
+
+    const res = await app.request(
+      rowsUrl,
+      json("PATCH", {
+        updates: [
+          { rowId: first.id, cells: { "0": null, "1": text("A") } },
+          { rowId: second.id, cells: { "1": text("B") } },
+        ],
+      }),
+    );
+    expect(res.status).toBe(204);
+    const rows = (await (await app.request(rowsUrl)).json()) as any[];
+    expect(rows.map(r => r.cells)).toEqual([
+      { "1": text("A") },
+      { "0": text("b"), "1": text("B") },
+    ]);
+    expect(events).toEqual([
+      {
+        type: "dataset-changed",
+        providerId: DATASET_PROVIDER_ID,
+        event: { type: "update", datasetId: dataset.id },
+      },
+    ]);
+
+    // A number in a string field is refused, and nothing changes.
+    const bad = await app.request(
+      rowsUrl,
+      json("PATCH", {
+        updates: [
+          { rowId: second.id, cells: { "0": text("changed") } },
+          {
+            rowId: first.id,
+            cells: {
+              "1": { kind: "value", value: { kind: "primitive", value: 3 } },
+            },
+          },
+        ],
+      }),
+    );
+    expect(bad.status).toBe(400);
+    expect(await (await app.request(rowsUrl)).json()).toEqual(rows);
+  });
+
   it("creates a dataset by hand, with no fields and no prompt, and appends an empty row", async () => {
     const { app } = await makeDatasetApp();
     const { res, body: dataset } = await create(app, {

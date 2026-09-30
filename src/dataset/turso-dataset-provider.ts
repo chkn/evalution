@@ -9,7 +9,7 @@
  */
 
 import type { Database } from "@tursodatabase/sync";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { matchKey } from "../shared/dataset-fields.ts";
 import type { ExecutionInput, PropDefinition } from "../shared/types.ts";
@@ -36,6 +36,7 @@ import type {
   DatasetRow,
   DatasetRowSource,
   DatasetRowsOverview,
+  DatasetRowUpdate,
   DatasetSummary,
 } from "./dataset-types.ts";
 import { datasetRows, datasets, jsonColumn } from "./db/schema.ts";
@@ -53,6 +54,44 @@ function rowToDataset(row: typeof datasets.$inferSelect): Dataset {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/**
+ * The `cells` column after one row's update, computed in SQLite so only the
+ * touched keys of the JSONB blob change: `jsonb_set` for each cell set,
+ * `jsonb_remove` for each cleared. `undefined` when there's nothing to do.
+ *
+ * Not `json_patch`: Turso's rejects a JSONB argument, and a merge patch would
+ * also merge a new cell into the keys of the one it replaces, and drop any
+ * `null` inside the new value. Setting and removing whole keys has neither
+ * problem. Field ids are base-36 (checked by the caller), so they need no
+ * escaping inside a quoted path.
+ */
+function mergedCells(
+  cells: Record<string, ExecutionInput | null>,
+): SQL | undefined {
+  const entries = Object.entries(cells);
+  if (entries.length === 0) return undefined;
+  const set = entries.filter(([, cell]) => cell !== null);
+  const cleared = entries.filter(([, cell]) => cell === null);
+  const path = (fieldId: string) => `$."${fieldId}"`;
+  let expr: SQL = sql`${datasetRows.cells}`;
+  if (set.length > 0) {
+    expr = sql`jsonb_set(${expr}, ${sql.join(
+      set.map(
+        ([fieldId, cell]) =>
+          sql`${path(fieldId)}, jsonb(${JSON.stringify(cell)})`,
+      ),
+      sql`, `,
+    )})`;
+  }
+  if (cleared.length > 0) {
+    expr = sql`jsonb_remove(${expr}, ${sql.join(
+      cleared.map(([fieldId]) => sql`${path(fieldId)}`),
+      sql`, `,
+    )})`;
+  }
+  return expr;
 }
 
 /** Options for {@link TursoDatasetProvider.createDataset} beyond the interface's. */
@@ -382,6 +421,84 @@ export class TursoDatasetProvider implements DatasetProvider {
     );
     this.emit({ type: "update", datasetId });
     return added;
+  }
+
+  async updateRows(
+    datasetId: string,
+    updates: DatasetRowUpdate[],
+  ): Promise<void> {
+    // A batch that names no cells changes nothing, so it's not recorded:
+    // no `updatedAt` bump, no change event.
+    const changes = updates.some(u => Object.keys(u.cells).length > 0);
+    await this.serializeWrite(() =>
+      this.db.transaction(async tx => {
+        const [row] = await tx
+          .select({ fields: datasets.fields })
+          .from(datasets)
+          .where(eq(datasets.id, datasetId));
+        if (!row) throw new DatasetNotFoundError(datasetId);
+        const fieldIds = new Set(
+          (JSON.parse(row.fields) as DatasetField[]).map(f => f.id),
+        );
+
+        // Everything is checked before anything is written, so a bad update
+        // anywhere in the batch leaves every row as it was.
+        for (const { rowId, cells } of updates) {
+          for (const [fieldId, cell] of Object.entries(cells)) {
+            if (!fieldIds.has(fieldId)) {
+              throw new DatasetValidationError(
+                `Dataset ${datasetId} has no field with id "${fieldId}"`,
+              );
+            }
+            if (cell !== null && cell.kind !== "value") {
+              throw new DatasetValidationError(
+                `Row ${rowId}, field "${fieldId}": only a value cell can be set`,
+              );
+            }
+          }
+        }
+        const rowIds = [...new Set(updates.map(u => u.rowId))];
+        if (rowIds.length > 0) {
+          const found = await tx
+            .select({ id: datasetRows.id })
+            .from(datasetRows)
+            .where(
+              and(
+                eq(datasetRows.datasetId, datasetId),
+                inArray(datasetRows.id, rowIds),
+              ),
+            );
+          const known = new Set(found.map(r => r.id));
+          const missing = rowIds.find(id => !known.has(id));
+          if (missing !== undefined) {
+            throw new DatasetValidationError(
+              `Dataset ${datasetId} has no row with id "${missing}"`,
+            );
+          }
+        }
+
+        for (const { rowId, cells } of updates) {
+          const merged = mergedCells(cells);
+          if (!merged) continue;
+          await tx
+            .update(datasetRows)
+            .set({ cells: merged })
+            .where(
+              and(
+                eq(datasetRows.id, rowId),
+                eq(datasetRows.datasetId, datasetId),
+              ),
+            );
+        }
+        if (changes) {
+          await tx
+            .update(datasets)
+            .set({ updatedAt: Date.now() })
+            .where(eq(datasets.id, datasetId));
+        }
+      }),
+    );
+    if (changes) this.emit({ type: "update", datasetId });
   }
 
   async deleteRow(datasetId: string, rowId: string): Promise<void> {

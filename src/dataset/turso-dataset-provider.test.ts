@@ -63,6 +63,30 @@ describe("TursoDatasetProvider storage", () => {
     expect(row).toMatchObject({ cells: "blob", source: "blob", kind: "value" });
   });
 
+  it("keeps cells a JSONB blob through an update", async () => {
+    client = await makeMigratedClient();
+    const provider = new TursoDatasetProvider({ client });
+    const dataset = await provider.createDataset({
+      name: "Blobs",
+      fields: [{ def: def("a") }, { def: def("b") }],
+    });
+    const [row] = await provider.addRows(dataset.id, [
+      { cells: { "0": text("x") } },
+    ]);
+    await provider.updateRows(dataset.id, [
+      { rowId: row.id, cells: { "0": null, "1": text("y") } },
+    ]);
+
+    const [stored] = await query(
+      client,
+      "SELECT typeof(cells) AS cells, json(cells) AS json FROM dataset_rows",
+    );
+    expect(stored).toEqual({
+      cells: "blob",
+      json: JSON.stringify({ "1": text("y") }),
+    });
+  });
+
   it("records the field counter so ids are never reused", async () => {
     client = await makeMigratedClient();
     const provider = new TursoDatasetProvider({ client });

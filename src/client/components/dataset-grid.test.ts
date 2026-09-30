@@ -8,11 +8,18 @@ import type {
   ExecutionInput,
 } from "../../shared/types";
 import {
+  applyUpdate,
   buildColumns,
+  cellEdits,
   cellView,
+  clearEdits,
   type DatasetColumn,
   DEFAULT_LAYOUT,
+  editableCell,
+  editedCell,
   fieldIdsByGroup,
+  fitsEditor,
+  groupEdits,
   groupHeader,
   layoutStorageKey,
   parseDatasetLayout,
@@ -182,11 +189,20 @@ describe("cellView", () => {
   it("previews a value, an empty cell, and a resource chip with its arguments", () => {
     const cols = columns();
     const r = row({ "0": text("Hi"), "1": seeded });
+    // `ticket: string` is typed into in place, so it's an editor's view.
     expect(cellView(r, byId(cols, "0"))).toEqual({
-      kind: "text",
+      kind: "edit",
+      base: "string",
+      value: "Hi",
       text: '"Hi"',
     });
-    expect(cellView(row({}), byId(cols, "0"))).toEqual({ kind: "empty" });
+    expect(cellView(row({}), byId(cols, "0"))).toEqual({
+      kind: "edit",
+      base: "string",
+      value: undefined,
+      text: "—",
+    });
+    expect(cellView(row({}), byId(cols, "1"))).toEqual({ kind: "empty" });
     expect(cellView(r, byId(cols, "1"))).toEqual({
       kind: "chip",
       text: '◆ seededTask(title: "Milk", owner: db)',
@@ -260,6 +276,199 @@ describe("cellView", () => {
       ),
     ).toEqual({ kind: "text", text: "playground", tone: "dim" });
     expect(cellView(row({}), source)).toEqual({ kind: "empty" });
+  });
+});
+
+describe("editableCell", () => {
+  const typed = (base: string) => field("9", base, base);
+  const whole = (f: DatasetField) =>
+    buildColumns({
+      fields: [f],
+      shape: {},
+      expanded: new Set(),
+      shortType: s => s,
+    })[0];
+  const primitive = (value: string | number | boolean | null) =>
+    row({ "9": { kind: "value", value: { kind: "primitive", value } } });
+
+  it("edits an empty cell or a plain primitive of a string, number, or boolean field", () => {
+    expect(editableCell(row({}), whole(typed("string")))).toEqual({
+      base: "string",
+      fieldId: "9",
+    });
+    expect(editableCell(primitive("x"), whole(typed("string")))).toEqual({
+      base: "string",
+      fieldId: "9",
+      value: "x",
+    });
+    expect(editableCell(primitive(3), whole(typed("number")))).toEqual({
+      base: "number",
+      fieldId: "9",
+      value: 3,
+    });
+    expect(editableCell(primitive(false), whole(typed("boolean")))).toEqual({
+      base: "boolean",
+      fieldId: "9",
+      value: false,
+    });
+    // A recorded `base` wins over the syntax.
+    const flag: DatasetField = {
+      id: "9",
+      def: {
+        name: "flag",
+        type: { kind: "primitive", syntax: "Flag", base: "boolean" },
+      } as DatasetField["def"],
+    };
+    expect(editableCell(row({}), whole(flag))?.base).toBe("boolean");
+  });
+
+  it("leaves anything else read-only", () => {
+    // Still loading.
+    expect(editableCell(undefined, whole(typed("string")))).toBeUndefined();
+    // Not a primitive field.
+    expect(editableCell(row({}), whole(typed("Task")))).toBeUndefined();
+    // A primitive of the wrong type, or a null.
+    expect(editableCell(primitive(3), whole(typed("string")))).toBeUndefined();
+    expect(
+      editableCell(primitive(null), whole(typed("string"))),
+    ).toBeUndefined();
+    // A template: the text editor would flatten its interpolations.
+    const template = row({
+      "9": {
+        kind: "value",
+        value: { kind: "template", value: ["Hi ", { expr: "name" }] },
+      },
+    });
+    expect(editableCell(template, whole(typed("string")))).toBeUndefined();
+    // A resource in a string field.
+    expect(
+      editableCell(row({ "9": blank }), whole(typed("string"))),
+    ).toBeUndefined();
+    // Key columns and the source column.
+    const cols = columns(["1"]);
+    expect(editableCell(row({}), byId(cols, "1/title"))).toBeUndefined();
+    expect(editableCell(row({}), byId(cols, "source"))).toBeUndefined();
+  });
+});
+
+describe("editor values", () => {
+  it("saves a value that fits as a typed-in primitive, and empty as a clear", () => {
+    expect(editedCell("string", "Hi")).toEqual(text("Hi"));
+    expect(editedCell("number", 4.5)).toEqual({
+      kind: "value",
+      value: { kind: "primitive", value: 4.5 },
+    });
+    expect(editedCell("boolean", false)).toEqual({
+      kind: "value",
+      value: { kind: "primitive", value: false },
+    });
+    expect(editedCell("string", "")).toBeNull();
+    expect(editedCell("number", undefined)).toBeNull();
+    expect(editedCell("boolean", null)).toBeNull();
+  });
+
+  it("refuses a value that doesn't fit the cell's type", () => {
+    expect(fitsEditor("number", "3")).toBe(false);
+    expect(fitsEditor("number", Number.NaN)).toBe(false);
+    expect(fitsEditor("boolean", "true")).toBe(false);
+    expect(fitsEditor("string", 3)).toBe(false);
+    expect(editedCell("number", "3")).toBeUndefined();
+  });
+});
+
+describe("grid edits", () => {
+  const FLAGS = [
+    field("0", "ticket"),
+    field("1", "count", "number"),
+    field("2", "task", "Task"),
+  ];
+  const cols = buildColumns({
+    fields: FLAGS,
+    shape: {},
+    expanded: new Set(),
+    shortType: s => s,
+  });
+  const rows = [
+    row({ "0": text("a"), "2": blank }, { id: "r0" }),
+    row({}, { id: "r1" }),
+  ];
+  const rowAt = (i: number) => rows[i];
+
+  it("turns a paste over a range into cell edits, skipping cells outside the editable set", () => {
+    expect(
+      cellEdits(
+        [
+          { col: 0, row: 0, value: "A" },
+          { col: 1, row: 0, value: 7 },
+          // Read-only: a resource field, and the source column.
+          { col: 2, row: 0, value: "x" },
+          { col: 3, row: 0, value: "x" },
+          // Doesn't fit a number.
+          { col: 1, row: 1, value: "seven" },
+          // Emptied: a clear.
+          { col: 0, row: 1, value: "" },
+          // Not loaded.
+          { col: 0, row: 5, value: "x" },
+        ],
+        cols,
+        rowAt,
+      ),
+    ).toEqual([
+      { rowId: "r0", fieldId: "0", cell: text("A") },
+      {
+        rowId: "r0",
+        fieldId: "1",
+        cell: { kind: "value", value: { kind: "primitive", value: 7 } },
+      },
+      { rowId: "r1", fieldId: "0", cell: null },
+    ]);
+  });
+
+  it("clears the editable cells in a selection that hold something", () => {
+    expect(
+      clearEdits(
+        [
+          { x: 0, y: 0, width: 4, height: 2 },
+          { x: 0, y: 0, width: 1, height: 1 },
+        ],
+        cols,
+        rowAt,
+      ),
+    ).toEqual([
+      { rowId: "r0", fieldId: "0", cell: null },
+      // Twice, from the overlapping range; grouping folds it.
+      { rowId: "r0", fieldId: "0", cell: null },
+    ]);
+  });
+});
+
+describe("groupEdits", () => {
+  it("sends one update per row, in the order rows were first edited", () => {
+    expect(
+      groupEdits([
+        { rowId: "b", fieldId: "0", cell: text("b0") },
+        { rowId: "a", fieldId: "0", cell: text("a0") },
+        { rowId: "b", fieldId: "1", cell: null },
+        // The same cell again: the last value wins.
+        { rowId: "a", fieldId: "0", cell: text("a0 again") },
+      ]),
+    ).toEqual([
+      { rowId: "b", cells: { "0": text("b0"), "1": null } },
+      { rowId: "a", cells: { "0": text("a0 again") } },
+    ]);
+    expect(groupEdits([])).toEqual([]);
+  });
+
+  it("applies an update as the server stores it: set, clear, rest untouched", () => {
+    const before = row({ "0": text("x"), "1": seeded });
+    const after = applyUpdate(before, {
+      rowId: "r",
+      cells: { "0": null, "2": text("new") },
+    });
+    expect(after.cells).toEqual({ "1": seeded, "2": text("new") });
+    expect(Object.hasOwn(after.cells, "0")).toBe(false);
+    // The original is left alone, so it can be put back.
+    expect(before.cells["0"]).toEqual(text("x"));
   });
 });
 
@@ -348,6 +557,59 @@ describe("RowPager", () => {
     expect(onError).toHaveBeenCalledWith(new Error("offline"));
     p.ensure(0, 5);
     expect(pending).toHaveLength(2);
+  });
+
+  it("patches loaded rows at once", async () => {
+    const { p, pending } = pager();
+    p.ensure(0, 5);
+    pending[0].resolve(rowsFrom(0, 10));
+    await Promise.resolve();
+
+    p.patch([
+      { rowId: "2", cells: { "0": text("typed") } },
+      // Not loaded: nothing to patch.
+      { rowId: "99", cells: { "0": text("elsewhere") } },
+    ]);
+    expect(p.get(2)?.cells).toEqual({ "0": text("typed") });
+    expect(p.get(3)?.cells).toEqual({});
+    // The patched page is still current: nothing is refetched.
+    p.ensure(0, 5);
+    expect(pending).toHaveLength(1);
+  });
+
+  it("shows the server's row again after two patches both fail and it reloads", async () => {
+    const { p, pending } = pager();
+    p.ensure(0, 5);
+    pending[0].resolve(rowsFrom(0, 10));
+    await Promise.resolve();
+
+    p.patch([{ rowId: "2", cells: { "0": text("A") } }]);
+    p.patch([{ rowId: "2", cells: { "1": text("B") } }]);
+    expect(p.get(2)?.cells).toEqual({ "0": text("A"), "1": text("B") });
+
+    // Both saves failed: reload from the server.
+    p.invalidate();
+    p.ensure(0, 5);
+    expect(pending).toHaveLength(2);
+    pending[1].resolve(rowsFrom(0, 10));
+    await Promise.resolve();
+    expect(p.get(2)?.cells).toEqual({});
+  });
+
+  it("doesn't let a fetch in flight when a row was patched overwrite it", async () => {
+    const { p, pending } = pager();
+    p.ensure(0, 5);
+    pending[0].resolve(rowsFrom(0, 10));
+    await Promise.resolve();
+    p.invalidate();
+    p.ensure(0, 5);
+    expect(pending).toHaveLength(2);
+
+    p.patch([{ rowId: "2", cells: { "0": text("typed") } }]);
+    // Fetched before the edit reached the server: pre-edit data.
+    pending[1].resolve(rowsFrom(0, 10));
+    await Promise.resolve();
+    expect(p.get(2)?.cells).toEqual({ "0": text("typed") });
   });
 
   it("holds at most maxPages, dropping those farthest from the view", async () => {

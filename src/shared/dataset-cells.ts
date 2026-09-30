@@ -7,7 +7,11 @@
  * storing). Pure — no runtime dependencies. See `specs/datasets.md` §A, §F.
  */
 
-import type { ExecutionInput } from "./types.ts";
+import {
+  isPrimitiveFieldType,
+  type PrimitiveFieldType,
+} from "./dataset-fields.ts";
+import type { ExecutionInput, PropType, PropValue } from "./types.ts";
 
 /**
  * `input` without any resource receipt, at any depth.
@@ -120,4 +124,51 @@ export function parseCell(value: unknown, path = "cell"): ExecutionInput {
         `${path}.kind must be "value", "object", or "resource"`,
       );
   }
+}
+
+/**
+ * The cell an editor's value commits as: a typed-in value, or `null` — clear
+ * the cell — when the editor was emptied (`undefined`, `null`, or `""`), so a
+ * cleared cell has no key, whether it was cleared in the grid or the details
+ * pane.
+ */
+export function committedCell(value: PropValue): ExecutionInput | null {
+  if (
+    value.kind === "primitive" &&
+    (value.value === undefined || value.value === null || value.value === "")
+  ) {
+    return null;
+  }
+  return { kind: "value", value };
+}
+
+/**
+ * The primitive types a dataset cell can be typed straight into — the same
+ * ones a field can be given by hand.
+ */
+export type EditableBase = PrimitiveFieldType;
+
+/**
+ * The base of a field typed `string`, `number`, or `boolean`, or `undefined`
+ * for any other type. Read from `base` when the checker recorded one, and
+ * otherwise from the syntax, which for a bare primitive is the same thing.
+ */
+export function primitiveBase(type: PropType): EditableBase | undefined {
+  if (type.kind !== "primitive") return undefined;
+  const base = type.base ?? type.syntax;
+  return isPrimitiveFieldType(base) ? base : undefined;
+}
+
+/**
+ * Whether `value` is something a field of primitive type `base` may hold as
+ * a typed-in value: a primitive of that type, or — for a string — a template,
+ * which is how a string with interpolations is stored. See
+ * `specs/datasets.md` §P.2.
+ */
+export function fitsPrimitiveBase(
+  value: PropValue,
+  base: EditableBase,
+): boolean {
+  if (value.kind === "primitive") return typeof value.value === base;
+  return base === "string" && value.kind === "template";
 }

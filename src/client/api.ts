@@ -13,6 +13,7 @@ import type {
   DatasetProviderInfo,
   DatasetRow,
   DatasetRowsOverview,
+  DatasetRowUpdate,
   DatasetSummary,
   ExecuteRequest,
   ExecuteResponse,
@@ -631,6 +632,23 @@ export async function addDatasetRows(
   });
   await throwIfError(res);
   return res.json();
+}
+
+/**
+ * Sets or clears cells on several rows of a dataset in one all-or-nothing
+ * batch. A `null` cell clears.
+ */
+export async function updateDatasetRows(
+  providerId: string,
+  datasetId: string,
+  updates: DatasetRowUpdate[],
+): Promise<void> {
+  const res = await fetch(datasetUrl(providerId, datasetId, "/rows"), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ updates }),
+  });
+  await throwIfError(res);
 }
 
 /**

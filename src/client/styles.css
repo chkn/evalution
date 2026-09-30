@@ -6898,6 +6898,42 @@ pre {
   color: var(--trace-text-dim);
 }
 
+/* Where the dataset grid opens a cell's editor, over the canvas. */
+.dataset-grid-portal {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 9999;
+}
+
+/* A cell's value or editor, with a clear button beside it. */
+.dataset-detail-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dataset-detail-cell > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.dataset-detail-clear {
+  flex: none;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font: inherit;
+  line-height: 1;
+  color: var(--trace-text-dim);
+  cursor: pointer;
+}
+
+.dataset-detail-clear:hover {
+  color: var(--delete-hover-text);
+}
+
 .dataset-link-btn,
 .dataset-row-btn {
   background: none;

@@ -29,6 +29,7 @@ import type {
   DatasetField,
   DatasetRow,
   DatasetRowsOverview,
+  DatasetRowUpdate,
   DatasetSummary,
 } from "./dataset-types.ts";
 import { runDatasetMigrations } from "./db/migrate.ts";
@@ -360,6 +361,14 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
   ): Promise<DatasetRow[]> {
     const entry = await this.requireEntry(datasetId);
     return entry.inner.addRows(entry.innerId, rows);
+  }
+
+  async updateRows(
+    datasetId: string,
+    updates: DatasetRowUpdate[],
+  ): Promise<void> {
+    const entry = await this.requireEntry(datasetId);
+    await entry.inner.updateRows(entry.innerId, updates);
   }
 
   async deleteRow(datasetId: string, rowId: string): Promise<void> {

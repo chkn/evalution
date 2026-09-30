@@ -50,6 +50,7 @@ import {
   handleListDatasets,
   handleListRows,
   handleRenameDataset,
+  handleUpdateRows,
   type ResolvePromptLink,
 } from "./handlers/datasets.ts";
 import { handleOtlpTraces } from "./handlers/otlp-ingest.ts";
@@ -882,6 +883,14 @@ export function setupRoutes({
     "/api/datasets/:providerId/:id/rows",
     datasetRoute(async (provider, { id }, c) =>
       handleAddRows(provider, id, await jsonBody(c)),
+    ),
+  );
+
+  // PATCH /api/datasets/:providerId/:id/rows - Set or clear cells on rows
+  app.patch(
+    "/api/datasets/:providerId/:id/rows",
+    datasetRoute(async (provider, { id }, c) =>
+      handleUpdateRows(provider, id, await jsonBody(c)),
     ),
   );
 

@@ -16,6 +16,7 @@ export type {
   DatasetRow,
   DatasetRowSource,
   DatasetRowsOverview,
+  DatasetRowUpdate,
   DatasetSummary,
 } from "../dataset/dataset-types.ts";
 

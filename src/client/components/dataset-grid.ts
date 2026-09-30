@@ -12,12 +12,23 @@
  * rows rather than the schema, and merged by name, so one `title` column
  * spans every resource that takes a `title`. A path is also what sorting and
  * filtering will name when they arrive.
+ *
+ * Some cells are typed into in place — see {@link editableCell}. An edit is
+ * reported per cell and sent per row ({@link groupEdits}), and the page it
+ * lands on is patched at once ({@link RowPager.patch}), before the server
+ * answers.
  */
 
+import {
+  committedCell,
+  type EditableBase,
+  primitiveBase,
+} from "../../shared/dataset-cells";
 import type {
   DatasetField,
   DatasetRow,
   DatasetRowsOverview,
+  DatasetRowUpdate,
   ExecutionInput,
   PropValue,
 } from "../../shared/types";
@@ -44,6 +55,11 @@ export type DatasetColumn = {
    */
   group?: string;
   width: number;
+  /**
+   * For a field's whole column, the primitive type its cells can be typed in
+   * as — see {@link editableCell}. Absent for any other column.
+   */
+  base?: EditableBase;
 } & (
   | {
       /**
@@ -96,6 +112,7 @@ export function buildColumns({
     const fieldKeys = fieldShape?.keys ?? [];
     const type = shortType(field.def.type.syntax);
     const path = { fieldId: field.id };
+    const base = primitiveBase(field.def.type);
     const whole: DatasetColumn = {
       id: field.id,
       title: field.def.name,
@@ -103,6 +120,7 @@ export function buildColumns({
       role: "whole",
       path,
       width: WIDTHS.whole,
+      ...(base && { base }),
     };
     if (fieldKeys.length === 0) {
       columns.push(whole);
@@ -211,6 +229,168 @@ export function readPath(
   return inner && Object.hasOwn(inner, key) ? inner[key] : "n/a";
 }
 
+/** A cell the grid types into in place — see {@link editableCell}. */
+export interface EditableCell {
+  /** The type it's typed into as. */
+  base: EditableBase;
+  /** The field it belongs to. */
+  fieldId: string;
+  /** What it holds, or `undefined` when it's empty. */
+  value?: string | number | boolean;
+}
+
+/**
+ * The cell of `column` in `row` if it's typed into in place, or `undefined`
+ * when it's read-only in the grid. Editable means: a field's whole column
+ * (not a key inside it), a field typed `string`, `number`, or `boolean`, and
+ * a cell that's empty or holds a plain primitive of that type. Anything else
+ * — a template, say, whose interpolations a text box would flatten — is
+ * edited in the details pane instead. See `specs/datasets.md` §P.2.
+ */
+export function editableCell(
+  row: DatasetRow | undefined,
+  column: DatasetColumn | undefined,
+): EditableCell | undefined {
+  if (!row || column?.role !== "whole" || !column.base) return undefined;
+  const { base } = column;
+  const { fieldId } = column.path;
+  const cell = row.cells[fieldId];
+  if (!cell) return { base, fieldId };
+  if (cell.kind !== "value" || cell.value.kind !== "primitive")
+    return undefined;
+  const { value } = cell.value;
+  return typeof value === base
+    ? { base, fieldId, value: value as string | number | boolean }
+    : undefined;
+}
+
+/** What an in-place editor holds: empty is `undefined` (or `null`, or `""`). */
+export type EditorValue = string | number | boolean | null | undefined;
+
+/** Whether an editor's value can be saved into a cell of type `base`. */
+export function fitsEditor(base: EditableBase, value: EditorValue): boolean {
+  if (value === undefined || value === null || value === "") return true;
+  if (base === "number") {
+    return typeof value === "number" && Number.isFinite(value);
+  }
+  return typeof value === base;
+}
+
+/**
+ * The cell an editor's value saves as: a typed-in primitive, or `null` —
+ * clear the cell — for an empty editor, so a cleared cell has no key rather
+ * than an empty string. `undefined` when the value doesn't fit `base` (see
+ * {@link fitsEditor}), which a batch skips.
+ */
+export function editedCell(
+  base: EditableBase,
+  value: EditorValue,
+): ExecutionInput | null | undefined {
+  if (!fitsEditor(base, value)) return undefined;
+  return committedCell({ kind: "primitive", value: value ?? undefined });
+}
+
+/** One cell's edit, located by row and field. */
+export interface CellEdit {
+  rowId: string;
+  fieldId: string;
+  /** The new cell, or `null` to clear it. */
+  cell: ExecutionInput | null;
+}
+
+/** One edited grid cell, as the grid reports it: column and row indexes. */
+export interface GridEdit {
+  col: number;
+  row: number;
+  value: EditorValue;
+}
+
+/**
+ * The grid's edits as {@link CellEdit}s, skipping any that land outside the
+ * editable set ({@link editableCell}) or don't fit the cell's type — a paste
+ * or fill over a range can cover both, and the rest of it still applies.
+ */
+export function cellEdits(
+  edits: readonly GridEdit[],
+  columns: readonly DatasetColumn[],
+  rowAt: (index: number) => DatasetRow | undefined,
+): CellEdit[] {
+  const out: CellEdit[] = [];
+  for (const { col, row: index, value } of edits) {
+    const row = rowAt(index);
+    const e = row && editableCell(row, columns[col]);
+    if (!e) continue;
+    const cell = editedCell(e.base, value);
+    if (cell === undefined) continue;
+    out.push({ rowId: row.id, fieldId: e.fieldId, cell });
+  }
+  return out;
+}
+
+/** A block of cells in the grid, by column and row index. */
+export interface CellRange {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Clearing `ranges` (Delete or Backspace over a selection): a `null` for each
+ * editable cell in them that holds something. Read-only cells are left as
+ * they are, even inside the selection — the details pane clears those.
+ */
+export function clearEdits(
+  ranges: readonly CellRange[],
+  columns: readonly DatasetColumn[],
+  rowAt: (index: number) => DatasetRow | undefined,
+): CellEdit[] {
+  const out: CellEdit[] = [];
+  for (const { x, y, width, height } of ranges) {
+    for (let index = y; index < y + height; index++) {
+      const row = rowAt(index);
+      for (let col = x; col < x + width; col++) {
+        const e = row && editableCell(row, columns[col]);
+        if (e && e.value !== undefined) {
+          out.push({ rowId: row.id, fieldId: e.fieldId, cell: null });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * A batch of cell edits — one keystroke's, a paste's over a range, a fill's —
+ * as one update per row, rows in the order first edited. A cell edited twice
+ * keeps its last value.
+ */
+export function groupEdits(edits: readonly CellEdit[]): DatasetRowUpdate[] {
+  const byRow = new Map<string, DatasetRowUpdate>();
+  for (const { rowId, fieldId, cell } of edits) {
+    let update = byRow.get(rowId);
+    if (!update) {
+      update = { rowId, cells: {} };
+      byRow.set(rowId, update);
+    }
+    update.cells[fieldId] = cell;
+  }
+  return [...byRow.values()];
+}
+
+/** `row` with `update`'s cells set or cleared, as the server will store it. */
+export function applyUpdate(
+  row: DatasetRow,
+  update: DatasetRowUpdate,
+): DatasetRow {
+  const cells = { ...row.cells };
+  for (const [fieldId, cell] of Object.entries(update.cells)) {
+    if (cell === null) delete cells[fieldId];
+    else cells[fieldId] = cell;
+  }
+  return { ...row, cells };
+}
+
 /** How the grid should draw one cell. */
 export type CellView =
   | { kind: "loading" }
@@ -220,7 +400,17 @@ export type CellView =
   | { kind: "n/a" }
   | { kind: "text"; text: string; tone?: "dim" | "link" }
   /** A resource, drawn as a chip. */
-  | { kind: "chip"; text: string };
+  | { kind: "chip"; text: string }
+  /**
+   * A cell typed into in place (see {@link editableCell}): `value` is what
+   * its editor starts from, `text` what's drawn — `—` when it's empty.
+   */
+  | {
+      kind: "edit";
+      base: EditableBase;
+      value: string | number | boolean | undefined;
+      text: string;
+    };
 
 /** A one-line rendering of an object: `{ db: ◆ db, userId: "u1" }`. */
 function previewObject(
@@ -290,6 +480,15 @@ export function cellView(
           : { kind: "empty" };
     default: {
       const found = readPath(row, column.path);
+      const e = editableCell(row, column);
+      if (e) {
+        return {
+          kind: "edit",
+          base: e.base,
+          value: e.value,
+          text: typeof found === "object" ? previewCell(found) : "—",
+        };
+      }
       if (found === "absent") return { kind: "empty" };
       if (found === "n/a") return { kind: "n/a" };
       return inputView(found, column.role);
@@ -369,6 +568,31 @@ export class RowPager {
       if (this.pages.get(page)?.generation === this.generation) continue;
       if (this.inFlight.get(page) === this.generation) continue;
       this.load(page);
+    }
+  }
+
+  /**
+   * Applies `updates` to whichever of their rows are loaded, at once — the
+   * optimistic half of an edit. A patched page moves to a new generation, so
+   * a fetch already in flight — which may have read the rows before the edit
+   * reached the server — can't overwrite it; pages that were current stay
+   * current. A failed save is undone by reloading ({@link invalidate}).
+   */
+  patch(updates: readonly DatasetRowUpdate[]): void {
+    const byId = new Map(updates.map(u => [u.rowId, u]));
+    const previous = this.generation++;
+    for (const [page, held] of this.pages) {
+      let rows: DatasetRow[] | undefined;
+      held.rows.forEach((row, index) => {
+        const update = byId.get(row.id);
+        if (!update) return;
+        rows ??= [...held.rows];
+        rows[index] = applyUpdate(row, update);
+      });
+      if (rows) this.pages.set(page, { rows, generation: this.generation });
+      else if (held.generation === previous) {
+        this.pages.set(page, { ...held, generation: this.generation });
+      }
     }
   }
 
