@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { ItemEditor, shortSyntax } from "ts-proppy/react";
+import { committedCell } from "../../shared/dataset-cells";
 import type {
   Dataset,
   DatasetRow,
@@ -17,7 +18,6 @@ import type {
   PropValue,
 } from "../../shared/types";
 import { DetailRow, type Fact, FactGroup, FactsGrid } from "./DetailsPane";
-import { committedCell } from "./dataset-grid";
 import { propValueToJson, resourceName } from "./dataset-preview";
 import { formatTimestamp } from "./trace/format.ts";
 import { CalendarIcon, SpansIcon } from "./trace/icons.tsx";

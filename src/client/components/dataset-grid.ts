@@ -13,13 +13,17 @@
  * spans every resource that takes a `title`. A path is also what sorting and
  * filtering will name when they arrive.
  *
- * Some cells are typed into in place — see {@link editableBase}. An edit is
+ * Some cells are typed into in place — see {@link editableCell}. An edit is
  * reported per cell and sent per row ({@link groupEdits}), and the page it
  * lands on is patched at once ({@link RowPager.patch}), before the server
  * answers.
  */
 
-import { type EditableBase, primitiveBase } from "../../shared/dataset-cells";
+import {
+  committedCell,
+  type EditableBase,
+  primitiveBase,
+} from "../../shared/dataset-cells";
 import type {
   DatasetField,
   DatasetRow,
@@ -53,7 +57,7 @@ export type DatasetColumn = {
   width: number;
   /**
    * For a field's whole column, the primitive type its cells can be typed in
-   * as — see {@link editableBase}. Absent for any other column.
+   * as — see {@link editableCell}. Absent for any other column.
    */
   base?: EditableBase;
 } & (
@@ -225,25 +229,38 @@ export function readPath(
   return inner && Object.hasOwn(inner, key) ? inner[key] : "n/a";
 }
 
+/** A cell the grid types into in place — see {@link editableCell}. */
+export interface EditableCell {
+  /** The type it's typed into as. */
+  base: EditableBase;
+  /** The field it belongs to. */
+  fieldId: string;
+  /** What it holds, or `undefined` when it's empty. */
+  value?: string | number | boolean;
+}
+
 /**
- * The type a cell is typed into in place as, or `undefined` when it's
- * read-only in the grid. Editable means: a field's whole column (not a key
- * inside it), a field typed `string`, `number`, or `boolean`, and a cell
- * that's empty or holds a plain primitive of that type. Anything else — a
- * template, say, whose interpolations a text box would flatten — is edited
- * in the details pane instead. See `specs/datasets.md` §P.2.
+ * The cell of `column` in `row` if it's typed into in place, or `undefined`
+ * when it's read-only in the grid. Editable means: a field's whole column
+ * (not a key inside it), a field typed `string`, `number`, or `boolean`, and
+ * a cell that's empty or holds a plain primitive of that type. Anything else
+ * — a template, say, whose interpolations a text box would flatten — is
+ * edited in the details pane instead. See `specs/datasets.md` §P.2.
  */
-export function editableBase(
+export function editableCell(
   row: DatasetRow | undefined,
   column: DatasetColumn | undefined,
-): EditableBase | undefined {
+): EditableCell | undefined {
   if (!row || column?.role !== "whole" || !column.base) return undefined;
-  const cell = row.cells[column.path.fieldId];
-  if (!cell) return column.base;
-  return cell.kind === "value" &&
-    cell.value.kind === "primitive" &&
-    typeof cell.value.value === column.base
-    ? column.base
+  const { base } = column;
+  const { fieldId } = column.path;
+  const cell = row.cells[fieldId];
+  if (!cell) return { base, fieldId };
+  if (cell.kind !== "value" || cell.value.kind !== "primitive")
+    return undefined;
+  const { value } = cell.value;
+  return typeof value === base
+    ? { base, fieldId, value: value as string | number | boolean }
     : undefined;
 }
 
@@ -270,23 +287,7 @@ export function editedCell(
   value: EditorValue,
 ): ExecutionInput | null | undefined {
   if (!fitsEditor(base, value)) return undefined;
-  if (value === undefined || value === null || value === "") return null;
-  return { kind: "value", value: { kind: "primitive", value } };
-}
-
-/**
- * The cell a details-pane editor's value commits as: a typed-in value, or
- * `null` — clear the cell — when the editor was emptied, so a cleared cell
- * has no key, as it does from the grid.
- */
-export function committedCell(value: PropValue): ExecutionInput | null {
-  if (
-    value.kind === "primitive" &&
-    (value.value === undefined || value.value === null || value.value === "")
-  ) {
-    return null;
-  }
-  return { kind: "value", value };
+  return committedCell({ kind: "primitive", value: value ?? undefined });
 }
 
 /** One cell's edit, located by row and field. */
@@ -306,7 +307,7 @@ export interface GridEdit {
 
 /**
  * The grid's edits as {@link CellEdit}s, skipping any that land outside the
- * editable set ({@link editableBase}) or don't fit the cell's type — a paste
+ * editable set ({@link editableCell}) or don't fit the cell's type — a paste
  * or fill over a range can cover both, and the rest of it still applies.
  */
 export function cellEdits(
@@ -316,13 +317,12 @@ export function cellEdits(
 ): CellEdit[] {
   const out: CellEdit[] = [];
   for (const { col, row: index, value } of edits) {
-    const column = columns[col];
     const row = rowAt(index);
-    const base = editableBase(row, column);
-    if (!row || !base || column.role !== "whole") continue;
-    const cell = editedCell(base, value);
+    const e = row && editableCell(row, columns[col]);
+    if (!e) continue;
+    const cell = editedCell(e.base, value);
     if (cell === undefined) continue;
-    out.push({ rowId: row.id, fieldId: column.path.fieldId, cell });
+    out.push({ rowId: row.id, fieldId: e.fieldId, cell });
   }
   return out;
 }
@@ -350,13 +350,10 @@ export function clearEdits(
     for (let index = y; index < y + height; index++) {
       const row = rowAt(index);
       for (let col = x; col < x + width; col++) {
-        const column = columns[col];
-        if (!row || !editableBase(row, column) || column.role !== "whole") {
-          continue;
+        const e = row && editableCell(row, columns[col]);
+        if (e && e.value !== undefined) {
+          out.push({ rowId: row.id, fieldId: e.fieldId, cell: null });
         }
-        const { fieldId } = column.path;
-        if (row.cells[fieldId])
-          out.push({ rowId: row.id, fieldId, cell: null });
       }
     }
   }
@@ -405,7 +402,7 @@ export type CellView =
   /** A resource, drawn as a chip. */
   | { kind: "chip"; text: string }
   /**
-   * A cell typed into in place (see {@link editableBase}): `value` is what
+   * A cell typed into in place (see {@link editableCell}): `value` is what
    * its editor starts from, `text` what's drawn — `—` when it's empty.
    */
   | {
@@ -483,19 +480,12 @@ export function cellView(
           : { kind: "empty" };
     default: {
       const found = readPath(row, column.path);
-      const base = editableBase(row, column);
-      if (base) {
-        // Editable means empty or a plain primitive — see `editableBase`.
-        const primitive =
-          typeof found === "object" &&
-          found.kind === "value" &&
-          found.value.kind === "primitive"
-            ? (found.value.value as string | number | boolean)
-            : undefined;
+      const e = editableCell(row, column);
+      if (e) {
         return {
           kind: "edit",
-          base,
-          value: primitive,
+          base: e.base,
+          value: e.value,
           text: typeof found === "object" ? previewCell(found) : "—",
         };
       }
@@ -583,38 +573,27 @@ export class RowPager {
 
   /**
    * Applies `updates` to whichever of their rows are loaded, at once — the
-   * optimistic half of an edit. Returns an undo that puts back each row it
-   * changed, unless a fetch has since replaced that row with a fresher one.
+   * optimistic half of an edit. A patched page moves to a new generation, so
+   * a fetch already in flight — which may have read the rows before the edit
+   * reached the server — can't overwrite it; pages that were current stay
+   * current. A failed save is undone by reloading ({@link invalidate}).
    */
-  patch(updates: readonly DatasetRowUpdate[]): () => void {
+  patch(updates: readonly DatasetRowUpdate[]): void {
     const byId = new Map(updates.map(u => [u.rowId, u]));
-    const changed: {
-      page: number;
-      index: number;
-      before: DatasetRow;
-      after: DatasetRow;
-    }[] = [];
+    const previous = this.generation++;
     for (const [page, held] of this.pages) {
       let rows: DatasetRow[] | undefined;
       held.rows.forEach((row, index) => {
         const update = byId.get(row.id);
         if (!update) return;
-        const after = applyUpdate(row, update);
         rows ??= [...held.rows];
-        rows[index] = after;
-        changed.push({ page, index, before: row, after });
+        rows[index] = applyUpdate(row, update);
       });
-      if (rows) this.pages.set(page, { ...held, rows });
-    }
-    return () => {
-      for (const { page, index, before, after } of changed) {
-        const held = this.pages.get(page);
-        if (held?.rows[index] !== after) continue;
-        const rows = [...held.rows];
-        rows[index] = before;
-        this.pages.set(page, { ...held, rows });
+      if (rows) this.pages.set(page, { rows, generation: this.generation });
+      else if (held.generation === previous) {
+        this.pages.set(page, { ...held, generation: this.generation });
       }
-    };
+    }
   }
 
   /** Marks every page stale; the next {@link ensure} refetches what it covers. */

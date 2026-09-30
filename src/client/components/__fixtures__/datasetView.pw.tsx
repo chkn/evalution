@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { expect, test } from "@playwright/experimental-ct-react";
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, Route } from "@playwright/test";
 import type {
   Dataset,
   DatasetRow,
@@ -517,12 +517,17 @@ test("typing into a string cell saves it, showing it at once", async ({
   });
 });
 
-test("a failed save puts the cell back and says why under the header", async ({
+test("a failed save reloads the row from the server and says why under the header", async ({
   mount,
   page,
 }) => {
   await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
-  const sent = await mockUpdates(page, 500);
+  // Each save is held until both are sent, then both fail.
+  const held: Route[] = [];
+  await page.route("**/api/datasets/local/tickets/rows", route => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    held.push(route);
+  });
   const component = await mount(
     <DatasetViewHarness providerId="local" datasetId="tickets" />,
   );
@@ -530,13 +535,21 @@ test("a failed save puts the cell back and says why under the header", async ({
 
   await clickCell(page, 40, 1, true);
   await typeIntoCell(page, "Changed");
+  await expect(inGrid(component, "gridcell", "Changed")).toBeAttached();
+  await clickCell(page, 40, 1, true);
+  await typeIntoCell(page, "Changed again");
+  await expect(inGrid(component, "gridcell", "Changed again")).toBeAttached();
 
-  await expect.poll(() => sent).toHaveLength(1);
+  await expect.poll(() => held.length).toBe(2);
+  for (const route of held) {
+    await route.fulfill({ status: 500, json: { error: "disk full" } });
+  }
   await expect(component.locator(".dataset-view-action-error")).toContainText(
     "disk full",
   );
   await expect(inGrid(component, "gridcell", "Refund please")).toBeAttached();
   await expect(inGrid(component, "gridcell", "Changed")).toHaveCount(0);
+  await expect(inGrid(component, "gridcell", "Changed again")).toHaveCount(0);
 });
 
 test("pasting a block fills the editable cells it covers, in one batch", async ({

@@ -743,7 +743,10 @@ string cell holding a template: the text editor would flatten its interpolation 
 - **`validateCell`** rejects a value that doesn't fit the cell's base type (Glide's `Number` cell
   already parses) before it's sent.
 - **Optimistic.** The edited page in `RowPager` is patched at once, and the `dataset-changed`
-  refetch replaces it. A failed save restores the page and shows the error under the header.
+  refetch replaces it; a patched page outranks any fetch already in flight, which may predate the
+  edit. A failed save shows the error under the header and reloads the visible rows from the
+  server, dropping every optimistic edit on them (no per-edit undo: two overlapping failed edits
+  can't be unwound in order).
 
 **In the row details pane** for everything inline can't do. Every `value` cell of any field gets
 `ItemEditor` against the field's `def`, as the panel does, and commits on blur or Enter rather than

@@ -64,7 +64,7 @@ import {
   type DatasetLayout,
   DEFAULT_LAYOUT,
   type EditorValue,
-  editableBase,
+  editableCell,
   fieldIdsByGroup,
   fitsEditor,
   type GridEdit,
@@ -292,7 +292,8 @@ function toGridCell(view: CellView, theme: Partial<Theme>): GridCell {
  *
  * Cells of `string`, `number`, and `boolean` fields are typed into in place,
  * pasted over, and cleared with Delete; every other value cell is edited in
- * the details pane. An edit shows at once and is undone if the save fails.
+ * the details pane. An edit shows at once; if its save fails, the rows are
+ * reloaded from the server.
  * See `specs/datasets.md` §P.2.
  */
 function DatasetView({
@@ -508,22 +509,24 @@ function DatasetView({
   /**
    * Saves a batch of edits as one `updateRows`, a row per update. The pages
    * they land on are patched first, so an edit shows at once; the
-   * `dataset-changed` refetch then replaces them, and a failure puts them
-   * back and says why.
+   * `dataset-changed` refetch then replaces them. A failure says why and
+   * reloads the visible rows from the server, dropping whatever optimistic
+   * edits are on them — any still saving refetch again when they land.
    */
   const saveEdits = useCallback(
     (edits: CellEdit[]) => {
       const updates = groupEdits(edits);
       if (updates.length === 0) return;
-      const undo = pager.patch(updates);
+      pager.patch(updates);
       setLoaded(n => n + 1);
       updateDatasetRows(providerId, datasetId, updates).catch(err => {
-        undo();
-        setLoaded(n => n + 1);
         setError(`Couldn't save: ${err.message}`);
+        pager.invalidate();
+        const { start, end } = visibleRef.current;
+        pager.ensure(start, Math.min(end, overview.rowCount));
       });
     },
-    [pager, providerId, datasetId],
+    [pager, providerId, datasetId, overview.rowCount],
   );
 
   /** Sets or clears one cell of one row — the details pane's edits. */
@@ -550,7 +553,7 @@ function DatasetView({
   /** Refuses, before it's sent, a value that doesn't fit the cell's type. */
   const validateCell = useCallback(
     ([col, row]: Item, newValue: EditableGridCell) => {
-      const base = editableBase(pager.get(row), columns[col]);
+      const base = editableCell(pager.get(row), columns[col])?.base;
       const typed = editorValue(newValue);
       return base !== undefined && !!typed && fitsEditor(base, typed.value);
     },

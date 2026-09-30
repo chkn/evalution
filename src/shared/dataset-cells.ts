@@ -122,6 +122,22 @@ export function parseCell(value: unknown, path = "cell"): ExecutionInput {
   }
 }
 
+/**
+ * The cell an editor's value commits as: a typed-in value, or `null` — clear
+ * the cell — when the editor was emptied (`undefined`, `null`, or `""`), so a
+ * cleared cell has no key, whether it was cleared in the grid or the details
+ * pane.
+ */
+export function committedCell(value: PropValue): ExecutionInput | null {
+  if (
+    value.kind === "primitive" &&
+    (value.value === undefined || value.value === null || value.value === "")
+  ) {
+    return null;
+  }
+  return { kind: "value", value };
+}
+
 /** The primitive types a dataset cell can be typed straight into. */
 export type EditableBase = "string" | "number" | "boolean";
 

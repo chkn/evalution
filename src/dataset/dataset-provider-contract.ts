@@ -8,7 +8,7 @@
  * storage layout. See `specs/datasets.md` §N.
  */
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import type { ExecutionInput, PropDefinition } from "../shared/types.ts";
 import {
   type DatasetProvider,
@@ -425,6 +425,40 @@ export function runDatasetProviderContractTests(
         ]);
         if (provider.watch) {
           expect(events).toEqual([{ type: "update", datasetId: dataset.id }]);
+        }
+      });
+
+      it("leaves a batch that changes no cells unrecorded: no updatedAt bump, no event", async () => {
+        const provider = await makeProvider();
+        const { dataset, first } = await seeded(provider);
+        const before = await provider.getDataset(dataset.id);
+        const events: DatasetChangeEvent[] = [];
+        provider.watch?.(e => events.push(e));
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+          vi.setSystemTime((before?.updatedAt ?? 0) + 60_000);
+          await provider.updateRows(dataset.id, []);
+          await provider.updateRows(dataset.id, [
+            { rowId: first.id, cells: {} },
+          ]);
+          expect((await provider.getDataset(dataset.id))?.updatedAt).toBe(
+            before?.updatedAt,
+          );
+          expect(events).toEqual([]);
+
+          // One cell is enough to count.
+          await provider.updateRows(dataset.id, [
+            { rowId: first.id, cells: {} },
+            { rowId: first.id, cells: { "0": text("uno") } },
+          ]);
+          expect((await provider.getDataset(dataset.id))?.updatedAt).toBe(
+            (before?.updatedAt ?? 0) + 60_000,
+          );
+          if (provider.watch) {
+            expect(events).toEqual([{ type: "update", datasetId: dataset.id }]);
+          }
+        } finally {
+          vi.useRealTimers();
         }
       });
     });

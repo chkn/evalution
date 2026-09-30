@@ -13,10 +13,9 @@ import {
   cellEdits,
   cellView,
   clearEdits,
-  committedCell,
   type DatasetColumn,
   DEFAULT_LAYOUT,
-  editableBase,
+  editableCell,
   editedCell,
   fieldIdsByGroup,
   fitsEditor,
@@ -280,7 +279,7 @@ describe("cellView", () => {
   });
 });
 
-describe("editableBase", () => {
+describe("editableCell", () => {
   const typed = (base: string) => field("9", base, base);
   const whole = (f: DatasetField) =>
     buildColumns({
@@ -293,12 +292,25 @@ describe("editableBase", () => {
     row({ "9": { kind: "value", value: { kind: "primitive", value } } });
 
   it("edits an empty cell or a plain primitive of a string, number, or boolean field", () => {
-    expect(editableBase(row({}), whole(typed("string")))).toBe("string");
-    expect(editableBase(primitive("x"), whole(typed("string")))).toBe("string");
-    expect(editableBase(primitive(3), whole(typed("number")))).toBe("number");
-    expect(editableBase(primitive(true), whole(typed("boolean")))).toBe(
-      "boolean",
-    );
+    expect(editableCell(row({}), whole(typed("string")))).toEqual({
+      base: "string",
+      fieldId: "9",
+    });
+    expect(editableCell(primitive("x"), whole(typed("string")))).toEqual({
+      base: "string",
+      fieldId: "9",
+      value: "x",
+    });
+    expect(editableCell(primitive(3), whole(typed("number")))).toEqual({
+      base: "number",
+      fieldId: "9",
+      value: 3,
+    });
+    expect(editableCell(primitive(false), whole(typed("boolean")))).toEqual({
+      base: "boolean",
+      fieldId: "9",
+      value: false,
+    });
     // A recorded `base` wins over the syntax.
     const flag: DatasetField = {
       id: "9",
@@ -307,18 +319,18 @@ describe("editableBase", () => {
         type: { kind: "primitive", syntax: "Flag", base: "boolean" },
       } as DatasetField["def"],
     };
-    expect(editableBase(row({}), whole(flag))).toBe("boolean");
+    expect(editableCell(row({}), whole(flag))?.base).toBe("boolean");
   });
 
   it("leaves anything else read-only", () => {
     // Still loading.
-    expect(editableBase(undefined, whole(typed("string")))).toBeUndefined();
+    expect(editableCell(undefined, whole(typed("string")))).toBeUndefined();
     // Not a primitive field.
-    expect(editableBase(row({}), whole(typed("Task")))).toBeUndefined();
+    expect(editableCell(row({}), whole(typed("Task")))).toBeUndefined();
     // A primitive of the wrong type, or a null.
-    expect(editableBase(primitive(3), whole(typed("string")))).toBeUndefined();
+    expect(editableCell(primitive(3), whole(typed("string")))).toBeUndefined();
     expect(
-      editableBase(primitive(null), whole(typed("string"))),
+      editableCell(primitive(null), whole(typed("string"))),
     ).toBeUndefined();
     // A template: the text editor would flatten its interpolations.
     const template = row({
@@ -327,15 +339,15 @@ describe("editableBase", () => {
         value: { kind: "template", value: ["Hi ", { expr: "name" }] },
       },
     });
-    expect(editableBase(template, whole(typed("string")))).toBeUndefined();
+    expect(editableCell(template, whole(typed("string")))).toBeUndefined();
     // A resource in a string field.
     expect(
-      editableBase(row({ "9": blank }), whole(typed("string"))),
+      editableCell(row({ "9": blank }), whole(typed("string"))),
     ).toBeUndefined();
     // Key columns and the source column.
     const cols = columns(["1"]);
-    expect(editableBase(row({}), byId(cols, "1/title"))).toBeUndefined();
-    expect(editableBase(row({}), byId(cols, "source"))).toBeUndefined();
+    expect(editableCell(row({}), byId(cols, "1/title"))).toBeUndefined();
+    expect(editableCell(row({}), byId(cols, "source"))).toBeUndefined();
   });
 });
 
@@ -361,24 +373,6 @@ describe("editor values", () => {
     expect(fitsEditor("boolean", "true")).toBe(false);
     expect(fitsEditor("string", 3)).toBe(false);
     expect(editedCell("number", "3")).toBeUndefined();
-  });
-});
-
-describe("committedCell", () => {
-  it("commits a typed-in value, and an emptied editor as a clear", () => {
-    expect(committedCell({ kind: "primitive", value: "x" })).toEqual(text("x"));
-    const template = {
-      kind: "template" as const,
-      value: ["Hi ", { expr: "name" }],
-    };
-    expect(committedCell(template)).toEqual({ kind: "value", value: template });
-    expect(committedCell({ kind: "primitive", value: "" })).toBeNull();
-    expect(committedCell({ kind: "primitive", value: undefined })).toBeNull();
-    // `false` and `0` are values, not empties.
-    expect(committedCell({ kind: "primitive", value: 0 })).toEqual({
-      kind: "value",
-      value: { kind: "primitive", value: 0 },
-    });
   });
 });
 
@@ -565,40 +559,57 @@ describe("RowPager", () => {
     expect(pending).toHaveLength(2);
   });
 
-  it("patches loaded rows at once, and undoes the patch", async () => {
+  it("patches loaded rows at once", async () => {
     const { p, pending } = pager();
     p.ensure(0, 5);
     pending[0].resolve(rowsFrom(0, 10));
     await Promise.resolve();
 
-    const undo = p.patch([
+    p.patch([
       { rowId: "2", cells: { "0": text("typed") } },
       // Not loaded: nothing to patch.
       { rowId: "99", cells: { "0": text("elsewhere") } },
     ]);
     expect(p.get(2)?.cells).toEqual({ "0": text("typed") });
     expect(p.get(3)?.cells).toEqual({});
-
-    undo();
-    expect(p.get(2)?.cells).toEqual({});
+    // The patched page is still current: nothing is refetched.
+    p.ensure(0, 5);
+    expect(pending).toHaveLength(1);
   });
 
-  it("doesn't undo over a row a later fetch replaced", async () => {
+  it("shows the server's row again after two patches both fail and it reloads", async () => {
     const { p, pending } = pager();
     p.ensure(0, 5);
     pending[0].resolve(rowsFrom(0, 10));
     await Promise.resolve();
 
-    const undo = p.patch([{ rowId: "2", cells: { "0": text("typed") } }]);
+    p.patch([{ rowId: "2", cells: { "0": text("A") } }]);
+    p.patch([{ rowId: "2", cells: { "1": text("B") } }]);
+    expect(p.get(2)?.cells).toEqual({ "0": text("A"), "1": text("B") });
+
+    // Both saves failed: reload from the server.
     p.invalidate();
     p.ensure(0, 5);
-    const fresh = rowsFrom(0, 10);
-    fresh[2] = row({ "0": text("from the server") }, { id: "2" });
-    pending[1].resolve(fresh);
+    expect(pending).toHaveLength(2);
+    pending[1].resolve(rowsFrom(0, 10));
     await Promise.resolve();
+    expect(p.get(2)?.cells).toEqual({});
+  });
 
-    undo();
-    expect(p.get(2)?.cells).toEqual({ "0": text("from the server") });
+  it("doesn't let a fetch in flight when a row was patched overwrite it", async () => {
+    const { p, pending } = pager();
+    p.ensure(0, 5);
+    pending[0].resolve(rowsFrom(0, 10));
+    await Promise.resolve();
+    p.invalidate();
+    p.ensure(0, 5);
+    expect(pending).toHaveLength(2);
+
+    p.patch([{ rowId: "2", cells: { "0": text("typed") } }]);
+    // Fetched before the edit reached the server: pre-edit data.
+    pending[1].resolve(rowsFrom(0, 10));
+    await Promise.resolve();
+    expect(p.get(2)?.cells).toEqual({ "0": text("typed") });
   });
 
   it("holds at most maxPages, dropping those farthest from the view", async () => {

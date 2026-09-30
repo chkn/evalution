@@ -70,9 +70,9 @@ function mergedCells(
   cells: Record<string, ExecutionInput | null>,
 ): SQL | undefined {
   const entries = Object.entries(cells);
+  if (entries.length === 0) return undefined;
   const set = entries.filter(([, cell]) => cell !== null);
   const cleared = entries.filter(([, cell]) => cell === null);
-  if (entries.length === 0) return undefined;
   const path = (fieldId: string) => `$."${fieldId}"`;
   let expr: SQL = sql`${datasetRows.cells}`;
   if (set.length > 0) {
@@ -426,6 +426,9 @@ export class TursoDatasetProvider implements DatasetProvider {
     datasetId: string,
     updates: DatasetRowUpdate[],
   ): Promise<void> {
+    // A batch that names no cells changes nothing, so it's not recorded:
+    // no `updatedAt` bump, no change event.
+    const changes = updates.some(u => Object.keys(u.cells).length > 0);
     await this.serializeWrite(() =>
       this.db.transaction(async tx => {
         const [row] = await tx
@@ -446,7 +449,7 @@ export class TursoDatasetProvider implements DatasetProvider {
                 `Dataset ${datasetId} has no field with id "${fieldId}"`,
               );
             }
-            if (cell !== null && cell?.kind !== "value") {
+            if (cell !== null && cell.kind !== "value") {
               throw new DatasetValidationError(
                 `Row ${rowId}, field "${fieldId}": only a value cell can be set`,
               );
@@ -486,13 +489,15 @@ export class TursoDatasetProvider implements DatasetProvider {
               ),
             );
         }
-        await tx
-          .update(datasets)
-          .set({ updatedAt: Date.now() })
-          .where(eq(datasets.id, datasetId));
+        if (changes) {
+          await tx
+            .update(datasets)
+            .set({ updatedAt: Date.now() })
+            .where(eq(datasets.id, datasetId));
+        }
       }),
     );
-    if (updates.length > 0) this.emit({ type: "update", datasetId });
+    if (changes) this.emit({ type: "update", datasetId });
   }
 
   async deleteRow(datasetId: string, rowId: string): Promise<void> {
