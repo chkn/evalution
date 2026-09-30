@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type { DatasetChangeEvent } from "../dataset/dataset-types.ts";
+import type { EvalChangeEvent, EvalRunProgress } from "../eval/eval-types.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import type { SDKAdapter } from "../sdk/sdk-adapter.ts";
 import type { TraceChangeEvent } from "../trace/trace-types.ts";
@@ -740,10 +741,24 @@ export interface DatasetChangedSSEData {
   event: DatasetChangeEvent;
 }
 
+/** An eval, or one of its runs, was added, changed, or removed — see `EvalProvider.watch`. */
+export interface EvalChangedSSEData {
+  type: "eval-changed";
+  providerId: string;
+  event: EvalChangeEvent;
+}
+
+/** A running eval made progress, or finished. See `specs/evals.md` §D.4. */
+export interface EvalRunSSEData extends EvalRunProgress {
+  type: "eval-run";
+}
+
 export type SSEData =
   | PromptChangedSSEData
   | TraceChangedSSEData
-  | DatasetChangedSSEData;
+  | DatasetChangedSSEData
+  | EvalChangedSSEData
+  | EvalRunSSEData;
 
 // #region Model
 

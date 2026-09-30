@@ -6,6 +6,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { EvalutionConfig } from "../config.ts";
 import { LocalDirectoryDatasetProvider } from "../dataset/local-directory-dataset-provider.ts";
+import { LocalEvalProvider } from "../eval/local-eval-provider.ts";
 import { startServer } from "../server/index.ts";
 import { TerminalSessionRegistry } from "../server/terminal.ts";
 import { CostFetchingTraceSink } from "../trace/cost-fetching-trace-sink.ts";
@@ -115,6 +116,12 @@ async function startConfiguredServer(
     }),
   ];
 
+  const evalProviders = config.evalProviders ?? [
+    new LocalEvalProvider({
+      path: path.join(rootDir, ".evalution", "evals", "evals.db"),
+    }),
+  ];
+
   // Each adapter runs its own SDK-specific setup and returns the resulting
   // ingestor — we stand up nothing here beyond the default provider.
   const collected = (
@@ -149,6 +156,7 @@ async function startConfiguredServer(
     promptProviders,
     traceProviders,
     datasetProviders,
+    evalProviders,
     port,
     rootPath: rootDir,
     hasConfig,

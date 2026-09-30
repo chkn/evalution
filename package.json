@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./checks": {
+      "types": "./dist/checks/index.d.ts",
+      "import": "./dist/checks/index.js"
     }
   },
   "bin": {

@@ -71,6 +71,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * @throws {InvalidCellError} naming the first problem found.
  */
 export function parseCell(value: unknown, path = "cell"): ExecutionInput {
+  return parseInput(value, path, false);
+}
+
+/**
+ * {@link parseCell} for an eval's bindings, which may also name a column of
+ * the row being run (`{ kind: "dataset", field }`), anywhere a cell's
+ * contents may sit. See `specs/evals.md` §B.2.
+ *
+ * @param path - Where `value` sits, for the error message.
+ * @throws {InvalidCellError} naming the first problem found.
+ */
+export function parseBinding(value: unknown, path = "binding"): ExecutionInput {
+  return parseInput(value, path, true);
+}
+
+function parseInput(
+  value: unknown,
+  path: string,
+  columns: boolean,
+): ExecutionInput {
+  const parseCell = (v: unknown, p: string) => parseInput(v, p, columns);
   if (!isRecord(value)) {
     throw new InvalidCellError(`${path} must be an object`);
   }
@@ -130,6 +151,14 @@ export function parseCell(value: unknown, path = "cell"): ExecutionInput {
       return { kind: "input", half: value.half, path: value.path };
     }
     case "dataset":
+      if (columns) {
+        if (typeof value.field !== "string" || value.field === "") {
+          throw new InvalidCellError(
+            `${path}.field must be a non-empty string`,
+          );
+        }
+        return { kind: "dataset", field: value.field };
+      }
       throw new InvalidCellError(
         `${path} is a column reference; a dataset cell must hold a value, object, resource, or slot reference`,
       );
