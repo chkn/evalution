@@ -283,3 +283,15 @@ describe("eval routes", () => {
     expect(res.body.def).toMatchObject({ name: "expected" });
   });
 });
+
+describe("GET /api/prompt-providers/:providerId/head", () => {
+  it("says a provider without versions isn't versioned", async () => {
+    const { call } = await makeApp();
+    expect((await call("GET", "/api/prompt-providers/fake/head")).body).toEqual(
+      { versioned: false, clean: false },
+    );
+    expect((await call("GET", "/api/prompt-providers/nope/head")).status).toBe(
+      404,
+    );
+  });
+});

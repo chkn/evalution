@@ -14,6 +14,7 @@ import type {
   ResourceInfo,
 } from "../../shared/types";
 import { executePrompt } from "../api";
+import { useStructurallyStable } from "../hooks/useStructurallyStable";
 import { AddToDatasetMenu } from "./AddToDatasetMenu";
 import { CombinedInputEditor } from "./CombinedInputEditor";
 import {
@@ -300,19 +301,13 @@ function PlaygroundExecution({
     resourceArgs,
     resourcesByUri,
   ]);
-  const sources = useMemo(
-    () =>
-      withPseudoSources(prompt.inputSources, {
-        functionParameters: prompt.functionParameters,
-        executeParameters,
-        bindings,
-      }),
-    [
-      prompt.inputSources,
-      prompt.functionParameters,
+  // Stable while only values change, so typing doesn't remount editors.
+  const sources = useStructurallyStable(
+    withPseudoSources(prompt.inputSources, {
+      functionParameters: prompt.functionParameters,
       executeParameters,
       bindings,
-    ],
+    }),
   );
 
   // Panel order — the first slot to reach a given resource `uri` owns its

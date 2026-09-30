@@ -336,7 +336,10 @@ const BUILTINS: Record<string, BuiltinCheck> = {
   },
   toolCalled: {
     check: toolCalled,
-    parameters: [primitive("name", "string"), primitive("times", "number", true)],
+    parameters: [
+      primitive("name", "string"),
+      primitive("times", "number", true),
+    ],
   },
   maxCost: { check: maxCost, parameters: [primitive("usd", "number")] },
   maxDuration: { check: maxDuration, parameters: [primitive("ms", "number")] },

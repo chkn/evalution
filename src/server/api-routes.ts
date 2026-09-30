@@ -334,6 +334,25 @@ export function setupRoutes({
     }
   });
 
+  // GET /api/prompt-providers/:providerId/head - The commit checked out and whether
+  // the tree is clean, for the eval run dialog's warnings (`specs/evals.md`
+  // §C). `{ versioned: false }` for a provider without versions.
+  app.get("/api/prompt-providers/:providerId/head", async c => {
+    const provider = promptProviders.get(c.req.param("providerId"));
+    if (!provider) return c.json({ error: "Provider not found" }, 404);
+    if (!provider.versions) return c.json({ versioned: false, clean: false });
+    try {
+      const head = await provider.versions.head();
+      return c.json({
+        versioned: true,
+        clean: head.clean,
+        ...(head.commit && { commit: head.commit }),
+      });
+    } catch (error: any) {
+      return errorResponse(c, error, 500);
+    }
+  });
+
   // GET /api/prompts/:providerId/:id/variations - Named variations and WIPs
   app.get("/api/prompts/:providerId/:id/variations", async c => {
     const { providerId, id } = c.req.param();

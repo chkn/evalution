@@ -21,8 +21,8 @@ import type {
 } from "../shared/types.ts";
 import type { TraceIngestor } from "../trace/trace-ingestor.ts";
 import type { ResolutionContext } from "./execution-inputs.ts";
-import type { CheckOutcome, CheckRun } from "./playground/check.ts";
 import type { PromptFileType } from "./file/prompt-file-type.ts";
+import type { CheckOutcome, CheckRun } from "./playground/check.ts";
 import type {
   HeadState,
   VersionHistoryOptions,

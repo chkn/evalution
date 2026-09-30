@@ -104,9 +104,10 @@ describe("built-in checks", () => {
 
   it("toolCalled, optionally an exact number of times", () => {
     expect(judge(toolCalled, { name: "create_task" })).toEqual({ pass: true });
-    expect(judge(toolCalled, { name: "create_task", times: 2 })).toMatchObject(
-      { pass: false, message: expect.stringMatching(/1 time, not 2/) },
-    );
+    expect(judge(toolCalled, { name: "create_task", times: 2 })).toMatchObject({
+      pass: false,
+      message: expect.stringMatching(/1 time, not 2/),
+    });
     expect(judge(toolCalled, { name: "success" })).toMatchObject({
       pass: false,
     });
@@ -120,7 +121,10 @@ describe("built-in checks", () => {
 
   it("refuses to guess from an incomplete trace", () => {
     expect(() =>
-      outputContains.run({ text: "x", caseSensitive: undefined }, runOf(spans, { traceIncomplete: true })),
+      outputContains.run(
+        { text: "x", caseSensitive: undefined },
+        runOf(spans, { traceIncomplete: true }),
+      ),
     ).toThrow(/didn't finish arriving/);
   });
 

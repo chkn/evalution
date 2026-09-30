@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { EvalRunProgress } from "../eval/eval-types";
 import { samePrompt } from "../shared/dataset-fields";
 import type {
   ExecuteResponse,
@@ -21,6 +22,11 @@ import type {
 import { renamePrompt } from "./api";
 import AddPromptDialog from "./components/AddPromptDialog";
 import DatasetList, { datasetKey } from "./components/DatasetList";
+import EvalList, { evalKey } from "./components/EvalList";
+import NewEvalDialog, {
+  findEvalPrompt,
+  type NewEvalSeed,
+} from "./components/NewEvalDialog";
 import {
   fromTrace,
   hasRecordedInputs,
@@ -39,9 +45,14 @@ import { Tab } from "./components/Tab";
 import { TerminalView } from "./components/TerminalView";
 import TraceList from "./components/TraceList";
 import TraceView from "./components/TraceView";
-import { DatasetsIcon as DatasetsGlyph } from "./components/trace/icons.tsx";
+import { formatTimestampCompact } from "./components/trace/format.ts";
+import {
+  DatasetsIcon as DatasetsGlyph,
+  EvalsIcon as EvalsGlyph,
+} from "./components/trace/icons.tsx";
 import { WelcomeWizard } from "./components/welcome/WelcomeWizard";
 import { useDatasets } from "./hooks/useDatasets";
+import { useEvals } from "./hooks/useEvals";
 import { usePrompts } from "./hooks/usePrompts";
 import { useResizable } from "./hooks/useResizable";
 import { useSSE } from "./hooks/useSSE";
@@ -54,6 +65,8 @@ import { requireProviderId, withSetMembership } from "./utils";
  * open a dataset.
  */
 const DatasetView = lazy(() => import("./components/DatasetView"));
+const EvalView = lazy(() => import("./components/EvalView"));
+const EvalRunView = lazy(() => import("./components/EvalRunView"));
 
 // ─── Tab / Pane model ─────────────────────────────────────────────────────────
 
@@ -82,6 +95,18 @@ interface DatasetTab {
   datasetId: string;
   label: string;
 }
+interface EvalTab {
+  type: "eval";
+  providerId: string;
+  evalId: string;
+  label: string;
+}
+interface EvalRunTab {
+  type: "eval-run";
+  providerId: string;
+  runId: string;
+  label: string;
+}
 interface WelcomeTab {
   type: "welcome";
 }
@@ -101,6 +126,8 @@ type AppTab =
   | PromptTab
   | TraceTab
   | DatasetTab
+  | EvalTab
+  | EvalRunTab
   | WelcomeTab
   | TerminalTab
   | SettingsTab;
@@ -114,11 +141,15 @@ const tabKey = (t: AppTab) =>
       ? `trace:${t.providerId}:${t.traceId}`
       : t.type === "dataset"
         ? `dataset:${t.providerId}:${t.datasetId}`
-        : t.type === "terminal"
-          ? `terminal:${t.id}`
-          : t.type === "settings"
-            ? `settings:${t.section}`
-            : WELCOME_TAB_KEY;
+        : t.type === "eval"
+          ? `eval:${t.providerId}:${t.evalId}`
+          : t.type === "eval-run"
+            ? `eval-run:${t.providerId}:${t.runId}`
+            : t.type === "terminal"
+              ? `terminal:${t.id}`
+              : t.type === "settings"
+                ? `settings:${t.section}`
+                : WELCOME_TAB_KEY;
 
 let _terminalSeq = 0;
 
@@ -191,6 +222,10 @@ function TracesIcon() {
       <line x1="6" y1="18" x2="16" y2="18" />
     </svg>
   );
+}
+
+function EvalsIcon() {
+  return <EvalsGlyph size={20} />;
 }
 
 function DatasetsIcon() {
@@ -299,6 +334,19 @@ function App() {
   } = useDatasets();
   // Bumped on every dataset change event, so open dataset views refetch.
   const [datasetVersion, setDatasetVersion] = useState(0);
+  const {
+    evals,
+    loading: evalsLoading,
+    error: evalsError,
+    refetch: refetchEvals,
+  } = useEvals();
+  // Bumped on every eval change event, so open eval views refetch.
+  const [evalVersion, setEvalVersion] = useState(0);
+  // The latest progress of every run in flight, by run id.
+  const [evalProgress, setEvalProgress] = useState<
+    Record<string, EvalRunProgress>
+  >({});
+  const [newEvalSeed, setNewEvalSeed] = useState<NewEvalSeed | null>(null);
   // Bumped on every prompt change made elsewhere, so a tab showing a version
   // or variation re-reads it.
   const [promptsVersion, setPromptsVersion] = useState(0);
@@ -309,7 +357,7 @@ function App() {
   const [rootPath, setRootPath] = useState("");
   const [configured, setConfigured] = useState(false);
   const [activeSection, setActiveSection] = useState<
-    "prompts" | "traces" | "datasets" | "settings"
+    "prompts" | "traces" | "datasets" | "evals" | "settings"
   >("prompts");
   const [showAddPrompt, setShowAddPrompt] = useState(false);
   const [sectionVisible, setSectionVisible] = useState(
@@ -374,9 +422,21 @@ function App() {
       } else if (data.type === "dataset-changed") {
         refetchDatasets();
         setDatasetVersion(v => v + 1);
+      } else if (data.type === "eval-changed") {
+        refetchEvals();
+        setEvalVersion(v => v + 1);
+      } else if (data.type === "eval-run") {
+        const { type: _, ...progress } = data;
+        setEvalProgress(prev => {
+          if (progress.status === "running") {
+            return { ...prev, [progress.runId]: progress };
+          }
+          const { [progress.runId]: __, ...rest } = prev;
+          return rest;
+        });
       }
     },
-    [refetchPrompts, refetchTraces, refetchDatasets],
+    [refetchPrompts, refetchTraces, refetchDatasets, refetchEvals],
   );
 
   // Re-pull everything the change events would have carried whenever the SSE
@@ -389,7 +449,14 @@ function App() {
     refetchPrompts();
     refetchTraces();
     refetchDatasets();
-  }, [refetchConfig, refetchPrompts, refetchTraces, refetchDatasets]);
+    refetchEvals();
+  }, [
+    refetchConfig,
+    refetchPrompts,
+    refetchTraces,
+    refetchDatasets,
+    refetchEvals,
+  ]);
 
   useSSE(handleSSEMessage, handleSSEOpen);
 
@@ -892,6 +959,13 @@ function App() {
           id: focusedActiveTab.datasetId,
         })
       : null;
+  const selectedEvalKey =
+    focusedActiveTab?.type === "eval"
+      ? evalKey({
+          providerId: focusedActiveTab.providerId,
+          id: focusedActiveTab.evalId,
+        })
+      : null;
   const selectedSettingsSection =
     focusedActiveTab?.type === "settings" ? focusedActiveTab.section : null;
   const sidebarWidth = sidebar.sizes.w;
@@ -974,6 +1048,21 @@ function App() {
               title="Datasets"
             >
               <DatasetsIcon />
+            </button>
+            <button
+              type="button"
+              className={`icon-nav-btn ${activeSection === "evals" && sectionVisible ? "active" : ""}`}
+              onClick={() => {
+                if (activeSection === "evals" && sectionVisible)
+                  setSectionVisible(false);
+                else {
+                  setActiveSection("evals");
+                  setSectionVisible(true);
+                }
+              }}
+              title="Evals"
+            >
+              <EvalsIcon />
             </button>
           </nav>
           <nav className="icon-nav-bottom">
@@ -1060,7 +1149,10 @@ function App() {
                         const name =
                           tab.type === "prompt"
                             ? (tabPrompt?.name ?? tab.promptId)
-                            : tab.type === "trace" || tab.type === "dataset"
+                            : tab.type === "trace" ||
+                                tab.type === "dataset" ||
+                                tab.type === "eval" ||
+                                tab.type === "eval-run"
                               ? tab.label
                               : tab.type === "terminal"
                                 ? tab.label
@@ -1072,6 +1164,8 @@ function App() {
                             <TracesIcon />
                           ) : tab.type === "dataset" ? (
                             <DatasetsGlyph size={14} />
+                          ) : tab.type === "eval" || tab.type === "eval-run" ? (
+                            <EvalsGlyph size={14} />
                           ) : tab.type === "welcome" ? (
                             <WelcomeIcon />
                           ) : tab.type === "terminal" ? (
@@ -1194,6 +1288,26 @@ function App() {
                         })
                       }
                       promptName={ref => findPrompt(ref)?.name}
+                      sidebarWidth={sidebarWidth}
+                      onResizeSidebar={w => sidebar.setSize("w", w)}
+                    />
+                  )}
+                  {activeSection === "evals" && (
+                    <EvalList
+                      evals={evals}
+                      loading={evalsLoading}
+                      error={evalsError}
+                      selectedKey={selectedEvalKey}
+                      onSelect={e =>
+                        openTabInFocusedPane({
+                          type: "eval",
+                          providerId: e.providerId,
+                          evalId: e.id,
+                          label: e.name,
+                        })
+                      }
+                      onNew={() => setNewEvalSeed({})}
+                      promptName={ref => findEvalPrompt(prompts, ref)?.name}
                       sidebarWidth={sidebarWidth}
                       onResizeSidebar={w => sidebar.setSize("w", w)}
                     />
@@ -1331,6 +1445,32 @@ function App() {
                               onOpenFillSource={from =>
                                 openFillSource(pane.id, from)
                               }
+                              evals={evals
+                                .filter(
+                                  e =>
+                                    findEvalPrompt(prompts, e.prompt) ===
+                                    prompt,
+                                )
+                                .map(e => ({ key: evalKey(e), name: e.name }))}
+                              onOpenEval={k => {
+                                const e = evals.find(e => evalKey(e) === k);
+                                if (e) {
+                                  openTabRightOf(pane.id, {
+                                    type: "eval",
+                                    providerId: e.providerId,
+                                    evalId: e.id,
+                                    label: e.name,
+                                  });
+                                }
+                              }}
+                              onNewEval={() =>
+                                setNewEvalSeed({
+                                  prompt: {
+                                    id: prompt.id,
+                                    providerId: prompt.providerId,
+                                  },
+                                })
+                              }
                             />
                           </div>
                         );
@@ -1358,6 +1498,64 @@ function App() {
                                   )
                                 }
                                 onDeleted={() => closeTabEverywhere(key)}
+                                onNewEval={setNewEvalSeed}
+                              />
+                            </Suspense>
+                          </div>
+                        );
+                      }
+                      if (tab.type === "eval") {
+                        return (
+                          <div key={key} style={visible}>
+                            <Suspense fallback={null}>
+                              <EvalView
+                                providerId={tab.providerId}
+                                evalId={tab.evalId}
+                                prompts={prompts}
+                                datasets={datasets}
+                                version={evalVersion}
+                                datasetVersion={datasetVersion}
+                                progress={evalProgress}
+                                onOpenRun={(run, evalName) =>
+                                  openTabRightOf(pane.id, {
+                                    type: "eval-run",
+                                    providerId: tab.providerId,
+                                    runId: run.id,
+                                    label: `${evalName} · ${formatTimestampCompact(run.startedAt)}`,
+                                  })
+                                }
+                                onOpenPrompt={prompt =>
+                                  openPromptTabRightOf(pane.id, prompt)
+                                }
+                                onOpenDataset={d =>
+                                  openTabRightOf(pane.id, {
+                                    type: "dataset",
+                                    providerId: d.providerId,
+                                    datasetId: d.id,
+                                    label: d.name,
+                                  })
+                                }
+                                onDeleted={() => closeTabEverywhere(key)}
+                              />
+                            </Suspense>
+                          </div>
+                        );
+                      }
+                      if (tab.type === "eval-run") {
+                        return (
+                          <div key={key} style={visible}>
+                            <Suspense fallback={null}>
+                              <EvalRunView
+                                providerId={tab.providerId}
+                                runId={tab.runId}
+                                version={evalVersion}
+                                progress={evalProgress[tab.runId]}
+                                onOpenTrace={(providerId, traceId) =>
+                                  openTabRightOf(
+                                    pane.id,
+                                    traceTab(providerId, traceId),
+                                  )
+                                }
                               />
                             </Suspense>
                           </div>
@@ -1378,6 +1576,7 @@ function App() {
                               )
                             }
                             findPrompt={findPrompt}
+                            evalVersion={evalVersion}
                             onDeleted={() => {
                               closeTabEverywhere(key);
                               refetchTraces();
@@ -1393,6 +1592,24 @@ function App() {
           </div>
         </div>
       </div>
+      {newEvalSeed && (
+        <NewEvalDialog
+          prompts={prompts}
+          datasets={datasets}
+          seed={newEvalSeed}
+          onClose={() => setNewEvalSeed(null)}
+          onCreated={created => {
+            setNewEvalSeed(null);
+            refetchEvals();
+            openTabInFocusedPane({
+              type: "eval",
+              providerId: created.providerId,
+              evalId: created.id,
+              label: created.name,
+            });
+          }}
+        />
+      )}
       {showAddPrompt && (
         <AddPromptDialog
           onClose={() => setShowAddPrompt(false)}

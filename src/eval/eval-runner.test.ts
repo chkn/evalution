@@ -266,9 +266,7 @@ describe("EvalRunner", () => {
     const { rows, checks } = await evals.listResults(run.id);
     const failed = rows.find(r => r.status === "error")!;
     expect(failed.error).toBe("model exploded");
-    expect(checks.find(c => c.rowId === failed.rowId)?.outcome).toBe(
-      "skipped",
-    );
+    expect(checks.find(c => c.rowId === failed.rowId)?.outcome).toBe("skipped");
   });
 
   it("reports an invalid check input as the check's error, not a fail", async () => {

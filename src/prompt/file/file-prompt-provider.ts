@@ -2,11 +2,11 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import path from "node:path";
+import { builtinCheck, builtinCheckInfos } from "../../checks/index.ts";
 import type { FileProvider } from "../../file-provider.ts";
 import { LocalFileProvider } from "../../file-provider-local.ts";
 import type { SDKAdapter } from "../../sdk/sdk-adapter.ts";
 import { isEditable } from "../../shared/helpers.ts";
-import { builtinCheck, builtinCheckInfos } from "../../checks/index.ts";
 import type {
   AddPromptContext,
   CheckInfo,

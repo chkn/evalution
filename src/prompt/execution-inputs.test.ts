@@ -656,7 +656,9 @@ describe("findInputCycle", () => {
           taskId: {
             kind: "resource",
             uri: "pg.ts#seeded",
-            args: { root: { kind: "input", half: "execute", path: "ctx.root" } },
+            args: {
+              root: { kind: "input", half: "execute", path: "ctx.root" },
+            },
           },
         },
         executeInputs: {

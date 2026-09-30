@@ -89,7 +89,9 @@ describe("lease.resolveDeclared", () => {
     const lease = reg.lease();
     await expect(
       lease.resolveDeclared(c.inputs, uri, async () => ({ title: 7 })),
-    ).rejects.toThrow(/Check '.*#c': invalid value for 'title' — expected a string/);
+    ).rejects.toThrow(
+      /Check '.*#c': invalid value for 'title' — expected a string/,
+    );
     await lease.release();
   });
 

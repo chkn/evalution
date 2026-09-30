@@ -119,6 +119,12 @@ interface Props {
   fill?: PanelFill;
   /** Opens where a fill came from — the notice's "trace ↗" / "dataset ↗". */
   onOpenFillSource?: (from: PanelFillSource) => void;
+  /** The evals that test this prompt, for the toolbar's Evals menu. */
+  evals?: { key: string; name: string }[];
+  /** Opens one of {@link evals}, by key. */
+  onOpenEval?: (key: string) => void;
+  /** "New eval…" — opens the dialog with this prompt chosen. */
+  onNewEval?: () => void;
 }
 
 function stableKey(value: unknown): string {
@@ -185,6 +191,9 @@ function PlaygroundContent({
   onExecuted,
   fill,
   onOpenFillSource,
+  evals,
+  onOpenEval,
+  onNewEval,
 }: Props) {
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -510,6 +519,26 @@ function PlaygroundContent({
                   ×
                 </button>
               </div>
+            )}
+            {onNewEval && (
+              <select
+                className="pg-evals-menu"
+                aria-label="Evals"
+                title="Evals of this prompt"
+                value=""
+                onChange={e => {
+                  if (e.target.value === "new") onNewEval();
+                  else if (e.target.value) onOpenEval?.(e.target.value);
+                }}
+              >
+                <option value="">Evals ▾</option>
+                {evals?.map(ev => (
+                  <option key={ev.key} value={ev.key}>
+                    Run {ev.name} ▸
+                  </option>
+                ))}
+                <option value="new">New eval…</option>
+              </select>
             )}
             {versioned && (
               <PromptRefActions
