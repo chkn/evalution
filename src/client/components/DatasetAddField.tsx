@@ -4,13 +4,13 @@
 import { useCallback, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { shortSyntax } from "ts-proppy/react";
+import { PRIMITIVE_FIELD_TYPES } from "../../shared/dataset-fields";
 import type { NormalizedPrompt, PromptID } from "../../shared/types";
 import { addDatasetField } from "../api";
 import {
   addFieldRequest,
   choiceFor,
   defaultFieldName,
-  PRIMITIVE_FIELD_TYPES,
   parameterOptionGroups,
 } from "./dataset-field-options";
 import { useAnchoredPopover } from "./use-anchored-popover";
@@ -35,7 +35,8 @@ interface Props {
  * it opens: a name box and a type picker — `string`, `number`, `boolean`, or
  * the type of a prompt parameter, which the server looks up and copies. A
  * rejected add (a duplicate, say) is shown in the popover. Rendered as
- * Glide's `rightElement`, so it stays put while the columns scroll. See
+ * Glide's `rightElement`, right after the last column, so it scrolls with
+ * the grid. See
  * `specs/datasets.md` §P.1.
  */
 export function DatasetAddField({
@@ -138,7 +139,7 @@ export function DatasetAddField({
               ))}
               {groups.map(group => (
                 <optgroup
-                  key={`${group.options[0].providerId}\u0000${group.options[0].promptId}`}
+                  key={group.key}
                   label={`Same type as a parameter of ${group.label}${group.linked ? " (linked)" : ""}`}
                 >
                   {group.options.map(option => (

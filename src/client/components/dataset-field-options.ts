@@ -7,14 +7,13 @@
  * body each one becomes. Pure; no React. See `specs/datasets.md` §P.1.
  */
 
+import {
+  type AddDatasetFieldRequest,
+  isPrimitiveFieldType,
+  type PrimitiveFieldType,
+  samePrompt,
+} from "../../shared/dataset-fields";
 import type { NormalizedPrompt, PropDefinition } from "../../shared/types";
-import type { AddDatasetFieldRequest } from "../api";
-
-/** The types a field can be given by hand. */
-export const PRIMITIVE_FIELD_TYPES = ["string", "number", "boolean"] as const;
-
-/** One of {@link PRIMITIVE_FIELD_TYPES}. */
-export type PrimitiveFieldType = (typeof PRIMITIVE_FIELD_TYPES)[number];
 
 /** A prompt parameter whose type a new field can copy. */
 export interface ParameterOption {
@@ -31,18 +30,13 @@ export interface ParameterOption {
 
 /** One prompt's parameters, as a group in the picker. */
 export interface ParameterOptionGroup {
+  /** Unique among the groups: the prompt's provider and id. */
+  key: string;
   /** The prompt's display name. */
   label: string;
   /** Whether this is the dataset's linked prompt, which is listed first. */
   linked: boolean;
   options: ParameterOption[];
-}
-
-function samePrompt(
-  a: Pick<NormalizedPrompt, "id" | "providerId">,
-  b: Pick<NormalizedPrompt, "id" | "providerId"> | undefined,
-): boolean {
-  return !!b && a.id === b.id && a.providerId === b.providerId;
 }
 
 /**
@@ -76,7 +70,12 @@ export function parameterOptionGroups(
     ];
     if (options.length === 0) continue;
     const isLinked = samePrompt(prompt, linked);
-    groups.push({ label: prompt.name, linked: isLinked, options });
+    groups.push({
+      key: JSON.stringify([providerId, promptId]),
+      label: prompt.name,
+      linked: isLinked,
+      options,
+    });
   }
   // Stable, so the rest keep their order.
   return groups.sort((a, b) => Number(b.linked) - Number(a.linked));
@@ -95,9 +94,7 @@ export function choiceFor(
   value: string,
   groups: readonly ParameterOptionGroup[],
 ): FieldTypeChoice | undefined {
-  if (PRIMITIVE_FIELD_TYPES.includes(value as PrimitiveFieldType)) {
-    return { kind: "primitive", type: value as PrimitiveFieldType };
-  }
+  if (isPrimitiveFieldType(value)) return { kind: "primitive", type: value };
   for (const group of groups) {
     const option = group.options.find(o => o.value === value);
     if (option) return { kind: "parameter", option };

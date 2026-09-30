@@ -10,6 +10,7 @@
  */
 
 import { stripReceipts } from "../../shared/dataset-cells";
+import { matchKey, portableDef } from "../../shared/dataset-fields";
 import type {
   Dataset,
   DatasetField,
@@ -50,25 +51,6 @@ export interface SkippedInput {
 export interface PartialExecuteRequest {
   functionInputs: Record<string, ExecutionInput>;
   executeInputs: Record<string, ExecutionInput>;
-}
-
-/**
- * The matching rule, and the only one: a source input and a target slot
- * match when their `name` is equal **and** their `type.syntax` is equal.
- * Plain string comparison over data the client already has — no checker —
- * and it fails closed.
- */
-export function matchKey(def: PropDefinition): string {
-  return `${def.name}\u0000${def.type?.syntax ?? ""}`;
-}
-
-/**
- * A definition fit for a dataset schema: the file-specific source spans
- * dropped, since a dataset belongs to no file.
- */
-function portableDef(def: PropDefinition): PropDefinition {
-  const { valueSpan: _v, fullSpan: _f, ...rest } = def;
-  return rest;
 }
 
 /**

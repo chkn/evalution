@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { AddDatasetFieldRequest } from "../shared/dataset-fields";
 import type { SetupTask } from "../shared/setup-task";
 import type {
   AddPromptContext,
@@ -610,23 +611,6 @@ export async function addDatasetRows(
   await throwIfError(res);
   return res.json();
 }
-
-/**
- * What {@link addDatasetField} sends: a name and a primitive type, or a
- * prompt parameter for the server to copy the type of (named after it unless
- * `name` is given). Never a definition — see `specs/datasets.md` §P.1.
- */
-export type AddDatasetFieldRequest =
-  | { name: string; type: "string" | "number" | "boolean" }
-  | {
-      from: {
-        providerId: string;
-        promptId: string;
-        half?: "function" | "execute";
-        path: string;
-      };
-      name?: string;
-    };
 
 /**
  * Appends a field to a dataset. Rejected (with the server's message) when a

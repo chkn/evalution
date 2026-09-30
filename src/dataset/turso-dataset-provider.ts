@@ -11,6 +11,7 @@
 import type { Database } from "@tursodatabase/sync";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
+import { matchKey } from "../shared/dataset-fields.ts";
 import type { ExecutionInput, PropDefinition } from "../shared/types.ts";
 import type { PromptID } from "../trace/trace-types.ts";
 import {
@@ -423,9 +424,7 @@ export class TursoDatasetProvider implements DatasetProvider {
         const fields = JSON.parse(row.fields) as DatasetField[];
         // Unique by §B's key, as derived fields are: the same name with a
         // different type is a different field.
-        const exists = fields.some(
-          f => f.def.name === def.name && f.def.type.syntax === def.type.syntax,
-        );
+        const exists = fields.some(f => matchKey(f.def) === matchKey(def));
         if (exists) {
           throw new DatasetValidationError(
             `\`${def.name}: ${def.type.syntax}\` already exists`,

@@ -22,6 +22,12 @@ import type {
   DatasetSummary,
 } from "../../dataset/dataset-types.ts";
 import { InvalidCellError, parseCell } from "../../shared/dataset-cells.ts";
+import {
+  isPrimitiveFieldType,
+  PRIMITIVE_FIELD_TYPES,
+  type PrimitiveFieldType,
+  portableDef,
+} from "../../shared/dataset-fields.ts";
 import type {
   ExecutionInput,
   NormalizedPrompt,
@@ -338,12 +344,6 @@ export async function handleAddRows(
   }
 }
 
-/** The types a field can be given by hand: the ones whose syntax is their structure. */
-const PRIMITIVE_FIELD_TYPES = ["string", "number", "boolean"] as const;
-
-/** One of {@link PRIMITIVE_FIELD_TYPES}. */
-export type PrimitiveFieldType = (typeof PRIMITIVE_FIELD_TYPES)[number];
-
 /**
  * The parameters a `{ from }` field lookup can copy — the server's own view of
  * a prompt, never one the client sends.
@@ -399,16 +399,6 @@ function defAtPath(
 }
 
 /**
- * A copied definition fit for a dataset: the file-specific source spans
- * dropped, since a dataset belongs to no file — as `named-inputs.ts` does for
- * the fields a new dataset is created with.
- */
-function portableDef(def: PropDefinition): PropDefinition {
-  const { valueSpan: _v, fullSpan: _f, ...rest } = def;
-  return rest;
-}
-
-/**
  * The definition a `POST …/fields` body asks for: built for `{ name, type }`,
  * looked up for `{ from }`. Never a definition the client wrote.
  */
@@ -427,12 +417,12 @@ async function parseNewField(
   if (body.from === undefined) {
     const name = parseName(body);
     const type = body.type;
-    if (!PRIMITIVE_FIELD_TYPES.includes(type as PrimitiveFieldType)) {
+    if (!isPrimitiveFieldType(type)) {
       throw new BadRequest(
         `type must be one of ${PRIMITIVE_FIELD_TYPES.join(", ")}`,
       );
     }
-    return primitiveFieldDef(name, type as PrimitiveFieldType);
+    return primitiveFieldDef(name, type);
   }
 
   if (body.type !== undefined) {
