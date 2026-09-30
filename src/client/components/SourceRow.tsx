@@ -7,6 +7,7 @@ import type { PropDefinition, ResourceInfo } from "../../shared/types";
 import { ExecutionInputEditor } from "./ExecutionInputEditor";
 import { rootResourceUri, type Selections } from "./execution-input-state";
 import { jsonToPropValue } from "./json-to-prop-value";
+import { isPseudoUri } from "./pseudo-sources";
 import {
   MAX_RESOURCE_ARG_DEPTH,
   nested,
@@ -115,8 +116,14 @@ export function SourceRow({
     () => new Map(resources.map(r => [r.uri, r])),
     [resources],
   );
+  const pseudo =
+    selected && isPseudoUri(selected.uri)
+      ? (argsContext?.describePseudo?.(selected.uri, propDef.type) ?? {
+          note: "",
+        })
+      : undefined;
   const sharedWith =
-    selected && argsContext
+    selected && !pseudo && argsContext
       ? argsContext.claimed.get(rootResourceUri(selected.uri, resourcesByUri))
       : undefined;
   const sameInstanceAs =
@@ -129,7 +136,24 @@ export function SourceRow({
   const row = (
     <div className="pg-slot" data-row-path={argsContext?.path}>
       <div className="pg-slot-body">
-        {selected ? (
+        {selected && pseudo ? (
+          <span
+            className={
+              "pg-slot-chip pg-slot-chip-pseudo" +
+              (pseudo.warning ? " pg-slot-chip-warning" : "")
+            }
+            title={
+              pseudo.warning ? `Type mismatch: ${pseudo.warning}` : undefined
+            }
+          >
+            {selected.label}
+            {(pseudo.warning || pseudo.note) && (
+              <em className="pg-slot-chip-note">
+                {pseudo.warning ? `⚠ ${pseudo.warning}` : pseudo.note}
+              </em>
+            )}
+          </span>
+        ) : selected ? (
           // The real value beats naming it: only a live handle or a run-only
           // resource (no `ResourceInfo.value` — see `ResourceRegistry.describe`)
           // falls back to the chip.
@@ -209,7 +233,7 @@ export function SourceRow({
   );
 
   const argsForm =
-    selected && argsContext ? (
+    selected && !pseudo && argsContext ? (
       <ResourceArgumentsForm
         selected={selected}
         resources={resources}

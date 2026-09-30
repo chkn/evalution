@@ -89,7 +89,9 @@ export function InputView({ input }: { input: ExecutionInput }) {
       );
     case "dataset":
     case "input":
-      return <code className="dataset-detail-scalar">{previewCell(input)}</code>;
+      return (
+        <code className="dataset-detail-scalar">{previewCell(input)}</code>
+      );
   }
 }
 

@@ -41,6 +41,7 @@ import {
   type PartialExecuteRequest,
   type SkippedInput,
 } from "./named-inputs";
+import { describePseudoSource, withPseudoSources } from "./pseudo-sources";
 import {
   computeClaims,
   type ResourceArgsContext,
@@ -265,15 +266,53 @@ function PlaygroundExecution({
   });
 
   const executeParameters = prompt.executeParameters ?? NO_PARAMETERS;
-  const sources = prompt.inputSources;
-  const broken = brokenResources(sources);
+  const broken = brokenResources(prompt.inputSources);
 
   const resourcesByUri = useMemo(
     () =>
       new Map<string, ResourceInfo>(
-        (sources?.resources ?? []).map(r => [r.uri, r]),
+        (prompt.inputSources?.resources ?? []).map(r => [r.uri, r]),
       ),
-    [sources],
+    [prompt.inputSources],
+  );
+
+  // The other slots, as sources for `input` references (`specs/evals.md`
+  // §B.2.1): offered where their type fits and no cycle would close.
+  const bindings = useMemo(() => {
+    const resolve = (uri: string) =>
+      resourceArgsFor(uri, resourceArgs, resourcesByUri);
+    const named = (defs: readonly PropDefinition[], sel: Selections) =>
+      Object.fromEntries(
+        defs.flatMap(d => {
+          const input = toExecutionInput(sel[d.name], resolve);
+          return input ? [[d.name, input] as const] : [];
+        }),
+      );
+    return {
+      functionInputs: named(prompt.functionParameters, functionSelections),
+      executeInputs: named(executeParameters, executeSelections),
+    };
+  }, [
+    prompt.functionParameters,
+    executeParameters,
+    functionSelections,
+    executeSelections,
+    resourceArgs,
+    resourcesByUri,
+  ]);
+  const sources = useMemo(
+    () =>
+      withPseudoSources(prompt.inputSources, {
+        functionParameters: prompt.functionParameters,
+        executeParameters,
+        bindings,
+      }),
+    [
+      prompt.inputSources,
+      prompt.functionParameters,
+      executeParameters,
+      bindings,
+    ],
   );
 
   // Panel order — the first slot to reach a given resource `uri` owns its
@@ -365,9 +404,14 @@ function PlaygroundExecution({
   const argsContextBase: Omit<ResourceArgsContext, "path"> = {
     resourceArgs,
     onResourceArgsChange,
-    resourceSlots: sources?.resourceSlots ?? {},
+    resourceSlots: sources.resourceSlots ?? {},
     claimed,
     depth: 0,
+    describePseudo: (uri, type) =>
+      describePseudoSource(uri, type, {
+        functionParameters: prompt.functionParameters,
+        executeParameters,
+      }),
   };
 
   /** Builds the `args` a chosen resource should carry, from the current {@link resourceArgs} state. */
@@ -471,7 +515,7 @@ function PlaygroundExecution({
         !param.optional &&
         param.defaultValue === undefined
       ) {
-        setError(missingInputMessage(param, !!sources));
+        setError(missingInputMessage(param, !!prompt.inputSources));
         return null;
       }
     }
@@ -484,7 +528,7 @@ function PlaygroundExecution({
       );
       if (input) executeInputs[param.name] = input;
       else if (requireAll && !param.optional) {
-        setError(missingInputMessage(param, !!sources));
+        setError(missingInputMessage(param, !!prompt.inputSources));
         return null;
       }
     }
