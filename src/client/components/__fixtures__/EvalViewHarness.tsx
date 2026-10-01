@@ -6,22 +6,27 @@ import EvalView from "../EvalView";
 
 /**
  * Mounts EvalView for one eval, with `prompts` and `datasets` loaded. Wrapped
- * in a fixed-height div, as `DatasetViewHarness` is, since the view fills its
- * pane's height.
+ * in a fixed-size div, as `PlaygroundContentHarness` is: the view fills its
+ * pane, and its layout answers to the pane's width.
  */
 export function EvalViewHarness({
   providerId,
   evalId,
   prompts,
   datasets,
+  width = 900,
+  height = 700,
 }: {
   providerId: string;
   evalId: string;
   prompts: NormalizedPrompt[];
   datasets: DatasetSummary[];
+  /** The pane's size: what the layout answers to, as in `PlaygroundContentHarness`. */
+  width?: number;
+  height?: number;
 }) {
   return (
-    <div style={{ height: "700px" }}>
+    <div style={{ width, height }}>
       <EvalView
         providerId={providerId}
         evalId={evalId}

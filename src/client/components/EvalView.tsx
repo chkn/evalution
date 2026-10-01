@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { shortSyntax } from "ts-proppy/react";
 import type { DatasetField } from "../../dataset/dataset-types";
 import type {
@@ -19,6 +25,7 @@ import type {
   DatasetSummary,
   ExecutionInput,
   NormalizedPrompt,
+  PromptInputSources,
   PropDefinition,
   ResourceInfo,
   VariationInfo,
@@ -39,6 +46,7 @@ import {
 } from "../api";
 import { useStructurallyStable } from "../hooks/useStructurallyStable";
 import { datasetKey } from "./DatasetList";
+import { ExecPanelShell, PromptSplit } from "./ExecPanelShell";
 import { ExecutionInputEditor } from "./ExecutionInputEditor";
 import { evalProblems, prefillBindings } from "./eval-bindings";
 import { formatRate, passRate } from "./eval-summary";
@@ -70,7 +78,13 @@ import {
   DatasetsIcon as SmallDatasetsIcon,
   TrashIcon,
 } from "./trace/icons.tsx";
-import { useAnchoredPopover } from "./use-anchored-popover";
+
+/** Sources for a check with none: no resources, no slots. */
+const EMPTY_SOURCES: PromptInputSources = {
+  resources: [],
+  functionSlots: {},
+  executeSlots: {},
+};
 
 /** How long after the last edit a change is saved. */
 const SAVE_DELAY_MS = 400;
@@ -569,311 +583,376 @@ function EvalView({
   }
   if (!def) return <div className="eval-view" />;
 
-  const renderSlots = (defs: readonly PropDefinition[], which: "fn" | "exec") =>
-    defs.map(param => (
-      <div className="pg-exec-param" key={`${which}:${param.name}`}>
-        <div className="pg-exec-param-label">
-          <span className="pg-exec-param-name">
-            {which === "exec" ? `execute.${param.name}` : param.name}
-            {param.optional ? "" : " *"}
-          </span>
-          <span className="pg-exec-param-type" title={param.type.syntax}>
-            {shortSyntax(param.type.syntax, 60)}
-          </span>
-          {matched.has(`${which}:${param.name}`) && (
-            <span
-              className="eval-matched"
-              title="Filled in for you — change it if it's wrong"
-            >
-              matched
-            </span>
-          )}
-        </div>
-        <ExecutionInputEditor
-          propDef={param}
-          selection={state[which][param.name] ?? {}}
-          onChange={selection => changeSlot(which)(param.name, selection)}
-          resources={sources.resources}
-          slots={which === "fn" ? sources.functionSlots : sources.executeSlots}
-          argsContext={argsContextFor(`${which}.${param.name}`)}
-        />
-      </div>
-    ));
-
-  return (
-    <div className="eval-view">
-      <div className="trace-view-header eval-view-header">
-        <div className="trace-view-header-row">
-          <div className="trace-view-title">
-            <EvalsIcon size={14} />
-            {renaming ? (
-              <form
-                className="dataset-view-rename"
-                onSubmit={e => {
-                  e.preventDefault();
-                  submitRename();
-                }}
-              >
-                <input
-                  autoFocus
-                  aria-label="Eval name"
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  onFocus={e => e.target.select()}
-                  onBlur={submitRename}
-                  onKeyDown={e => {
-                    if (e.key === "Escape") {
-                      setName(def.name);
-                      setRenaming(false);
-                    }
-                  }}
-                />
-              </form>
-            ) : (
-              <span
-                className="trace-view-name"
-                onDoubleClick={() => setRenaming(true)}
-                title="Double-click to rename"
-              >
-                {def.name}
-              </span>
-            )}
-          </div>
-          <div className="trace-view-header-actions">
-            <button
-              type="button"
-              className="trace-view-prompt-btn trace-view-delete-btn"
-              onClick={handleDelete}
-              title="Delete eval"
-              aria-label="Delete eval"
-            >
-              <TrashIcon />
-            </button>
-          </div>
-        </div>
-        <div className="trace-view-meta eval-view-pickers">
-          <label className="trace-view-meta-item" title="Prompt under test">
-            <PromptLinkIcon />
-            <select
-              className="eval-view-picker"
-              aria-label="Prompt"
-              value={prompt ? `${prompt.providerId}:${prompt.id}` : ""}
-              onChange={e => {
-                const next = prompts.find(
-                  p => `${p.providerId}:${p.id}` === e.target.value,
-                );
-                if (next?.providerId) {
-                  save(
-                    {
-                      prompt: {
-                        id: next.globalId ?? next.id,
-                        providerId: next.providerId,
-                      },
-                    },
-                    true,
-                  );
-                }
-              }}
-            >
-              {!prompt && <option value="">(missing prompt)</option>}
-              {prompts.map(p => (
-                <option
-                  key={`${p.providerId}:${p.id}`}
-                  value={`${p.providerId}:${p.id}`}
-                >
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            {prompt && (
-              <button
-                type="button"
-                className="eval-view-open"
-                title="Open the prompt"
-                onClick={() => onOpenPrompt(prompt)}
-              >
-                ↗
-              </button>
-            )}
-          </label>
-          <label
-            className="trace-view-meta-item"
-            title="Dataset whose rows run"
+  /** One field of the Inputs panel: a prompt slot or a check's parameter. */
+  const renderField = (
+    param: PropDefinition,
+    {
+      key,
+      label,
+      matchedKey,
+      selection,
+      onChange,
+      sources: from,
+      slots,
+      path,
+    }: {
+      key: string;
+      label: string;
+      matchedKey: string;
+      selection: SlotSelection;
+      onChange: (selection: SlotSelection) => void;
+      sources: PromptInputSources;
+      slots: PromptInputSources["functionSlots"];
+      path: string;
+    },
+  ) => (
+    <div className="pg-exec-param" key={key}>
+      <div className="pg-exec-param-label">
+        <span className="pg-exec-param-name">
+          {label}
+          {param.optional ? "" : " *"}
+        </span>
+        <span className="pg-exec-param-type" title={param.type.syntax}>
+          {shortSyntax(param.type.syntax, 60)}
+        </span>
+        {matched.has(matchedKey) && (
+          <span
+            className="eval-matched"
+            title="Filled in for you — change it if it's wrong"
           >
-            <SmallDatasetsIcon />
-            <select
-              className="eval-view-picker"
-              aria-label="Dataset"
-              value={dataset ? datasetKey(dataset) : ""}
-              onChange={e => {
-                const next = datasets.find(
-                  d => datasetKey(d) === e.target.value,
-                );
-                if (next) {
-                  save(
-                    { dataset: { providerId: next.providerId, id: next.id } },
-                    true,
-                  );
+            matched
+          </span>
+        )}
+      </div>
+      <ExecutionInputEditor
+        propDef={param}
+        selection={selection}
+        onChange={onChange}
+        resources={from.resources}
+        slots={slots}
+        argsContext={argsContextFor(path)}
+      />
+    </div>
+  );
+
+  const renderSlots = (defs: readonly PropDefinition[], which: "fn" | "exec") =>
+    defs.map(param =>
+      renderField(param, {
+        key: `${which}:${param.name}`,
+        label: which === "exec" ? `execute.${param.name}` : param.name,
+        matchedKey: `${which}:${param.name}`,
+        selection: state[which][param.name] ?? {},
+        onChange: selection => changeSlot(which)(param.name, selection),
+        sources,
+        slots: which === "fn" ? sources.functionSlots : sources.executeSlots,
+        path: `${which}.${param.name}`,
+      }),
+    );
+
+  const checkLabelOf = (check: EvalCheck) =>
+    check.label ??
+    checkInfos.find(c => c.uri === check.uri)?.label ??
+    check.uri;
+
+  const hasChecksWithParams = def.checks.some(
+    c => (checkInfos.find(i => i.uri === c.uri)?.parameters.length ?? 0) > 0,
+  );
+
+  const header = (
+    <div className="pg-prompt-header eval-header">
+      <div className="pg-prompt-header-row">
+        <EvalsIcon size={14} />
+        {renaming ? (
+          <form
+            className="dataset-view-rename"
+            onSubmit={e => {
+              e.preventDefault();
+              submitRename();
+            }}
+          >
+            <input
+              autoFocus
+              aria-label="Eval name"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              onFocus={e => e.target.select()}
+              onBlur={submitRename}
+              onKeyDown={e => {
+                if (e.key === "Escape") {
+                  setName(def.name);
+                  setRenaming(false);
                 }
               }}
-            >
-              {!dataset && <option value="">(missing dataset)</option>}
-              {datasets.map(d => (
-                <option key={datasetKey(d)} value={datasetKey(d)}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-            {dataset && (
+            />
+          </form>
+        ) : (
+          <span
+            className="pg-prompt-name"
+            onDoubleClick={() => setRenaming(true)}
+            title="Double-click to rename"
+          >
+            {def.name}
+          </span>
+        )}
+        <div className="pg-prompt-header-right">
+          {error && (
+            <div className="pg-header-error">
+              {error}
               <button
                 type="button"
-                className="eval-view-open"
-                title="Open the dataset"
-                onClick={() => onOpenDataset(dataset)}
+                className="pg-dismiss"
+                onClick={() => setError(null)}
               >
-                ↗
+                ×
               </button>
-            )}
-          </label>
-        </div>
-      </div>
-
-      {error && (
-        <div className="pg-exec-error eval-view-action-error">
-          {error}
+            </div>
+          )}
           <button
             type="button"
-            className="pg-dismiss"
-            onClick={() => setError(null)}
+            className="pg-header-btn eval-delete-btn"
+            onClick={handleDelete}
+            title="Delete eval"
+            aria-label="Delete eval"
           >
-            ×
+            <TrashIcon />
           </button>
         </div>
-      )}
+      </div>
+      <div className="eval-header-links">
+        <button
+          type="button"
+          className="eval-header-link"
+          disabled={!prompt}
+          title="Open the prompt"
+          onClick={() => prompt && onOpenPrompt(prompt)}
+        >
+          <PromptLinkIcon />
+          <span className="eval-header-link-name">
+            {prompt?.name ?? "Prompt missing"}
+          </span>
+          {prompt && "↗"}
+        </button>
+        <button
+          type="button"
+          className="eval-header-link"
+          disabled={!dataset}
+          title="Open the dataset"
+          onClick={() => dataset && onOpenDataset(dataset)}
+        >
+          <SmallDatasetsIcon />
+          <span className="eval-header-link-name">
+            {dataset?.name ?? "Dataset missing"}
+          </span>
+          {dataset && "↗"}
+        </button>
+      </div>
+    </div>
+  );
 
-      <div className="eval-view-body">
-        <section className="eval-section">
-          <h4 className="eval-section-title">Inputs</h4>
-          {prompt ? (
-            <>
-              {renderSlots(functionParameters, "fn")}
-              {executeParameters.length > 0 && (
-                <>
-                  <div className="pg-exec-section" />
-                  {renderSlots(executeParameters, "exec")}
-                </>
-              )}
-              {functionParameters.length + executeParameters.length === 0 && (
-                <p className="eval-empty">This prompt takes no inputs.</p>
-              )}
-            </>
-          ) : (
-            <p className="eval-empty">Choose a prompt above.</p>
-          )}
-        </section>
-
-        <section className="eval-section">
-          <h4 className="eval-section-title">Checks</h4>
-          {def.checks.map(check => (
-            <CheckEditor
-              key={check.id}
-              check={check}
-              info={checkInfos.find(c => c.uri === check.uri)}
-              selections={state.checks[check.id] ?? {}}
-              onChange={changeCheckParam(check)}
-              onChangeCheck={patch => changeCheck(check.id, patch)}
-              onRemove={() => removeCheck(check.id)}
-              sources={checkSources[check.id] ?? {}}
-              argsContextFor={argsContextFor}
-              matched={matched}
-            />
-          ))}
-          <AddCheckMenu checks={checkInfos} onAdd={addCheck} />
-        </section>
-
-        <section className="eval-section">
-          {problems.length > 0 && (
-            <ul className="eval-problems" aria-label="Problems">
-              {problems.map(p => (
-                <li key={p}>{p}</li>
-              ))}
-            </ul>
-          )}
-          <RunControl
-            prompt={prompt}
-            disabled={problems.length > 0}
-            onRun={async options => {
-              await flush();
-              try {
-                // The run's own change event refetches the runs list.
-                await startEvalRun(providerId, evalId, options);
-              } catch (err: any) {
-                setError(
-                  err instanceof EvalRunRefused
-                    ? `Can't run: ${err.problems.join("; ")}`
-                    : err.message,
+  const editor = (
+    <div className="eval-editor">
+      <section className="eval-section">
+        <h4 className="eval-section-title">What it runs</h4>
+        <label className="eval-select-row">
+          <span>Prompt</span>
+          <select
+            className="eval-select"
+            aria-label="Prompt"
+            value={prompt ? `${prompt.providerId}:${prompt.id}` : ""}
+            onChange={e => {
+              const next = prompts.find(
+                p => `${p.providerId}:${p.id}` === e.target.value,
+              );
+              if (next?.providerId) {
+                save(
+                  {
+                    prompt: {
+                      id: next.globalId ?? next.id,
+                      providerId: next.providerId,
+                    },
+                  },
+                  true,
                 );
               }
             }}
-          />
-        </section>
-
-        <section className="eval-section">
-          <h4 className="eval-section-title">Runs</h4>
-          {runs.length === 0 ? (
-            <p className="eval-empty">No runs yet.</p>
-          ) : (
-            <RunList
-              runs={runs}
-              progress={progress}
-              onOpen={run => onOpenRun(run, def.name)}
-              onCancel={run =>
-                cancelEvalRun(providerId, run.id).catch(err =>
-                  setError(err.message),
-                )
+          >
+            {!prompt && <option value="">(missing prompt)</option>}
+            {prompts.map(p => (
+              <option
+                key={`${p.providerId}:${p.id}`}
+                value={`${p.providerId}:${p.id}`}
+              >
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="eval-select-row">
+          <span>Dataset</span>
+          <select
+            className="eval-select"
+            aria-label="Dataset"
+            value={dataset ? datasetKey(dataset) : ""}
+            onChange={e => {
+              const next = datasets.find(d => datasetKey(d) === e.target.value);
+              if (next) {
+                save(
+                  { dataset: { providerId: next.providerId, id: next.id } },
+                  true,
+                );
               }
-            />
+            }}
+          >
+            {!dataset && <option value="">(missing dataset)</option>}
+            {datasets.map(d => (
+              <option key={datasetKey(d)} value={datasetKey(d)}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </section>
+
+      <section className="eval-section">
+        <h4 className="eval-section-title">Checks</h4>
+        {def.checks.length === 0 && (
+          <p className="eval-empty">
+            Nothing judges a run yet. Add a check to say what a good answer is.
+          </p>
+        )}
+        {def.checks.map(check => (
+          <CheckEditor
+            key={check.id}
+            check={check}
+            info={checkInfos.find(c => c.uri === check.uri)}
+            onChangeCheck={patch => changeCheck(check.id, patch)}
+            onRemove={() => removeCheck(check.id)}
+          />
+        ))}
+        <AddCheckMenu checks={checkInfos} onAdd={addCheck} />
+      </section>
+
+      <section className="eval-section">
+        <h4 className="eval-section-title">Runs</h4>
+        {runs.length === 0 ? (
+          <p className="eval-empty">No runs yet. Run it from the panel.</p>
+        ) : (
+          <RunList
+            runs={runs}
+            progress={progress}
+            onOpen={run => onOpenRun(run, def.name)}
+            onCancel={run =>
+              cancelEvalRun(providerId, run.id).catch(err =>
+                setError(err.message),
+              )
+            }
+          />
+        )}
+      </section>
+    </div>
+  );
+
+  const panel = (
+    <ExecPanelShell
+      title="Inputs"
+      footer={
+        <RunControl
+          prompt={prompt}
+          disabled={problems.length > 0}
+          problems={problems}
+          onRun={async options => {
+            await flush();
+            try {
+              // The run's own change event refetches the runs list.
+              await startEvalRun(providerId, evalId, options);
+            } catch (err: any) {
+              setError(
+                err instanceof EvalRunRefused
+                  ? `Can't run: ${err.problems.join("; ")}`
+                  : err.message,
+              );
+            }
+          }}
+        />
+      }
+    >
+      {prompt ? (
+        <>
+          {renderSlots(functionParameters, "fn")}
+          {executeParameters.length > 0 && (
+            <>
+              <div className="pg-exec-section" />
+              {renderSlots(executeParameters, "exec")}
+            </>
           )}
-        </section>
-      </div>
+          {functionParameters.length + executeParameters.length === 0 && (
+            <p className="eval-empty">This prompt takes no inputs.</p>
+          )}
+        </>
+      ) : (
+        <p className="eval-empty">Choose a prompt.</p>
+      )}
+      {hasChecksWithParams &&
+        def.checks.map(check => {
+          const info = checkInfos.find(c => c.uri === check.uri);
+          if (!info?.parameters.length) return null;
+          return (
+            <Fragment key={check.id}>
+              <div className="pg-exec-section" />
+              <div className="eval-panel-group" title={check.uri}>
+                {checkLabelOf(check)}
+              </div>
+              {info.parameters.map(param =>
+                renderField(param, {
+                  key: `check:${check.id}:${param.name}`,
+                  label: param.name,
+                  matchedKey: `check:${check.id}:${param.name}`,
+                  selection: state.checks[check.id]?.[param.name] ?? {},
+                  onChange: selection =>
+                    changeCheckParam(check)(param.name, selection),
+                  sources: checkSources[check.id] ?? EMPTY_SOURCES,
+                  slots: checkSources[check.id]?.functionSlots ?? {},
+                  path: `check.${check.id}.${param.name}`,
+                }),
+              )}
+            </Fragment>
+          );
+        })}
+    </ExecPanelShell>
+  );
+
+  return (
+    <div className="eval-view">
+      <PromptSplit header={header} editor={editor} panel={panel} />
     </div>
   );
 }
 
-/** One check in the editor: its parameters, threshold, and a remove button. */
+/** One check in the editor: its label, threshold, and a remove button. Its parameters are fields of the Inputs panel. */
 function CheckEditor({
   check,
   info,
-  selections,
-  onChange,
   onChangeCheck,
   onRemove,
-  sources,
-  argsContextFor,
-  matched,
 }: {
   check: EvalCheck;
   info: CheckInfo | undefined;
-  selections: Selections;
-  onChange: (name: string, selection: SlotSelection) => void;
   onChangeCheck: (patch: Partial<EvalCheck>) => void;
   onRemove: () => void;
-  sources: ReturnType<typeof checkParameterSources>;
-  argsContextFor: (path: string) => ResourceArgsContext;
-  matched: ReadonlySet<string>;
 }) {
+  const label = check.label ?? info?.label ?? check.uri;
   return (
     <div className="eval-check">
       <div className="eval-check-header">
         <span className="eval-check-label" title={check.uri}>
-          {check.label ?? info?.label ?? check.uri}
+          {label}
         </span>
         {info?.group && <span className="eval-check-group">{info.group}</span>}
         <button
           type="button"
           className="pg-dismiss eval-check-remove"
           title="Remove check"
-          aria-label={`Remove ${check.label ?? info?.label ?? check.uri}`}
+          aria-label={`Remove ${label}`}
           onClick={onRemove}
         >
           ×
@@ -886,32 +965,6 @@ function CheckEditor({
         <div className="eval-check-missing">This check no longer exists.</div>
       )}
       {info?.error && <div className="eval-check-missing">{info.error}</div>}
-      {info?.parameters.map(param => (
-        <div className="pg-exec-param" key={param.name}>
-          <div className="pg-exec-param-label">
-            <span className="pg-exec-param-name">
-              {param.name}
-              {param.optional ? "" : " *"}
-            </span>
-            <span className="pg-exec-param-type" title={param.type.syntax}>
-              {shortSyntax(param.type.syntax, 60)}
-            </span>
-            {matched.has(`check:${check.id}:${param.name}`) && (
-              <span className="eval-matched" title="Filled in for you">
-                matched
-              </span>
-            )}
-          </div>
-          <ExecutionInputEditor
-            propDef={param}
-            selection={selections[param.name] ?? {}}
-            onChange={selection => onChange(param.name, selection)}
-            resources={sources.resources}
-            slots={sources.functionSlots}
-            argsContext={argsContextFor(`check.${check.id}.${param.name}`)}
-          />
-        </div>
-      ))}
       <label className="eval-check-threshold">
         <span>Pass at score ≥</span>
         <input
@@ -975,17 +1028,21 @@ function AddCheckMenu({
 }
 
 /**
- * The Run button, with its arms selector: Working tree, plus Unsaved edits
- * when the prompt has some, and any named variation. Warns first when the
- * tree has uncommitted changes, or there's no git to pin results to.
+ * The Run button, with what it runs against: Working tree, plus Unsaved
+ * edits when the prompt has some, and any named variation — a line under the
+ * button that opens into the choices. Warns when the tree has uncommitted
+ * changes, or there's no git to pin results to.
  */
 function RunControl({
   prompt,
   disabled,
+  problems,
   onRun,
 }: {
   prompt: NormalizedPrompt | undefined;
   disabled: boolean;
+  /** Why it can't run, one line each. */
+  problems: readonly string[];
   onRun: (options: {
     arms: EvalArmSpec[];
     concurrency: number;
@@ -997,31 +1054,38 @@ function RunControl({
   const [chosen, setChosen] = useState<Set<string>>(new Set(["head"]));
   const [concurrency, setConcurrency] = useState(4);
   const [busy, setBusy] = useState(false);
-  const { triggerRef, popoverRef, style } =
-    useAnchoredPopover<HTMLButtonElement>({
-      open,
-      onClose: () => setOpen(false),
-      matchTriggerWidth: false,
-    });
+  const preselected = useRef<string | undefined>(undefined);
 
   const wip = variations.find(v => v.wip && v.onHead);
   const named = variations.filter(v => !v.wip && v.names.length > 0);
 
-  const openDialog = async () => {
-    setOpen(true);
+  // What there is to run against, read when the prompt is known and each time
+  // the choices open — unsaved edits come and go as the prompt is edited.
+  const promptKey = prompt && `${prompt.providerId}:${prompt.id}`;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refetch on the prompt and on opening; `prompt` itself changes identity on every edit.
+  useEffect(() => {
     if (!prompt?.providerId) return;
-    const [vs, h] = await Promise.all([
+    let cancelled = false;
+    Promise.all([
       getPromptVariations(prompt).catch(() => []),
       getProviderHead(prompt.providerId).catch(() => undefined),
-    ]);
-    setVariations(vs);
-    setHead(h);
-    // Unsaved edits are pre-selected when there are some: the tight loop is
-    // "edit, run the eval, compare".
-    if (vs.some(v => v.wip && v.onHead)) {
-      setChosen(prev => new Set([...prev, "wip"]));
-    }
-  };
+    ]).then(([vs, h]) => {
+      if (cancelled) return;
+      setVariations(vs);
+      setHead(h);
+      // Unsaved edits are pre-selected when there are some: the tight loop is
+      // "edit, run the eval, compare". Once per set of edits, so unchecking
+      // them sticks.
+      const editing = vs.find(v => v.wip && v.onHead);
+      if (editing && editing.id !== preselected.current) {
+        preselected.current = editing.id;
+        setChosen(prev => new Set([...prev, "wip"]));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [promptKey, open]);
 
   const toggle = (key: string) =>
     setChosen(prev => {
@@ -1044,89 +1108,101 @@ function RunControl({
         label: v.names[0],
       })),
   ];
+  const armLabels = [
+    ...(chosen.has("head") ? ["Working tree"] : []),
+    ...(wip && chosen.has("wip") ? ["Unsaved edits"] : []),
+    ...named.filter(v => chosen.has(v.id)).map(v => v.names[0]!),
+  ];
+  const warning =
+    head && !head.versioned
+      ? "There's no git here, so results won't record a version."
+      : head && !head.clean
+        ? "You have uncommitted changes. Results won't be reproducible; commit first to pin them to a version."
+        : undefined;
 
   return (
     <div className="eval-run-control">
-      <button
-        ref={triggerRef}
-        type="button"
-        className="pg-run-btn"
-        disabled={disabled}
-        title={disabled ? "Fix the problems above to run" : undefined}
-        onClick={() => (open ? setOpen(false) : void openDialog())}
-      >
-        ▶ Run ▾
-      </button>
-      {open &&
-        createPortal(
-          <div className="eval-run-dialog" ref={popoverRef} style={style}>
-            <div className="eval-run-dialog-title">Run against</div>
+      {problems.length > 0 && (
+        <ul className="eval-problems" aria-label="Problems">
+          {problems.map(p => (
+            <li key={p}>{p}</li>
+          ))}
+        </ul>
+      )}
+      {open && (
+        <div className="eval-run-options">
+          <label>
+            <input
+              type="checkbox"
+              checked={chosen.has("head")}
+              onChange={() => toggle("head")}
+            />
+            Working tree
+          </label>
+          {wip && (
             <label>
               <input
                 type="checkbox"
-                checked={chosen.has("head")}
-                onChange={() => toggle("head")}
+                checked={chosen.has("wip")}
+                onChange={() => toggle("wip")}
               />
-              Working tree
+              Unsaved edits
             </label>
-            {wip && (
-              <label>
-                <input
-                  type="checkbox"
-                  checked={chosen.has("wip")}
-                  onChange={() => toggle("wip")}
-                />
-                Unsaved edits
-              </label>
-            )}
-            {named.map(v => (
-              <label key={v.id}>
-                <input
-                  type="checkbox"
-                  checked={chosen.has(v.id)}
-                  onChange={() => toggle(v.id)}
-                />
-                {v.names[0]}
-              </label>
-            ))}
-            <label className="eval-run-concurrency">
-              At once
+          )}
+          {named.map(v => (
+            <label key={v.id}>
               <input
-                type="number"
-                min={1}
-                value={concurrency}
-                onChange={e =>
-                  setConcurrency(Math.max(1, Number(e.target.value) || 1))
-                }
+                type="checkbox"
+                checked={chosen.has(v.id)}
+                onChange={() => toggle(v.id)}
               />
+              {v.names[0]}
             </label>
-            {head && !head.versioned && (
-              <p className="eval-run-warning">
-                There's no git here, so results won't record a version.
-              </p>
-            )}
-            {head?.versioned && !head.clean && (
-              <p className="eval-run-warning">
-                You have uncommitted changes. Results won't be reproducible;
-                commit first to pin them to a version.
-              </p>
-            )}
-            <button
-              type="button"
-              className="dialog-btn-create"
-              disabled={busy || arms.length === 0}
-              onClick={async () => {
-                setBusy(true);
-                await onRun({ arms, concurrency });
-                setBusy(false);
-                setOpen(false);
-              }}
-            >
-              Start run
-            </button>
-          </div>,
-          document.body,
-        )}
+          ))}
+          <label className="eval-run-concurrency">
+            At once
+            <input
+              type="number"
+              min={1}
+              value={concurrency}
+              onChange={e =>
+                setConcurrency(Math.max(1, Number(e.target.value) || 1))
+              }
+            />
+          </label>
+        </div>
+      )}
+      {warning && <p className="eval-run-warning">{warning}</p>}
+      <button
+        type="button"
+        className="pg-run-btn"
+        disabled={disabled || busy || arms.length === 0}
+        title={
+          disabled
+            ? "Fix the problems above to run"
+            : arms.length === 0
+              ? "Choose what to run against"
+              : undefined
+        }
+        onClick={async () => {
+          setBusy(true);
+          await onRun({ arms, concurrency });
+          setBusy(false);
+        }}
+      >
+        {busy ? "…" : "▶  Run"}
+      </button>
+      <button
+        type="button"
+        className="eval-run-summary"
+        aria-expanded={open}
+        title="What to run against"
+        onClick={() => setOpen(o => !o)}
+      >
+        {armLabels.length > 0 ? armLabels.join(" · ") : "Nothing chosen"}
+        {" · "}
+        {concurrency} at once {open ? "▴" : "▾"}
+      </button>
     </div>
   );
 }
@@ -1144,79 +1220,84 @@ function RunList({
   onCancel: (run: EvalRunSummary) => void;
 }) {
   return (
-    <table className="eval-runs">
-      <tbody>
-        {runs.map(run => {
-          const live = progress[run.id];
-          const status = live?.status ?? run.status;
-          const counts = live?.counts ?? run.counts;
-          const done = live?.done ?? run.done;
-          return (
-            <tr
-              key={run.id}
-              className="eval-run-row"
-              onClick={() => onOpen(run)}
-            >
-              <td>{formatTimestampCompact(run.startedAt)}</td>
-              <td>{run.arms.map(a => a.label).join(" · ")}</td>
-              <td>
-                {status === "running" ? (
-                  <>
-                    <progress max={run.total} value={done} /> {done}/{run.total}
-                  </>
-                ) : (
-                  <span className={`eval-status eval-status-${status}`}>
-                    {status === "done"
-                      ? `${formatRate(passRate(counts))} passing`
-                      : status}
-                  </span>
-                )}
-              </td>
-              <td className="eval-run-counts">
-                {counts.fail > 0 && (
-                  <span className="eval-count-fail">{counts.fail} failed</span>
-                )}
-                {counts.error > 0 && (
-                  <span className="eval-count-error">
-                    {counts.error} errors
-                  </span>
-                )}
-              </td>
-              <td className="eval-run-badges">
-                {run.dirty && (
-                  <span
-                    className="eval-badge"
-                    title="Run with uncommitted changes"
-                  >
-                    uncommitted changes
-                  </span>
-                )}
-                {run.drifted && (
-                  <span
-                    className="eval-badge"
-                    title="The working tree changed mid-run"
-                  >
-                    drifted
-                  </span>
-                )}
-                {status === "running" && (
-                  <button
-                    type="button"
-                    className="dialog-btn-cancel"
-                    onClick={e => {
-                      e.stopPropagation();
-                      onCancel(run);
-                    }}
-                  >
-                    Cancel
-                  </button>
-                )}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <div className="eval-runs-scroll">
+      <table className="eval-runs">
+        <tbody>
+          {runs.map(run => {
+            const live = progress[run.id];
+            const status = live?.status ?? run.status;
+            const counts = live?.counts ?? run.counts;
+            const done = live?.done ?? run.done;
+            return (
+              <tr
+                key={run.id}
+                className="eval-run-row"
+                onClick={() => onOpen(run)}
+              >
+                <td>{formatTimestampCompact(run.startedAt)}</td>
+                <td>{run.arms.map(a => a.label).join(" · ")}</td>
+                <td>
+                  {status === "running" ? (
+                    <>
+                      <progress max={run.total} value={done} /> {done}/
+                      {run.total}
+                    </>
+                  ) : (
+                    <span className={`eval-status eval-status-${status}`}>
+                      {status === "done"
+                        ? `${formatRate(passRate(counts))} passing`
+                        : status}
+                    </span>
+                  )}
+                </td>
+                <td className="eval-run-counts">
+                  {counts.fail > 0 && (
+                    <span className="eval-count-fail">
+                      {counts.fail} failed
+                    </span>
+                  )}
+                  {counts.error > 0 && (
+                    <span className="eval-count-error">
+                      {counts.error} errors
+                    </span>
+                  )}
+                </td>
+                <td className="eval-run-badges">
+                  {run.dirty && (
+                    <span
+                      className="eval-badge"
+                      title="Run with uncommitted changes"
+                    >
+                      uncommitted changes
+                    </span>
+                  )}
+                  {run.drifted && (
+                    <span
+                      className="eval-badge"
+                      title="The working tree changed mid-run"
+                    >
+                      drifted
+                    </span>
+                  )}
+                  {status === "running" && (
+                    <button
+                      type="button"
+                      className="dialog-btn-cancel"
+                      onClick={e => {
+                        e.stopPropagation();
+                        onCancel(run);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

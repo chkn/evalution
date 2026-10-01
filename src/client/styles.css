@@ -7063,39 +7063,6 @@ pre {
   gap: 16px;
 }
 
-.eval-view-pickers {
-  flex-wrap: wrap;
-}
-
-.eval-view-picker,
-.pg-evals-menu,
-.eval-add-check select,
-.eval-compare select {
-  background: var(--input-bg);
-  border: 1px solid var(--input-border);
-  border-radius: 5px;
-  color: var(--trace-text);
-  font-size: 12px;
-  padding: 2px 4px;
-  max-width: 240px;
-}
-
-.eval-view-open {
-  background: none;
-  border: none;
-  color: var(--trace-text-dim);
-  cursor: pointer;
-  padding: 0 2px;
-}
-
-.eval-view-open:hover {
-  color: var(--trace-text);
-}
-
-.eval-view-action-error {
-  margin: 8px 16px 0;
-}
-
 .eval-section {
   display: flex;
   flex-direction: column;
@@ -7184,42 +7151,65 @@ pre {
 
 .eval-run-control {
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
 }
 
-.eval-run-dialog {
-  z-index: 1000;
+.eval-run-options {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-width: 220px;
-  padding: 10px 12px;
-  background: var(--dropdown-bg);
-  border: 1px solid var(--dropdown-border);
-  border-radius: 8px;
-  box-shadow: var(--dropdown-shadow);
-  color: var(--dropdown-text);
+  padding: 8px 10px;
+  border: 1px solid var(--exec-border);
+  border-radius: 6px;
+  background: var(--panel-card-bg);
   font-size: 12px;
 }
 
-.eval-run-dialog label {
+.eval-run-options label {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.eval-run-dialog-title {
-  font-weight: 600;
+.eval-run-concurrency {
+  justify-content: space-between;
 }
 
 .eval-run-warning {
   margin: 0;
-  max-width: 260px;
+  font-size: 11.5px;
   color: var(--error-text);
+}
+
+/* The line under Run: what it runs against, opening into the choices. */
+.eval-run-summary {
+  align-self: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--panel-text-secondary);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.eval-run-summary:hover {
+  color: var(--panel-text-primary);
 }
 
 .eval-runs {
   border-collapse: collapse;
   width: 100%;
+}
+
+.eval-runs-scroll {
+  overflow-x: auto;
 }
 
 .eval-runs td {
@@ -7412,4 +7402,78 @@ pre {
   padding-left: 56px;
   color: var(--trace-text-dim);
   white-space: pre-wrap;
+}
+
+/* The eval screen shares the playground's split (`PromptSplit`); these are
+   what's its own: the header's links, and the left column's sections. */
+.eval-view > .pg-playground-wrapper {
+  height: 100%;
+}
+
+.eval-header-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.eval-header-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--panel-text-secondary);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.eval-header-link:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.eval-header-link:disabled {
+  cursor: default;
+  color: var(--error-text);
+}
+
+.eval-header-link-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eval-delete-btn {
+  color: var(--panel-text-secondary);
+}
+
+.eval-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 640px;
+}
+
+.eval-select-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: var(--panel-text-secondary);
+}
+
+.eval-select {
+  width: 100%;
+  max-width: none;
+  padding: 5px 6px;
+}
+
+/* A check's name, above its parameters in the Inputs panel. */
+.eval-panel-group {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--panel-text-primary);
 }
