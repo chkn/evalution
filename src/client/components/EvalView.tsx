@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import {
-  Fragment,
   type ReactNode,
   useCallback,
   useEffect,
@@ -650,15 +649,6 @@ function EvalView({
       }),
     );
 
-  const checkLabelOf = (check: EvalCheck) =>
-    check.label ??
-    checkInfos.find(c => c.uri === check.uri)?.label ??
-    check.uri;
-
-  const hasChecksWithParams = def.checks.some(
-    c => (checkInfos.find(i => i.uri === c.uri)?.parameters.length ?? 0) > 0,
-  );
-
   const header = (
     <div className="pg-prompt-header eval-header">
       <div className="pg-prompt-header-row">
@@ -755,7 +745,10 @@ function EvalView({
       <section className="eval-section">
         <h4 className="eval-section-title">What it runs</h4>
         <label className="eval-select-row">
-          <span>Prompt</span>
+          <span className="eval-select-label">
+            <PromptLinkIcon />
+            Prompt
+          </span>
           <SelectBox label={prompt?.name ?? "(missing prompt)"}>
             <select
               className="pg-model-overlay-select"
@@ -791,7 +784,10 @@ function EvalView({
           </SelectBox>
         </label>
         <label className="eval-select-row">
-          <span>Dataset</span>
+          <span className="eval-select-label">
+            <SmallDatasetsIcon />
+            Dataset
+          </span>
           <SelectBox label={dataset?.name ?? "(missing dataset)"}>
             <select
               className="pg-model-overlay-select"
@@ -834,7 +830,23 @@ function EvalView({
             info={checkInfos.find(c => c.uri === check.uri)}
             onChangeCheck={patch => changeCheck(check.id, patch)}
             onRemove={() => removeCheck(check.id)}
-          />
+          >
+            {checkInfos
+              .find(c => c.uri === check.uri)
+              ?.parameters.map(param =>
+                renderField(param, {
+                  key: `check:${check.id}:${param.name}`,
+                  label: param.name,
+                  matchedKey: `check:${check.id}:${param.name}`,
+                  selection: state.checks[check.id]?.[param.name] ?? {},
+                  onChange: selection =>
+                    changeCheckParam(check)(param.name, selection),
+                  sources: checkSources[check.id] ?? EMPTY_SOURCES,
+                  slots: checkSources[check.id]?.functionSlots ?? {},
+                  path: `check.${check.id}.${param.name}`,
+                }),
+              )}
+          </CheckEditor>
         ))}
         <AddCheckMenu checks={checkInfos} onAdd={addCheck} />
       </section>
@@ -907,32 +919,6 @@ function EvalView({
       ) : (
         <p className="eval-empty">Choose a prompt.</p>
       )}
-      {hasChecksWithParams &&
-        def.checks.map(check => {
-          const info = checkInfos.find(c => c.uri === check.uri);
-          if (!info?.parameters.length) return null;
-          return (
-            <Fragment key={check.id}>
-              <div className="pg-exec-section" />
-              <div className="eval-panel-group" title={check.uri}>
-                {checkLabelOf(check)}
-              </div>
-              {info.parameters.map(param =>
-                renderField(param, {
-                  key: `check:${check.id}:${param.name}`,
-                  label: param.name,
-                  matchedKey: `check:${check.id}:${param.name}`,
-                  selection: state.checks[check.id]?.[param.name] ?? {},
-                  onChange: selection =>
-                    changeCheckParam(check)(param.name, selection),
-                  sources: checkSources[check.id] ?? EMPTY_SOURCES,
-                  slots: checkSources[check.id]?.functionSlots ?? {},
-                  path: `check.${check.id}.${param.name}`,
-                }),
-              )}
-            </Fragment>
-          );
-        })}
     </ExecPanelShell>
   );
 
@@ -943,17 +929,24 @@ function EvalView({
   );
 }
 
-/** One check in the editor: its label, threshold, and a remove button. Its parameters are fields of the Inputs panel. */
+/**
+ * One check in the editor: its label, a remove button, its parameter fields
+ * (`children`), and a score threshold. Built-in checks only pass or fail, so
+ * the threshold is offered for the others — those that may return a score.
+ */
 function CheckEditor({
   check,
   info,
   onChangeCheck,
   onRemove,
+  children,
 }: {
   check: EvalCheck;
   info: CheckInfo | undefined;
   onChangeCheck: (patch: Partial<EvalCheck>) => void;
   onRemove: () => void;
+  /** The check's parameter fields. */
+  children?: ReactNode;
 }) {
   const label = check.label ?? info?.label ?? check.uri;
   return (
@@ -980,22 +973,28 @@ function CheckEditor({
         <div className="eval-check-missing">This check no longer exists.</div>
       )}
       {info?.error && <div className="eval-check-missing">{info.error}</div>}
-      <label className="eval-check-threshold">
-        <span>Pass at score ≥</span>
-        <input
-          type="number"
-          step="any"
-          placeholder="—"
-          aria-label="Threshold"
-          value={check.threshold ?? ""}
-          onChange={e =>
-            onChangeCheck({
-              threshold:
-                e.target.value === "" ? undefined : Number(e.target.value),
-            })
-          }
-        />
-      </label>
+      {children && <div className="eval-check-params">{children}</div>}
+      {(info?.group !== "Built-in" || check.threshold !== undefined) && (
+        <label
+          className="eval-check-threshold"
+          title="For a check that returns a score: pass at or above this. Left empty, the score is just recorded."
+        >
+          <span>Pass at score ≥</span>
+          <input
+            type="number"
+            step="any"
+            placeholder="—"
+            aria-label="Threshold"
+            value={check.threshold ?? ""}
+            onChange={e =>
+              onChangeCheck({
+                threshold:
+                  e.target.value === "" ? undefined : Number(e.target.value),
+              })
+            }
+          />
+        </label>
+      )}
     </div>
   );
 }

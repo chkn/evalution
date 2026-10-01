@@ -7123,6 +7123,18 @@ pre {
   color: var(--error-text);
 }
 
+/* A check's parameters, as in the Inputs panel but stacked in its card. */
+.eval-check-params {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.eval-check-params .pg-exec-param {
+  flex: 0 0 auto;
+}
+
 .eval-check-threshold {
   display: flex;
   align-items: center;
@@ -7149,50 +7161,25 @@ pre {
   border-radius: 6px;
 }
 
-/* Narrow: the summary and a compact Run share a row; the problems, options
-   and warning span under both. Wide: Run fills the panel's width. */
 /* The panel's notices: spanning under the fields and the Run column alike. */
 .pg-exec-notice {
   padding: 0 16px 10px;
 }
 
+/* Run fills the panel's width; what it runs against sits centered below. */
 .eval-run-control {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: center;
-}
-
-.eval-run-control > * {
-  grid-column: 1 / -1;
-}
-
-.eval-run-control > .eval-run-summary {
-  grid-column: 1;
-  grid-row: 1;
-  justify-self: start;
+  align-items: stretch;
 }
 
 .eval-run-control > .pg-run-btn {
-  grid-column: 2;
-  grid-row: 1;
-  width: auto !important;
+  width: 100% !important;
 }
 
-@container playground (min-width: 620px) {
-  .eval-run-control > .eval-run-summary,
-  .eval-run-control > .pg-run-btn {
-    grid-column: 1 / -1;
-    grid-row: auto;
-  }
-
-  .eval-run-control > .pg-run-btn {
-    width: 100% !important;
-  }
-
-  .eval-run-control > .eval-run-summary {
-    justify-self: center;
-  }
+.eval-run-control > .eval-run-summary {
+  align-self: center;
 }
 
 .eval-run-options {
@@ -7497,10 +7484,16 @@ pre {
 
 .eval-select-row {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: 84px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   color: var(--panel-text-secondary);
+}
+
+.eval-select-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .eval-select {
@@ -7538,12 +7531,4 @@ pre {
   line-height: 1;
   color: #9ca3af;
   transform: translateY(-0.1em);
-}
-
-/* A check's name, above its parameters in the Inputs panel. */
-.eval-panel-group {
-  flex-basis: 100%;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--panel-text-primary);
 }

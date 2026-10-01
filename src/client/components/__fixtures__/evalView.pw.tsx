@@ -235,3 +235,18 @@ test("when narrow, Run is compact and the problems sit below it across the panel
     (panel.right - panel.left) * 0.8,
   );
 });
+
+test("a check's fields live in its card, and a pass/fail built-in has no score threshold", async ({
+  mount,
+  page,
+}) => {
+  await mockEval(page, {
+    ...EVAL,
+    checks: [{ id: "c1", uri: CONTAINS.uri, args: {} }],
+  });
+  const component = await mountEval(mount);
+  const card = component.locator(".eval-check");
+  await expect(card.locator(".pg-exec-param")).toHaveCount(2);
+  await expect(component.locator(".pg-exec-col .eval-check")).toHaveCount(0);
+  await expect(card.getByLabel("Threshold")).toHaveCount(0);
+});
