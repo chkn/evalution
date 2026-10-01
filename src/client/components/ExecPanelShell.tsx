@@ -54,6 +54,7 @@ export function ExecPanelShell({
   error,
   onDismissError,
   footer,
+  notice,
 }: {
   title: string;
   /** Beside the title, right-aligned: "Add to dataset", say. */
@@ -65,6 +66,8 @@ export function ExecPanelShell({
   onDismissError?: () => void;
   /** The run button, and anything that goes with it. */
   footer: ReactNode;
+  /** Below the body and footer, across the panel's full width in either layout. */
+  notice?: ReactNode;
 }) {
   // Whether `.pg-exec-body` has more content below the fold — cues the
   // shadow above the run error, which otherwise reads as sitting flush
@@ -123,6 +126,7 @@ export function ExecPanelShell({
           {footer}
         </div>
       </div>
+      {notice && <div className="pg-exec-notice">{notice}</div>}
     </div>
   );
 }

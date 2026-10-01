@@ -3,6 +3,7 @@
 
 import {
   Fragment,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -755,61 +756,67 @@ function EvalView({
         <h4 className="eval-section-title">What it runs</h4>
         <label className="eval-select-row">
           <span>Prompt</span>
-          <select
-            className="eval-select"
-            aria-label="Prompt"
-            value={prompt ? `${prompt.providerId}:${prompt.id}` : ""}
-            onChange={e => {
-              const next = prompts.find(
-                p => `${p.providerId}:${p.id}` === e.target.value,
-              );
-              if (next?.providerId) {
-                save(
-                  {
-                    prompt: {
-                      id: next.globalId ?? next.id,
-                      providerId: next.providerId,
-                    },
-                  },
-                  true,
+          <SelectBox label={prompt?.name ?? "(missing prompt)"}>
+            <select
+              className="pg-model-overlay-select"
+              aria-label="Prompt"
+              value={prompt ? `${prompt.providerId}:${prompt.id}` : ""}
+              onChange={e => {
+                const next = prompts.find(
+                  p => `${p.providerId}:${p.id}` === e.target.value,
                 );
-              }
-            }}
-          >
-            {!prompt && <option value="">(missing prompt)</option>}
-            {prompts.map(p => (
-              <option
-                key={`${p.providerId}:${p.id}`}
-                value={`${p.providerId}:${p.id}`}
-              >
-                {p.name}
-              </option>
-            ))}
-          </select>
+                if (next?.providerId) {
+                  save(
+                    {
+                      prompt: {
+                        id: next.globalId ?? next.id,
+                        providerId: next.providerId,
+                      },
+                    },
+                    true,
+                  );
+                }
+              }}
+            >
+              {!prompt && <option value="">(missing prompt)</option>}
+              {prompts.map(p => (
+                <option
+                  key={`${p.providerId}:${p.id}`}
+                  value={`${p.providerId}:${p.id}`}
+                >
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </SelectBox>
         </label>
         <label className="eval-select-row">
           <span>Dataset</span>
-          <select
-            className="eval-select"
-            aria-label="Dataset"
-            value={dataset ? datasetKey(dataset) : ""}
-            onChange={e => {
-              const next = datasets.find(d => datasetKey(d) === e.target.value);
-              if (next) {
-                save(
-                  { dataset: { providerId: next.providerId, id: next.id } },
-                  true,
+          <SelectBox label={dataset?.name ?? "(missing dataset)"}>
+            <select
+              className="pg-model-overlay-select"
+              aria-label="Dataset"
+              value={dataset ? datasetKey(dataset) : ""}
+              onChange={e => {
+                const next = datasets.find(
+                  d => datasetKey(d) === e.target.value,
                 );
-              }
-            }}
-          >
-            {!dataset && <option value="">(missing dataset)</option>}
-            {datasets.map(d => (
-              <option key={datasetKey(d)} value={datasetKey(d)}>
-                {d.name}
-              </option>
-            ))}
-          </select>
+                if (next) {
+                  save(
+                    { dataset: { providerId: next.providerId, id: next.id } },
+                    true,
+                  );
+                }
+              }}
+            >
+              {!dataset && <option value="">(missing dataset)</option>}
+              {datasets.map(d => (
+                <option key={datasetKey(d)} value={datasetKey(d)}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </SelectBox>
         </label>
       </section>
 
@@ -855,11 +862,19 @@ function EvalView({
   const panel = (
     <ExecPanelShell
       title="Inputs"
+      notice={
+        problems.length > 0 && (
+          <ul className="eval-problems" aria-label="Problems">
+            {problems.map(p => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
+        )
+      }
       footer={
         <RunControl
           prompt={prompt}
           disabled={problems.length > 0}
-          problems={problems}
           onRun={async options => {
             await flush();
             try {
@@ -985,6 +1000,26 @@ function CheckEditor({
   );
 }
 
+/**
+ * A select drawn like the prompt editor's model picker: the chosen name in a
+ * pill with a chevron, the native select laid invisibly over it.
+ */
+function SelectBox({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="eval-select">
+      <span className="proppy-catalog-label">{label}</span>
+      <span className="proppy-catalog-chevron">⌄</span>
+      {children}
+    </div>
+  );
+}
+
 /** "＋ Add check": the checks on offer, grouped like the resource picker, built-ins first. */
 function AddCheckMenu({
   checks,
@@ -1002,22 +1037,26 @@ function AddCheckMenu({
   const broken = checks.filter(c => c.error);
   return (
     <div className="eval-add-check">
-      <select
-        aria-label="Add check"
-        value=""
-        onChange={e => e.target.value && onAdd(e.target.value)}
-      >
-        <option value="">＋ Add check…</option>
-        {[...groups].map(([group, members]) => (
-          <optgroup key={group} label={group}>
-            {members.map(c => (
-              <option key={c.uri} value={c.uri} title={c.description}>
-                {c.label}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
+      <div className="pg-add-msg-btn pg-add-question">
+        ＋ Add check
+        <select
+          aria-label="Add check"
+          className="pg-model-overlay-select"
+          value=""
+          onChange={e => e.target.value && onAdd(e.target.value)}
+        >
+          <option value="">＋ Add check…</option>
+          {[...groups].map(([group, members]) => (
+            <optgroup key={group} label={group}>
+              {members.map(c => (
+                <option key={c.uri} value={c.uri} title={c.description}>
+                  {c.label}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
       {broken.map(c => (
         <div className="pg-exec-error" key={c.uri}>
           <code>{c.uri}</code> failed to load: {c.error}
@@ -1036,13 +1075,11 @@ function AddCheckMenu({
 function RunControl({
   prompt,
   disabled,
-  problems,
   onRun,
 }: {
   prompt: NormalizedPrompt | undefined;
   disabled: boolean;
   /** Why it can't run, one line each. */
-  problems: readonly string[];
   onRun: (options: {
     arms: EvalArmSpec[];
     concurrency: number;
@@ -1122,13 +1159,6 @@ function RunControl({
 
   return (
     <div className="eval-run-control">
-      {problems.length > 0 && (
-        <ul className="eval-problems" aria-label="Problems">
-          {problems.map(p => (
-            <li key={p}>{p}</li>
-          ))}
-        </ul>
-      )}
       {open && (
         <div className="eval-run-options">
           <label>
@@ -1179,7 +1209,7 @@ function RunControl({
         disabled={disabled || busy || arms.length === 0}
         title={
           disabled
-            ? "Fix the problems above to run"
+            ? "Fix the problems below to run"
             : arms.length === 0
               ? "Choose what to run against"
               : undefined

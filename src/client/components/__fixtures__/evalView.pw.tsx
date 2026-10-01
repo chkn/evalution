@@ -214,3 +214,24 @@ test("Run sits at the bottom of the inputs panel", async ({ mount, page }) => {
   expect(run.bottom).toBeLessThanOrEqual(panel.bottom);
   expect(panel.bottom - run.bottom).toBeLessThan(40);
 });
+
+test("when narrow, Run is compact and the problems sit below it across the panel", async ({
+  mount,
+  page,
+}) => {
+  await mockEval(page, {
+    ...EVAL,
+    checks: [{ id: "c1", uri: CONTAINS.uri, args: {} }],
+  });
+  const component = await mountEval(mount, { width: 520, height: 700 });
+  const run = await rect(component.getByRole("button", { name: /Run/ }));
+  const problems = await rect(
+    component.getByRole("list", { name: "Problems" }),
+  );
+  const panel = await rect(component.locator(".pg-exec-col"));
+  expect(run.right - run.left).toBeLessThan((panel.right - panel.left) / 3);
+  expect(problems.top).toBeGreaterThanOrEqual(run.bottom);
+  expect(problems.right - problems.left).toBeGreaterThan(
+    (panel.right - panel.left) * 0.8,
+  );
+});
