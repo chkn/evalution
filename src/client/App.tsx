@@ -1445,32 +1445,6 @@ function App() {
                               onOpenFillSource={from =>
                                 openFillSource(pane.id, from)
                               }
-                              evals={evals
-                                .filter(
-                                  e =>
-                                    findEvalPrompt(prompts, e.prompt) ===
-                                    prompt,
-                                )
-                                .map(e => ({ key: evalKey(e), name: e.name }))}
-                              onOpenEval={k => {
-                                const e = evals.find(e => evalKey(e) === k);
-                                if (e) {
-                                  openTabRightOf(pane.id, {
-                                    type: "eval",
-                                    providerId: e.providerId,
-                                    evalId: e.id,
-                                    label: e.name,
-                                  });
-                                }
-                              }}
-                              onNewEval={() =>
-                                setNewEvalSeed({
-                                  prompt: {
-                                    id: prompt.id,
-                                    providerId: prompt.providerId,
-                                  },
-                                })
-                              }
                             />
                           </div>
                         );

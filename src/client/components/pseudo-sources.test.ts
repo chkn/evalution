@@ -156,7 +156,7 @@ describe("describePseudoSource", () => {
   it("warns of a type mismatch", () => {
     expect(
       describePseudoSource(columnUri("0"), def("x", "string").type, options),
-    ).toEqual({ note: "column of each row", warning: "number into string" });
+    ).toEqual({ note: "column from dataset", warning: "number into string" });
     expect(
       describePseudoSource(
         inputUri("function", "taskId"),

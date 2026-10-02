@@ -215,7 +215,7 @@ test("Run sits at the bottom of the inputs panel", async ({ mount, page }) => {
   expect(panel.bottom - run.bottom).toBeLessThan(40);
 });
 
-test("when narrow, Run is compact and the problems sit below it across the panel", async ({
+test("when narrow, Run is compact and problems span the full width", async ({
   mount,
   page,
 }) => {
@@ -230,10 +230,133 @@ test("when narrow, Run is compact and the problems sit below it across the panel
   );
   const panel = await rect(component.locator(".pg-exec-col"));
   expect(run.right - run.left).toBeLessThan((panel.right - panel.left) / 3);
-  expect(problems.top).toBeGreaterThanOrEqual(run.bottom);
   expect(problems.right - problems.left).toBeGreaterThan(
     (panel.right - panel.left) * 0.8,
   );
+});
+
+test("the pickers' chevrons and the Delete button match the playground's and the other headers'", async ({
+  mount,
+  page,
+}) => {
+  await mockEval(page, EVAL);
+  const component = await mountEval(mount);
+
+  // The model picker's chevron is ▾; the pickers here draw the same.
+  const chevrons = component.locator(".eval-select .proppy-catalog-chevron");
+  await expect(chevrons).toHaveCount(2);
+  for (const chevron of await chevrons.all()) {
+    await expect(chevron).toHaveText("▾");
+  }
+  // Delete is the dashed button the dataset and trace headers use.
+  const del = component.getByRole("button", { name: "Delete eval" });
+  await expect(del).toHaveClass(/trace-view-prompt-btn/);
+  await expect(del).toHaveClass(/trace-view-delete-btn/);
+  await expect(del).toHaveCSS("border-top-style", "dashed");
+});
+
+test("checks are set apart by a rule, with their fields under one down the left", async ({
+  mount,
+  page,
+}) => {
+  await mockEval(page, {
+    ...EVAL,
+    checks: [
+      { id: "c1", uri: CONTAINS.uri, args: {} },
+      { id: "c2", uri: CONTAINS.uri, args: {} },
+    ],
+  });
+  const component = await mountEval(mount, { width: 900, height: 800 });
+
+  const checks = component.locator(".eval-check");
+  await expect(checks).toHaveCount(2);
+  // No box around a check; a rule between the two, none above the first.
+  await expect(checks.first()).toHaveCSS("border-top-width", "0px");
+  await expect(checks.first()).toHaveCSS("border-left-width", "0px");
+  await expect(checks.last()).toHaveCSS("border-top-width", "1px");
+  // The fields sit under a rule down the left.
+  const fields = checks.first().locator(".eval-check-fields");
+  await expect(fields).toHaveCSS("border-left-width", "2px");
+});
+
+test("what to run against is always showing, in the scrolling body above Run", async ({
+  mount,
+  page,
+}) => {
+  await mockEval(page, EVAL);
+  const component = await mountEval(mount, { width: 900, height: 500 });
+
+  const options = component.locator(".pg-exec-body .eval-run-options");
+  await expect(options.getByLabel("Working tree")).toBeChecked();
+  await expect(options.getByLabel("At once")).toHaveValue("4");
+  // Set off from the inputs above by a rule, as the execute inputs are.
+  const rule = component.locator(".pg-exec-body .pg-exec-section");
+  expect(
+    await rule.evaluate((el: Element) => getComputedStyle(el).borderTopWidth),
+  ).toBe("1px");
+  expect((await rect(options)).top).toBeGreaterThan((await rect(rule)).top);
+  await expect(component.locator(".eval-run-summary")).toHaveCount(0);
+  await expect(
+    component.locator(".pg-exec-footer").getByRole("button", { name: /Run/ }),
+  ).toBeVisible();
+});
+
+test("Unsaved edits joins the choices once the prompt has some", async ({
+  mount,
+  page,
+}) => {
+  await mockEval(page, EVAL);
+  let variations: unknown[] = [];
+  await page.route("**/api/prompts/**/variations", route =>
+    route.fulfill({ json: variations }),
+  );
+  const component = await mountEval(mount);
+
+  const options = component.locator(".eval-run-options");
+  await expect(options.getByLabel("Working tree")).toBeChecked();
+  await expect(options.getByLabel("Unsaved edits")).toHaveCount(0);
+
+  // The prompt is edited elsewhere: it now reports a WIP at head.
+  variations = [
+    {
+      id: "w1",
+      promptId: TRIAGE.id,
+      updates: {},
+      wip: true,
+      onHead: true,
+      names: [],
+      createdAt: 0,
+      updatedAt: 0,
+    },
+  ];
+  await component.update(
+    <EvalViewHarness
+      providerId="local-evals"
+      evalId="e1"
+      prompts={[{ ...TRIAGE, dirty: true, wipId: "w1" }]}
+      datasets={[TICKETS_SUMMARY]}
+    />,
+  );
+  await expect(options.getByLabel("Unsaved edits")).toBeChecked();
+});
+
+test("the run warning wraps within the panel instead of widening it", async ({
+  mount,
+  page,
+}) => {
+  await mockEval(page, EVAL);
+  await page.route("**/api/prompt-providers/files/head", route =>
+    route.fulfill({ json: { versioned: true, clean: false } }),
+  );
+  const component = await mountEval(mount, { width: 520, height: 700 });
+
+  const warning = component.locator(".eval-run-warning");
+  await expect(warning).toContainText("uncommitted changes");
+  const panel = await rect(component.locator(".pg-exec-col"));
+  const box = await rect(warning);
+  expect(box.right).toBeLessThanOrEqual(panel.right);
+  // Wrapped onto several lines, not one long one.
+  expect(box.bottom - box.top).toBeGreaterThan(2 * 11.5);
 });
 
 test("a check's fields live in its card, and a pass/fail built-in has no score threshold", async ({

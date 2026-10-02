@@ -31,7 +31,7 @@ const INPUT_PREFIX = "@@input/";
 export const NEW_COLUMN_URI = "@@new-column";
 
 /** The group columns are listed under. */
-export const COLUMNS_GROUP = "Columns";
+export const COLUMNS_GROUP = "Dataset columns";
 /** The group other prompt slots are listed under. */
 export const PROMPT_INPUTS_GROUP = "Prompt inputs";
 
@@ -339,7 +339,7 @@ export function describePseudoSource(
   let note = "";
   if (input.kind === "dataset") {
     type = options.fields?.find(f => f.id === input.field)?.def.type;
-    note = type ? "column of each row" : "column no longer exists";
+    note = type ? "column from dataset" : "column no longer exists";
   } else if (input.kind === "input") {
     const { half, path } = input;
     type = targetsOf(options).find(

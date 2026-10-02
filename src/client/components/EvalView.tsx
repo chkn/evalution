@@ -5,6 +5,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -73,7 +74,6 @@ import {
 } from "./resource-args-context";
 import { formatTimestampCompact } from "./trace/format.ts";
 import {
-  EvalsIcon,
   PromptLinkIcon,
   DatasetsIcon as SmallDatasetsIcon,
   TrashIcon,
@@ -187,6 +187,7 @@ function EvalView({
   const [name, setName] = useState("");
 
   const prompt = def ? findEvalPrompt(prompts, def.prompt) : undefined;
+  const runChoices = useRunChoices(prompt);
   const dataset =
     def &&
     datasets.find(
@@ -652,7 +653,6 @@ function EvalView({
   const header = (
     <div className="pg-prompt-header eval-header">
       <div className="pg-prompt-header-row">
-        <EvalsIcon size={14} />
         {renaming ? (
           <form
             className="dataset-view-rename"
@@ -700,7 +700,7 @@ function EvalView({
           )}
           <button
             type="button"
-            className="pg-header-btn eval-delete-btn"
+            className="trace-view-prompt-btn trace-view-delete-btn"
             onClick={handleDelete}
             title="Delete eval"
             aria-label="Delete eval"
@@ -743,7 +743,6 @@ function EvalView({
   const editor = (
     <div className="eval-editor">
       <section className="eval-section">
-        <h4 className="eval-section-title">What it runs</h4>
         <label className="eval-select-row">
           <span className="eval-select-label">
             <PromptLinkIcon />
@@ -817,7 +816,9 @@ function EvalView({
       </section>
 
       <section className="eval-section">
-        <h4 className="eval-section-title">Checks</h4>
+        <h4 className="pg-msg-header pg-role-label eval-section-title">
+          Checks
+        </h4>
         {def.checks.length === 0 && (
           <p className="eval-empty">
             Nothing judges a run yet. Add a check to say what a good answer is.
@@ -852,7 +853,7 @@ function EvalView({
       </section>
 
       <section className="eval-section">
-        <h4 className="eval-section-title">Runs</h4>
+        <h4 className="pg-msg-header pg-role-label eval-section-title">Runs</h4>
         {runs.length === 0 ? (
           <p className="eval-empty">No runs yet. Run it from the panel.</p>
         ) : (
@@ -884,8 +885,8 @@ function EvalView({
         )
       }
       footer={
-        <RunControl
-          prompt={prompt}
+        <RunButton
+          choices={runChoices}
           disabled={problems.length > 0}
           onRun={async options => {
             await flush();
@@ -919,6 +920,8 @@ function EvalView({
       ) : (
         <p className="eval-empty">Choose a prompt.</p>
       )}
+      <div className="pg-exec-section" />
+      <RunOptions choices={runChoices} />
     </ExecPanelShell>
   );
 
@@ -949,6 +952,8 @@ function CheckEditor({
   children?: ReactNode;
 }) {
   const label = check.label ?? info?.label ?? check.uri;
+  const showThreshold =
+    info?.group !== "Built-in" || check.threshold !== undefined;
   return (
     <div className="eval-check">
       <div className="eval-check-header">
@@ -973,27 +978,33 @@ function CheckEditor({
         <div className="eval-check-missing">This check no longer exists.</div>
       )}
       {info?.error && <div className="eval-check-missing">{info.error}</div>}
-      {children && <div className="eval-check-params">{children}</div>}
-      {(info?.group !== "Built-in" || check.threshold !== undefined) && (
-        <label
-          className="eval-check-threshold"
-          title="For a check that returns a score: pass at or above this. Left empty, the score is just recorded."
-        >
-          <span>Pass at score ≥</span>
-          <input
-            type="number"
-            step="any"
-            placeholder="—"
-            aria-label="Threshold"
-            value={check.threshold ?? ""}
-            onChange={e =>
-              onChangeCheck({
-                threshold:
-                  e.target.value === "" ? undefined : Number(e.target.value),
-              })
-            }
-          />
-        </label>
+      {(children || showThreshold) && (
+        <div className="eval-check-fields">
+          {children && <div className="eval-check-params">{children}</div>}
+          {showThreshold && (
+            <label
+              className="eval-check-threshold"
+              title="For a check that returns a score: pass at or above this. Left empty, the score is just recorded."
+            >
+              <span>Pass at score ≥</span>
+              <input
+                type="number"
+                step="any"
+                placeholder="—"
+                aria-label="Threshold"
+                value={check.threshold ?? ""}
+                onChange={e =>
+                  onChangeCheck({
+                    threshold:
+                      e.target.value === ""
+                        ? undefined
+                        : Number(e.target.value),
+                  })
+                }
+              />
+            </label>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1013,7 +1024,9 @@ function SelectBox({
   return (
     <div className="eval-select">
       <span className="proppy-catalog-label">{label}</span>
-      <span className="proppy-catalog-chevron">⌄</span>
+      <span aria-hidden className="proppy-catalog-chevron">
+        ▾
+      </span>
       {children}
     </div>
   );
@@ -1065,40 +1078,28 @@ function AddCheckMenu({
   );
 }
 
+/** What the Run button runs against, as chosen in {@link RunOptions}. */
+type RunChoices = ReturnType<typeof useRunChoices>;
+
 /**
- * The Run button, with what it runs against: Working tree, plus Unsaved
- * edits when the prompt has some, and any named variation — a line under the
- * button that opens into the choices. Warns when the tree has uncommitted
- * changes, or there's no git to pin results to.
+ * The choices behind Run: Working tree, plus Unsaved edits when the prompt has
+ * some, and any named variation; how many run at once; and whether the tree
+ * has uncommitted changes, or there's no git to pin results to.
  */
-function RunControl({
-  prompt,
-  disabled,
-  onRun,
-}: {
-  prompt: NormalizedPrompt | undefined;
-  disabled: boolean;
-  /** Why it can't run, one line each. */
-  onRun: (options: {
-    arms: EvalArmSpec[];
-    concurrency: number;
-  }) => Promise<void>;
-}) {
-  const [open, setOpen] = useState(false);
+function useRunChoices(prompt: NormalizedPrompt | undefined) {
   const [variations, setVariations] = useState<VariationInfo[]>([]);
   const [head, setHead] = useState<{ versioned: boolean; clean: boolean }>();
   const [chosen, setChosen] = useState<Set<string>>(new Set(["head"]));
   const [concurrency, setConcurrency] = useState(4);
-  const [busy, setBusy] = useState(false);
   const preselected = useRef<string | undefined>(undefined);
 
   const wip = variations.find(v => v.wip && v.onHead);
   const named = variations.filter(v => !v.wip && v.names.length > 0);
 
-  // What there is to run against, read when the prompt is known and each time
-  // the choices open — unsaved edits come and go as the prompt is edited.
+  // What there is to run against, read when the prompt is known and again as
+  // its unsaved edits come and go (its `wipId`).
   const promptKey = prompt && `${prompt.providerId}:${prompt.id}`;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refetch on the prompt and on opening; `prompt` itself changes identity on every edit.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refetch on the prompt and its unsaved edits; `prompt` itself changes identity on every edit.
   useEffect(() => {
     if (!prompt?.providerId) return;
     let cancelled = false;
@@ -1121,7 +1122,7 @@ function RunControl({
     return () => {
       cancelled = true;
     };
-  }, [promptKey, open]);
+  }, [promptKey, prompt?.wipId]);
 
   const toggle = (key: string) =>
     setChosen(prev => {
@@ -1144,63 +1145,101 @@ function RunControl({
         label: v.names[0],
       })),
   ];
-  const armLabels = [
-    ...(chosen.has("head") ? ["Working tree"] : []),
-    ...(wip && chosen.has("wip") ? ["Unsaved edits"] : []),
-    ...named.filter(v => chosen.has(v.id)).map(v => v.names[0]!),
-  ];
   const warning =
     head && !head.versioned
-      ? "There's no git here, so results won't record a version."
+      ? "⚠️ Results won't record a version."
       : head && !head.clean
-        ? "You have uncommitted changes. Results won't be reproducible; commit first to pin them to a version."
+        ? "⚠️ There are uncommitted changes."
         : undefined;
 
+  return {
+    wip,
+    named,
+    chosen,
+    toggle,
+    concurrency,
+    setConcurrency,
+    arms,
+    warning,
+  };
+}
+
+/**
+ * What to run against — a checkbox for each choice, then how many run at once —
+ * under a "Run against" heading, in the inputs panel's scrolling body.
+ */
+function RunOptions({ choices }: { choices: RunChoices }) {
+  const { wip, named, chosen, toggle, concurrency, setConcurrency } = choices;
+  const headingId = useId();
+  return (
+    <div className="eval-run-options" role="group" aria-labelledby={headingId}>
+      <span className="pg-exec-param-name" id={headingId}>
+        Run against
+      </span>
+      <label>
+        <input
+          type="checkbox"
+          checked={chosen.has("head")}
+          onChange={() => toggle("head")}
+        />
+        Working tree
+      </label>
+      {wip && (
+        <label>
+          <input
+            type="checkbox"
+            checked={chosen.has("wip")}
+            onChange={() => toggle("wip")}
+          />
+          Unsaved edits
+        </label>
+      )}
+      {named.map(v => (
+        <label key={v.id}>
+          <input
+            type="checkbox"
+            checked={chosen.has(v.id)}
+            onChange={() => toggle(v.id)}
+          />
+          {v.names[0]}
+        </label>
+      ))}
+      <label className="eval-run-concurrency">
+        At once
+        <input
+          type="number"
+          min={1}
+          value={concurrency}
+          onChange={e =>
+            setConcurrency(Math.max(1, Number(e.target.value) || 1))
+          }
+        />
+      </label>
+    </div>
+  );
+}
+
+/**
+ * The Run button, running against what {@link RunOptions} has chosen, with the
+ * warning above it when the tree has uncommitted changes or there's no git.
+ */
+function RunButton({
+  choices,
+  disabled,
+  onRun,
+}: {
+  choices: RunChoices;
+  /** Whether there are problems to fix first. */
+  disabled: boolean;
+  onRun: (options: {
+    arms: EvalArmSpec[];
+    concurrency: number;
+  }) => Promise<void>;
+}) {
+  const { arms, concurrency, warning } = choices;
+  const [busy, setBusy] = useState(false);
   return (
     <div className="eval-run-control">
-      {open && (
-        <div className="eval-run-options">
-          <label>
-            <input
-              type="checkbox"
-              checked={chosen.has("head")}
-              onChange={() => toggle("head")}
-            />
-            Working tree
-          </label>
-          {wip && (
-            <label>
-              <input
-                type="checkbox"
-                checked={chosen.has("wip")}
-                onChange={() => toggle("wip")}
-              />
-              Unsaved edits
-            </label>
-          )}
-          {named.map(v => (
-            <label key={v.id}>
-              <input
-                type="checkbox"
-                checked={chosen.has(v.id)}
-                onChange={() => toggle(v.id)}
-              />
-              {v.names[0]}
-            </label>
-          ))}
-          <label className="eval-run-concurrency">
-            At once
-            <input
-              type="number"
-              min={1}
-              value={concurrency}
-              onChange={e =>
-                setConcurrency(Math.max(1, Number(e.target.value) || 1))
-              }
-            />
-          </label>
-        </div>
-      )}
       {warning && <p className="eval-run-warning">{warning}</p>}
       <button
         type="button"
@@ -1220,17 +1259,6 @@ function RunControl({
         }}
       >
         {busy ? "…" : "▶  Run"}
-      </button>
-      <button
-        type="button"
-        className="eval-run-summary"
-        aria-expanded={open}
-        title="What to run against"
-        onClick={() => setOpen(o => !o)}
-      >
-        {armLabels.length > 0 ? armLabels.join(" · ") : "Nothing chosen"}
-        {" · "}
-        {concurrency} at once {open ? "▴" : "▾"}
       </button>
     </div>
   );

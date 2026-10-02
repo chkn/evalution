@@ -99,6 +99,7 @@ export function ExecPanelShell({
         <span className="pg-exec-title">{title}</span>
         {actions}
       </div>
+      {notice && <div className="pg-exec-notice">{notice}</div>}
       <div className="pg-exec-main">
         <div className="pg-exec-body" ref={bodyRef}>
           {children}
@@ -126,7 +127,6 @@ export function ExecPanelShell({
           {footer}
         </div>
       </div>
-      {notice && <div className="pg-exec-notice">{notice}</div>}
     </div>
   );
 }
