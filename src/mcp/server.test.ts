@@ -9,6 +9,8 @@ import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runDatasetMigrations } from "../dataset/db/migrate.ts";
 import { TursoDatasetProvider } from "../dataset/turso-dataset-provider.ts";
+import { runEvalMigrations } from "../eval/db/migrate.ts";
+import { TursoEvalProvider } from "../eval/turso-eval-provider.ts";
 import { type PromptProvider, promptIdOf } from "../prompt/prompt-provider.ts";
 import { PromptRegistry } from "../prompt/prompt-registry.ts";
 import { createApiContext } from "../server/api-context.ts";
@@ -122,6 +124,9 @@ async function setup(clientName = "claude-code") {
     client: datasetClient,
     id: "local-datasets",
   });
+  const evalClient = await memoryClient();
+  await runEvalMigrations(drizzle({ client: evalClient }));
+  const evals = new TursoEvalProvider({ client: evalClient, id: "evals" });
   const prompts = fakePromptProvider(traces);
   const promptProviders = new Map([[prompts.id, prompts]]);
   const promptRegistry = new PromptRegistry();
@@ -131,6 +136,7 @@ async function setup(clientName = "claude-code") {
     promptProviders,
     traceProviders: new Map([[traces.id, traces]]),
     datasetProviders: new Map([[datasets.id, datasets]]),
+    evalProviders: new Map([[evals.id, evals]]),
     promptRegistry,
     rootPath: "/project",
     tracer: trace.getTracer("test"),
@@ -165,27 +171,38 @@ describe("MCP server", () => {
     expect(tools.map(t => t.name).sort()).toEqual([
       "add_field",
       "add_rows",
+      "cancel_eval_run",
       "create_annotation",
       "create_dataset",
+      "create_eval",
       "delete_annotation",
       "delete_dataset",
+      "delete_eval",
+      "delete_eval_run",
       "delete_field",
       "delete_rows",
       "execute_prompt",
       "get_dataset",
+      "get_eval",
+      "get_eval_run",
       "get_prompt",
       "get_trace_schema",
       "get_traces",
       "list_annotations",
+      "list_checks",
       "list_dataset_rows",
       "list_datasets",
+      "list_eval_runs",
+      "list_evals",
       "list_prompts",
       "list_traces",
       "query_dataset_rows",
       "query_traces",
       "rename_dataset",
       "rename_field",
+      "start_eval_run",
       "update_annotation",
+      "update_eval",
       "update_rows",
     ]);
   });
@@ -564,6 +581,257 @@ describe("MCP server", () => {
       await expect(
         call("get_dataset", { datasetId: dataset.id }),
       ).rejects.toThrow("Dataset not found");
+    });
+  });
+
+  describe("evals", () => {
+    /** A dataset made from the greet prompt, plus an `expected` column, with two rows. */
+    async function greetings(call: Awaited<ReturnType<typeof setup>>["call"]) {
+      const dataset = await call("create_dataset", {
+        name: "Greetings",
+        fromPrompt: { promptId: "greet" },
+        fields: [{ name: "expected", type: "string" }],
+      });
+      await call("add_rows", {
+        datasetId: dataset.id,
+        rows: [
+          { values: { name: "Ada", excited: true, expected: "Ada!" } },
+          { values: { name: "Grace", excited: false, expected: "Grace!" } },
+        ],
+      });
+      return dataset;
+    }
+
+    const contains = {
+      uri: "evalution/checks#outputContains",
+      args: { text: { column: "expected" } },
+    };
+
+    /** Polls get_eval_run until the run is over. */
+    async function finished(
+      call: Awaited<ReturnType<typeof setup>>["call"],
+      runId: string,
+      args: Record<string, unknown> = {},
+    ) {
+      return vi.waitFor(
+        async () => {
+          const run = await call("get_eval_run", { runId, ...args });
+          expect(run.running).toBe(false);
+          expect(run.status).not.toBe("running");
+          return run;
+        },
+        { timeout: 5000, interval: 20 },
+      );
+    }
+
+    it("lists the checks an eval can use, with their parameters", async () => {
+      const { call } = await setup();
+      const checks = await call("list_checks");
+      expect(
+        checks.find(
+          (c: { uri: string }) => c.uri === "evalution/checks#outputContains",
+        ),
+      ).toMatchObject({
+        label: "Output contains",
+        parameters: [
+          { name: "text", type: "string", optional: false },
+          { name: "caseSensitive", type: "boolean", optional: true },
+        ],
+      });
+    });
+
+    it("creates an eval, binding parameters to matching columns, and shows bindings by column name", async () => {
+      const { call } = await setup();
+      const dataset = await greetings(call);
+      const created = await call("create_eval", {
+        name: "Greets",
+        promptId: "greet",
+        datasetId: dataset.id,
+        checks: [contains],
+      });
+      expect(created).toMatchObject({
+        providerId: "evals",
+        name: "Greets",
+        prompt: { id: "greet", providerId: "files", promptId: GREET.id },
+        dataset: { providerId: "local-datasets", id: dataset.id },
+        inputs: {
+          functionInputs: {
+            name: { column: "name" },
+            excited: { column: "excited" },
+          },
+          executeInputs: {},
+        },
+        checks: [
+          {
+            id: "outputContains",
+            uri: contains.uri,
+            args: { text: { column: "expected" } },
+          },
+        ],
+        problems: [],
+      });
+      expect(await call("get_eval", { evalId: created.id })).toEqual(created);
+      expect(await call("list_evals")).toEqual([
+        expect.objectContaining({ id: created.id, name: "Greets" }),
+      ]);
+    });
+
+    it("updates bindings by name, unbinds with null, and reports what's left to bind", async () => {
+      const { call } = await setup();
+      const dataset = await greetings(call);
+      const { id } = await call("create_eval", {
+        name: "Greets",
+        promptId: "greet",
+        datasetId: dataset.id,
+        autoBind: false,
+      });
+      const unbound = await call("get_eval", { evalId: id });
+      expect(unbound.inputs.functionInputs).toEqual({});
+      expect(unbound.problems).toEqual([expect.stringContaining("name")]);
+
+      const updated = await call("update_eval", {
+        evalId: id,
+        name: "Renamed",
+        functionInputs: {
+          name: { json: "Ada" },
+          excited: { column: "excited" },
+        },
+        autoBind: false,
+      });
+      expect(updated).toMatchObject({
+        name: "Renamed",
+        inputs: {
+          functionInputs: {
+            name: { json: "Ada" },
+            excited: { column: "excited" },
+          },
+        },
+        problems: [],
+      });
+
+      const cleared = await call("update_eval", {
+        evalId: id,
+        functionInputs: { excited: null },
+        autoBind: false,
+      });
+      expect(cleared.inputs.functionInputs).toEqual({ name: { json: "Ada" } });
+
+      await expect(
+        call("update_eval", {
+          evalId: id,
+          functionInputs: { name: { column: "nope" } },
+        }),
+      ).rejects.toThrow(/No field "nope"/);
+
+      expect(await call("delete_eval", { evalId: id })).toEqual({
+        deleted: id,
+      });
+      expect(await call("list_evals")).toEqual([]);
+    });
+
+    it("refuses to start a run while the eval has problems", async () => {
+      const { call } = await setup();
+      const dataset = await greetings(call);
+      const { id } = await call("create_eval", {
+        name: "Greets",
+        promptId: "greet",
+        datasetId: dataset.id,
+        autoBind: false,
+      });
+      await expect(call("start_eval_run", { evalId: id })).rejects.toThrow(
+        /name/,
+      );
+    });
+
+    it("starts a run without waiting, then reports its progress, results, and traces", async () => {
+      const { call } = await setup();
+      const dataset = await greetings(call);
+      const { id } = await call("create_eval", {
+        name: "Greets",
+        promptId: "greet",
+        datasetId: dataset.id,
+        checks: [contains],
+      });
+
+      const started = await call("start_eval_run", { evalId: id });
+      expect(started).toMatchObject({
+        evalId: id,
+        providerId: "evals",
+        status: "running",
+        total: 2,
+        arms: [{ id: expect.any(String), label: expect.any(String) }],
+      });
+
+      const run = await finished(call, started.runId);
+      expect(run).toMatchObject({
+        id: started.runId,
+        status: "done",
+        done: 2,
+        total: 2,
+        checks: [{ id: "outputContains", uri: contains.uri }],
+        arms: [
+          {
+            summary: {
+              checks: [
+                {
+                  checkId: "outputContains",
+                  passRate: 0.5,
+                  counts: { pass: 1, fail: 1 },
+                },
+              ],
+              rowErrors: 0,
+            },
+          },
+        ],
+        resultRows: 2,
+      });
+      expect(run.results).toEqual([
+        expect.objectContaining({
+          rowIndex: 0,
+          status: "ok",
+          inputs: { name: "Ada", excited: true, expected: "Ada!" },
+          traceProviderId: "local",
+          traceId: expect.any(String),
+          checks: [{ checkId: "outputContains", outcome: "pass" }],
+        }),
+        expect.objectContaining({
+          rowIndex: 1,
+          inputs: { name: "Grace", excited: false, expected: "Grace!" },
+          checks: [
+            expect.objectContaining({
+              checkId: "outputContains",
+              outcome: "fail",
+            }),
+          ],
+        }),
+      ]);
+
+      const failing = await call("get_eval_run", {
+        runId: started.runId,
+        failingOnly: true,
+      });
+      expect(failing.resultRows).toBe(1);
+      expect(
+        failing.results.map((r: { rowIndex: number }) => r.rowIndex),
+      ).toEqual([1]);
+
+      // Each result points at the trace it recorded.
+      const [trace] = await call("get_traces", {
+        traceIds: [failing.results[0].traceId],
+        providerId: failing.results[0].traceProviderId,
+      });
+      expect(trace.spans[0].llm.output).toBe("Hello, Grace.");
+
+      expect(await call("list_eval_runs", { evalId: id })).toEqual([
+        expect.objectContaining({ id: started.runId, status: "done", done: 2 }),
+      ]);
+      await expect(
+        call("cancel_eval_run", { runId: started.runId }),
+      ).rejects.toThrow(/isn't running/);
+      expect(await call("delete_eval_run", { runId: started.runId })).toEqual({
+        deleted: started.runId,
+      });
+      expect(await call("list_eval_runs", { evalId: id })).toEqual([]);
     });
   });
 });

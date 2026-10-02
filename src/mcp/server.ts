@@ -50,7 +50,6 @@ import {
   handleListPrompts,
   summarizePrompt,
 } from "../server/handlers/prompts.ts";
-import type { HandlerResult } from "../server/handlers/result.ts";
 import {
   handleGetTrace,
   handleGetTraceQuerySchema,
@@ -58,13 +57,12 @@ import {
   handleQueryTraces,
 } from "../server/handlers/traces.ts";
 import { fieldsForPrompt } from "../shared/dataset-fields.ts";
-import { jsonToPropValue, propValueToJson } from "../shared/json-prop-value.ts";
+import { jsonToPropValue } from "../shared/json-prop-value.ts";
 import type {
   AnnotationSource,
   ExecuteResponse,
   ExecutionInput,
   NormalizedPrompt,
-  PromptRef,
   Span,
   TraceSummary,
   TraceWithSpans,
@@ -72,6 +70,22 @@ import type {
 import { DEFAULT_QUERY_TIMEOUT_MS } from "../trace/db/read-only-query.ts";
 import { rollupSpans } from "../trace/span-rollup.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
+import { registerEvalTools } from "./eval-tools.ts";
+import {
+  describeField,
+  describeRow,
+  executionInput,
+  findField,
+  findPrompt,
+  findTrace,
+  guard,
+  ok,
+  pickProvider,
+  providerIdParam,
+  refOf,
+  relay,
+  unwrap,
+} from "./tool-helpers.ts";
 
 /** Options for {@link createMcpServer}. */
 export interface McpServerOptions {
@@ -97,211 +111,6 @@ export interface McpServerOptions {
  * {@link McpServerOptions.clientName}.
  */
 export const MCP_CLIENT_HEADER = "x-evalution-client";
-
-/** What a tool callback returns. */
-interface ToolResult {
-  [key: string]: unknown;
-  content: { type: "text"; text: string }[];
-  isError?: boolean;
-}
-
-/** A tool result carrying `value` as JSON text, or a string as-is. */
-function ok(value: unknown): ToolResult {
-  return {
-    content: [
-      {
-        type: "text",
-        text: typeof value === "string" ? value : JSON.stringify(value),
-      },
-    ],
-  };
-}
-
-/** A tool error result. */
-function fail(message: string): ToolResult {
-  return { content: [{ type: "text", text: message }], isError: true };
-}
-
-/** Thrown inside a tool to answer it with an error. */
-class ToolError extends Error {}
-
-/** A failed handler result's message, with the conflicts behind it when it has them. */
-function failureMessage(result: HandlerResult): string {
-  const body = result.body as { error?: string; conflicts?: unknown };
-  const error = body?.error ?? `Failed with status ${result.status}`;
-  return body?.conflicts
-    ? `${error}\n${JSON.stringify(body.conflicts)}`
-    : error;
-}
-
-/** The body of a successful handler result; throws its error otherwise. */
-function unwrap<T>(result: HandlerResult): T {
-  if (result.status >= 400) throw new ToolError(failureMessage(result));
-  return result.body as T;
-}
-
-/**
- * A handler's `{ status, body }` as a tool result: its body on success
- * (`fallback` for a bodyless 204), its error on failure.
- */
-function relay(result: HandlerResult, fallback: unknown = { ok: true }) {
-  if (result.status >= 400) return fail(failureMessage(result));
-  return ok(result.body === undefined ? fallback : result.body);
-}
-
-/** Runs a tool body, answering a thrown {@link ToolError} (or anything else) as an error result. */
-async function guard(run: () => Promise<ToolResult>): Promise<ToolResult> {
-  try {
-    return await run();
-  } catch (err) {
-    return fail(err instanceof Error ? err.message : String(err));
-  }
-}
-
-/**
- * The provider `id` names, or — when `id` is omitted — the only one there is.
- * Several and none named is an error listing them, since guessing would act
- * on the wrong store.
- */
-function pickProvider<P>(
-  providers: Map<string, P>,
-  id: string | undefined,
-  kind: string,
-): P {
-  if (id !== undefined) {
-    const provider = providers.get(id);
-    if (!provider) {
-      throw new ToolError(
-        `No ${kind} provider "${id}". Available: ${[...providers.keys()].join(", ") || "none"}`,
-      );
-    }
-    return provider;
-  }
-  const [only, ...rest] = providers.values();
-  if (!only) throw new ToolError(`No ${kind} providers are configured.`);
-  if (rest.length > 0) {
-    throw new ToolError(
-      `Several ${kind} providers are configured; pass providerId (one of ${[...providers.keys()].join(", ")}).`,
-    );
-  }
-  return only;
-}
-
-/**
- * The prompt a tool call names: by provider-scoped id or by `globalId`,
- * in the named provider or any.
- */
-async function findPrompt(
-  context: ApiContext,
-  promptId: string,
-  providerId: string | undefined,
-): Promise<{ provider: PromptProvider; promptId: string }> {
-  const resolved = context.promptRegistry.resolve(promptId, providerId);
-  if (resolved) {
-    const provider = context.promptProviders.get(resolved.providerId);
-    if (provider) return { provider, promptId: resolved.promptId };
-  }
-  if (providerId !== undefined) {
-    return {
-      provider: pickProvider(context.promptProviders, providerId, "prompt"),
-      promptId,
-    };
-  }
-  for (const provider of context.promptProviders.values()) {
-    if (await provider.getPrompt({ promptId })) return { provider, promptId };
-  }
-  throw new ToolError(
-    `Prompt not found: ${promptId}. Call list_prompts for the available ids.`,
-  );
-}
-
-/** The ref a tool call names: head, unless it gives a version or variation. */
-function refOf(
-  promptId: string,
-  { version, variation }: { version?: string; variation?: string },
-): PromptRef {
-  if (variation) return { promptId, variation };
-  if (version) return { promptId, version };
-  return { promptId };
-}
-
-/**
- * The trace provider holding `traceId`: the one named, or — when none is —
- * the first that has it.
- */
-async function findTrace(
-  context: ApiContext,
-  traceId: string,
-  providerId: string | undefined,
-): Promise<TraceProvider> {
-  if (providerId !== undefined || context.traceProviders.size === 1) {
-    return pickProvider(context.traceProviders, providerId, "trace");
-  }
-  for (const provider of context.traceProviders.values()) {
-    if (await provider.getTrace(traceId)) return provider;
-  }
-  throw new ToolError(`Trace not found: ${traceId}`);
-}
-
-/**
- * The field `ref` names — its id, its column name in `rows` (which is also
- * how `list_dataset_rows` keys it, e.g. `city#3` for one of two `city`
- * fields), or else its name when exactly one field has that name.
- */
-function findField(fields: readonly DatasetField[], ref: string): DatasetField {
-  const byId = fields.find(f => f.id === ref);
-  if (byId) return byId;
-  const column = datasetQueryColumns(fields).find(
-    c => c.fieldId !== undefined && c.column === ref,
-  );
-  const byColumn = column && fields.find(f => f.id === column.fieldId);
-  if (byColumn) return byColumn;
-  const named = fields.filter(f => f.def.name === ref);
-  if (named.length === 1) return named[0];
-  if (named.length > 1) {
-    throw new ToolError(
-      `Several fields are named "${ref}"; use one of their ids: ${named.map(f => `${f.id} (${f.def.type.syntax})`).join(", ")}`,
-    );
-  }
-  throw new ToolError(
-    `No field "${ref}". Fields: ${fields.map(f => `${f.def.name} (id ${f.id})`).join(", ") || "none"}`,
-  );
-}
-
-/** A field as a tool shows it: id, name, and type, without the definition's catalogs and spans. */
-function describeField(field: DatasetField) {
-  return {
-    id: field.id,
-    name: field.def.name,
-    type: field.def.type.syntax,
-    ...(field.def.description && { description: field.def.description }),
-  };
-}
-
-/**
- * A row's cells keyed by field name, as plain JSON where a cell is a typed-in
- * data value, else as the stored {@link ExecutionInput}.
- */
-function describeRow(row: DatasetRow, fields: readonly DatasetField[]) {
-  const columns = new Map(
-    datasetQueryColumns(fields)
-      .filter(c => c.fieldId !== undefined)
-      .map(c => [c.fieldId as string, c.column]),
-  );
-  const values: Record<string, unknown> = {};
-  for (const [fieldId, cell] of Object.entries(row.cells)) {
-    const plain =
-      cell.kind === "value" ? propValueToJson(cell.value) : undefined;
-    values[columns.get(fieldId) ?? fieldId] =
-      plain === undefined ? cell : plain;
-  }
-  return {
-    id: row.id,
-    values,
-    ...(row.source && { source: row.source }),
-    createdAt: row.createdAt,
-  };
-}
 
 /**
  * Cells keyed by field id, from a tool call's `values` (plain JSON, `null`
@@ -419,14 +228,6 @@ function annotationSourceFor(clientName: string | undefined): AnnotationSource {
 /** How long an ad-hoc SQL query may run, as the query tools describe it. */
 const QUERY_TIMEOUT_SECONDS = DEFAULT_QUERY_TIMEOUT_MS / 1000;
 
-const providerIdParam = (kind: string) =>
-  z
-    .string()
-    .optional()
-    .describe(
-      `The ${kind} provider's id. Optional when only one is configured.`,
-    );
-
 /** A field given by hand: a primitive type, or a copy of a prompt parameter's. */
 const fieldSpec = z.union([
   z.object({
@@ -456,12 +257,6 @@ const fieldSpec = z.union([
   }),
 ]);
 
-const executionInput = z
-  .record(z.string(), z.unknown())
-  .describe(
-    'An unresolved input: {kind: "value", value: PropValue}, {kind: "object", properties: {...}}, or {kind: "resource", uri, args?}.',
-  );
-
 /**
  * Builds an MCP server answering from `context`. One instance serves one
  * connection (stdio) or one request (HTTP); everything it holds is in
@@ -475,7 +270,7 @@ export function createMcpServer(
     { name: "evalution", version },
     {
       instructions:
-        "Evalution is a prompt playground for this project. Use list_prompts to find prompts (with their source files) and execute_prompt to run one; every run is recorded as a trace. Explore traces with list_traces, query_traces (SQL — call get_trace_schema first), and get_traces; leave findings on them with the annotation tools. Datasets hold rows of inputs for prompts; build and query them with the dataset tools.",
+        "Evalution is a prompt playground for this project. Use list_prompts to find prompts (with their source files) and execute_prompt to run one; every run is recorded as a trace. Explore traces with list_traces, query_traces (SQL — call get_trace_schema first), and get_traces; leave findings on them with the annotation tools. Datasets hold rows of inputs for prompts; build and query them with the dataset tools. Evals run a prompt over every row of a dataset and judge each result with checks: define them with create_eval, start a run with start_eval_run, and follow it with get_eval_run, whose results point at each row's trace.",
     },
   );
   const { promptProviders, traceProviders, datasetProviders } = context;
@@ -1290,6 +1085,8 @@ export function createMcpServer(
         ),
       ),
   );
+
+  registerEvalTools(server, context);
 
   // ── resources ────────────────────────────────────────────────────────
 

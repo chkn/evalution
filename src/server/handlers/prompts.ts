@@ -169,7 +169,8 @@ export interface PromptSummary {
   dirty?: boolean;
 }
 
-function summarizeParameter(def: PropDefinition): ParameterSummary {
+/** A parameter as a {@link PromptSummary} lists it. */
+export function summarizeParameter(def: PropDefinition): ParameterSummary {
   return {
     name: def.name,
     type: def.type.syntax,

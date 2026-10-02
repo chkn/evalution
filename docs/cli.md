@@ -39,8 +39,8 @@ On startup Evalution opens the playground in your default browser automatically.
 
 ## MCP server
 
-`evalution mcp` lets a coding agent work with your prompts, traces, and
-datasets directly. Register it with your agent as a stdio server, run from the
+`evalution mcp` lets a coding agent work with your prompts, traces, datasets,
+and evals directly. Register it with your agent as a stdio server, run from the
 project root. For Claude Code:
 
 ```sh
@@ -73,6 +73,14 @@ The server offers tools to:
   delete datasets; add, rename, and delete fields; add, update, list, and delete
   rows in bulk, by field name; and query rows with read-only SQL against a
   `rows` view with a column per field (`query_dataset_rows`).
+- **Evals** — list the checks an eval can use (`list_checks`); create, read,
+  change, and delete evals (`create_eval`, `get_eval`, `update_eval`,
+  `delete_eval`, `list_evals`), with parameters bound to dataset columns by
+  name — and, by default, to the columns that match them, as the eval editor
+  does. Start a run without waiting for it (`start_eval_run`), follow it and
+  read its results — per-arm pass rates, each row's check outcomes, and the
+  trace each row recorded (`get_eval_run`, `list_eval_runs`) — and cancel or
+  delete runs (`cancel_eval_run`, `delete_eval_run`).
 
 A SQL query that runs longer than 10 seconds is stopped with an error.
 
