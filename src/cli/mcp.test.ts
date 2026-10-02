@@ -77,7 +77,12 @@ function slowPrompts(traces: TursoTraceProvider): PromptProvider {
 }
 
 /** A project with one trace, `t1`, served over HTTP the way the first process serves it. */
-async function servedProject(): Promise<McpHttpServer> {
+async function servedProject(port?: number): Promise<McpHttpServer> {
+  return serve(await projectContext(), port);
+}
+
+/** The project {@link servedProject} serves, not served yet. */
+async function projectContext() {
   const client: Database = await connect({ path: ":memory:", url: () => null });
   cleanup.push(() => client.close());
   await runMigrations(drizzle({ client }));
@@ -89,12 +94,18 @@ async function servedProject(): Promise<McpHttpServer> {
     kind: "LLM",
     startTime: 1,
   });
-  const context = await createProjectContext({
+  return createProjectContext({
     promptProviders: [slowPrompts(traces)],
     traceProviders: [traces],
     rootPath: "/project",
   });
-  const server = await serveMcpOverHttp(context, "0.0.0-test", true);
+}
+
+async function serve(
+  context: Awaited<ReturnType<typeof projectContext>>,
+  port?: number,
+): Promise<McpHttpServer> {
+  const server = await serveMcpOverHttp(context, "0.0.0-test", true, port);
   cleanup.push(() => server.close());
   return server;
 }
@@ -129,6 +140,7 @@ describe("serveMcpOverHttp and relayMcp", () => {
     expect(await res.json()).toEqual({
       rootPath: "/project",
       configured: true,
+      instance: expect.any(String),
     });
   });
 
@@ -244,6 +256,34 @@ describe("serveMcpOverHttp and relayMcp", () => {
     await expect(call).rejects.toThrow(/went away while answering/);
     // Told at once, not after the client's own timeout.
     expect(Date.now() - started).toBeLessThan(SLOW_MS * 2);
+
+    const after = await agent.callTool({ name: "list_traces", arguments: {} });
+    expect(after.isError).toBeFalsy();
+  });
+
+  it("takes a server restarted on the same port for gone, as far as the requests it was answering go", async () => {
+    const first = await servedProject();
+    const port = Number(new URL(first.url).port);
+    let restart!: (server: McpHttpServer) => void;
+    const restarted = new Promise<McpHttpServer>(r => {
+      restart = r;
+    });
+    const { agent } = await relayedAgent(first, "zed", {
+      reconnect: async () => (await restarted).url,
+    });
+    await agent.callTool({ name: "list_traces", arguments: {} });
+    const call = agent.callTool(
+      { name: "execute_prompt", arguments: { promptId: "slow" } },
+      { timeout: 10_000 },
+    );
+    // Watched from the start: it may fail before the new server is up.
+    const failed = expect(call).rejects.toThrow(/went away while answering/);
+    await new Promise(r => setTimeout(r, SLOW_MS / 4));
+    // Back on the same port at once, before the relay can find it gone.
+    const context = await projectContext();
+    await first.close();
+    restart(await serve(context, port));
+    await failed;
 
     const after = await agent.callTool({ name: "list_traces", arguments: {} });
     expect(after.isError).toBeFalsy();

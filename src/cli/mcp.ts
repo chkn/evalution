@@ -65,15 +65,17 @@ export interface McpHttpServer {
 }
 
 /**
- * Serves `context` over MCP at `/mcp` on a free loopback port, with the
- * `/api/config` that `findRunningServer` checks a server against — all a
- * later `evalution mcp` needs to relay to this process. `hasConfig` is
- * whether the project has a config file, as `/api/config` reports it.
+ * Serves `context` over MCP at `/mcp` on a loopback port — `listenPort`, or
+ * a free one — with the `/api/config` that `findRunningServer` checks a
+ * server against: all a later `evalution mcp` needs to relay to this
+ * process. `hasConfig` is whether the project has a config file, as
+ * `/api/config` reports it.
  */
 export async function serveMcpOverHttp(
   context: ApiContext,
   version: string,
   hasConfig: boolean,
+  listenPort = 0,
 ): Promise<McpHttpServer> {
   const app = new Hono();
   mountConfigRoute(app, context.rootPath, hasConfig);
@@ -83,7 +85,7 @@ export async function serveMcpOverHttp(
     port: number;
   }>(resolve => {
     const server = serve(
-      { fetch: app.fetch, port: 0, hostname: "127.0.0.1" },
+      { fetch: app.fetch, port: listenPort, hostname: "127.0.0.1" },
       info => resolve({ server, port: info.port }),
     );
   });
@@ -223,6 +225,8 @@ export async function relayMcp(
   };
 
   const connect = async (url: string) => {
+    // Which server answers at `url` — see `instanceAt`. Set once connected.
+    let instance: string | undefined;
     const transport = new StreamableHTTPClientTransport(new URL("/mcp", url), {
       fetch: (input, init) => {
         const headers = new Headers(init?.headers);
@@ -244,8 +248,10 @@ export async function relayMcp(
       if (![...pending.values()].some(p => p.transport === transport)) return;
       // A response stream broke. If it's because the server is gone, the
       // requests it was answering never will be.
-      void reachable(url).then(up => {
-        if (up) {
+      // Still up only if it's the same server: one restarted on the same
+      // port can't resume the streams the old one was answering.
+      void instanceAt(url).then(now => {
+        if (now !== undefined && now === instance) {
           console.error("MCP relay error:", err);
           return;
         }
@@ -268,6 +274,7 @@ export async function relayMcp(
       }
     };
     await transport.start();
+    instance = await instanceAt(url);
     return transport;
   };
 
@@ -387,15 +394,16 @@ export interface RelayMcpToServerOptions extends RelayMcpOptions {
   beforeExit?: () => Promise<void>;
 }
 
-/** Whether a server answers at `url` at all. */
-async function reachable(url: string): Promise<boolean> {
+/** The `instance` id of the server at `url` (see `mountConfigRoute`), or `undefined` when none answers. */
+async function instanceAt(url: string): Promise<string | undefined> {
   try {
-    await fetch(new URL("/api/config", url), {
+    const res = await fetch(new URL("/api/config", url), {
       signal: AbortSignal.timeout(1000),
     });
-    return true;
+    const { instance } = (await res.json()) as { instance?: unknown };
+    return typeof instance === "string" ? instance : "";
   } catch {
-    return false;
+    return undefined;
   }
 }
 

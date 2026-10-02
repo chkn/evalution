@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { randomUUID } from "node:crypto";
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -95,14 +96,17 @@ function promptRefFrom(c: Context, promptId: string): PromptRef {
 /**
  * `GET /api/config`: the project's root and whether it has a config file —
  * what the playground starts from, and what `findRunningServer` checks a
- * running server against before a later `evalution` process uses it.
+ * running server against before a later `evalution` process uses it. Also
+ * an `instance` id, new each time it's mounted, so a relay can tell a
+ * server restarted on the same port from the one it was talking to.
  */
 export function mountConfigRoute(
   app: Hono,
   rootPath: string,
   configured: boolean,
 ): void {
-  app.get("/api/config", c => c.json({ rootPath, configured }));
+  const instance = randomUUID();
+  app.get("/api/config", c => c.json({ rootPath, configured, instance }));
 }
 
 /** Relays a neutral handler's `{status, body}` — a 204 carries no body of its own. */
