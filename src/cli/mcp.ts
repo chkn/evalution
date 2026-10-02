@@ -202,26 +202,51 @@ export async function relayMcp(
   let initialize: JSONRPCMessage | undefined;
   let initialized: JSONRPCMessage | undefined;
   const replayIds = new Set<string>();
-  // Requests sent and not yet answered, with the server each went to: when
-  // that server goes away mid-answer, the agent is told rather than left
-  // waiting. They aren't resent — a tool call may not be safe to repeat.
+  // Requests the agent is waiting on, each answered exactly once: by a
+  // server, or with an error when none can. When the server a request went
+  // to goes away mid-answer, the agent is told rather than left waiting.
+  // They aren't resent — a tool call may not be safe to repeat.
   const pending = new Map<
     string,
     {
       id: RequestId;
-      transport: StreamableHTTPClientTransport;
+      /** The server it went to, once it's being sent. */
+      transport?: StreamableHTTPClientTransport;
       /** Set once `send` has returned; until then a failure is the sender's to handle. */
       sent?: boolean;
     }
   >();
+
+  /** Answers the pending request `key` with an error, if it's still waiting. */
+  const fail = async (key: string, message: string): Promise<void> => {
+    const entry = pending.get(key);
+    if (!entry) return;
+    pending.delete(key);
+    await local
+      .send({ jsonrpc: "2.0", id: entry.id, error: { code: -32603, message } })
+      .catch(() => {});
+  };
 
   let ended = false;
   const end = (failure?: string) => {
     if (ended) return;
     ended = true;
     void remote.close().catch(() => {});
-    void local.close().catch(() => {});
-    onEnd(failure);
+    // Whichever failure ends the relay, a request still waiting gets its
+    // reason before the agent's side closes, rather than "connection closed".
+    const answered =
+      failure === undefined
+        ? []
+        : [...pending.keys()].map(key =>
+            fail(
+              key,
+              `${failure}. Restart the evalution MCP server to reconnect.`,
+            ),
+          );
+    void Promise.all(answered).then(() => {
+      void local.close().catch(() => {});
+      onEnd(failure);
+    });
   };
 
   const connect = async (url: string) => {
@@ -245,7 +270,10 @@ export async function relayMcp(
       void local.send(message);
     };
     transport.onerror = err => {
-      if (![...pending.values()].some(p => p.transport === transport)) return;
+      // Only a request already sent can be stranded by a broken stream; one
+      // still being sent fails its `send`, and its sender handles that.
+      if (![...pending.values()].some(p => p.transport === transport && p.sent))
+        return;
       // A response stream broke. If it's because the server is gone, the
       // requests it was answering never will be.
       // Still up only if it's the same server: one restarted on the same
@@ -306,21 +334,14 @@ export async function relayMcp(
     return switching;
   };
 
-  /** Answers every request still waiting on `transport` with an error. */
+  /** Answers every request sent to `transport` and still waiting with an error. */
   const abandon = (transport: StreamableHTTPClientTransport, url: string) => {
     for (const [key, entry] of pending) {
       if (entry.transport !== transport || !entry.sent) continue;
-      pending.delete(key);
-      void local
-        .send({
-          jsonrpc: "2.0",
-          id: entry.id,
-          error: {
-            code: -32603,
-            message: `The evalution server at ${url} went away while answering this request, which may or may not have taken effect. Check, then retry if needed.`,
-          },
-        })
-        .catch(() => {});
+      void fail(
+        key,
+        `The evalution server at ${url} went away while answering this request, which may or may not have taken effect. Check, then retry if needed.`,
+      );
     }
   };
 
@@ -328,20 +349,23 @@ export async function relayMcp(
     await switching;
     let target = remote;
     const key = isJSONRPCRequest(message) ? String(message.id) : undefined;
-    /** Sends to `target`, keeping track of a request until it's answered. */
+    /** Sends to `target`, noting where a request went until it's answered. */
     const sendTracked = async () => {
-      if (key === undefined || !isJSONRPCRequest(message)) {
-        await target.send(message);
+      const entry = key === undefined ? undefined : pending.get(key);
+      if (!entry) {
+        // A notification — or a request already answered, as the relay ended.
+        if (key === undefined) await target.send(message);
         return;
       }
-      // Tracked before it's sent: its answer can arrive before `send` returns.
-      const entry = { id: message.id, transport: target, sent: false };
-      pending.set(key, entry);
+      // Noted before it's sent: its answer can arrive before `send` returns.
+      entry.transport = target;
+      entry.sent = false;
       try {
         await target.send(message);
         entry.sent = true;
       } catch (err) {
-        if (pending.get(key) === entry) pending.delete(key);
+        // Still waiting, but on no server: the sender answers or resends it.
+        entry.transport = undefined;
         throw err;
       }
     };
@@ -367,21 +391,14 @@ export async function relayMcp(
     ) {
       initialized = message;
     }
-    forward(message).catch(async (err: unknown) => {
-      const failure = `Could not reach the evalution server at ${remoteUrl}: ${err instanceof Error ? err.message : String(err)}`;
-      if (isJSONRPCRequest(message)) {
-        await local
-          .send({
-            jsonrpc: "2.0",
-            id: message.id,
-            error: {
-              code: -32603,
-              message: `${failure}. Restart the evalution MCP server to reconnect.`,
-            },
-          })
-          .catch(() => {});
-      }
-      end(failure);
+    if (isJSONRPCRequest(message)) {
+      pending.set(String(message.id), { id: message.id });
+    }
+    forward(message).catch((err: unknown) => {
+      // `end` answers this request, if it's still waiting, with the reason.
+      end(
+        `Could not reach the evalution server at ${remoteUrl}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     });
   };
   local.onclose = () => end();

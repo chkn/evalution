@@ -11,11 +11,14 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Client } from "@modelcontextprotocol/client";
+import {
+  Client,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { connect, type Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type PromptProvider, promptIdOf } from "../prompt/prompt-provider.ts";
 import { createProjectContext } from "../server/api-context.ts";
 import type { NormalizedPrompt } from "../shared/types.ts";
@@ -302,6 +305,52 @@ describe("serveMcpOverHttp and relayMcp", () => {
       agent.callTool({ name: "list_traces", arguments: {} }),
     ).rejects.toThrow(/no holder/);
     expect(await ended).toMatch(/no holder/);
+  });
+
+  it("answers a request that can't be sent with why, even when a broken stream is reported first", async () => {
+    // The order that's otherwise down to timing: the tail of the last
+    // response's stream breaks as the server goes, and reports it while the
+    // next request is still on its way to the gone server.
+    const send = StreamableHTTPClientTransport.prototype.send;
+    let streamBreaks = false;
+    const spy = vi
+      .spyOn(StreamableHTTPClientTransport.prototype, "send")
+      .mockImplementation(async function (
+        this: StreamableHTTPClientTransport,
+        ...args
+      ) {
+        if (streamBreaks) {
+          streamBreaks = false;
+          this.onerror?.(
+            new Error("SSE stream disconnected: TypeError: terminated"),
+          );
+          await new Promise(resolve => setTimeout(resolve, 150));
+        }
+        return send.apply(this, args);
+      });
+    cleanup.push(async () => spy.mockRestore());
+
+    for (const [options, reason] of [
+      [undefined, /Could not reach the evalution server/],
+      [
+        {
+          reconnect: async () => {
+            throw new Error("no holder");
+          },
+        },
+        /no holder/,
+      ],
+    ] as const) {
+      const server = await servedProject();
+      const { agent, ended } = await relayedAgent(server, "zed", options);
+      await agent.callTool({ name: "list_traces", arguments: {} });
+      await server.close();
+      streamBreaks = true;
+      await expect(
+        agent.callTool({ name: "list_traces", arguments: {} }),
+      ).rejects.toThrow(reason);
+      expect(await ended).toMatch(reason);
+    }
   });
 });
 
