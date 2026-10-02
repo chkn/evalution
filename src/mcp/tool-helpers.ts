@@ -202,6 +202,21 @@ export function describeField(field: DatasetField) {
 }
 
 /**
+ * Each field's column name in the `rows` view, by field id: its name, or —
+ * for a field sharing its name with an earlier one — its name and id
+ * (`city#3`). The name tools show a field by, and {@link findField} takes.
+ */
+export function columnNames(
+  fields: readonly DatasetField[],
+): Map<string, string> {
+  return new Map(
+    datasetQueryColumns(fields)
+      .filter(c => c.fieldId !== undefined)
+      .map(c => [c.fieldId as string, c.column]),
+  );
+}
+
+/**
  * Cells keyed by field name (as the `rows` view names its columns), as plain
  * JSON where a cell is a typed-in data value, else as the stored
  * {@link ExecutionInput}. A cell whose field is gone keeps its field id.
@@ -210,11 +225,7 @@ export function describeCells(
   cells: Record<string, ExecutionInput>,
   fields: readonly DatasetField[],
 ): Record<string, unknown> {
-  const columns = new Map(
-    datasetQueryColumns(fields)
-      .filter(c => c.fieldId !== undefined)
-      .map(c => [c.fieldId as string, c.column]),
-  );
+  const columns = columnNames(fields);
   const values: Record<string, unknown> = {};
   for (const [fieldId, cell] of Object.entries(cells)) {
     const plain =

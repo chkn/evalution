@@ -51,6 +51,7 @@ import type {
   PromptID,
 } from "../shared/types.ts";
 import {
+  columnNames,
   describeCells,
   describeField,
   findField,
@@ -149,8 +150,8 @@ function describeBinding(
 ): unknown {
   switch (input.kind) {
     case "dataset": {
-      const field = fields?.find(f => f.id === input.field);
-      return field ? { column: field.def.name } : input;
+      const column = fields && columnNames(fields).get(input.field);
+      return column ? { column } : input;
     }
     case "value": {
       const plain = propValueToJson(input.value);
@@ -194,7 +195,7 @@ function checkIdFor(uri: string, taken: Set<string>): string {
 const binding = z
   .record(z.string(), z.unknown())
   .describe(
-    'How to fill a slot: {column: "<dataset field name>"} for the row\'s value, {json: <plain JSON>} for a fixed value, {kind: "input", half: "function" | "execute", path} for what the run bound to one of the prompt\'s own slots, {kind: "object", properties: {name: binding}} to fill an object property by property, or {kind: "resource", uri, args?: {name: binding}}.',
+    'How to fill a slot: {column: "<dataset field name>"} for the row\'s value (a field sharing its name with an earlier one goes by its query column, e.g. "city#3"), {json: <plain JSON>} for a fixed value, {kind: "input", half: "function" | "execute", path} for what the run bound to one of the prompt\'s own slots, {kind: "object", properties: {name: binding}} to fill an object property by property, or {kind: "resource", uri, args?: {name: binding}}.',
   );
 
 const bindings = z
@@ -553,7 +554,12 @@ export function registerEvalTools(
           .optional()
           .describe("Execute parameter name → binding, or null to unbind."),
         checks: z.array(checkSpec).optional(),
-        autoBind: autoBindParam,
+        autoBind: z
+          .boolean()
+          .optional()
+          .describe(
+            "When the prompt or dataset changes, bind its parameters left unbound to the dataset columns with the same name and type; likewise the parameters of the checks given (default true). Parameters unbound with null stay unbound, and bindings given are never overwritten.",
+          ),
         providerId: providerIdParam("eval"),
       }),
       annotations: { idempotentHint: true },
@@ -591,7 +597,31 @@ export function registerEvalTools(
           ? checksFrom(args.checks, setting.fields)
           : current.checks;
         if (args.autoBind !== false) {
-          ({ inputs, checks } = autoBound(setting, inputs, checks));
+          // Only what this call changed is matched: a parameter unbound in
+          // this call or an earlier one stays unbound.
+          const proposed = autoBound(setting, inputs, checks);
+          const rebind =
+            args.promptId !== undefined || args.datasetId !== undefined;
+          if (rebind) {
+            const unbind = (
+              half: Record<string, ExecutionInput>,
+              given: Record<string, unknown> | undefined,
+            ) =>
+              Object.fromEntries(
+                Object.entries(half).filter(([name]) => given?.[name] !== null),
+              );
+            inputs = {
+              functionInputs: unbind(
+                proposed.inputs.functionInputs,
+                args.functionInputs,
+              ),
+              executeInputs: unbind(
+                proposed.inputs.executeInputs,
+                args.executeInputs,
+              ),
+            };
+          }
+          if (args.checks) checks = proposed.checks;
         }
         const updated = unwrap<EvalDefinition>(
           await handleUpdateEval(provider, args.evalId, {

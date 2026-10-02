@@ -729,6 +729,62 @@ describe("MCP server", () => {
       expect(await call("list_evals")).toEqual([]);
     });
 
+    it("keeps a parameter unbound with null unbound, auto-binding only what the call changes", async () => {
+      const { call } = await setup();
+      const dataset = await greetings(call);
+      const { id } = await call("create_eval", {
+        name: "Greets",
+        promptId: "greet",
+        datasetId: dataset.id,
+      });
+      const cleared = await call("update_eval", {
+        evalId: id,
+        functionInputs: { excited: null },
+      });
+      expect(cleared.inputs.functionInputs).toEqual({
+        name: { column: "name" },
+      });
+      // A later change leaves it unbound too.
+      const renamed = await call("update_eval", { evalId: id, name: "Again" });
+      expect(renamed.inputs.functionInputs).toEqual({
+        name: { column: "name" },
+      });
+      // Pointing the eval at a dataset binds what's unbound, unless unbound in the same call.
+      const rebound = await call("update_eval", {
+        evalId: id,
+        datasetId: dataset.id,
+        functionInputs: { name: null },
+      });
+      expect(rebound.inputs.functionInputs).toEqual({
+        excited: { column: "excited" },
+      });
+    });
+
+    it("shows a column sharing its name with another by its query column, and takes it back", async () => {
+      const { call } = await setup();
+      const dataset = await greetings(call);
+      await call("add_field", {
+        datasetId: dataset.id,
+        field: { name: "expected", type: "number" },
+      });
+      const created = await call("create_eval", {
+        name: "Greets",
+        promptId: "greet",
+        datasetId: dataset.id,
+        checks: [{ ...contains, args: { text: { column: "3" } } }],
+      });
+      expect(created.checks[0].args).toEqual({
+        text: { column: "expected#3" },
+      });
+      const updated = await call("update_eval", {
+        evalId: created.id,
+        checks: created.checks,
+      });
+      expect(updated.checks[0].args).toEqual({
+        text: { column: "expected#3" },
+      });
+    });
+
     it("refuses to start a run while the eval has problems", async () => {
       const { call } = await setup();
       const dataset = await greetings(call);
