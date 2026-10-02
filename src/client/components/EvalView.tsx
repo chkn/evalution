@@ -35,6 +35,7 @@ import {
   addDatasetField,
   cancelEvalRun,
   deleteEval,
+  deleteEvalRun,
   EvalRunRefused,
   getChecks,
   getDataset,
@@ -50,7 +51,7 @@ import { datasetKey } from "./DatasetList";
 import { ExecPanelShell, PromptSplit } from "./ExecPanelShell";
 import { ExecutionInputEditor } from "./ExecutionInputEditor";
 import { evalProblems, prefillBindings } from "./eval-bindings";
-import { formatRate, passRate } from "./eval-summary";
+import { deleteRunQuestion, formatRate, passRate } from "./eval-summary";
 import {
   fromExecutionInput,
   type ResourceArgs,
@@ -104,6 +105,8 @@ interface Props {
   onOpenPrompt: (prompt: NormalizedPrompt) => void;
   onOpenDataset: (dataset: DatasetSummary) => void;
   onDeleted: () => void;
+  /** Called once one of the eval's runs is deleted, so its tab can close. */
+  onRunDeleted: (run: EvalRunSummary) => void;
 }
 
 /** Editor state for the eval's bindings, in the execute panel's shape. */
@@ -168,6 +171,7 @@ function EvalView({
   onOpenPrompt,
   onOpenDataset,
   onDeleted,
+  onRunDeleted,
 }: Props) {
   const [def, setDef] = useState<EvalDefinition | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -579,6 +583,18 @@ function EvalView({
     }
   };
 
+  const handleDeleteRun = async (run: EvalRunSummary) => {
+    const running = (progress[run.id]?.status ?? run.status) === "running";
+    if (!window.confirm(deleteRunQuestion(run.startedAt, running))) return;
+    try {
+      await deleteEvalRun(providerId, run.id);
+      setRuns(prev => prev.filter(r => r.id !== run.id));
+      onRunDeleted(run);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
   if (loadError) {
     return <div className="eval-view eval-view-error">Error: {loadError}</div>;
   }
@@ -866,6 +882,7 @@ function EvalView({
                 setError(err.message),
               )
             }
+            onDelete={handleDeleteRun}
           />
         )}
       </section>
@@ -1132,8 +1149,11 @@ function useRunChoices(prompt: NormalizedPrompt | undefined) {
       return next;
     });
 
+  // With nothing else to run against there is no choice to make, so the
+  // working tree runs even if it was unchecked before the others went away.
+  const single = !wip && named.length === 0;
   const arms: EvalArmSpec[] = [
-    ...(chosen.has("head") ? [{ kind: "head" } as const] : []),
+    ...(single || chosen.has("head") ? [{ kind: "head" } as const] : []),
     ...(wip && chosen.has("wip")
       ? [{ kind: "wip", variation: wip.id } as const]
       : []),
@@ -1155,6 +1175,7 @@ function useRunChoices(prompt: NormalizedPrompt | undefined) {
   return {
     wip,
     named,
+    single,
     chosen,
     toggle,
     concurrency,
@@ -1165,47 +1186,58 @@ function useRunChoices(prompt: NormalizedPrompt | undefined) {
 }
 
 /**
- * What to run against — a checkbox for each choice, then how many run at once —
- * under a "Run against" heading, in the inputs panel's scrolling body.
+ * What to run against — a checkbox for each choice under a "Run against"
+ * heading, unless there is only one, then how many run at once — in the inputs
+ * panel's scrolling body.
  */
 function RunOptions({ choices }: { choices: RunChoices }) {
-  const { wip, named, chosen, toggle, concurrency, setConcurrency } = choices;
+  const { wip, named, single, chosen, toggle, concurrency, setConcurrency } =
+    choices;
   const headingId = useId();
   return (
-    <div className="eval-run-options" role="group" aria-labelledby={headingId}>
-      <span className="pg-exec-param-name" id={headingId}>
-        Run against
-      </span>
-      <label>
-        <input
-          type="checkbox"
-          checked={chosen.has("head")}
-          onChange={() => toggle("head")}
-        />
-        Working tree
-      </label>
-      {wip && (
-        <label>
-          <input
-            type="checkbox"
-            checked={chosen.has("wip")}
-            onChange={() => toggle("wip")}
-          />
-          Unsaved edits
-        </label>
+    <div
+      className="eval-run-options"
+      role="group"
+      aria-labelledby={single ? undefined : headingId}
+    >
+      {!single && (
+        <>
+          <span className="pg-exec-param-name" id={headingId}>
+            Run against
+          </span>
+          <label>
+            <input
+              type="checkbox"
+              checked={chosen.has("head")}
+              onChange={() => toggle("head")}
+            />
+            Working tree
+          </label>
+          {wip && (
+            <label>
+              <input
+                type="checkbox"
+                checked={chosen.has("wip")}
+                onChange={() => toggle("wip")}
+              />
+              Unsaved edits
+            </label>
+          )}
+          {named.map(v => (
+            <label key={v.id}>
+              <input
+                type="checkbox"
+                checked={chosen.has(v.id)}
+                onChange={() => toggle(v.id)}
+              />
+              {v.names[0]}
+            </label>
+          ))}
+          <div className="pg-exec-section" />
+        </>
       )}
-      {named.map(v => (
-        <label key={v.id}>
-          <input
-            type="checkbox"
-            checked={chosen.has(v.id)}
-            onChange={() => toggle(v.id)}
-          />
-          {v.names[0]}
-        </label>
-      ))}
       <label className="eval-run-concurrency">
-        At once
+        Parallel workers
         <input
           type="number"
           min={1}
@@ -1264,18 +1296,35 @@ function RunButton({
   );
 }
 
-/** The eval's runs, newest first, with live progress for those in flight. */
+/**
+ * The eval's runs, newest first, with live progress for those in flight and a
+ * button at the end of each row to delete it.
+ */
 function RunList({
   runs,
   progress,
   onOpen,
   onCancel,
+  onDelete,
 }: {
   runs: EvalRunSummary[];
   progress: Record<string, EvalRunProgress>;
   onOpen: (run: EvalRunSummary) => void;
   onCancel: (run: EvalRunSummary) => void;
+  /** Resolves once the run is deleted, or deleting it failed or was declined. */
+  onDelete: (run: EvalRunSummary) => Promise<void>;
 }) {
+  /** Runs being deleted, whose buttons wait — a run in flight is cancelled first. */
+  const [deleting, setDeleting] = useState<ReadonlySet<string>>(new Set());
+  const remove = async (run: EvalRunSummary) => {
+    setDeleting(prev => new Set(prev).add(run.id));
+    await onDelete(run);
+    setDeleting(prev => {
+      const next = new Set(prev);
+      next.delete(run.id);
+      return next;
+    });
+  };
   return (
     <div className="eval-runs-scroll">
       <table className="eval-runs">
@@ -1348,6 +1397,21 @@ function RunList({
                       Cancel
                     </button>
                   )}
+                </td>
+                <td className="eval-run-actions">
+                  <button
+                    type="button"
+                    className="eval-run-delete"
+                    title="Delete run"
+                    aria-label={`Delete run from ${formatTimestampCompact(run.startedAt)}`}
+                    disabled={deleting.has(run.id)}
+                    onClick={e => {
+                      e.stopPropagation();
+                      void remove(run);
+                    }}
+                  >
+                    <TrashIcon />
+                  </button>
                 </td>
               </tr>
             );

@@ -492,13 +492,43 @@ test("DatasetView pages rows in as they scroll into view", async ({
 });
 
 /**
+ * Waits for the grid and its first page of `SUPPORT_ROWS`. The canvas shows
+ * before the rows land, and a click, keypress or paste on a row still loading
+ * is lost.
+ */
+async function untilRowsShown(component: Locator) {
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+  await expect(
+    inGrid(component, "gridcell", "My order never arrived"),
+  ).toBeAttached();
+}
+
+/**
+ * Presses `key` on the grid. Glide focuses the grid (its canvas, or the
+ * selected cell in its accessible mirror) a frame after a click, and a key
+ * pressed before then lands on the page, so this waits for it.
+ */
+async function pressInGrid(page: Page, key: string) {
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        document
+          .querySelector(".dataset-grid")
+          ?.contains(document.activeElement),
+      ),
+    )
+    .toBe(true);
+  await page.keyboard.press(key);
+}
+
+/**
  * Types `value` into the selected cell's editor and saves it with Enter.
  * Enter opens the editor first, rather than typing straight onto the grid:
  * the first key typed there opens it, and the keys after it can land before
  * it has focus.
  */
 async function typeIntoCell(page: Page, value: string) {
-  await page.keyboard.press("Enter");
+  await pressInGrid(page, "Enter");
   const editor = page.locator(".dataset-grid-portal textarea");
   await editor.fill(value);
   await editor.press("Enter");
@@ -529,7 +559,7 @@ test("typing into a string cell saves it, showing it at once", async ({
   const component = await mount(
     <DatasetViewHarness providerId="local" datasetId="tickets" />,
   );
-  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+  await untilRowsShown(component);
 
   // Row 3's `ticket` is empty.
   await clickCell(page, 40, 2, true);
@@ -544,11 +574,11 @@ test("typing into a string cell saves it, showing it at once", async ({
 
   // A resource cell is read-only in the grid: no editor opens there.
   await clickCell(page, 240 + 40, 0, true);
-  await page.keyboard.press("Enter");
+  await pressInGrid(page, "Enter");
   await expect(page.locator(".dataset-grid-portal textarea")).toHaveCount(0);
   // Delete clears an editable cell to `null`, and skips a read-only one.
   await clickCell(page, 40, 1, true);
-  await page.keyboard.press("Delete");
+  await pressInGrid(page, "Delete");
   await expect.poll(() => sent).toHaveLength(2);
   expect(sent[1]).toEqual({
     updates: [{ rowId: "r2", cells: { "0": null } }],
@@ -569,7 +599,7 @@ test("a failed save reloads the row from the server and says why under the heade
   const component = await mount(
     <DatasetViewHarness providerId="local" datasetId="tickets" />,
   );
-  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+  await untilRowsShown(component);
 
   await clickCell(page, 40, 1, true);
   await typeIntoCell(page, "Changed");
@@ -610,7 +640,7 @@ test("pasting a block fills the editable cells it covers, in one batch", async (
   const component = await mount(
     <DatasetViewHarness providerId="local" datasetId="tickets" />,
   );
-  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+  await untilRowsShown(component);
 
   // Three rows of `ticket`, `task`, `expected`, as a spreadsheet copies them.
   await page.evaluate(
@@ -622,7 +652,7 @@ test("pasting a block fills the editable cells it covers, in one batch", async (
     ].join("\n"),
   );
   await clickCell(page, 40, 0, false);
-  await page.keyboard.press("ControlOrMeta+v");
+  await pressInGrid(page, "ControlOrMeta+v");
 
   // `task` holds resources, so it's skipped; so is the value that isn't a
   // number. Everything else lands, grouped by row.
@@ -663,7 +693,7 @@ test("the details pane edits a value cell, committing on Enter, and clears any c
   const component = await mount(
     <DatasetViewHarness providerId="local" datasetId="tickets" />,
   );
-  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+  await untilRowsShown(component);
 
   await clickCell(page, 40, 1, true);
   const pane = component.getByRole("region", { name: "Row details" });
@@ -701,7 +731,7 @@ test("a details-pane edit is saved when the grid is clicked, on the same row or 
   const component = await mount(
     <DatasetViewHarness providerId="local" datasetId="tickets" />,
   );
-  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+  await untilRowsShown(component);
   const pane = component.getByRole("region", { name: "Row details" });
   const editor = pane.locator(".dataset-detail-editor textarea");
 

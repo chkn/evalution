@@ -76,6 +76,12 @@ export interface EvalProvider {
   /** A run, or `undefined` if it doesn't exist. */
   getRun(runId: string): Promise<EvalRun | undefined>;
 
+  /**
+   * Deletes a run with its results. A no-op if it doesn't exist. The caller
+   * makes sure the run isn't still in flight.
+   */
+  deleteRun(runId: string): Promise<void>;
+
   /** Records one (arm, row) run's result. */
   recordRowResult(result: EvalRowResult): Promise<void>;
 

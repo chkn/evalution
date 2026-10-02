@@ -52,6 +52,7 @@ import {
   handleCancelRun,
   handleCreateEval,
   handleDeleteEval,
+  handleDeleteRun,
   handleGetEval,
   handleGetRun,
   handleListEvals,
@@ -1046,6 +1047,14 @@ export function setupRoutes({
     "/api/eval-runs/:providerId/:runId/cancel",
     runnerRoute((runner, _provider, { runId }) =>
       handleCancelRun(runner, runId),
+    ),
+  );
+
+  // DELETE /api/eval-runs/:providerId/:runId - Delete a run, with its results
+  app.delete(
+    "/api/eval-runs/:providerId/:runId",
+    evalRoute((provider, { runId }) =>
+      handleDeleteRun(evalRunner, provider, runId),
     ),
   );
 

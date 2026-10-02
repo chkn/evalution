@@ -15,6 +15,7 @@ import {
   type EvalRowResult,
   emptyCounts,
 } from "../../eval/eval-types";
+import { formatTimestampCompact } from "./trace/format.ts";
 
 /** One check's line in an arm's summary. */
 export interface CheckSummary {
@@ -172,4 +173,12 @@ export function compareRuns(
 /** "83%", or "—" when there's nothing to rate. */
 export function formatRate(rate: number | undefined): string {
   return rate === undefined ? "—" : `${Math.round(rate * 100)}%`;
+}
+
+/** What to ask before deleting the run started at `startedAt`. */
+export function deleteRunQuestion(startedAt: number, running: boolean): string {
+  const what = `the run from ${formatTimestampCompact(startedAt)}`;
+  return running
+    ? `Cancel and delete ${what}, with its results?`
+    : `Delete ${what} and its results?`;
 }

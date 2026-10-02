@@ -447,6 +447,25 @@ export class TursoEvalProvider implements EvalProvider {
     });
   }
 
+  async deleteRun(runId: string): Promise<void> {
+    const evalId = await this.serialize(() =>
+      this.db.transaction(async tx => {
+        // As in `deleteEval`: explicit, so a client without foreign keys
+        // still can't strand results.
+        await tx
+          .delete(evalCheckResults)
+          .where(eq(evalCheckResults.runId, runId));
+        await tx.delete(evalRowResults).where(eq(evalRowResults.runId, runId));
+        const [removed] = await tx
+          .delete(evalRuns)
+          .where(eq(evalRuns.id, runId))
+          .returning({ evalId: evalRuns.evalId });
+        return removed?.evalId;
+      }),
+    );
+    if (evalId) this.emit({ type: "remove", evalId, runId });
+  }
+
   /**
    * How many (arm, row) runs each of `runIds` has finished, and how its
    * check results break down.

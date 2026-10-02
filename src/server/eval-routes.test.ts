@@ -242,6 +242,27 @@ describe("eval routes", () => {
     ).toBe(409);
   });
 
+  it("deletes a run with its results", async () => {
+    const { call, dataset } = await makeApp();
+    const { body: def } = await call(
+      "POST",
+      "/api/evals/ev",
+      newEval(dataset.id),
+    );
+    const { body: run } = await call("POST", `/api/evals/ev/${def.id}/runs`);
+    await awaitRun(call, run.id);
+
+    expect((await call("DELETE", `/api/eval-runs/ev/${run.id}`)).status).toBe(
+      204,
+    );
+    expect((await call("GET", `/api/eval-runs/ev/${run.id}`)).status).toBe(404);
+    expect((await call("GET", `/api/evals/ev/${def.id}/runs`)).body).toEqual(
+      [],
+    );
+    // The eval itself stays.
+    expect((await call("GET", `/api/evals/ev/${def.id}`)).status).toBe(200);
+  });
+
   it("refuses to run an eval with problems, listing them", async () => {
     const { call, dataset } = await makeApp();
     const { body: def } = await call(

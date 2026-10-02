@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { EvalRunSummary } from "../../../eval/eval-types";
 import type { DatasetSummary, NormalizedPrompt } from "../../../shared/types";
 import EvalView from "../EvalView";
 
@@ -16,6 +17,8 @@ export function EvalViewHarness({
   datasets,
   width = 900,
   height = 700,
+  onOpenRun = () => {},
+  onRunDeleted = () => {},
 }: {
   providerId: string;
   evalId: string;
@@ -24,6 +27,8 @@ export function EvalViewHarness({
   /** The pane's size: what the layout answers to, as in `PlaygroundContentHarness`. */
   width?: number;
   height?: number;
+  onOpenRun?: (run: EvalRunSummary) => void;
+  onRunDeleted?: (run: EvalRunSummary) => void;
 }) {
   return (
     <div style={{ width, height }}>
@@ -35,10 +40,11 @@ export function EvalViewHarness({
         version={0}
         datasetVersion={0}
         progress={{}}
-        onOpenRun={() => {}}
+        onOpenRun={onOpenRun}
         onOpenPrompt={() => {}}
         onOpenDataset={() => {}}
         onDeleted={() => {}}
+        onRunDeleted={onRunDeleted}
       />
     </div>
   );

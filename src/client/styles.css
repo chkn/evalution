@@ -7240,6 +7240,32 @@ pre {
   background: var(--trace-row-hover);
 }
 
+/* The last column: a red trash can, at the right of each row. */
+.eval-run-actions {
+  width: 1%;
+  text-align: right;
+}
+
+.eval-run-delete {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  color: var(--delete-hover-text);
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.eval-run-delete:hover {
+  opacity: 1;
+}
+
+.eval-run-delete:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .eval-run-counts span + span {
   margin-left: 8px;
 }

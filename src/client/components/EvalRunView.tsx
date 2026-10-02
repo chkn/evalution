@@ -9,10 +9,11 @@ import type {
   EvalRunProgress,
   EvalRunSummary,
 } from "../../eval/eval-types";
-import { cancelEvalRun, getEvalRun, getEvalRuns } from "../api";
+import { cancelEvalRun, deleteEvalRun, getEvalRun, getEvalRuns } from "../api";
 import {
   cellKey,
   compareRuns,
+  deleteRunQuestion,
   formatRate,
   gridRows,
   indexChecks,
@@ -24,7 +25,7 @@ import {
   formatDuration,
   formatTimestampCompact,
 } from "./trace/format.ts";
-import { EvalsIcon } from "./trace/icons.tsx";
+import { EvalsIcon, TrashIcon } from "./trace/icons.tsx";
 
 interface Props {
   providerId: string;
@@ -34,6 +35,8 @@ interface Props {
   /** This run's latest progress, while it's in flight. */
   progress?: EvalRunProgress;
   onOpenTrace: (traceProviderId: string, traceId: string) => void;
+  /** Called once the run is deleted, so its tab can close. */
+  onDeleted: () => void;
 }
 
 /** The least time between refetches of a run in flight. */
@@ -71,6 +74,7 @@ function EvalRunView({
   version,
   progress,
   onOpenTrace,
+  onDeleted,
 }: Props) {
   const [run, setRun] = useState<EvalRun | null>(null);
   const [results, setResults] = useState<EvalResults>({ rows: [], checks: [] });
@@ -78,6 +82,8 @@ function EvalRunView({
   const [selected, setSelected] = useState<string | null>(null);
   const [others, setOthers] = useState<EvalRunSummary[]>([]);
   const [compareId, setCompareId] = useState("");
+  /** Set while the run is being deleted — a run in flight is cancelled first. */
+  const [deleting, setDeleting] = useState(false);
   const [other, setOther] = useState<{
     run: EvalRun;
     results: EvalResults;
@@ -116,12 +122,17 @@ function EvalRunView({
   }, [providerId, runId, version, tick]);
 
   const evalId = run?.evalId;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refetch on change events too, so a run deleted elsewhere leaves the list.
   useEffect(() => {
     if (!evalId) return;
     getEvalRuns(providerId, evalId)
-      .then(rs => setOthers(rs.filter(r => r.id !== runId)))
+      .then(rs => {
+        const rest = rs.filter(r => r.id !== runId);
+        setOthers(rest);
+        setCompareId(id => (rest.some(r => r.id === id) ? id : ""));
+      })
       .catch(() => {});
-  }, [providerId, evalId, runId]);
+  }, [providerId, evalId, runId, version]);
 
   // The run compared against is finished, so it's fetched once per pick.
   useEffect(() => {
@@ -173,6 +184,22 @@ function EvalRunView({
         ?.arms.get(selected.split(":")[0])
     : undefined;
 
+  const handleDelete = async () => {
+    if (
+      !window.confirm(deleteRunQuestion(run.startedAt, status === "running"))
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await deleteEvalRun(providerId, runId);
+      onDeleted();
+    } catch (err: any) {
+      setError(err.message);
+      setDeleting(false);
+    }
+  };
+
   const openCell = (armId: string, rowId: string, checkId: string) => {
     const key = cellKey(armId, rowId, checkId);
     setSelected(key);
@@ -206,6 +233,16 @@ function EvalRunView({
                 Cancel
               </button>
             )}
+            <button
+              type="button"
+              className="trace-view-prompt-btn trace-view-delete-btn"
+              onClick={handleDelete}
+              disabled={deleting}
+              title="Delete run"
+              aria-label="Delete run"
+            >
+              <TrashIcon />
+            </button>
           </div>
         </div>
         <div className="trace-view-meta">

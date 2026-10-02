@@ -201,6 +201,67 @@ describe("TursoEvalProvider", () => {
     expect(summary.lastRun?.status).not.toBe("running");
   });
 
+  it("deletes a run with its results, leaving the eval's other runs", async () => {
+    const provider = await makeProvider();
+    const evalDef = await provider.createEval(def);
+    const newRun = () =>
+      provider.createRun(evalDef.id, {
+        definition: evalDef,
+        arms: [{ id: "a0", label: "Working tree", spec: { kind: "head" } }],
+        dirty: false,
+        concurrency: 1,
+        total: 1,
+      });
+    const doomed = await newRun();
+    const kept = await newRun();
+    for (const run of [doomed, kept]) {
+      await provider.recordRowResult({
+        runId: run.id,
+        armId: "a0",
+        rowId: "r1",
+        sample: 0,
+        rowIndex: 0,
+        rowCells: {},
+        traceProviderId: "local-db",
+        traceId: `t-${run.id}`,
+        status: "ok",
+      });
+      await provider.recordCheckResults([
+        {
+          runId: run.id,
+          armId: "a0",
+          rowId: "r1",
+          sample: 0,
+          checkId: "c1",
+          outcome: "pass",
+        },
+      ]);
+    }
+    const events: EvalChangeEvent[] = [];
+    provider.watch(e => events.push(e));
+
+    await provider.deleteRun(doomed.id);
+    expect(await provider.getRun(doomed.id)).toBeUndefined();
+    expect(await provider.listResults(doomed.id)).toEqual({
+      rows: [],
+      checks: [],
+    });
+    expect(
+      await provider.resultsForTrace("local-db", `t-${doomed.id}`),
+    ).toEqual([]);
+    expect((await provider.listRuns(evalDef.id)).map(r => r.id)).toEqual([
+      kept.id,
+    ]);
+    expect((await provider.listResults(kept.id)).checks).toHaveLength(1);
+    expect(events).toEqual([
+      { type: "remove", evalId: evalDef.id, runId: doomed.id },
+    ]);
+
+    // Deleting it again is a no-op, and quiet.
+    await provider.deleteRun(doomed.id);
+    expect(events).toHaveLength(1);
+  });
+
   it("refuses a run of an eval that doesn't exist", async () => {
     const provider = await makeProvider();
     await expect(

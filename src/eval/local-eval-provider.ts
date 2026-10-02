@@ -147,6 +147,9 @@ export class LocalEvalProvider implements EvalProvider {
   async getRun(runId: string) {
     return (await this.existing())?.getRun(runId);
   }
+  async deleteRun(runId: string) {
+    await (await this.existing())?.deleteRun(runId);
+  }
   async recordRowResult(result: EvalRowResult) {
     await (await this.open()).recordRowResult(result);
   }

@@ -364,6 +364,24 @@ export function handleCancelRun(
     : { status: 409, body: { error: "The run isn't running" } };
 }
 
+/**
+ * `DELETE /api/eval-runs/:providerId/:runId` — a run in flight is cancelled,
+ * and its rows left to finish, first, so none is recorded after it's gone.
+ */
+export async function handleDeleteRun(
+  runner: EvalRunner | undefined,
+  provider: EvalProvider,
+  runId: string,
+): Promise<EvalHandlerResult> {
+  try {
+    if (runner?.cancel(runId)) await runner.finished(runId);
+    await provider.deleteRun(runId);
+    return { status: 204, body: undefined };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
 /** `GET /api/traces/:providerId/:id/check-results` — across every eval provider. */
 export async function handleTraceCheckResults(
   providers: Iterable<EvalProvider>,

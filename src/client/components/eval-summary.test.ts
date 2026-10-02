@@ -10,6 +10,7 @@ import type {
 } from "../../eval/eval-types";
 import {
   compareRuns,
+  deleteRunQuestion,
   formatRate,
   gridRows,
   percentile,
@@ -131,5 +132,16 @@ describe("helpers", () => {
     expect(percentile([], 0.5)).toBeUndefined();
     expect(formatRate(0.834)).toBe("83%");
     expect(formatRate(undefined)).toBe("—");
+  });
+});
+
+describe("deleteRunQuestion", () => {
+  it("asks to cancel a run in flight as well as delete it", () => {
+    expect(deleteRunQuestion(0, false)).toMatch(
+      /^Delete the run from .+ and its results\?$/,
+    );
+    expect(deleteRunQuestion(0, true)).toMatch(
+      /^Cancel and delete the run from .+, with its results\?$/,
+    );
   });
 });

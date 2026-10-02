@@ -3,7 +3,7 @@
 
 import { expect, test } from "@playwright/experimental-ct-react";
 import type { Locator, Page } from "@playwright/test";
-import type { EvalDefinition } from "../../../eval/eval-types";
+import type { EvalDefinition, EvalRunSummary } from "../../../eval/eval-types";
 import type {
   CheckInfo,
   Dataset,
@@ -60,10 +60,14 @@ const EVAL: EvalDefinition = {
 } as EvalDefinition;
 
 /**
- * Serves `def` and the dataset, and records every PATCH of the eval — each
- * answered with the definition as patched, as the server does.
+ * Serves `def`, its `runs`, and the dataset, and records every PATCH of the
+ * eval — each answered with the definition as patched, as the server does.
  */
-async function mockEval(page: Page, def: EvalDefinition) {
+async function mockEval(
+  page: Page,
+  def: EvalDefinition,
+  runs: EvalRunSummary[] = [],
+) {
   const patches: Record<string, unknown>[] = [];
   let current = def;
   await page.route(`**/api/evals/local-evals/${def.id}`, async route => {
@@ -75,7 +79,7 @@ async function mockEval(page: Page, def: EvalDefinition) {
     return route.fulfill({ json: current });
   });
   await page.route(`**/api/evals/local-evals/${def.id}/runs`, route =>
-    route.fulfill({ json: [] }),
+    route.fulfill({ json: runs }),
   );
   await page.route("**/api/datasets/local/tickets", route =>
     route.fulfill({ json: { dataset: TICKETS, rowCount: 0, fields: {} } }),
@@ -85,6 +89,18 @@ async function mockEval(page: Page, def: EvalDefinition) {
   );
   return patches;
 }
+
+/** The prompt's variations when it has unsaved edits at head. */
+const UNSAVED_EDITS = {
+  id: "w1",
+  promptId: TRIAGE.id,
+  updates: {},
+  wip: true,
+  onHead: true,
+  names: [],
+  createdAt: 0,
+  updatedAt: 0,
+};
 
 const mountEval = (
   mount: any,
@@ -284,13 +300,16 @@ test("what to run against is always showing, in the scrolling body above Run", a
   page,
 }) => {
   await mockEval(page, EVAL);
+  await page.route("**/api/prompts/**/variations", route =>
+    route.fulfill({ json: [UNSAVED_EDITS] }),
+  );
   const component = await mountEval(mount, { width: 900, height: 500 });
 
   const options = component.locator(".pg-exec-body .eval-run-options");
   await expect(options.getByLabel("Working tree")).toBeChecked();
-  await expect(options.getByLabel("At once")).toHaveValue("4");
+  await expect(options.getByLabel("Parallel workers")).toHaveValue("4");
   // Set off from the inputs above by a rule, as the execute inputs are.
-  const rule = component.locator(".pg-exec-body .pg-exec-section");
+  const rule = component.locator(".pg-exec-body > .pg-exec-section");
   expect(
     await rule.evaluate((el: Element) => getComputedStyle(el).borderTopWidth),
   ).toBe("1px");
@@ -312,23 +331,14 @@ test("Unsaved edits joins the choices once the prompt has some", async ({
   );
   const component = await mountEval(mount);
 
+  // With only the working tree to run against, there is nothing to choose.
   const options = component.locator(".eval-run-options");
-  await expect(options.getByLabel("Working tree")).toBeChecked();
-  await expect(options.getByLabel("Unsaved edits")).toHaveCount(0);
+  await expect(options.getByLabel("Parallel workers")).toBeVisible();
+  await expect(options.getByText("Run against")).toHaveCount(0);
+  await expect(options.getByLabel("Working tree")).toHaveCount(0);
 
   // The prompt is edited elsewhere: it now reports a WIP at head.
-  variations = [
-    {
-      id: "w1",
-      promptId: TRIAGE.id,
-      updates: {},
-      wip: true,
-      onHead: true,
-      names: [],
-      createdAt: 0,
-      updatedAt: 0,
-    },
-  ];
+  variations = [UNSAVED_EDITS];
   await component.update(
     <EvalViewHarness
       providerId="local-evals"
@@ -337,6 +347,8 @@ test("Unsaved edits joins the choices once the prompt has some", async ({
       datasets={[TICKETS_SUMMARY]}
     />,
   );
+  await expect(options.getByText("Run against")).toBeVisible();
+  await expect(options.getByLabel("Working tree")).toBeChecked();
   await expect(options.getByLabel("Unsaved edits")).toBeChecked();
 });
 
@@ -372,4 +384,84 @@ test("a check's fields live in its card, and a pass/fail built-in has no score t
   await expect(card.locator(".pg-exec-param")).toHaveCount(2);
   await expect(component.locator(".pg-exec-col .eval-check")).toHaveCount(0);
   await expect(card.getByLabel("Threshold")).toHaveCount(0);
+});
+
+const RUN: EvalRunSummary = {
+  id: "run_1",
+  evalId: "e1",
+  status: "done",
+  arms: [{ id: "a0", label: "Working tree" }],
+  dirty: false,
+  drifted: false,
+  startedAt: Date.UTC(2026, 8, 30, 9),
+  total: 2,
+  done: 2,
+  counts: { pass: 1, fail: 1, error: 0, skipped: 0, scored: 0 },
+};
+
+test("each run has a red trash can at the right of its row, which deletes it", async ({
+  mount,
+  page,
+}) => {
+  await mockEval(page, EVAL, [RUN, { ...RUN, id: "run_2" }]);
+  const deletes: string[] = [];
+  await page.route("**/api/eval-runs/local-evals/*", route => {
+    if (route.request().method() !== "DELETE") return route.fallback();
+    deletes.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 204 });
+  });
+  const deleted: string[] = [];
+  const opened: string[] = [];
+  const component = await mount(
+    <EvalViewHarness
+      providerId="local-evals"
+      evalId="e1"
+      prompts={[TRIAGE]}
+      datasets={[TICKETS_SUMMARY]}
+      onOpenRun={run => opened.push(run.id)}
+      onRunDeleted={run => deleted.push(run.id)}
+    />,
+  );
+  const rows = component.locator(".eval-run-row");
+  await expect(rows).toHaveCount(2);
+
+  // Red, and the last thing in its row.
+  const trash = rows.first().getByRole("button", { name: /^Delete run/ });
+  await expect(trash).toHaveCSS("color", /rgb\((239, 68, 68|248, 113, 113)\)/);
+  const row = await rect(rows.first());
+  const button = await rect(trash);
+  expect(row.right - button.right).toBeLessThan(12);
+
+  // Declining the confirmation leaves the run.
+  page.once("dialog", d => d.dismiss());
+  await trash.click();
+  await expect(rows).toHaveCount(2);
+  expect(deletes).toEqual([]);
+
+  page.once("dialog", d => d.accept());
+  await trash.click();
+  await expect(rows).toHaveCount(1);
+  expect(deletes).toEqual(["/api/eval-runs/local-evals/run_1"]);
+  expect(deleted).toEqual(["run_1"]);
+  // The click deletes the run without also opening it.
+  expect(opened).toEqual([]);
+});
+
+test("a run that fails to delete stays, with the error shown", async ({
+  mount,
+  page,
+}) => {
+  await mockEval(page, EVAL, [RUN]);
+  await page.route("**/api/eval-runs/local-evals/run_1", route =>
+    route.request().method() === "DELETE"
+      ? route.fulfill({ status: 500, json: { error: "disk full" } })
+      : route.fallback(),
+  );
+  const component = await mountEval(mount);
+  page.once("dialog", d => d.accept());
+  await component.getByRole("button", { name: /^Delete run/ }).click();
+  await expect(component.locator(".pg-header-error")).toContainText(
+    "disk full",
+  );
+  await expect(component.locator(".eval-run-row")).toHaveCount(1);
 });

@@ -1510,6 +1510,16 @@ function App() {
                                   })
                                 }
                                 onDeleted={() => closeTabEverywhere(key)}
+                                onRunDeleted={run =>
+                                  closeTabEverywhere(
+                                    tabKey({
+                                      type: "eval-run",
+                                      providerId: tab.providerId,
+                                      runId: run.id,
+                                      label: "",
+                                    }),
+                                  )
+                                }
                               />
                             </Suspense>
                           </div>
@@ -1530,6 +1540,7 @@ function App() {
                                     traceTab(providerId, traceId),
                                   )
                                 }
+                                onDeleted={() => closeTabEverywhere(key)}
                               />
                             </Suspense>
                           </div>

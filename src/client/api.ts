@@ -846,6 +846,18 @@ export async function cancelEvalRun(
   await throwIfError(res);
 }
 
+/**
+ * Deletes a run with its results. A run in flight is cancelled first, so this
+ * resolves once its rows in flight have stopped.
+ */
+export async function deleteEvalRun(
+  providerId: string,
+  runId: string,
+): Promise<void> {
+  const res = await fetch(evalRunUrl(providerId, runId), { method: "DELETE" });
+  await throwIfError(res);
+}
+
 /** Every prompt provider's checks. */
 export async function getChecks(): Promise<
   { providerId: string; checks: CheckInfo[] }[]
