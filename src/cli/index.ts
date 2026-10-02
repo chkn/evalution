@@ -114,6 +114,7 @@ async function mcp(rootDir: string, hasConfig: boolean) {
     rootDir,
     await setUpProject(rootDir, config),
     VERSION,
+    hasConfig,
   );
 }
 

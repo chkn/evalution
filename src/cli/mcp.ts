@@ -32,6 +32,7 @@ import {
   type ApiContext,
   createProjectContext,
 } from "../server/api-context.ts";
+import { mountConfigRoute } from "../server/api-routes.ts";
 import { mountMcp } from "../server/mcp-route.ts";
 import type { ProjectProviders } from "./project.ts";
 import { writeServerInfo } from "./server-discovery.ts";
@@ -65,14 +66,16 @@ export interface McpHttpServer {
 /**
  * Serves `context` over MCP at `/mcp` on a free loopback port, with the
  * `/api/config` that `findRunningServer` checks a server against — all a
- * later `evalution mcp` needs to relay to this process.
+ * later `evalution mcp` needs to relay to this process. `hasConfig` is
+ * whether the project has a config file, as `/api/config` reports it.
  */
 export async function serveMcpOverHttp(
   context: ApiContext,
   version: string,
+  hasConfig: boolean,
 ): Promise<McpHttpServer> {
   const app = new Hono();
-  app.get("/api/config", c => c.json({ rootPath: context.rootPath }));
+  mountConfigRoute(app, context.rootPath, hasConfig);
   const mcp = mountMcp(app, context, version);
   const { server, port } = await new Promise<{
     server: ReturnType<typeof serve>;
@@ -102,13 +105,14 @@ export async function serveMcpInProcess(
   rootPath: string,
   providers: ProjectProviders,
   version: string,
+  hasConfig: boolean,
 ): Promise<void> {
   const context = await createProjectContext({ ...providers, rootPath });
   serveStdio(() => createMcpServer(context, { version }), {
     onerror: err => console.error("MCP error:", err),
   });
   exitWithStdin();
-  const http = await serveMcpOverHttp(context, version);
+  const http = await serveMcpOverHttp(context, version, hasConfig);
   await writeServerInfo(rootPath, http.url, "mcp");
   console.error(`✨ Evalution MCP server running for ${rootPath}`);
 }

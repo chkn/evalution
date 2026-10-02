@@ -92,6 +92,19 @@ function promptRefFrom(c: Context, promptId: string): PromptRef {
   return { promptId };
 }
 
+/**
+ * `GET /api/config`: the project's root and whether it has a config file —
+ * what the playground starts from, and what `findRunningServer` checks a
+ * running server against before a later `evalution` process uses it.
+ */
+export function mountConfigRoute(
+  app: Hono,
+  rootPath: string,
+  configured: boolean,
+): void {
+  app.get("/api/config", c => c.json({ rootPath, configured }));
+}
+
 /** Relays a neutral handler's `{status, body}` — a 204 carries no body of its own. */
 function relay(c: Context, { status, body }: HandlerResult) {
   return body === undefined
@@ -185,8 +198,7 @@ export function setupRoutes({
     resolvePromptLink,
   } = context;
 
-  // GET /api/config - Get server configuration
-  app.get("/api/config", c => c.json({ rootPath, configured: hasConfig }));
+  mountConfigRoute(app, rootPath, hasConfig);
 
   // GET /api/setup-tasks - Onboarding tasks (with per-step completion status)
   app.get("/api/setup-tasks", c =>

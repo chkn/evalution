@@ -42,7 +42,7 @@ async function servedProject(): Promise<McpHttpServer> {
     traceProviders: [traces],
     rootPath: "/project",
   });
-  const server = await serveMcpOverHttp(context, "0.0.0-test");
+  const server = await serveMcpOverHttp(context, "0.0.0-test", true);
   cleanup.push(() => server.close());
   return server;
 }
@@ -70,7 +70,10 @@ describe("serveMcpOverHttp and relayMcp", () => {
   it("answers the config check a later `evalution mcp` makes", async () => {
     const server = await servedProject();
     const res = await fetch(`${server.url}/api/config`);
-    expect(await res.json()).toEqual({ rootPath: "/project" });
+    expect(await res.json()).toEqual({
+      rootPath: "/project",
+      configured: true,
+    });
   });
 
   it("refuses requests addressed to anything but localhost", async () => {
