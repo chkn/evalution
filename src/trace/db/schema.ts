@@ -112,7 +112,7 @@ export const annotations = sqliteTable(
     kind: text("kind", { enum: ["issue", "good", "note"] }).notNull(),
     note: text("note").notNull(),
     source: text("source", {
-      enum: ["user", "claude-code", "codex"],
+      enum: ["user", "claude-code", "codex", "agent"],
     }).notNull(),
     /** Creation timestamp (ms). */
     createdAt: real("created_at").notNull(),

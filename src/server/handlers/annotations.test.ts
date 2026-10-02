@@ -19,10 +19,11 @@ import {
   handleCreateAnnotation,
   handleDeleteAnnotation,
   handleListAnnotations,
+  handleUpdateAnnotation,
 } from "./annotations.ts";
 
 describe("annotation handlers against a provider with no annotation store", () => {
-  it("all three respond 405", async () => {
+  it("all four respond 405", async () => {
     const provider = new MemoryTraceProvider();
     expect((await handleListAnnotations(provider, "t1")).status).toBe(405);
     expect(
@@ -36,6 +37,10 @@ describe("annotation handlers against a provider with no annotation store", () =
     expect((await handleDeleteAnnotation(provider, "t1", "a1")).status).toBe(
       405,
     );
+    expect(
+      (await handleUpdateAnnotation(provider, "t1", "a1", { note: "x" }))
+        .status,
+    ).toBe(405);
   });
 });
 
@@ -119,5 +124,78 @@ describe("annotation handlers against a real provider", () => {
     const provider = await makeProvider();
     const result = await handleDeleteAnnotation(provider, "t1", "nonexistent");
     expect(result.status).toBe(404);
+  });
+
+  it("rejects an unknown kind or source with 400", async () => {
+    const provider = await makeProvider();
+    expect(
+      (
+        await handleCreateAnnotation(provider, "t1", {
+          kind: "bad" as any,
+          note: "x",
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handleCreateAnnotation(provider, "t1", {
+          kind: "note",
+          note: "x",
+          source: "someone" as any,
+        })
+      ).status,
+    ).toBe(400);
+  });
+
+  it("updates an annotation's kind and note and emits an update", async () => {
+    const provider = await makeProvider();
+    const annotation = (
+      await handleCreateAnnotation(provider, "t1", { kind: "note", note: "a" })
+    ).body as any;
+    const events: unknown[] = [];
+    provider.subscribeAnnotations("t1", e => events.push(e));
+
+    const result = await handleUpdateAnnotation(provider, "t1", annotation.id, {
+      kind: "issue",
+      note: "b",
+    });
+    expect(result.status).toBe(200);
+    const updated = { ...annotation, kind: "issue", note: "b" };
+    expect(result.body).toEqual(updated);
+    expect(events).toEqual([
+      { type: "annotation", op: "update", annotation: updated },
+    ]);
+  });
+
+  it("validates updates, and 404s an annotation not on this trace", async () => {
+    const provider = await makeProvider();
+    const annotation = (
+      await handleCreateAnnotation(provider, "t1", { kind: "note", note: "a" })
+    ).body as any;
+    expect(
+      (
+        await handleUpdateAnnotation(provider, "t1", annotation.id, {
+          kind: "bad" as any,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handleUpdateAnnotation(provider, "t1", annotation.id, {
+          note: "",
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handleUpdateAnnotation(provider, "t2", annotation.id, {
+          note: "x",
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (await handleUpdateAnnotation(provider, "t1", "nope", { note: "x" }))
+        .status,
+    ).toBe(404);
   });
 });

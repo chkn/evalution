@@ -28,12 +28,10 @@ import type {
 } from "../../eval/eval-types.ts";
 import { InvalidCellError, parseBinding } from "../../shared/dataset-cells.ts";
 import type { ExecutionInput, PromptID } from "../../shared/types.ts";
+import { errorResult, type HandlerResult } from "./result.ts";
 
-/** What an eval handler returns; the route relays it. */
-export interface EvalHandlerResult {
-  status: number;
-  body: unknown;
-}
+/** What an eval handler returns; the route or MCP tool relays it. */
+export type EvalHandlerResult = HandlerResult;
 
 /** The body of `GET /api/eval-runs/:providerId/:runId`. */
 export interface EvalRunWithResults {
@@ -332,9 +330,33 @@ export async function handleListRuns(
   }
 }
 
-/** `GET /api/eval-runs/:providerId/:runId` — the run with its results. */
+/**
+ * The runner to start or cancel a run with, or why runs can't be started
+ * here: execution is disabled (`executeDisabledMessage`), or there's no trace
+ * provider for runs to record their traces in.
+ */
+export function evalRunnerOrRefusal(
+  runner: EvalRunner | undefined,
+  executeDisabledMessage: string | undefined,
+): { ok: true; runner: EvalRunner } | { ok: false; result: EvalHandlerResult } {
+  if (executeDisabledMessage) {
+    return { ok: false, result: errorResult(400, executeDisabledMessage) };
+  }
+  if (!runner) {
+    return {
+      ok: false,
+      result: errorResult(400, "No trace provider to run on"),
+    };
+  }
+  return { ok: true, runner };
+}
+
+/**
+ * `GET /api/eval-runs/:providerId/:runId` — the run with its results.
+ * Without a `runner`, no run is reported as running.
+ */
 export async function handleGetRun(
-  runner: EvalRunner,
+  runner: EvalRunner | undefined,
   provider: EvalProvider,
   runId: string,
 ): Promise<EvalHandlerResult> {
@@ -346,7 +368,7 @@ export async function handleGetRun(
     const body: EvalRunWithResults = {
       run,
       results: await provider.listResults(runId),
-      running: runner.isRunning(runId),
+      running: runner?.isRunning(runId) ?? false,
     };
     return { status: 200, body };
   } catch (err) {

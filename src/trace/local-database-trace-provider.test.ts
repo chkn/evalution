@@ -15,6 +15,7 @@ import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createLocalTursoClient } from "./db/local-turso-client.ts";
 import { MIGRATIONS_TABLE, runMigrations } from "./db/migrate.ts";
+import { runawayQueryCount } from "./db/query-worker.ts";
 import {
   LocalDatabaseTraceProvider,
   resolveDbPath,
@@ -154,6 +155,40 @@ describe("LocalDatabaseTraceProvider — deferred creation", () => {
     // tick to finish before asserting.
     await new Promise(r => setTimeout(r, 50));
     expect(await second.getTrace("t1")).toBeDefined();
+  });
+});
+
+describe("LocalDatabaseTraceProvider — query", () => {
+  it("says there is nothing to query before the first trace", async () => {
+    const provider = new LocalDatabaseTraceProvider({
+      path: await tempDbPath(),
+    });
+    await expect(provider.query("SELECT 1")).rejects.toThrow(
+      /No traces have been recorded yet/,
+    );
+  });
+
+  it("answers from the file, off the main thread, under a time limit", async () => {
+    const provider = new LocalDatabaseTraceProvider({
+      path: await tempDbPath(),
+    });
+    await provider.recordSpanStart(rootSpan("t1"));
+    expect(await provider.query("SELECT id, status FROM traces")).toEqual({
+      columns: ["id", "status"],
+      rows: [{ id: "t1", status: "running" }],
+    });
+    await expect(
+      provider.query(
+        "WITH t(x) AS (VALUES (1),(2),(3),(4),(5),(6),(7),(8),(9),(10)) " +
+          "SELECT count(*) FROM t a, t b, t c, t d, t e, t f, t g",
+        { timeoutMs: 50 },
+      ),
+    ).rejects.toThrow(/took longer/);
+    // Let the abandoned query finish before the file goes away.
+    await vi.waitFor(() => expect(runawayQueryCount()).toBe(0), {
+      timeout: 10_000,
+      interval: 50,
+    });
   });
 });
 

@@ -13,14 +13,13 @@
  * @module
  */
 
-import { trace } from "@opentelemetry/api";
 import { Hono } from "hono";
 import { MemoryFileProvider } from "../file-provider-memory.ts";
 import { FilePromptProvider } from "../prompt/file/file-prompt-provider.ts";
-import { PromptRegistry } from "../prompt/prompt-registry.ts";
 import { VercelAISDK } from "../sdk/vercel-ai-sdk/index.ts";
 import type { SSEData } from "../shared/types.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
+import { createProjectContext } from "./api-context.ts";
 import { setupRoutes } from "./api-routes.ts";
 
 /** Default message returned when a client tries to run a prompt in-browser. */
@@ -79,17 +78,6 @@ export async function createMemoryApp(
   });
   const traceProvider = new MemoryTraceProvider();
 
-  const promptProviders = new Map([[promptProvider.id, promptProvider]]);
-  const traceProviders = new Map([[traceProvider.id, traceProvider]]);
-
-  const promptRegistry = new PromptRegistry();
-  await promptRegistry.rebuild(promptProviders);
-
-  // setupRoutes requires a Tracer for the OTel/v6 execute fallback path. No
-  // real spans are produced here (execution is disabled), so a no-op tracer
-  // (no global provider registered) is fine.
-  const tracer = trace.getTracer("evalution");
-
   const app = new Hono();
 
   const hotReloadSubscribers = new Set<(data: SSEData) => void>();
@@ -99,15 +87,21 @@ export async function createMemoryApp(
 
   setupRoutes({
     app,
-    promptProviders,
-    traceProviders,
-    promptRegistry,
+    // Fan `prompt-changed` out to all `/api/events` subscribers (the embedded
+    // app and the host's code sample) on every prompt change — including this
+    // provider's own writes, which are no longer suppressed server-side.
+    // Clients dedupe echoes of their own edits (see client/self-edits.ts), so
+    // every client sharing this workspace stays in sync.
+    context: await createProjectContext({
+      promptProviders: [promptProvider],
+      traceProviders: [traceProvider],
+      rootPath: rootDir,
+      executeDisabledMessage,
+      onPromptChanged: (providerId, event) =>
+        broadcast({ type: "prompt-changed", providerId, event }),
+    }),
     hotReloadSubscribers,
-    rootPath: rootDir,
     hasConfig: true,
-    tracer,
-    defaultTraceProviderId: traceProvider.id,
-    executeDisabledMessage,
     // setupTasks omitted → onboarding routes report no tasks. Combined with
     // hasConfig:true, the client never engages the WelcomeWizard.
   });
@@ -137,21 +131,6 @@ export async function createMemoryApp(
     }
     await fileProvider.writeFile(path, content);
     return c.json({ path });
-  });
-
-  // Fan `prompt-changed` out to all `/api/events` subscribers (the embedded app
-  // and the host's code sample) on every prompt change — including this
-  // provider's own writes, which are no longer suppressed server-side. Clients
-  // dedupe echoes of their own edits (see client/self-edits.ts), so every client
-  // sharing this workspace stays in sync.
-  promptProvider.watch?.(event => {
-    void promptRegistry.rebuild(promptProviders).then(() => {
-      broadcast({
-        type: "prompt-changed",
-        providerId: promptProvider.id,
-        event,
-      });
-    });
   });
 
   return { app, fileProvider };

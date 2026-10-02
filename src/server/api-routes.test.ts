@@ -23,6 +23,7 @@ import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
 import { TursoTraceProvider } from "../trace/turso-trace-provider.ts";
+import { createApiContext } from "./api-context.ts";
 import { setupRoutes } from "./api-routes.ts";
 
 const PROVIDER_ID = "fake";
@@ -95,15 +96,17 @@ function makeApp(
 
   setupRoutes({
     app,
-    promptProviders,
-    traceProviders,
-    promptRegistry,
     hotReloadSubscribers: new Set(),
-    rootPath: "/demo",
     hasConfig: true,
-    tracer: trace.getTracer("test"),
-    defaultTraceProviderId: TRACE_PROVIDER_ID,
     otlpIngestor,
+    context: createApiContext({
+      promptProviders,
+      traceProviders,
+      promptRegistry,
+      rootPath: "/demo",
+      tracer: trace.getTracer("test"),
+      defaultTraceProviderId: TRACE_PROVIDER_ID,
+    }),
   });
 
   return { app, traceProvider };
@@ -428,14 +431,16 @@ describe("annotation routes", () => {
     const app = new Hono();
     setupRoutes({
       app,
-      promptProviders: new Map(),
-      traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
-      promptRegistry: new PromptRegistry(),
       hotReloadSubscribers: new Set(),
-      rootPath: "/demo",
       hasConfig: true,
-      tracer: trace.getTracer("test"),
-      defaultTraceProviderId: TRACE_PROVIDER_ID,
+      context: createApiContext({
+        promptProviders: new Map(),
+        traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
+        promptRegistry: new PromptRegistry(),
+        rootPath: "/demo",
+        tracer: trace.getTracer("test"),
+        defaultTraceProviderId: TRACE_PROVIDER_ID,
+      }),
     });
     return app;
   }
@@ -467,6 +472,65 @@ describe("annotation routes", () => {
     });
     expect(deleteRes.status).toBe(204);
     expect(await (await app.request(base)).json()).toEqual([]);
+  });
+
+  it("updates an annotation over HTTP", async () => {
+    const app = await makeAnnotationsApp();
+    const base = `/api/traces/${TRACE_PROVIDER_ID}/t1/annotations`;
+    const created = (await (
+      await app.request(base, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "issue", note: "bad output" }),
+      })
+    ).json()) as { id: string };
+
+    const res = await app.request(`${base}/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "good" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ...created, kind: "good" });
+  });
+
+  it("serves the trace query schema and runs read-only queries", async () => {
+    const app = await makeAnnotationsApp();
+    const schema = await app.request(
+      `/api/trace-providers/${TRACE_PROVIDER_ID}/schema`,
+    );
+    expect(((await schema.json()) as { schema: string }).schema).toContain(
+      "CREATE TABLE traces",
+    );
+
+    const query = (body: unknown) =>
+      app.request(`/api/trace-providers/${TRACE_PROVIDER_ID}/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const ok = await query({ sql: "SELECT id, name FROM spans" });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({
+      columns: ["id", "name"],
+      rows: [{ id: "t1:root", name: "root" }],
+    });
+    expect((await query({ sql: "DELETE FROM spans" })).status).toBe(400);
+    expect((await query({})).status).toBe(400);
+    expect((await query({ sql: "SELECT 1", maxRows: 0 })).status).toBe(400);
+  });
+
+  it("reports SQL queries as unsupported for a provider without them", async () => {
+    const { app } = makeApp();
+    const res = await app.request(
+      `/api/trace-providers/${TRACE_PROVIDER_ID}/query`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sql: "SELECT 1" }),
+      },
+    );
+    expect(res.status).toBe(405);
   });
 
   it("responds 404 for an unknown trace provider", async () => {
@@ -511,14 +575,16 @@ describe("DELETE /api/traces/:providerId/:id", () => {
     const app = new Hono();
     setupRoutes({
       app,
-      promptProviders: new Map(),
-      traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
-      promptRegistry: new PromptRegistry(),
       hotReloadSubscribers: new Set(),
-      rootPath: "/demo",
       hasConfig: true,
-      tracer: trace.getTracer("test"),
-      defaultTraceProviderId: TRACE_PROVIDER_ID,
+      context: createApiContext({
+        promptProviders: new Map(),
+        traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
+        promptRegistry: new PromptRegistry(),
+        rootPath: "/demo",
+        tracer: trace.getTracer("test"),
+        defaultTraceProviderId: TRACE_PROVIDER_ID,
+      }),
     });
     return app;
   }
@@ -586,14 +652,16 @@ describe("GET /api/traces/:providerId/:id", () => {
     const traceProvider = new MemoryTraceProvider({ id: TRACE_PROVIDER_ID });
     setupRoutes({
       app,
-      promptProviders,
-      traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
-      promptRegistry,
       hotReloadSubscribers: new Set(),
-      rootPath: "/demo",
       hasConfig: true,
-      tracer: trace.getTracer("test"),
-      defaultTraceProviderId: TRACE_PROVIDER_ID,
+      context: createApiContext({
+        promptProviders,
+        traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
+        promptRegistry,
+        rootPath: "/demo",
+        tracer: trace.getTracer("test"),
+        defaultTraceProviderId: TRACE_PROVIDER_ID,
+      }),
     });
 
     const functionInputs = [
@@ -647,15 +715,17 @@ describe("dataset routes", () => {
     const app = new Hono();
     setupRoutes({
       app,
-      promptProviders,
-      traceProviders: new Map(),
-      datasetProviders: new Map([[DATASET_PROVIDER_ID, datasetProvider]]),
-      promptRegistry,
       hotReloadSubscribers: new Set([(data: SSEData) => events.push(data)]),
-      rootPath: "/demo",
       hasConfig: true,
-      tracer: trace.getTracer("test"),
-      defaultTraceProviderId: TRACE_PROVIDER_ID,
+      context: createApiContext({
+        promptProviders,
+        traceProviders: new Map(),
+        datasetProviders: new Map([[DATASET_PROVIDER_ID, datasetProvider]]),
+        promptRegistry,
+        rootPath: "/demo",
+        tracer: trace.getTracer("test"),
+        defaultTraceProviderId: TRACE_PROVIDER_ID,
+      }),
     });
     return { app, events };
   }
@@ -685,6 +755,61 @@ describe("dataset routes", () => {
     );
     return { res, body: (await res.json()) as any };
   }
+
+  it("renames and deletes fields, and queries rows with SQL", async () => {
+    const { app } = await makeDatasetApp();
+    const { body: dataset } = await create(app, {
+      name: "Cities",
+      // A field may be given as add-field takes one, as well as by `def`.
+      fields: [stringField("city"), { name: "pop", type: "number" }],
+    });
+    expect(dataset.fields.map((f: any) => f.def.name)).toEqual(["city", "pop"]);
+    const base = `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}`;
+    await app.request(
+      `${base}/rows`,
+      json("POST", {
+        rows: [
+          {
+            cells: {
+              "0": text("Oslo"),
+              "1": { kind: "value", value: { kind: "primitive", value: 700 } },
+            },
+          },
+        ],
+      }),
+    );
+
+    const renamed = await app.request(
+      `${base}/fields/1`,
+      json("PATCH", { name: "population" }),
+    );
+    expect(renamed.status).toBe(200);
+    expect(((await renamed.json()) as any).def.name).toBe("population");
+
+    const query = await app.request(
+      `${base}/query`,
+      json("POST", { sql: "SELECT city, population FROM rows" }),
+    );
+    expect(await query.json()).toEqual({
+      columns: ["city", "population"],
+      rows: [{ city: "Oslo", population: 700 }],
+    });
+    const bad = await app.request(
+      `${base}/query`,
+      json("POST", { sql: "SELECT nope FROM rows" }),
+    );
+    expect(bad.status).toBe(400);
+
+    const deleted = await app.request(`${base}/fields/0`, { method: "DELETE" });
+    expect(deleted.status).toBe(204);
+    const unknown = await app.request(`${base}/fields/0`, { method: "DELETE" });
+    expect(unknown.status).toBe(400);
+    const missing = await app.request(
+      `/api/datasets/${DATASET_PROVIDER_ID}/nope/query`,
+      json("POST", { sql: "SELECT 1" }),
+    );
+    expect(missing.status).toBe(404);
+  });
 
   it("round-trips create, add rows, get, rename, delete row, and delete", async () => {
     const { app } = await makeDatasetApp();
@@ -1086,14 +1211,16 @@ describe("prompt refs on the prompt routes", () => {
     };
     setupRoutes({
       app,
-      promptProviders: new Map([[PROVIDER_ID, provider]]),
-      traceProviders: new Map(),
-      promptRegistry: new PromptRegistry(),
       hotReloadSubscribers: new Set(),
-      rootPath: "/demo",
       hasConfig: true,
-      tracer: trace.getTracer("test"),
-      defaultTraceProviderId: TRACE_PROVIDER_ID,
+      context: createApiContext({
+        promptProviders: new Map([[PROVIDER_ID, provider]]),
+        traceProviders: new Map(),
+        promptRegistry: new PromptRegistry(),
+        rootPath: "/demo",
+        tracer: trace.getTracer("test"),
+        defaultTraceProviderId: TRACE_PROVIDER_ID,
+      }),
     });
     const res = await app.request(
       new Request("http://localhost/api/prompts/fake/cCN0ZXN0/update", {

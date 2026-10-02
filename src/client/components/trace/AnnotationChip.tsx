@@ -49,12 +49,14 @@ export const KIND_STYLES: Record<
 export const SOURCE_GLYPH: Record<AnnotationSource, string> = {
   "claude-code": "◆",
   codex: "›",
+  agent: "◇",
   user: "·",
 };
 
 export function annotationSourceLabel(source: AnnotationSource): string {
   if (source === "claude-code") return "Claude Code";
   if (source === "codex") return "Codex";
+  if (source === "agent") return "An agent";
   return "You";
 }
 

@@ -74,7 +74,7 @@ describe("LocalDirectoryDatasetProvider — files", () => {
     await provider.listDatasets();
     await provider.getDataset("anything");
     await provider.listRows("anything");
-    await provider.deleteRow("anything", "row");
+    await provider.deleteRows("anything", ["row"]);
     expect(existsSync(dir)).toBe(false);
   });
 

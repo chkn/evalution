@@ -241,8 +241,11 @@ export interface TraceWithSpans {
   spans: Span[];
 }
 
-/** Where an {@link Annotation} came from. */
-export type AnnotationSource = "user" | "claude-code" | "codex";
+/**
+ * Where an {@link Annotation} came from: the user, a coding agent we know by
+ * name, or any other agent (an MCP client that isn't Claude Code or Codex).
+ */
+export type AnnotationSource = "user" | "claude-code" | "codex" | "agent";
 
 /** What kind of note an {@link Annotation} records. */
 export type AnnotationKind = "issue" | "good" | "note";
@@ -264,6 +267,9 @@ export interface Annotation {
   createdAt: number;
 }
 
+/** The fields of an {@link Annotation} that can be changed after it's made. */
+export type AnnotationChanges = Partial<Pick<Annotation, "kind" | "note">>;
+
 /** The kind of change that occurred to a trace. */
 export type TraceChangeType = "add" | "update" | "remove";
 
@@ -282,7 +288,7 @@ export type TraceStreamEvent =
   | { type: "trace-end"; trace: Trace };
 
 /** The change an annotation event describes. */
-export type AnnotationEventOp = "insert" | "delete";
+export type AnnotationEventOp = "insert" | "update" | "delete";
 
 /** The event a per-trace annotation subscription delivers. */
 export interface AnnotationEvent {

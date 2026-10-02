@@ -10,6 +10,11 @@ import {
   assertSqliteFile,
   createLocalTursoClient,
 } from "../trace/db/local-turso-client.ts";
+import { runQueryInWorker } from "../trace/db/query-worker.ts";
+import type {
+  SqlQueryOptions,
+  SqlQueryResult,
+} from "../trace/db/read-only-query.ts";
 import { mkdirSelfIgnoring } from "../trace/db/self-ignoring-dir.ts";
 import {
   isValidDatasetId,
@@ -177,7 +182,11 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
       await assertSqliteFile(path);
       client = await createLocalTursoClient({ path });
       await runDatasetMigrations(drizzle({ client }));
-      const inner = new TursoDatasetProvider({ client, id: this.id });
+      const inner = new TursoDatasetProvider({
+        client,
+        runQuery: (query, options) => runQueryInWorker(path, query, options),
+        id: this.id,
+      });
       const found = await inner.listDatasets();
       // A fresh file holds nothing until `createDataset` fills it; the
       // caller creating it is the only one that ever sees it empty.
@@ -371,10 +380,13 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
     await entry.inner.updateRows(entry.innerId, updates);
   }
 
-  async deleteRow(datasetId: string, rowId: string): Promise<void> {
+  async deleteRows(
+    datasetId: string,
+    rowIds: readonly string[],
+  ): Promise<number> {
     const entry = await this.entryFor(datasetId);
-    if (!entry?.ok) return;
-    await entry.inner.deleteRow(entry.innerId, rowId);
+    if (!entry?.ok) return 0;
+    return entry.inner.deleteRows(entry.innerId, rowIds);
   }
 
   async addField(
@@ -383,6 +395,29 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
   ): Promise<DatasetField> {
     const entry = await this.requireEntry(datasetId);
     return entry.inner.addField(entry.innerId, def);
+  }
+
+  async renameField(
+    datasetId: string,
+    fieldId: string,
+    name: string,
+  ): Promise<DatasetField> {
+    const entry = await this.requireEntry(datasetId);
+    return entry.inner.renameField(entry.innerId, fieldId, name);
+  }
+
+  async deleteField(datasetId: string, fieldId: string): Promise<void> {
+    const entry = await this.requireEntry(datasetId);
+    await entry.inner.deleteField(entry.innerId, fieldId);
+  }
+
+  async queryRows(
+    datasetId: string,
+    sql: string,
+    options?: SqlQueryOptions,
+  ): Promise<SqlQueryResult> {
+    const entry = await this.requireEntry(datasetId);
+    return entry.inner.queryRows(entry.innerId, sql, options);
   }
 
   /** Closes every open file. The provider reopens them on next use. */

@@ -3,6 +3,7 @@
 
 import type {
   Annotation,
+  AnnotationChanges,
   AnnotationEvent,
   AnnotationEventOp,
   TraceChangeEvent,
@@ -10,6 +11,7 @@ import type {
   TraceSummary,
   TraceWithSpans,
 } from "../shared/types.ts";
+import type { SqlQueryOptions, SqlQueryResult } from "./db/read-only-query.ts";
 
 export {
   createTracerForPrompt,
@@ -91,6 +93,23 @@ export interface TraceProvider {
    */
   deleteTrace?(traceId: string): Promise<boolean>;
 
+  /**
+   * Runs one read-only SQL query (a `SELECT`) against this provider's
+   * store and returns the rows — the ad-hoc counterpart to
+   * {@link getAllTraces}, for questions a summary can't answer. The schema the
+   * query is written against is {@link getQuerySchema}'s. Writes are refused.
+   *
+   * Optional — a provider not backed by SQL omits it, and the REST and MCP
+   * handlers report "not supported".
+   */
+  query?(sql: string, options?: SqlQueryOptions): Promise<SqlQueryResult>;
+
+  /**
+   * Describes the tables {@link query} runs against, as annotated SQL DDL.
+   * Present exactly when {@link query} is.
+   */
+  getQuerySchema?(): string;
+
   // ── Annotations — all optional; a provider with no annotation store
   // (e.g. `MemoryTraceProvider`) simply omits every member below, and the
   // REST handlers in `src/server/handlers/annotations.ts` treat their
@@ -105,6 +124,15 @@ export interface TraceProvider {
     input: Omit<Annotation, "id" | "createdAt">,
   ): Promise<Annotation>;
 
+  /**
+   * Changes an annotation's `kind` and/or `note`, returning it as updated, or
+   * `undefined` if it doesn't exist.
+   */
+  updateAnnotation?(
+    id: string,
+    changes: AnnotationChanges,
+  ): Promise<Annotation | undefined>;
+
   /** Deletes an annotation by id. A no-op if it doesn't exist. */
   deleteAnnotation?(id: string): Promise<void>;
 
@@ -113,7 +141,7 @@ export interface TraceProvider {
    * to {@link subscribeTrace} that a client's per-trace SSE connection also
    * opens, so both ride the same stream. Callers (the annotation REST
    * handlers) invoke {@link emitAnnotation} after a successful
-   * create/delete; this only delivers what's explicitly emitted.
+   * create/update/delete; this only delivers what's explicitly emitted.
    *
    * @returns A no-argument function that cancels the subscription.
    */
@@ -125,7 +153,8 @@ export interface TraceProvider {
   /**
    * Notifies this trace's {@link subscribeAnnotations} subscribers of an
    * annotation change. Called by the annotation REST handlers immediately
-   * after {@link createAnnotation}/{@link deleteAnnotation} succeeds — the
+   * after {@link createAnnotation}/{@link updateAnnotation}/{@link deleteAnnotation}
+   * succeeds — the
    * provider itself never calls this on its own.
    */
   emitAnnotation?(

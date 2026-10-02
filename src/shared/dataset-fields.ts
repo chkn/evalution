@@ -8,7 +8,12 @@
  * `specs/datasets.md` §B, §P.1.
  */
 
-import type { PromptID, PropDefinition } from "./types.ts";
+import type {
+  DatasetField,
+  NormalizedPrompt,
+  PromptID,
+  PropDefinition,
+} from "./types.ts";
 
 /**
  * The matching rule, and the only one: a source input and a target slot
@@ -74,3 +79,31 @@ export type AddDatasetFieldRequest =
       from: { providerId: string; checkUri: string; path: string };
       name?: string;
     };
+
+/** Unique-by-{@link matchKey} fields for a set of definitions, in order. */
+export function fieldsForDefs(
+  defs: readonly PropDefinition[],
+): Omit<DatasetField, "id">[] {
+  const seen = new Set<string>();
+  const out: Omit<DatasetField, "id">[] = [];
+  for (const def of defs) {
+    const key = matchKey(def);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ def: portableDef(def) });
+  }
+  return out;
+}
+
+/**
+ * A schema for "New dataset" from a prompt's signature: every function and
+ * execute parameter, filled or not — the dataset is *for* this prompt.
+ */
+export function fieldsForPrompt(
+  prompt: NormalizedPrompt,
+): Omit<DatasetField, "id">[] {
+  return fieldsForDefs([
+    ...prompt.functionParameters,
+    ...(prompt.executeParameters ?? []),
+  ]);
+}

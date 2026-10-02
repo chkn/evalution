@@ -10,7 +10,12 @@
  */
 
 import { stripReceipts } from "../../shared/dataset-cells";
-import { matchKey, portableDef } from "../../shared/dataset-fields";
+import {
+  fieldsForDefs,
+  fieldsForPrompt,
+  matchKey,
+} from "../../shared/dataset-fields";
+import { jsonToPropValue } from "../../shared/json-prop-value";
 import type {
   Dataset,
   DatasetField,
@@ -20,7 +25,6 @@ import type {
   PromptID,
   PropDefinition,
 } from "../../shared/types";
-import { jsonToPropValue } from "./json-to-prop-value";
 
 /** An input together with the definition that says what it is. */
 export interface NamedInput {
@@ -245,37 +249,9 @@ export function toPanel(
   return { functionInputs, executeInputs, skipped };
 }
 
-/** Unique-by-{@link matchKey} fields for a set of definitions, in order. */
-function fieldsForDefs(
-  defs: readonly PropDefinition[],
-): Omit<DatasetField, "id">[] {
-  const seen = new Set<string>();
-  const out: Omit<DatasetField, "id">[] = [];
-  for (const def of defs) {
-    const key = matchKey(def);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ def: portableDef(def) });
-  }
-  return out;
-}
-
 /** A schema for "New dataset" from a set of inputs: one field per distinct input. */
 function fieldsFor(inputs: NamedInputs): Omit<DatasetField, "id">[] {
   return fieldsForDefs(inputs.map(i => i.def));
-}
-
-/**
- * A schema for "New dataset" from a prompt's signature: every function and
- * execute parameter, filled or not — the dataset is *for* this prompt.
- */
-export function fieldsForPrompt(
-  prompt: NormalizedPrompt,
-): Omit<DatasetField, "id">[] {
-  return fieldsForDefs([
-    ...prompt.functionParameters,
-    ...(prompt.executeParameters ?? []),
-  ]);
 }
 
 /**

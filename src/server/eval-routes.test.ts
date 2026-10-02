@@ -14,6 +14,7 @@ import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import { PromptRegistry } from "../prompt/prompt-registry.ts";
 import type { NormalizedPrompt, SSEData } from "../shared/types.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
+import { createApiContext } from "./api-context.ts";
 import { setupRoutes } from "./api-routes.ts";
 
 const clients: Database[] = [];
@@ -98,16 +99,18 @@ async function makeApp() {
   const app = new Hono();
   setupRoutes({
     app,
-    promptProviders: new Map([["fake", prompts]]),
-    traceProviders: new Map([["mem", traces]]),
-    datasetProviders: new Map([["ds", datasets]]),
-    evalProviders: new Map([["ev", evals]]),
-    promptRegistry,
+    context: createApiContext({
+      promptProviders: new Map([["fake", prompts]]),
+      traceProviders: new Map([["mem", traces]]),
+      datasetProviders: new Map([["ds", datasets]]),
+      evalProviders: new Map([["ev", evals]]),
+      promptRegistry,
+      rootPath: "/demo",
+      tracer: trace.getTracer("test"),
+      defaultTraceProviderId: "mem",
+    }),
     hotReloadSubscribers: new Set([(e: SSEData) => void events.push(e)]),
-    rootPath: "/demo",
     hasConfig: true,
-    tracer: trace.getTracer("test"),
-    defaultTraceProviderId: "mem",
   });
   const call = async (method: string, url: string, body?: unknown) => {
     const res = await app.request(url, {

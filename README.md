@@ -13,6 +13,7 @@ time, so what you test is exactly what ships.
 - 🎯 **Type-safe** — full TypeScript support with parameter inference
 - 🔌 **Multi-provider** — Vercel AI SDK is fully supported, or wire up a different SDK adapter
 - 📊 **Tracing** — traces for your prompt runs populate in realtime
+- 🤖 **MCP server** — `npx evalution mcp` lets coding agents run prompts, query traces with SQL, annotate them, and build datasets
 - 🧩 **Extensible** — swap in your own prompt sources, SDK adapters, and trace backends
 
 ## Getting started

@@ -301,6 +301,12 @@ export interface PromptProvider<
   getPrompt(ref: PromptRefLike): Promise<TPrompt | null>;
 
   /**
+   * The absolute path of the file `prompt` is defined in, for a provider whose
+   * prompts live in files. Optional.
+   */
+  getSourcePath?(prompt: TPrompt): string | undefined;
+
+  /**
    * Applies normalized updates to the prompt `ref` names, and returns where
    * they landed. Setting any field of `updates` to `null` removes the
    * corresponding property.

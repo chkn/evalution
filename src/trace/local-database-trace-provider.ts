@@ -6,11 +6,19 @@ import { dirname, resolve } from "node:path";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { createLocalTursoClient } from "./db/local-turso-client.ts";
 import { runMigrations } from "./db/migrate.ts";
+import { TRACE_QUERY_SCHEMA } from "./db/query-schema.ts";
+import { runQueryInWorker } from "./db/query-worker.ts";
+import {
+  SqlQueryError,
+  type SqlQueryOptions,
+  type SqlQueryResult,
+} from "./db/read-only-query.ts";
 import { mkdirSelfIgnoring } from "./db/self-ignoring-dir.ts";
 import type { TraceProvider } from "./trace-provider.ts";
 import { BaseTraceProvider } from "./trace-sink.ts";
 import type {
   Annotation,
+  AnnotationChanges,
   Span,
   Trace,
   TraceStreamEvent,
@@ -134,6 +142,7 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
     await runMigrations(drizzle({ client }));
     const real = new TursoTraceProvider({
       client,
+      runQuery: (query, options) => runQueryInWorker(this.path, query, options),
       id: this.id,
       displayName: this.displayName,
       description: this.description,
@@ -190,6 +199,28 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
    */
   override async deleteTrace(traceId: string): Promise<boolean> {
     return (await (await this.currentReal())?.deleteTrace(traceId)) ?? false;
+  }
+
+  /**
+   * Runs one read-only query — see {@link TursoTraceProvider.query}. With no
+   * database yet there is nothing to query, and opening one to find that out
+   * would create the file, so this says so instead.
+   */
+  async query(sql: string, options?: SqlQueryOptions): Promise<SqlQueryResult> {
+    const real = await this.currentReal();
+    if (!real) {
+      throw new SqlQueryError(
+        this.openFailure
+          ? `The trace database at ${this.path} could not be opened: ${this.openFailure.message}`
+          : "No traces have been recorded yet, so there is nothing to query.",
+      );
+    }
+    return real.query(sql, options);
+  }
+
+  /** The tables {@link query} runs against. */
+  getQuerySchema(): string {
+    return TRACE_QUERY_SCHEMA;
   }
 
   override async getTrace(
@@ -257,6 +288,17 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
       );
     }
     return real.createAnnotation(input);
+  }
+
+  /**
+   * Changes an annotation's `kind` and/or `note`. `undefined` if it doesn't
+   * exist — including when the database was never created.
+   */
+  async updateAnnotation(
+    id: string,
+    changes: AnnotationChanges,
+  ): Promise<Annotation | undefined> {
+    return (await this.currentReal())?.updateAnnotation(id, changes);
   }
 
   /** Deletes an annotation by id. A no-op if the database was never created. */

@@ -13,6 +13,12 @@ import { and, asc, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { matchKey } from "../shared/dataset-fields.ts";
 import type { ExecutionInput, PropDefinition } from "../shared/types.ts";
+import {
+  type ReadOnlyQueryRunner,
+  runReadOnlyQuery,
+  type SqlQueryOptions,
+  type SqlQueryResult,
+} from "../trace/db/read-only-query.ts";
 import type { PromptID } from "../trace/trace-types.ts";
 import {
   fieldIdFor,
@@ -28,6 +34,7 @@ import {
   type ListRowsOptions,
   type NewDatasetRow,
 } from "./dataset-provider.ts";
+import { datasetRowsQuery } from "./dataset-query.ts";
 import type {
   Dataset,
   DatasetChangeEvent,
@@ -115,6 +122,8 @@ export class TursoDatasetProvider implements DatasetProvider {
   readonly displayName?: string;
   readonly description?: string;
 
+  /** Answers `query` — see the constructor's `runQuery`. */
+  private readonly runQuery: ReadOnlyQueryRunner;
   private readonly db: ReturnType<
     typeof drizzle<Record<string, never>, Database>
   >;
@@ -125,12 +134,20 @@ export class TursoDatasetProvider implements DatasetProvider {
 
   constructor({
     client,
+    runQuery,
     id = "turso-datasets",
     displayName = "Datasets",
     description = "Stores datasets in a (optionally synced) SQLite database.",
   }: {
     /** An already-connected, migrated `@tursodatabase/sync` client. */
     client: Database;
+    /**
+     * Runs ad-hoc queries. Defaults to running them on `client` itself,
+     * queued behind its writes; a store over a database file passes
+     * `runQueryInWorker` for that file instead, so a slow query can't block
+     * the event loop.
+     */
+    runQuery?: ReadOnlyQueryRunner;
     id?: string;
     displayName?: string;
     description?: string;
@@ -139,6 +156,12 @@ export class TursoDatasetProvider implements DatasetProvider {
     this.displayName = displayName;
     this.description = description;
     this.db = drizzle({ client });
+    // Read-only mode is a per-connection pragma no write may run under, so a
+    // query on the store's own connection waits its turn on the write chain.
+    this.runQuery =
+      runQuery ??
+      ((query, options) =>
+        this.serializeWrite(() => runReadOnlyQuery(client, query, options)));
   }
 
   /**
@@ -501,27 +524,32 @@ export class TursoDatasetProvider implements DatasetProvider {
     if (changes) this.emit({ type: "update", datasetId });
   }
 
-  async deleteRow(datasetId: string, rowId: string): Promise<void> {
+  async deleteRows(
+    datasetId: string,
+    rowIds: readonly string[],
+  ): Promise<number> {
+    if (rowIds.length === 0) return 0;
     const deleted = await this.serializeWrite(() =>
       this.db.transaction(async tx => {
         const removed = await tx
           .delete(datasetRows)
           .where(
             and(
-              eq(datasetRows.id, rowId),
+              inArray(datasetRows.id, [...rowIds]),
               eq(datasetRows.datasetId, datasetId),
             ),
           )
           .returning({ id: datasetRows.id });
-        if (removed.length === 0) return false;
+        if (removed.length === 0) return 0;
         await tx
           .update(datasets)
           .set({ updatedAt: Date.now() })
           .where(eq(datasets.id, datasetId));
-        return true;
+        return removed.length;
       }),
     );
-    if (deleted) this.emit({ type: "update", datasetId });
+    if (deleted > 0) this.emit({ type: "update", datasetId });
+    return deleted;
   }
 
   async addField(
@@ -566,4 +594,103 @@ export class TursoDatasetProvider implements DatasetProvider {
     this.emit({ type: "update", datasetId });
     return field;
   }
+
+  async renameField(
+    datasetId: string,
+    fieldId: string,
+    name: string,
+  ): Promise<DatasetField> {
+    const field = await this.serializeWrite(() =>
+      this.db.transaction(async tx => {
+        const fields = await this.fieldsIn(tx, datasetId);
+        const field = fields.find(f => f.id === fieldId);
+        if (!field) throw noSuchField(datasetId, fieldId);
+        const renamed: DatasetField = { ...field, def: { ...field.def, name } };
+        const clash = fields.some(
+          f => f.id !== fieldId && matchKey(f.def) === matchKey(renamed.def),
+        );
+        if (clash) {
+          throw new DatasetValidationError(
+            `\`${name}: ${field.def.type.syntax}\` already exists`,
+          );
+        }
+        await tx
+          .update(datasets)
+          .set({
+            fields: JSON.stringify(
+              fields.map(f => (f.id === fieldId ? renamed : f)),
+            ),
+            updatedAt: Date.now(),
+          })
+          .where(eq(datasets.id, datasetId));
+        return renamed;
+      }),
+    );
+    this.emit({ type: "update", datasetId });
+    return field;
+  }
+
+  async deleteField(datasetId: string, fieldId: string): Promise<void> {
+    await this.serializeWrite(() =>
+      this.db.transaction(async tx => {
+        const fields = await this.fieldsIn(tx, datasetId);
+        if (!fields.some(f => f.id === fieldId)) {
+          throw noSuchField(datasetId, fieldId);
+        }
+        // `nextFieldId` is left alone, so the id is never minted again: a
+        // row written before the delete can't come back under a new field.
+        await tx
+          .update(datasets)
+          .set({
+            fields: JSON.stringify(fields.filter(f => f.id !== fieldId)),
+            updatedAt: Date.now(),
+          })
+          .where(eq(datasets.id, datasetId));
+        await tx
+          .update(datasetRows)
+          .set({
+            cells: sql`jsonb_remove(${datasetRows.cells}, ${`$."${fieldId}"`})`,
+          })
+          .where(eq(datasetRows.datasetId, datasetId));
+      }),
+    );
+    this.emit({ type: "update", datasetId });
+  }
+
+  /**
+   * Runs one read-only query against a `rows` view of the dataset (see
+   * `./dataset-query.ts`). Queued on the write chain, as
+   * `TursoTraceProvider.query` is.
+   */
+  async queryRows(
+    datasetId: string,
+    query: string,
+    options?: SqlQueryOptions,
+  ): Promise<SqlQueryResult> {
+    const dataset = await this.getDataset(datasetId);
+    if (!dataset) throw new DatasetNotFoundError(datasetId);
+    return this.runQuery(
+      datasetRowsQuery(datasetId, dataset.fields, query),
+      options,
+    );
+  }
+
+  /** A dataset's fields, read inside `tx`; throws if it doesn't exist. */
+  private async fieldsIn(
+    tx: Pick<typeof this.db, "select">,
+    datasetId: string,
+  ): Promise<DatasetField[]> {
+    const [row] = await tx
+      .select({ fields: datasets.fields })
+      .from(datasets)
+      .where(eq(datasets.id, datasetId));
+    if (!row) throw new DatasetNotFoundError(datasetId);
+    return JSON.parse(row.fields) as DatasetField[];
+  }
+}
+
+function noSuchField(datasetId: string, fieldId: string): Error {
+  return new DatasetValidationError(
+    `Dataset ${datasetId} has no field with id "${fieldId}"`,
+  );
 }

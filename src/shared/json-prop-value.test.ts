@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import { jsonToPropValue } from "./json-to-prop-value";
+import { jsonToPropValue, propValueToJson } from "./json-prop-value.ts";
 
 describe("jsonToPropValue", () => {
   it("wraps a primitive as a `primitive` PropValue", () => {
@@ -50,5 +50,47 @@ describe("jsonToPropValue", () => {
         },
       },
     });
+  });
+});
+
+describe("propValueToJson", () => {
+  it("round-trips plain JSON", () => {
+    for (const value of [
+      "hi",
+      4,
+      true,
+      null,
+      [1, "a"],
+      { a: { b: [false] } },
+    ]) {
+      expect(propValueToJson(jsonToPropValue(value))).toEqual(value);
+    }
+  });
+
+  it("reads a tuple as an array and an interpolation-free template as a string", () => {
+    expect(
+      propValueToJson({
+        kind: "tuple",
+        elements: [{ kind: "primitive", value: 1 }],
+      }),
+    ).toEqual([1]);
+    expect(propValueToJson({ kind: "template", value: ["a", "b"] })).toBe("ab");
+  });
+
+  it("is undefined for anything that only means something as source", () => {
+    expect(
+      propValueToJson({ kind: "template", value: ["Hi ", { expr: "name" }] }),
+    ).toBeUndefined();
+    expect(
+      propValueToJson({
+        kind: "object",
+        properties: {
+          model: { kind: "functionCall", callee: "openai", args: [] },
+        },
+      }),
+    ).toBeUndefined();
+    expect(
+      propValueToJson({ kind: "reference", path: ["ticket"] }),
+    ).toBeUndefined();
   });
 });

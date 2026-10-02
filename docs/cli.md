@@ -9,17 +9,21 @@ nav:
 
 # CLI
 
-Evalution ships a single command that starts the local playground.
+Evalution's CLI starts the local playground, or serves the same project to a
+coding agent over [MCP](https://modelcontextprotocol.io).
 
 ## Usage
 
 ```sh
 npx evalution [ui [path]]
+npx evalution mcp [path]
 ```
 
 - `evalution` — start the playground for the current directory.
-- `evalution ui` — same as above; `ui` is currently the only named subcommand.
+- `evalution ui` — same as above.
 - `evalution ui <path>` — start for `<path>` instead of the current directory.
+- `evalution mcp` — serve the project as an MCP server over stdio. See [MCP server](#mcp-server).
+- `evalution mcp <path>` — same, for `<path>` instead of the current directory.
 
 ## How a project is found
 
@@ -32,6 +36,70 @@ If no `.evalution/config.ts` is found anywhere up the tree, Evalution starts in
 **onboarding mode** and guides you through creating one. See [Configuration](/docs/config) for the config file format.
 
 On startup Evalution opens the playground in your default browser automatically.
+
+## MCP server
+
+`evalution mcp` lets a coding agent work with your prompts, traces, datasets,
+and evals directly. Register it with your agent as a stdio server, run from the
+project root. For Claude Code:
+
+```sh
+claude mcp add evalution -- npx evalution mcp
+```
+
+For Codex, add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.evalution]
+command = "npx"
+args = ["evalution", "mcp"]
+```
+
+Any other MCP client takes the same command: `npx evalution mcp`.
+
+The server offers tools to:
+
+- **Prompts** — list every prompt with the file it's defined in, its model, and
+  its parameters (`list_prompts`, `get_prompt`), and run one with plain JSON
+  arguments, waiting for its output (`execute_prompt`).
+- **Traces** — list traces (`list_traces`), query them with read-only SQL
+  (`query_traces`, with the schema from `get_trace_schema` or the
+  `evalution://trace-providers/<id>/schema` resource), and fetch traces in full
+  with every span and annotation (`get_traces`).
+- **Annotations** — list, create, edit, and delete the notes on a trace or span
+  (`list_annotations`, `create_annotation`, `update_annotation`,
+  `delete_annotation`). They show up live in the playground.
+- **Datasets** — create (optionally from a prompt's parameters), rename, and
+  delete datasets; add, rename, and delete fields; add, update, list, and delete
+  rows in bulk, by field name; and query rows with read-only SQL against a
+  `rows` view with a column per field (`query_dataset_rows`).
+- **Evals** — list the checks an eval can use (`list_checks`); create, read,
+  change, and delete evals (`create_eval`, `get_eval`, `update_eval`,
+  `delete_eval`, `list_evals`), with parameters bound to dataset columns by
+  name — and, by default, to the columns that match them, as the eval editor
+  does. Start a run without waiting for it (`start_eval_run`), follow it and
+  read its results — per-arm pass rates, each row's check outcomes, and the
+  trace each row recorded (`get_eval_run`, `list_eval_runs`) — and cancel or
+  delete runs (`cancel_eval_run`, `delete_eval_run`).
+
+A SQL query that runs longer than 10 seconds is stopped with an error.
+
+A project's databases can only be open in one process at a time, so the first
+evalution process to serve a project holds them, and every `evalution mcp`
+started after it relays to that one instead. Several agent sessions on one
+project can therefore run side by side. When the playground (`evalution ui`)
+is that first process, annotations agents leave show up in it live. The
+playground also serves MCP itself, over HTTP at `/mcp` — e.g.
+`claude mcp add --transport http evalution http://localhost:3000/mcp`.
+
+When the process holding the project goes away (its agent session ended, or
+the playground was stopped), the other `evalution mcp`s carry on without
+their agents noticing: one of them takes the project over, and the rest relay
+to it. An `evalution mcp` whose agent session ends keeps running until the
+eval runs it holds have finished.
+
+Start the playground before your agents when you use both: while an agent's
+`evalution mcp` holds the project, `evalution ui` can't start, and says so.
 
 ## Environment
 

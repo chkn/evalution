@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
+import { fieldsForPrompt } from "../../shared/dataset-fields";
 import type {
   Dataset,
   DatasetField,
@@ -10,7 +11,6 @@ import type {
   PropDefinition,
 } from "../../shared/types";
 import {
-  fieldsForPrompt,
   fieldsForTrace,
   fromPanel,
   fromRow,

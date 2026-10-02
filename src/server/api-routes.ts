@@ -1,54 +1,48 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { Tracer } from "@opentelemetry/api";
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { builtinCheckInfos } from "../checks/index.ts";
-import type { DatasetProvider } from "../dataset/dataset-provider.ts";
 import type { EvalProvider } from "../eval/eval-provider.ts";
-import { EvalRunner } from "../eval/eval-runner.ts";
-import {
-  type OpenOnHeadOptions,
-  type PromptProvider,
-  VariationConflictError,
+import type { EvalRunner } from "../eval/eval-runner.ts";
+import type {
+  OpenOnHeadOptions,
+  PromptProvider,
 } from "../prompt/prompt-provider.ts";
-import type { PromptRegistry } from "../prompt/prompt-registry.ts";
 import { isPromptStyle } from "../shared/helpers.ts";
 import type { SetupTask } from "../shared/setup-task.ts";
 import type {
   ExecuteRequest,
-  ExecuteResponse,
   PromptRef,
-  Span,
   SSEData,
   UpdatePromptResponse,
 } from "../shared/types.ts";
 import type { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
-import type { TraceProvider } from "../trace/trace-provider.ts";
+import type { ApiContext } from "./api-context.ts";
 import {
-  type AnnotationHandlerResult,
   handleCreateAnnotation,
   handleDeleteAnnotation,
   handleListAnnotations,
+  handleUpdateAnnotation,
 } from "./handlers/annotations.ts";
 import {
-  type DatasetHandlerResult,
   handleAddField,
   handleAddRows,
   handleCreateDataset,
   handleDeleteDataset,
+  handleDeleteField,
   handleDeleteRow,
   handleGetDataset,
   handleListDatasets,
   handleListRows,
+  handleQueryRows,
   handleRenameDataset,
+  handleRenameField,
   handleUpdateRows,
-  type ResolvePromptLink,
 } from "./handlers/datasets.ts";
 import {
-  type EvalHandlerResult,
+  evalRunnerOrRefusal,
   handleCancelRun,
   handleCreateEval,
   handleDeleteEval,
@@ -62,8 +56,21 @@ import {
   handleUpdateEval,
 } from "./handlers/evals.ts";
 import { handleOtlpTraces } from "./handlers/otlp-ingest.ts";
+import {
+  handleExecutePrompt,
+  handleGetPrompt,
+  handleListPrompts,
+  promptFailure,
+} from "./handlers/prompts.ts";
+import type { HandlerResult } from "./handlers/result.ts";
 import { streamTrace } from "./handlers/trace-stream.ts";
-import { InputResolutionError, runPrompt } from "./run-prompt.ts";
+import {
+  handleDeleteTrace,
+  handleGetTrace,
+  handleGetTraceQuerySchema,
+  handleListTraces,
+  handleQueryTraces,
+} from "./handlers/traces.ts";
 
 /** Decodes a URL-safe base64 prompt id produced by `encodePromptId`. Uses the
  * Web `atob` (rather than Node's `Buffer`) so it works in browser/worker
@@ -86,14 +93,54 @@ function promptRefFrom(c: Context, promptId: string): PromptRef {
 }
 
 /**
+ * `GET /api/config`: the project's root and whether it has a config file —
+ * what the playground starts from, and what `findRunningServer` checks a
+ * running server against before a later `evalution` process uses it. Also
+ * an `instance` id, new each time it's mounted, so a relay can tell a
+ * server restarted on the same port from the one it was talking to.
+ */
+export function mountConfigRoute(
+  app: Hono,
+  rootPath: string,
+  configured: boolean,
+): void {
+  const instance = crypto.randomUUID();
+  app.get("/api/config", c => c.json({ rootPath, configured, instance }));
+}
+
+/** Relays a neutral handler's `{status, body}` — a 204 carries no body of its own. */
+function relay(c: Context, { status, body }: HandlerResult) {
+  return body === undefined
+    ? c.body(null, status as ContentfulStatusCode)
+    : c.json(body as object, status as ContentfulStatusCode);
+}
+
+/**
+ * A route for one of `providers`, named by the `:providerId` param: answers
+ * `handle`'s result, or a 404 with `notFound` when there's no such provider.
+ */
+const providerRoute =
+  <P>(providers: Map<string, P>, notFound: string) =>
+  (
+    handle: (
+      provider: P,
+      params: Record<string, string>,
+      c: Context,
+    ) => HandlerResult | Promise<HandlerResult>,
+  ) =>
+  async (c: Context) => {
+    const params = c.req.param();
+    const provider = providers.get(params.providerId);
+    if (!provider) return c.json({ error: notFound }, 404);
+    return relay(c, await handle(provider, params, c));
+  };
+
+/**
  * The response for an error from a versions or variations call: a conflict is
  * a 409 carrying the conflicting fields, so the client can show them.
  */
 function errorResponse(c: Context, error: any, status: ContentfulStatusCode) {
-  if (error instanceof VariationConflictError) {
-    return c.json({ error: error.message, conflicts: error.conflicts }, 409);
-  }
-  return c.json({ error: error?.message ?? String(error) }, status);
+  return relay(c, promptFailure(error, status));
 }
 
 /**
@@ -113,34 +160,17 @@ export interface SetupTaskHandlers {
 
 export interface SetupRoutesOptions {
   app: Hono;
-  promptProviders: Map<string, PromptProvider>;
-  traceProviders: Map<string, TraceProvider>;
-  /** Dataset stores. Omitted by hosts with none; the routes then list nothing. */
-  datasetProviders?: Map<string, DatasetProvider>;
-  /**
-   * Eval stores. Omitted by hosts with none; the routes then list nothing,
-   * and there is nothing to run. See `specs/evals.md` §E.
-   */
-  evalProviders?: Map<string, EvalProvider>;
-  promptRegistry: PromptRegistry;
+  /** The providers and lookups the routes answer from. */
+  context: ApiContext;
   /** Registry of hot-reload SSE writers; each `/api/events` client adds one. */
   hotReloadSubscribers: Set<(data: SSEData) => void>;
-  rootPath: string;
   /** Whether the server was started with a project config file loaded. */
   hasConfig: boolean;
-  tracer: Tracer;
-  defaultTraceProviderId: string;
   /**
    * Optional onboarding setup-task handlers. When omitted, the setup-task
    * routes report no tasks / 404 (used by hosts without a filesystem).
    */
   setupTasks?: SetupTaskHandlers;
-  /**
-   * When set, `POST /api/prompts/:p/:id/execute` short-circuits and returns this
-   * message as a 400 error instead of running the prompt. Used by the in-browser
-   * demo, where execution happens locally via `npx evalution`.
-   */
-  executeDisabledMessage?: string;
   /**
    * The process's OTLP ingestor, if any. When set, `POST /v1/traces` (and the
    * `/otel/v1/traces` alias) accept incoming OTLP trace exports and feed them
@@ -150,46 +180,28 @@ export interface SetupRoutesOptions {
   otlpIngestor?: OtlpTraceIngestor;
 }
 
+/**
+ * Registers every REST route on `app`, answering through the neutral handlers
+ * in `./handlers/` from `context` — which a host can serve over MCP too.
+ */
 export function setupRoutes({
   app,
-  promptProviders,
-  traceProviders,
-  datasetProviders = new Map(),
-  evalProviders = new Map(),
-  promptRegistry,
+  context,
   hotReloadSubscribers,
-  rootPath,
   hasConfig,
-  tracer,
-  defaultTraceProviderId,
   setupTasks,
-  executeDisabledMessage,
   otlpIngestor,
-}: SetupRoutesOptions) {
-  // Resolve a span's prompt reference (which may be a global ID) to a concrete
-  // provider-scoped prompt the client can open. Done at read time against the
-  // current registry so the stored raw ID stays stable across renames/moves.
-  const resolveSpanPrompt = (span: Span): Span => {
-    if (!span.prompt) return span;
-    const resolved = promptRegistry.resolve(
-      span.prompt.id,
-      span.prompt.providerId,
-    );
-    if (!resolved) return span;
-    // Only the reference is rewritten: the recorded inputs and definitions
-    // ride along, since they're what "Open prompt" fills the panel from.
-    return {
-      ...span,
-      prompt: {
-        ...span.prompt,
-        id: resolved.promptId,
-        providerId: resolved.providerId,
-      },
-    };
-  };
+}: SetupRoutesOptions): void {
+  const {
+    promptProviders,
+    traceProviders,
+    datasetProviders,
+    rootPath,
+    resolveSpanPrompt,
+    resolvePromptLink,
+  } = context;
 
-  // GET /api/config - Get server configuration
-  app.get("/api/config", c => c.json({ rootPath, configured: hasConfig }));
+  mountConfigRoute(app, rootPath, hasConfig);
 
   // GET /api/setup-tasks - Onboarding tasks (with per-step completion status)
   app.get("/api/setup-tasks", c =>
@@ -276,41 +288,24 @@ export function setupRoutes({
   });
 
   // GET /api/prompts - Get all prompts from all providers
-  app.get("/api/prompts", async c => {
-    try {
-      const results = await Promise.all(
-        Array.from(promptProviders.entries()).map(
-          async ([providerId, provider]) => {
-            const prompts = await provider.getAllPrompts();
-            return prompts.map(prompt => ({ ...prompt, providerId }));
-          },
-        ),
-      );
-      return c.json(results.flat());
-    } catch (error: any) {
-      return c.json({ error: error.message }, 500);
-    }
-  });
+  app.get("/api/prompts", async c =>
+    relay(c, await handleListPrompts(promptProviders)),
+  );
 
   // GET /api/prompts/:providerId/:id - Get specific prompt
   app.get("/api/prompts/:providerId/:id", async c => {
+    const { providerId, id } = c.req.param();
+    const provider = promptProviders.get(providerId);
+    if (!provider) {
+      return c.json({ error: "Provider not found" }, 404);
+    }
+    let ref: PromptRef;
     try {
-      const { providerId, id } = c.req.param();
-      const provider = promptProviders.get(providerId);
-      if (!provider) {
-        return c.json({ error: "Provider not found" }, 404);
-      }
-
-      const decodedId = decodePromptId(id);
-      const prompt = await provider.getPrompt(promptRefFrom(c, decodedId));
-      if (!prompt) {
-        return c.json({ error: "Prompt not found" }, 404);
-      }
-
-      return c.json({ ...prompt, providerId });
+      ref = promptRefFrom(c, decodePromptId(id));
     } catch (error: any) {
       return c.json({ error: error.message }, 500);
     }
+    return relay(c, await handleGetPrompt(provider, ref));
   });
 
   // GET /api/prompts/:providerId/:id/versions?limit=&before= - Versions that
@@ -573,54 +568,28 @@ export function setupRoutes({
   // the background; clients subscribe to
   // `/api/traces/:providerId/:traceId/events` for span-level updates.
   app.post("/api/prompts/:providerId/:id/execute", async c => {
+    // Answered before the id is even decoded: a host that can't run prompts
+    // says so whatever the request names.
+    if (context.executeDisabledMessage) {
+      return c.json({ error: context.executeDisabledMessage }, 400);
+    }
+    const { providerId, id } = c.req.param();
+    let ref: PromptRef;
     try {
-      // Hosts that can't run prompts (e.g. the in-browser demo) disable
-      // execution and surface a message the client renders as an error.
-      if (executeDisabledMessage) {
-        return c.json({ error: executeDisabledMessage }, 400);
-      }
-      const { providerId, id } = c.req.param();
-      const provider = promptProviders.get(providerId);
-      if (!provider) {
-        return c.json({ error: "Provider not found" }, 404);
-      }
-
-      const decodedId = decodePromptId(id);
-      const ref = promptRefFrom(c, decodedId);
-      const { functionInputs = [], executeInputs = {} } = (await c.req
-        .json()
-        .catch(() => ({}))) as ExecuteRequest;
-
-      const prompt = await provider.getPrompt(ref);
-      if (!prompt) {
-        return c.json({ error: "Prompt not found" }, 404);
-      }
-
-      let response: ExecuteResponse;
-      try {
-        ({ response } = await runPrompt(
-          provider,
-          ref,
-          prompt,
-          { functionInputs, executeInputs },
-          { tracer, traceProviderId: defaultTraceProviderId },
-        ));
-      } catch (err: any) {
-        // The request named something that cannot be turned into a value — a
-        // dataset cell, an unknown slot, a resource that no longer exists.
-        // That is a bad request, not a failed run: nothing has been
-        // dispatched and no trace exists to carry the error, so it has to be
-        // answered here — and logged, since the response carries only the
-        // message.
-        if (!(err instanceof InputResolutionError)) throw err;
-        console.error("failed to resolve prompt inputs:", err);
-        return c.json({ error: err.message }, 400);
-      }
-
-      return c.json(response);
+      ref = promptRefFrom(c, decodePromptId(id));
     } catch (error: any) {
       return errorResponse(c, error, 500);
     }
+    const request = (await c.req.json().catch(() => ({}))) as ExecuteRequest;
+    return relay(
+      c,
+      await handleExecutePrompt(
+        context,
+        promptProviders.get(providerId),
+        ref,
+        request,
+      ),
+    );
   });
 
   // GET /api/trace-providers - List trace providers
@@ -635,53 +604,41 @@ export function setupRoutes({
   );
 
   // GET /api/traces - List all traces across all trace providers
-  app.get("/api/traces", async c => {
-    try {
-      const results = await Promise.all(
-        Array.from(traceProviders.values()).map(p => p.getAllTraces()),
-      );
-      return c.json(results.flat());
-    } catch (error: any) {
-      return c.json({ error: error.message }, 500);
-    }
-  });
+  app.get("/api/traces", async c =>
+    relay(c, await handleListTraces(traceProviders.values())),
+  );
+
+  // Trace provider routes: resolve the provider, then relay the neutral
+  // handler's `{status, body}`.
+  const traceRoute = providerRoute(traceProviders, "Trace provider not found");
+
+  // GET /api/trace-providers/:providerId/schema - The tables a query runs against
+  app.get(
+    "/api/trace-providers/:providerId/schema",
+    traceRoute(provider => handleGetTraceQuerySchema(provider)),
+  );
+
+  // POST /api/trace-providers/:providerId/query - One read-only SQL query
+  app.post(
+    "/api/trace-providers/:providerId/query",
+    traceRoute(async (provider, _params, c) =>
+      handleQueryTraces(provider, await c.req.json().catch(() => undefined)),
+    ),
+  );
 
   // GET /api/traces/:providerId/:id - Fetch a trace together with its spans
-  app.get("/api/traces/:providerId/:id", async c => {
-    const { providerId, id } = c.req.param();
-    const provider = traceProviders.get(providerId);
-    if (!provider) {
-      return c.json({ error: "Trace provider not found" }, 404);
-    }
-    const trace = await provider.getTrace(id);
-    if (!trace) {
-      return c.json({ error: "Trace not found" }, 404);
-    }
-    return c.json({ ...trace, spans: trace.spans.map(resolveSpanPrompt) });
-  });
+  app.get(
+    "/api/traces/:providerId/:id",
+    traceRoute((provider, { id }) =>
+      handleGetTrace(provider, id, resolveSpanPrompt),
+    ),
+  );
 
   // DELETE /api/traces/:providerId/:id - Delete a trace with its spans and annotations
-  app.delete("/api/traces/:providerId/:id", async c => {
-    const { providerId, id } = c.req.param();
-    const provider = traceProviders.get(providerId);
-    if (!provider) {
-      return c.json({ error: "Trace provider not found" }, 404);
-    }
-    if (!provider.deleteTrace) {
-      return c.json(
-        { error: "This trace provider does not support deleting traces" },
-        405,
-      );
-    }
-    try {
-      const deleted = await provider.deleteTrace(id);
-      return deleted
-        ? c.body(null, 204)
-        : c.json({ error: "Trace not found" }, 404);
-    } catch (error: any) {
-      return c.json({ error: error.message }, 500);
-    }
-  });
+  app.delete(
+    "/api/traces/:providerId/:id",
+    traceRoute((provider, { id }) => handleDeleteTrace(provider, id)),
+  );
 
   // GET /api/traces/:providerId/:id/events - SSE stream of trace updates
   // (span lifecycle + annotations — see `./handlers/trace-stream.ts`)
@@ -697,30 +654,10 @@ export function setupRoutes({
     );
   });
 
-  // Annotation routes: resolve the provider, then relay the neutral handler's
-  // `{status, body}` — a 204 carries no body of its own.
-  const annotationRoute =
-    (
-      handle: (
-        provider: TraceProvider,
-        params: Record<string, string>,
-        c: Context,
-      ) => Promise<AnnotationHandlerResult>,
-    ) =>
-    async (c: Context) => {
-      const params = c.req.param();
-      const provider = traceProviders.get(params.providerId);
-      if (!provider) return c.json({ error: "Trace provider not found" }, 404);
-      const { status, body } = await handle(provider, params, c);
-      return body === undefined
-        ? c.body(null, status as ContentfulStatusCode)
-        : c.json(body as object, status as ContentfulStatusCode);
-    };
-
   // GET /api/traces/:providerId/:traceId/annotations - List annotations
   app.get(
     "/api/traces/:providerId/:traceId/annotations",
-    annotationRoute((provider, { traceId }) =>
+    traceRoute((provider, { traceId }) =>
       handleListAnnotations(provider, traceId),
     ),
   );
@@ -728,7 +665,7 @@ export function setupRoutes({
   // POST /api/traces/:providerId/:traceId/annotations - Create an annotation
   app.post(
     "/api/traces/:providerId/:traceId/annotations",
-    annotationRoute(async (provider, { traceId }, c) =>
+    traceRoute(async (provider, { traceId }, c) =>
       handleCreateAnnotation(
         provider,
         traceId,
@@ -737,46 +674,33 @@ export function setupRoutes({
     ),
   );
 
+  // PATCH /api/traces/:providerId/:traceId/annotations/:id - Change an annotation's kind or note
+  app.patch(
+    "/api/traces/:providerId/:traceId/annotations/:id",
+    traceRoute(async (provider, { traceId, id }, c) =>
+      handleUpdateAnnotation(
+        provider,
+        traceId,
+        id,
+        await c.req.json().catch(() => ({})),
+      ),
+    ),
+  );
+
   // DELETE /api/traces/:providerId/:traceId/annotations/:id - Delete an annotation
   app.delete(
     "/api/traces/:providerId/:traceId/annotations/:id",
-    annotationRoute((provider, { traceId, id }) =>
+    traceRoute((provider, { traceId, id }) =>
       handleDeleteAnnotation(provider, traceId, id),
     ),
   );
 
-  // A dataset's stored prompt link (a global or provider-scoped id) resolved
-  // to one the client can open, or dropped when it no longer resolves — as
-  // `resolveSpanPrompt` does for spans.
-  const resolvePromptLink: ResolvePromptLink = prompt => {
-    const resolved = promptRegistry.resolve(prompt.id, prompt.providerId);
-    return resolved
-      ? { id: resolved.promptId, providerId: resolved.providerId }
-      : undefined;
-  };
-
   // Dataset routes: resolve the provider, then relay the neutral handler's
-  // `{status, body}` — a 204 carries no body of its own.
-  const relay = (c: Context, { status, body }: DatasetHandlerResult) =>
-    body === undefined
-      ? c.body(null, status as ContentfulStatusCode)
-      : c.json(body as object, status as ContentfulStatusCode);
-  const datasetRoute =
-    (
-      handle: (
-        provider: DatasetProvider,
-        params: Record<string, string>,
-        c: Context,
-      ) => Promise<DatasetHandlerResult>,
-    ) =>
-    async (c: Context) => {
-      const params = c.req.param();
-      const provider = datasetProviders.get(params.providerId);
-      if (!provider) {
-        return c.json({ error: "Dataset provider not found" }, 404);
-      }
-      return relay(c, await handle(provider, params, c));
-    };
+  // `{status, body}`.
+  const datasetRoute = providerRoute(
+    datasetProviders,
+    "Dataset provider not found",
+  );
   const jsonBody = (c: Context) => c.req.json().catch(() => undefined);
 
   // Dataset changes ride the hot-reload stream, as `trace-changed` does —
@@ -812,7 +736,12 @@ export function setupRoutes({
   app.post(
     "/api/datasets/:providerId",
     datasetRoute(async (provider, _params, c) =>
-      handleCreateDataset(provider, await jsonBody(c), resolvePromptLink),
+      handleCreateDataset(
+        provider,
+        await jsonBody(c),
+        resolvePromptLink,
+        context.lookupFieldSourcePrompt,
+      ),
     ),
   );
 
@@ -874,12 +803,33 @@ export function setupRoutes({
         provider,
         id,
         await jsonBody(c),
-        (providerId, promptId) =>
-          promptProviders.get(providerId)?.getPrompt({ promptId }) ??
-          Promise.resolve(undefined),
-        async (providerId, uri) =>
-          (await listChecksOf(providerId))?.find(c => c.uri === uri),
+        context.lookupFieldSourcePrompt,
+        context.lookupFieldSourceCheck,
       ),
+    ),
+  );
+
+  // PATCH /api/datasets/:providerId/:id/fields/:fieldId - Rename a field
+  app.patch(
+    "/api/datasets/:providerId/:id/fields/:fieldId",
+    datasetRoute(async (provider, { id, fieldId }, c) =>
+      handleRenameField(provider, id, fieldId, await jsonBody(c)),
+    ),
+  );
+
+  // DELETE /api/datasets/:providerId/:id/fields/:fieldId - Delete a field and its cells
+  app.delete(
+    "/api/datasets/:providerId/:id/fields/:fieldId",
+    datasetRoute((provider, { id, fieldId }) =>
+      handleDeleteField(provider, id, fieldId),
+    ),
+  );
+
+  // POST /api/datasets/:providerId/:id/query - One read-only SQL query over the rows
+  app.post(
+    "/api/datasets/:providerId/:id/query",
+    datasetRoute(async (provider, { id }, c) =>
+      handleQueryRows(provider, id, await jsonBody(c)),
     ),
   );
 
@@ -893,41 +843,12 @@ export function setupRoutes({
 
   // #region Evals — `specs/evals.md` §F
 
-  // A provider's checks: its own `listChecks`, or the built-ins, which the
-  // runner handles itself for a provider without one.
-  const listChecksOf = async (providerId: string) => {
-    const provider = promptProviders.get(providerId);
-    if (!provider) return undefined;
-    return (await provider.listChecks?.()) ?? builtinCheckInfos();
-  };
-
-  const defaultTraceProvider = traceProviders.get(defaultTraceProviderId);
-  const evalRunner =
-    defaultTraceProvider &&
-    new EvalRunner({
-      promptProviders,
-      datasetProviders,
-      traceProvider: defaultTraceProvider,
-      traceProviderId: defaultTraceProviderId,
-      tracer,
-      resolvePrompt: p => promptRegistry.resolve(p.id, p.providerId),
-      onProgress: progress => {
-        for (const send of hotReloadSubscribers) {
-          send({ type: "eval-run", ...progress });
-        }
-      },
-    });
-
-  // A run still `running` in storage was cut off when the server last
-  // stopped — no runner owns it now. Marked before any new run starts, so a
-  // new one can't be caught up in it.
-  const runsInterrupted = Promise.all(
-    Array.from(evalProviders.values(), p =>
-      p.interruptRuns().catch(err => {
-        console.error(`failed to mark ${p.id}'s interrupted runs:`, err);
-      }),
-    ),
-  );
+  const { evalProviders, evalRunner, runsInterrupted, listChecksOf } = context;
+  context.onEvalProgress(progress => {
+    for (const send of hotReloadSubscribers) {
+      send({ type: "eval-run", ...progress });
+    }
+  });
 
   // Eval changes ride the hot-reload stream too.
   for (const [providerId, provider] of evalProviders) {
@@ -938,40 +859,23 @@ export function setupRoutes({
     });
   }
 
-  const relayEval = (c: Context, result: EvalHandlerResult) =>
-    result.body === undefined
-      ? c.body(null, result.status as 204)
-      : c.json(result.body as object, result.status as ContentfulStatusCode);
-  const evalRoute =
-    (
-      handle: (
-        provider: EvalProvider,
-        params: Record<string, string>,
-        c: Context,
-      ) => Promise<EvalHandlerResult> | EvalHandlerResult,
-    ) =>
-    async (c: Context) => {
-      const params = c.req.param();
-      const provider = evalProviders.get(params.providerId);
-      if (!provider) return c.json({ error: "Eval provider not found" }, 404);
-      return relayEval(c, await handle(provider, params, c));
-    };
+  const evalRoute = providerRoute(evalProviders, "Eval provider not found");
   const runnerRoute = (
     handle: (
       runner: EvalRunner,
       provider: EvalProvider,
       params: Record<string, string>,
       c: Context,
-    ) => Promise<EvalHandlerResult> | EvalHandlerResult,
+    ) => HandlerResult | Promise<HandlerResult>,
   ) =>
     evalRoute((provider, params, c) => {
-      if (executeDisabledMessage) {
-        return { status: 400, body: { error: executeDisabledMessage } };
-      }
-      if (!evalRunner) {
-        return { status: 400, body: { error: "No trace provider to run on" } };
-      }
-      return handle(evalRunner, provider, params, c);
+      const found = evalRunnerOrRefusal(
+        evalRunner,
+        context.executeDisabledMessage,
+      );
+      return found.ok
+        ? handle(found.runner, provider, params, c)
+        : found.result;
     });
 
   // GET /api/eval-providers - List eval providers
@@ -986,7 +890,7 @@ export function setupRoutes({
 
   // GET /api/evals - List evals across every provider
   app.get("/api/evals", async c =>
-    relayEval(c, await handleListEvals(evalProviders.values())),
+    relay(c, await handleListEvals(evalProviders.values())),
   );
 
   // POST /api/evals/:providerId - Create an eval
@@ -1036,9 +940,7 @@ export function setupRoutes({
   app.get(
     "/api/eval-runs/:providerId/:runId",
     evalRoute((provider, { runId }) =>
-      evalRunner
-        ? handleGetRun(evalRunner, provider, runId)
-        : { status: 404, body: { error: "Run not found" } },
+      handleGetRun(evalRunner, provider, runId),
     ),
   );
 
@@ -1072,7 +974,7 @@ export function setupRoutes({
   // GET /api/traces/:providerId/:id/check-results - Check results for a trace
   app.get("/api/traces/:providerId/:id/check-results", async c => {
     const { providerId, id } = c.req.param();
-    return relayEval(
+    return relay(
       c,
       await handleTraceCheckResults(evalProviders.values(), providerId, id),
     );

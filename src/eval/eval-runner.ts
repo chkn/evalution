@@ -335,6 +335,18 @@ export class EvalRunner {
     return this.active.has(runId);
   }
 
+  /** Whether any run is in flight. */
+  isBusy(): boolean {
+    return this.active.size > 0;
+  }
+
+  /** Resolves once no run is in flight, including runs started meanwhile. */
+  async idle(): Promise<void> {
+    while (this.active.size > 0) {
+      await Promise.all(Array.from(this.active.values(), a => a.finished));
+    }
+  }
+
   /** Resolves once `runId` has finished, or at once when it isn't running. */
   async finished(runId: string): Promise<void> {
     await this.active.get(runId)?.finished;

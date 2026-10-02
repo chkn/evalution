@@ -267,7 +267,7 @@ production with no code change, and it composes with the other two ingestors.
      not treat that as a defect.)
    - `annotations` (port Workshop's table verbatim, `run_id`→`trace_id`): `id` PK,
      `trace_id` (idx), `span_id` (nullable = trace-level), `kind` (`issue|good|note`),
-     `note`, `source` (`user|claude-code|codex`), `created_at`.
+     `note`, `source` (`user|claude-code|codex|agent`), `created_at`.
    - **Omit `live_events` locally** — Evalution's SSE replays current state from spans on
      connect, so a durable event log is redundant. Revisit only if the cloud Durable Object
      needs a persisted backlog.

@@ -84,6 +84,10 @@ export function useAnnotations(
       if (hydrated.current && annotation.source !== "user") {
         setFreshIds(prev => new Set(prev).add(annotation.id));
       }
+    } else if (op === "update") {
+      setAnnotations(prev =>
+        prev.map(a => (a.id === annotation.id ? annotation : a)),
+      );
     } else {
       setAnnotations(prev => prev.filter(a => a.id !== annotation.id));
       setFreshIds(prev => {

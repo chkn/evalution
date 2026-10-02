@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { shortSyntax } from "ts-proppy/react";
+import { fieldsForPrompt } from "../../shared/dataset-fields";
 import type {
   ExecuteRequest,
   ExecuteResponse,
@@ -38,7 +39,6 @@ import {
   toExecutionInput,
 } from "./execution-input-state";
 import {
-  fieldsForPrompt,
   fromPanel,
   type PanelFill,
   type PanelFillSource,
