@@ -1,23 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import {
-  isSpanContextValid,
-  SpanStatusCode,
-  type Tracer,
-} from "@opentelemetry/api";
+import type { Tracer } from "@opentelemetry/api";
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { builtinCheckInfos } from "../checks/index.ts";
 import type { DatasetProvider } from "../dataset/dataset-provider.ts";
-import {
-  resolveExecutionInputs,
-  stampReceipts,
-} from "../prompt/execution-inputs.ts";
+import type { EvalProvider } from "../eval/eval-provider.ts";
+import { EvalRunner } from "../eval/eval-runner.ts";
 import {
   type OpenOnHeadOptions,
   type PromptProvider,
-  type ResolvedPromptInputs,
   VariationConflictError,
 } from "../prompt/prompt-provider.ts";
 import type { PromptRegistry } from "../prompt/prompt-registry.ts";
@@ -53,8 +47,23 @@ import {
   handleUpdateRows,
   type ResolvePromptLink,
 } from "./handlers/datasets.ts";
+import {
+  type EvalHandlerResult,
+  handleCancelRun,
+  handleCreateEval,
+  handleDeleteEval,
+  handleDeleteRun,
+  handleGetEval,
+  handleGetRun,
+  handleListEvals,
+  handleListRuns,
+  handleStartRun,
+  handleTraceCheckResults,
+  handleUpdateEval,
+} from "./handlers/evals.ts";
 import { handleOtlpTraces } from "./handlers/otlp-ingest.ts";
 import { streamTrace } from "./handlers/trace-stream.ts";
+import { InputResolutionError, runPrompt } from "./run-prompt.ts";
 
 /** Decodes a URL-safe base64 prompt id produced by `encodePromptId`. Uses the
  * Web `atob` (rather than Node's `Buffer`) so it works in browser/worker
@@ -108,6 +117,11 @@ export interface SetupRoutesOptions {
   traceProviders: Map<string, TraceProvider>;
   /** Dataset stores. Omitted by hosts with none; the routes then list nothing. */
   datasetProviders?: Map<string, DatasetProvider>;
+  /**
+   * Eval stores. Omitted by hosts with none; the routes then list nothing,
+   * and there is nothing to run. See `specs/evals.md` §E.
+   */
+  evalProviders?: Map<string, EvalProvider>;
   promptRegistry: PromptRegistry;
   /** Registry of hot-reload SSE writers; each `/api/events` client adds one. */
   hotReloadSubscribers: Set<(data: SSEData) => void>;
@@ -141,6 +155,7 @@ export function setupRoutes({
   promptProviders,
   traceProviders,
   datasetProviders = new Map(),
+  evalProviders = new Map(),
   promptRegistry,
   hotReloadSubscribers,
   rootPath,
@@ -315,6 +330,25 @@ export function setupRoutes({
           ...(c.req.query("before") && { before: c.req.query("before") }),
         }),
       );
+    } catch (error: any) {
+      return errorResponse(c, error, 500);
+    }
+  });
+
+  // GET /api/prompt-providers/:providerId/head - The commit checked out and whether
+  // the tree is clean, for the eval run dialog's warnings (`specs/evals.md`
+  // §C). `{ versioned: false }` for a provider without versions.
+  app.get("/api/prompt-providers/:providerId/head", async c => {
+    const provider = promptProviders.get(c.req.param("providerId"));
+    if (!provider) return c.json({ error: "Provider not found" }, 404);
+    if (!provider.versions) return c.json({ versioned: false, clean: false });
+    try {
+      const head = await provider.versions.head();
+      return c.json({
+        versioned: true,
+        clean: head.clean,
+        ...(head.commit && { commit: head.commit }),
+      });
     } catch (error: any) {
       return errorResponse(c, error, 500);
     }
@@ -562,89 +596,26 @@ export function setupRoutes({
         return c.json({ error: "Prompt not found" }, 404);
       }
 
-      // Inputs arrive unresolved, so resolution happens here — server-side,
-      // where a resource can actually be created and where a value's import
-      // bindings can actually be imported. A provider that offers non-value
-      // sources interprets its own `uri` grammar through `resolveInputs`;
-      // every other provider gets the value-only fallback and never has to
-      // know an `ExecutionInput` exists.
-      const inputs = { functionInputs, executeInputs };
-      let resolved: ResolvedPromptInputs;
+      let response: ExecuteResponse;
       try {
-        resolved = provider.resolveInputs
-          ? await provider.resolveInputs(ref, inputs)
-          : { ...(await resolveExecutionInputs(inputs)), release: undefined };
+        ({ response } = await runPrompt(
+          provider,
+          ref,
+          prompt,
+          { functionInputs, executeInputs },
+          { tracer, traceProviderId: defaultTraceProviderId },
+        ));
       } catch (err: any) {
         // The request named something that cannot be turned into a value — a
-        // dataset cell, a resource that no longer exists. That is a bad
-        // request, not a failed run: nothing has been dispatched and no trace
-        // exists to carry the error, so it has to be answered here — and
-        // logged, since the response carries only the message.
+        // dataset cell, an unknown slot, a resource that no longer exists.
+        // That is a bad request, not a failed run: nothing has been
+        // dispatched and no trace exists to carry the error, so it has to be
+        // answered here — and logged, since the response carries only the
+        // message.
+        if (!(err instanceof InputResolutionError)) throw err;
         console.error("failed to resolve prompt inputs:", err);
-        return c.json({ error: err?.message ?? String(err) }, 400);
+        return c.json({ error: err.message }, 400);
       }
-      const { functionParams, executeValues } = resolved;
-      // What actually gets recorded on the trace: the request as sent, with
-      // each resource reference's receipt filled in from what this run's
-      // resolution produced — see `specs/resource-arguments.md` §K. A receipt
-      // arriving on a replay request already survived resolution above
-      // (`resolveInputs` passes it to `create`); this is what makes the *new*
-      // run's own receipt the one a later replay of *this* trace would see.
-      const recordedInputs = stampReceipts(inputs, resolved.receipts);
-
-      const response = await tracer.startActiveSpan(prompt.name, async span => {
-        const ctx = span.spanContext();
-        // On the native (v7) path no OTel tracer provider is registered, so the
-        // no-op tracer hands back the all-zero *invalid* span context — the same
-        // value for every call. Mint our own unique id then, and name the root
-        // span the way the native ingestor does (`${traceId}:root`) so the
-        // client's initial span selection resolves. On the OTel/v6 path the span
-        // context is real and must be reused: the OTel ingestor records its
-        // spans under that same trace id.
-        const native = !isSpanContextValid(ctx);
-        const traceId = native ? crypto.randomUUID() : ctx.traceId;
-        const rootSpanId = native ? `${traceId}:root` : ctx.spanId;
-
-        // The trace is created lazily by the telemetry ingestor when the root
-        // span starts. A client that opens the returned trace id before then
-        // polls `GET /api/traces/:p/:id` until it appears (see the client's
-        // `getTrace`), so no server-side pre-creation is needed.
-        let ran: Awaited<ReturnType<PromptProvider["execute"]>>;
-        try {
-          ran = await provider.execute(ref, functionParams, {
-            traceId,
-            rootSpanId,
-            executeValues,
-            inputs: recordedInputs,
-            // Run-scoped resources outlive this response: `execute` returns as
-            // soon as the run is dispatched, so teardown hangs off completion
-            // rather than off the HTTP request.
-            onSettled: () => void resolved.release?.(),
-          });
-        } catch (err: any) {
-          void resolved.release?.();
-          console.error("prompt execution failed:", err);
-          span.recordException(err);
-          span.setStatus({
-            code: SpanStatusCode.ERROR,
-            message: err?.error
-              ? JSON.stringify(err.error, null, 2)
-              : (err?.message ?? String(err)),
-          });
-          span.end();
-          throw err;
-        }
-
-        span.setStatus({ code: SpanStatusCode.OK });
-        span.end();
-        return {
-          traceId,
-          rootSpanId,
-          tracerProviderId: defaultTraceProviderId,
-          ...(ran?.version && { version: ran.version }),
-          ...(ran?.variation && { variation: ran.variation }),
-        } satisfies ExecuteResponse;
-      });
 
       return c.json(response);
     } catch (error: any) {
@@ -906,6 +877,8 @@ export function setupRoutes({
         (providerId, promptId) =>
           promptProviders.get(providerId)?.getPrompt({ promptId }) ??
           Promise.resolve(undefined),
+        async (providerId, uri) =>
+          (await listChecksOf(providerId))?.find(c => c.uri === uri),
       ),
     ),
   );
@@ -917,6 +890,195 @@ export function setupRoutes({
       handleDeleteRow(provider, id, rowId),
     ),
   );
+
+  // #region Evals — `specs/evals.md` §F
+
+  // A provider's checks: its own `listChecks`, or the built-ins, which the
+  // runner handles itself for a provider without one.
+  const listChecksOf = async (providerId: string) => {
+    const provider = promptProviders.get(providerId);
+    if (!provider) return undefined;
+    return (await provider.listChecks?.()) ?? builtinCheckInfos();
+  };
+
+  const defaultTraceProvider = traceProviders.get(defaultTraceProviderId);
+  const evalRunner =
+    defaultTraceProvider &&
+    new EvalRunner({
+      promptProviders,
+      datasetProviders,
+      traceProvider: defaultTraceProvider,
+      traceProviderId: defaultTraceProviderId,
+      tracer,
+      resolvePrompt: p => promptRegistry.resolve(p.id, p.providerId),
+      onProgress: progress => {
+        for (const send of hotReloadSubscribers) {
+          send({ type: "eval-run", ...progress });
+        }
+      },
+    });
+
+  // A run still `running` in storage was cut off when the server last
+  // stopped — no runner owns it now. Marked before any new run starts, so a
+  // new one can't be caught up in it.
+  const runsInterrupted = Promise.all(
+    Array.from(evalProviders.values(), p =>
+      p.interruptRuns().catch(err => {
+        console.error(`failed to mark ${p.id}'s interrupted runs:`, err);
+      }),
+    ),
+  );
+
+  // Eval changes ride the hot-reload stream too.
+  for (const [providerId, provider] of evalProviders) {
+    provider.watch?.(event => {
+      for (const send of hotReloadSubscribers) {
+        send({ type: "eval-changed", providerId, event });
+      }
+    });
+  }
+
+  const relayEval = (c: Context, result: EvalHandlerResult) =>
+    result.body === undefined
+      ? c.body(null, result.status as 204)
+      : c.json(result.body as object, result.status as ContentfulStatusCode);
+  const evalRoute =
+    (
+      handle: (
+        provider: EvalProvider,
+        params: Record<string, string>,
+        c: Context,
+      ) => Promise<EvalHandlerResult> | EvalHandlerResult,
+    ) =>
+    async (c: Context) => {
+      const params = c.req.param();
+      const provider = evalProviders.get(params.providerId);
+      if (!provider) return c.json({ error: "Eval provider not found" }, 404);
+      return relayEval(c, await handle(provider, params, c));
+    };
+  const runnerRoute = (
+    handle: (
+      runner: EvalRunner,
+      provider: EvalProvider,
+      params: Record<string, string>,
+      c: Context,
+    ) => Promise<EvalHandlerResult> | EvalHandlerResult,
+  ) =>
+    evalRoute((provider, params, c) => {
+      if (executeDisabledMessage) {
+        return { status: 400, body: { error: executeDisabledMessage } };
+      }
+      if (!evalRunner) {
+        return { status: 400, body: { error: "No trace provider to run on" } };
+      }
+      return handle(evalRunner, provider, params, c);
+    });
+
+  // GET /api/eval-providers - List eval providers
+  app.get("/api/eval-providers", c =>
+    c.json(
+      Array.from(evalProviders.values()).map(p => ({
+        id: p.id,
+        displayName: p.displayName,
+      })),
+    ),
+  );
+
+  // GET /api/evals - List evals across every provider
+  app.get("/api/evals", async c =>
+    relayEval(c, await handleListEvals(evalProviders.values())),
+  );
+
+  // POST /api/evals/:providerId - Create an eval
+  app.post(
+    "/api/evals/:providerId",
+    evalRoute(async (provider, _params, c) =>
+      handleCreateEval(provider, await jsonBody(c)),
+    ),
+  );
+
+  // GET /api/evals/:providerId/:id - An eval's definition
+  app.get(
+    "/api/evals/:providerId/:id",
+    evalRoute((provider, { id }) => handleGetEval(provider, id)),
+  );
+
+  // PATCH /api/evals/:providerId/:id - Change an eval's definition
+  app.patch(
+    "/api/evals/:providerId/:id",
+    evalRoute(async (provider, { id }, c) =>
+      handleUpdateEval(provider, id, await jsonBody(c)),
+    ),
+  );
+
+  // DELETE /api/evals/:providerId/:id - Delete an eval, with its runs
+  app.delete(
+    "/api/evals/:providerId/:id",
+    evalRoute((provider, { id }) => handleDeleteEval(provider, id)),
+  );
+
+  // POST /api/evals/:providerId/:id/runs - Start a run: `{ arms?, concurrency? }`
+  app.post(
+    "/api/evals/:providerId/:id/runs",
+    runnerRoute(async (runner, provider, { id }, c) => {
+      await runsInterrupted;
+      return handleStartRun(runner, provider, id, await jsonBody(c));
+    }),
+  );
+
+  // GET /api/evals/:providerId/:id/runs - An eval's runs, newest first
+  app.get(
+    "/api/evals/:providerId/:id/runs",
+    evalRoute((provider, { id }) => handleListRuns(provider, id)),
+  );
+
+  // GET /api/eval-runs/:providerId/:runId - A run with its results
+  app.get(
+    "/api/eval-runs/:providerId/:runId",
+    evalRoute((provider, { runId }) =>
+      evalRunner
+        ? handleGetRun(evalRunner, provider, runId)
+        : { status: 404, body: { error: "Run not found" } },
+    ),
+  );
+
+  // POST /api/eval-runs/:providerId/:runId/cancel - Cancel a running run
+  app.post(
+    "/api/eval-runs/:providerId/:runId/cancel",
+    runnerRoute((runner, _provider, { runId }) =>
+      handleCancelRun(runner, runId),
+    ),
+  );
+
+  // DELETE /api/eval-runs/:providerId/:runId - Delete a run, with its results
+  app.delete(
+    "/api/eval-runs/:providerId/:runId",
+    evalRoute((provider, { runId }) =>
+      handleDeleteRun(evalRunner, provider, runId),
+    ),
+  );
+
+  // GET /api/checks - Every prompt provider's checks
+  app.get("/api/checks", async c => {
+    const all = await Promise.all(
+      [...promptProviders.keys()].map(async providerId => ({
+        providerId,
+        checks: (await listChecksOf(providerId)) ?? [],
+      })),
+    );
+    return c.json(all);
+  });
+
+  // GET /api/traces/:providerId/:id/check-results - Check results for a trace
+  app.get("/api/traces/:providerId/:id/check-results", async c => {
+    const { providerId, id } = c.req.param();
+    return relayEval(
+      c,
+      await handleTraceCheckResults(evalProviders.values(), providerId, id),
+    );
+  });
+
+  // #endregion
 
   // POST /v1/traces, POST /otel/v1/traces - OTLP trace export (protobuf or JSON)
   //

@@ -79,6 +79,7 @@ import {
   serializeDatasetLayout,
 } from "./dataset-grid";
 import { GRID_HEADER_ICONS } from "./grid-sprites";
+import type { NewEvalSeed } from "./NewEvalDialog";
 import {
   fromRow,
   type PanelFill,
@@ -89,6 +90,7 @@ import { formatTimestamp, formatTimestampCompact } from "./trace/format.ts";
 import {
   CalendarIcon,
   DatasetsIcon,
+  EvalsIcon,
   MoreIcon,
   PromptLinkIcon,
   TrashIcon,
@@ -120,6 +122,8 @@ interface Props {
   onOpenTrace: (providerId: string, traceId: string) => void;
   /** Called after the dataset itself has been deleted. */
   onDeleted: () => void;
+  /** "New eval…" — opens the dialog with this dataset and its linked prompt chosen. */
+  onNewEval?: (seed: NewEvalSeed) => void;
 }
 
 /**
@@ -319,6 +323,7 @@ function DatasetView({
   onOpenInPlayground,
   onOpenTrace,
   onDeleted,
+  onNewEval,
 }: Props) {
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [overview, setOverview] = useState<DatasetRowsOverview>({
@@ -751,6 +756,18 @@ function DatasetView({
     menuOpen &&
     createPortal(
       <div className="trace-header-menu" ref={menuRef} style={menuStyle}>
+        {onNewEval && (
+          <button
+            type="button"
+            className="trace-header-menu-item"
+            onClick={() => {
+              setMenuOpen(false);
+              newEval();
+            }}
+          >
+            <span className="trace-header-menu-item-label">New eval…</span>
+          </button>
+        )}
         <button
           type="button"
           className="trace-header-menu-item dataset-menu-delete"
@@ -764,6 +781,14 @@ function DatasetView({
       </div>,
       document.body,
     );
+
+  const newEval = () =>
+    onNewEval?.({
+      dataset: { providerId, id: datasetId },
+      ...(linkedPrompt?.providerId && {
+        prompt: { id: linkedPrompt.id, providerId: linkedPrompt.providerId },
+      }),
+    });
 
   const rowDetails = selectedRow && selectedIndex !== null && (
     <>
@@ -848,6 +873,17 @@ function DatasetView({
           </div>
           <div className="trace-view-header-actions">
             <div className="trace-view-header-actions-full">
+              {onNewEval && (
+                <button
+                  type="button"
+                  className="trace-view-prompt-btn"
+                  onClick={newEval}
+                  title="New eval on this dataset"
+                >
+                  <EvalsIcon size={14} />
+                  New eval…
+                </button>
+              )}
               <button
                 type="button"
                 className="trace-view-prompt-btn trace-view-delete-btn"

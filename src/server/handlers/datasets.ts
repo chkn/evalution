@@ -35,6 +35,7 @@ import {
   portableDef,
 } from "../../shared/dataset-fields.ts";
 import type {
+  CheckInfo,
   ExecutionInput,
   NormalizedPrompt,
   PromptID,
@@ -428,6 +429,15 @@ export type FieldSourcePrompt = Pick<
 >;
 
 /**
+ * Looks up the check a `POST …/fields` `{ from: { checkUri } }` names,
+ * `undefined` when it doesn't exist.
+ */
+export type LookupFieldSourceCheck = (
+  providerId: string,
+  uri: string,
+) => Promise<Pick<CheckInfo, "parameters"> | undefined>;
+
+/**
  * Looks up the prompt a `POST …/fields` `{ from }` names, `null` or
  * `undefined` when it doesn't exist.
  */
@@ -479,6 +489,7 @@ function defAtPath(
 async function parseNewField(
   body: unknown,
   lookupPrompt: LookupFieldSourcePrompt,
+  lookupCheck?: LookupFieldSourceCheck,
 ): Promise<PropDefinition> {
   if (!isRecord(body)) {
     throw new BadRequest("body must be { name, type } or { from }");
@@ -507,11 +518,30 @@ async function parseNewField(
     throw new BadRequest("from must be { providerId, promptId, half?, path }");
   }
   if (from.checkUri !== undefined) {
-    // `specs/evals.md` §B.4: checks don't exist yet, so neither does a
-    // registry to look their parameters up in.
-    throw new BadRequest(
-      "copying a check's parameter isn't supported yet: from must name a prompt",
-    );
+    // A check's parameter (`specs/evals.md` §F.1): "＋ New column from this
+    // check parameter" in the eval editor.
+    if (
+      typeof from.providerId !== "string" ||
+      typeof from.checkUri !== "string" ||
+      typeof from.path !== "string" ||
+      !from.path
+    ) {
+      throw new BadRequest(
+        "from must be { providerId, checkUri, path } with string values",
+      );
+    }
+    const check = await lookupCheck?.(from.providerId, from.checkUri);
+    if (!check) {
+      throw new BadRequest(
+        `Check not found: ${from.checkUri} (provider ${from.providerId})`,
+      );
+    }
+    const found = defAtPath(check.parameters, from.path);
+    if (!found) {
+      throw new BadRequest(`${from.checkUri} has no parameter "${from.path}"`);
+    }
+    const def = portableDef(found);
+    return body.name === undefined ? def : { ...def, name: parseName(body) };
   }
   if (
     typeof from.providerId !== "string" ||
@@ -551,17 +581,19 @@ async function parseNewField(
 /**
  * `POST /api/datasets/:providerId/:id/fields` — body `{ name, type }` with a
  * `type` of `string`, `number`, or `boolean`, or `{ from: { providerId,
- * promptId, half?, path }, name? }` to copy a prompt parameter's definition.
- * See `specs/datasets.md` §P.1.
+ * promptId, half?, path }, name? }` to copy a prompt parameter's definition,
+ * or `{ from: { providerId, checkUri, path }, name? }` to copy a check's.
+ * See `specs/datasets.md` §P.1 and `specs/evals.md` §F.1.
  */
 export async function handleAddField(
   provider: DatasetProvider,
   datasetId: string,
   body: unknown,
   lookupPrompt: LookupFieldSourcePrompt,
+  lookupCheck?: LookupFieldSourceCheck,
 ): Promise<DatasetHandlerResult> {
   try {
-    const def = await parseNewField(body, lookupPrompt);
+    const def = await parseNewField(body, lookupPrompt, lookupCheck);
     const field = await provider.addField(datasetId, def);
     return { status: 201, body: field };
   } catch (err) {

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type { DatasetProvider } from "./dataset/dataset-provider.ts";
+import type { EvalProvider } from "./eval/eval-provider.ts";
 import type { PromptProvider } from "./prompt/prompt-provider.ts";
 import type { TraceProvider } from "./trace/trace-provider.ts";
 
@@ -68,4 +69,15 @@ export interface EvalutionConfig {
    * gets a `.gitignore` of its own, so datasets stay out of git.
    */
   datasetProviders?: DatasetProvider[];
+
+  /**
+   * One or more providers that store evals — a prompt, a dataset and a set
+   * of checks — and their runs' results. See `specs/evals.md`.
+   *
+   * If omitted, a {@link LocalEvalProvider} is used, which keeps every eval
+   * in one SQLite file at `.evalution/evals/evals.db`. Nothing is written to
+   * disk until the first eval is created; the directory then gets a
+   * `.gitignore` of its own, so evals stay out of git.
+   */
+  evalProviders?: EvalProvider[];
 }

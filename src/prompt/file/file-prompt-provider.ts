@@ -2,12 +2,14 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import path from "node:path";
+import { builtinCheck, builtinCheckInfos } from "../../checks/index.ts";
 import type { FileProvider } from "../../file-provider.ts";
 import { LocalFileProvider } from "../../file-provider-local.ts";
 import type { SDKAdapter } from "../../sdk/sdk-adapter.ts";
 import { isEditable } from "../../shared/helpers.ts";
 import type {
   AddPromptContext,
+  CheckInfo,
   ExecutionInput,
   NormalizedPromptUpdates,
   PromptChangeEvent,
@@ -20,6 +22,8 @@ import {
   collectInputSlots,
   type InputSource,
   matchSourcesToSlots,
+  type ResolutionContext,
+  resolveExecutionInput,
   resolveExecutionInputs,
 } from "../execution-inputs.ts";
 import { isResource, type Resource } from "../playground/resource.ts";
@@ -34,6 +38,7 @@ import {
 import {
   type ExecuteOptions,
   type ExecuteResult,
+  type PreparedCheck,
   type PromptProvider,
   type PromptRefLike,
   type PromptVariations,
@@ -234,7 +239,7 @@ function resourceTypeExpression(
  * `specs/resource-arguments.md` §H.
  */
 function resourceParameterTypeExpression(
-  resource: RegisteredResource,
+  resource: Pick<RegisteredResource, "key">,
   paramName: string,
 ): string {
   // Evaluated in the resource's own file (see `withInjectedTypes`), so the
@@ -1229,19 +1234,54 @@ export class FilePromptProvider
       functionInputs?: readonly ExecutionInput[];
       executeInputs?: Record<string, ExecutionInput>;
     },
+    context?: ResolutionContext,
   ): Promise<ResolvedPromptInputs> {
     // One lease across both halves: a run-scoped resource named by a function
     // input *and* an execute input must be created once, not twice.
     const lease = this.resources.lease();
+    const resolveResource = (
+      uri: string,
+      binding?: Parameters<typeof lease.acquire>[1],
+    ) => lease.acquire(uri, binding);
+    // More inputs resolved later in the same lease — a check's — see the
+    // same row and bindings the run's own did.
+    const resolveMore = async (more: Record<string, ExecutionInput>) =>
+      Object.fromEntries(
+        await Promise.all(
+          Object.entries(more).map(
+            async ([name, input]) =>
+              [
+                name,
+                await resolveExecutionInput(input, resolveResource, context),
+              ] as const,
+          ),
+        ),
+      );
     try {
       const { functionParams, executeValues } = await resolveExecutionInputs(
         inputs,
-        (uri, binding) => lease.acquire(uri, binding),
+        resolveResource,
+        context,
       );
       return {
         functionParams,
         executeValues,
         receipts: lease.receipts(),
+        resolveMore,
+        prepareCheck: async (uri, args): Promise<PreparedCheck> => {
+          const target =
+            builtinCheck(uri) ??
+            (await this.resources.checks()).find(c => c.uri === uri)?.check;
+          if (!target) throw new Error(`Check '${uri}' not found`);
+          const resolved = await lease.resolveDeclared(target.inputs, uri, () =>
+            resolveMore(args),
+          );
+          return {
+            run: run => target.run(resolved as never, run),
+            timeoutMs: target.timeoutMs,
+            runsOnError: target.runsOnError,
+          };
+        },
         release: () => lease.release(),
       };
     } catch (err) {
@@ -1249,6 +1289,74 @@ export class FilePromptProvider
       await lease.release();
       throw err;
     }
+  }
+
+  /**
+   * The built-in checks, plus every `check()` exported from a playground
+   * module, with each one's schema inputs probed for their types the same
+   * way a resource's arguments are (`specs/evals.md` §B.4). A module that
+   * failed to load is listed with its error rather than hidden.
+   */
+  async listChecks(): Promise<CheckInfo[]> {
+    const registered = await this.resources.checks();
+    const moduleErrors = await this.resources.errors();
+    // A check whose inputs are declared wrongly is listed with its error,
+    // like a module that failed to load, rather than failing the listing.
+    const broken: CheckInfo[] = [];
+    const withNames = registered.flatMap(c => {
+      try {
+        return [{ registered: c, names: resourceParameterNames(c.check) }];
+      } catch (err) {
+        broken.push({
+          uri: c.uri,
+          label: c.check.label ?? c.key,
+          parameters: [],
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return [];
+      }
+    });
+    const requests = withNames.flatMap(({ registered: c, names }) =>
+      names.map(name => ({
+        probe: {
+          kind: "type" as const,
+          name,
+          expression: resourceParameterTypeExpression(c, name),
+        },
+        filePath: c.modulePath,
+        promptName: c.key,
+      })),
+    );
+    const resolved =
+      requests.length > 0 ? await this.resolveTypes(requests, []) : {};
+
+    let cursor = 0;
+    const user = withNames.map(({ registered: c, names }): CheckInfo => {
+      const start = cursor;
+      cursor += names.length;
+      return {
+        uri: c.uri,
+        label: c.check.label ?? c.key,
+        ...(c.check.group && { group: c.check.group }),
+        ...(c.check.description && { description: c.check.description }),
+        ...(c.check.runsOnError && { runsOnError: true }),
+        parameters: names.map((name, j) => {
+          const result = resolved.probes?.[start + j];
+          return isDefinition(result) ? result : unresolvedParameter(name);
+        }),
+      };
+    });
+    return [
+      ...builtinCheckInfos(),
+      ...user,
+      ...broken,
+      ...moduleErrors.map(e => ({
+        uri: path.relative(this.rootDir, e.modulePath),
+        label: path.basename(e.modulePath),
+        parameters: [],
+        error: e.message,
+      })),
+    ];
   }
 
   /**

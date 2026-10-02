@@ -3,9 +3,48 @@
 
 import type {
   ExecutionInput,
+  InputLayout,
+  NormalizedPrompt,
   PropValue,
   ResourceInfo,
 } from "../../shared/types";
+import { pseudoInput, pseudoUriOf } from "./pseudo-sources";
+
+/**
+ * What the execute panel persists between sessions, per prompt: the inputs
+ * themselves, not the values.
+ */
+export interface StoredInputs {
+  functionInputs?: Record<string, ExecutionInput>;
+  executeInputs?: Record<string, ExecutionInput>;
+  /** The user's explicit layout choice, by slot path. Absent until they touch the toggle. */
+  layout?: {
+    functionSlots?: Record<string, InputLayout>;
+    executeSlots?: Record<string, InputLayout>;
+  };
+}
+
+/**
+ * Where the execute panel persists `prompt`'s inputs. `globalId` survives
+ * file moves/renames, so it's the more stable key when present; `id`
+ * (always present) is the fallback.
+ */
+export function paramStorageKey(prompt: NormalizedPrompt): string {
+  return `pg-exec-params:${prompt.globalId ?? prompt.id}`;
+}
+
+/** The panel's persisted inputs for `prompt`, if any parse. */
+export function readStoredInputs(
+  prompt: NormalizedPrompt,
+): StoredInputs | undefined {
+  try {
+    const raw = localStorage.getItem(paramStorageKey(prompt));
+    const parsed = raw ? JSON.parse(raw) : undefined;
+    return parsed && typeof parsed === "object" ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * What the panel holds for one top-level slot while it is being edited.
@@ -91,11 +130,17 @@ export function toExecutionInput(
   return out;
 }
 
-/** A `{ kind: "resource" }` node, with `args` attached when `resolveArgs` has any. */
+/**
+ * A `{ kind: "resource" }` node, with `args` attached when `resolveArgs` has
+ * any — or, for a column or prompt slot chosen as a source, the `dataset` or
+ * `input` node it stands for.
+ */
 function resourceInput(
   uri: string,
   resolveArgs?: (uri: string) => Record<string, ExecutionInput> | undefined,
 ): ExecutionInput {
+  const pseudo = pseudoInput(uri);
+  if (pseudo) return pseudo;
   const args = resolveArgs?.(uri);
   return args ? { kind: "resource", uri, args } : { kind: "resource", uri };
 }
@@ -264,7 +309,9 @@ export function fromExecutionInput(
         }
         break;
       case "dataset":
-        // Not implemented; nothing to restore into the editor yet.
+      case "input":
+        // A column or another slot comes back as the chip it was chosen as.
+        resources[prefix] = pseudoUriOf(node)!;
         break;
     }
   };

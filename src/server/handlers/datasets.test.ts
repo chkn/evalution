@@ -83,9 +83,29 @@ describe("handleAddField", () => {
       fields: [{ def: primitiveFieldDef("title", "string") }],
     });
     const add = (body: unknown, datasetId = dataset.id) =>
-      handleAddField(provider, datasetId, body, lookup);
+      handleAddField(provider, datasetId, body, lookup, async (p, uri) =>
+        p === "files" && uri === ".evalution/playground/checks.ts#titled"
+          ? { parameters: [primitive("title", "string")] }
+          : undefined,
+      );
     return { provider, dataset, add };
   }
+
+  it("copies a check parameter's definition", async () => {
+    const { add } = await setup();
+    const res = await add({
+      from: {
+        providerId: "files",
+        checkUri: ".evalution/playground/checks.ts#titled",
+        path: "title",
+      },
+      name: "expectedTitle",
+    });
+    expect(res).toMatchObject({
+      status: 201,
+      body: { def: { name: "expectedTitle", type: { base: "string" } } },
+    });
+  });
 
   it("builds a primitive field's definition from a name and type", async () => {
     const { provider, dataset, add } = await setup();
@@ -241,9 +261,22 @@ describe("handleAddField", () => {
       /from must be/,
     ],
     [
-      "a check's parameter",
-      { checkUri: ".evalution/playground/checks.ts#titled", path: "title" },
-      /check's parameter isn't supported yet/,
+      "a check that doesn't exist",
+      {
+        providerId: "files",
+        checkUri: ".evalution/playground/checks.ts#missing",
+        path: "title",
+      },
+      /Check not found/,
+    ],
+    [
+      "a check parameter that doesn't exist",
+      {
+        providerId: "files",
+        checkUri: ".evalution/playground/checks.ts#titled",
+        path: "nope",
+      },
+      /has no parameter "nope"/,
     ],
   ])("rejects a lookup of %s with a 400", async (_label, from, message) => {
     const { add } = await setup();

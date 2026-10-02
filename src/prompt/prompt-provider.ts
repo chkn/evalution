@@ -3,6 +3,7 @@
 
 import type {
   AddPromptContext,
+  CheckInfo,
   ConflictChoices,
   ExecutionInput,
   NormalizedPrompt,
@@ -19,7 +20,9 @@ import type {
   VersionInfo,
 } from "../shared/types.ts";
 import type { TraceIngestor } from "../trace/trace-ingestor.ts";
+import type { ResolutionContext } from "./execution-inputs.ts";
 import type { PromptFileType } from "./file/prompt-file-type.ts";
+import type { CheckOutcome, CheckRun } from "./playground/check.ts";
 import type {
   HeadState,
   VersionHistoryOptions,
@@ -226,10 +229,43 @@ export interface ResolvedPromptInputs {
    */
   receipts?: Record<string, unknown>;
   /**
+   * Resolves more inputs within this run's lease, before {@link release} —
+   * with the same row and bindings the run's own inputs resolved against,
+   * so a resource comes back as the run's own instance. See
+   * `specs/evals.md` §D.1.
+   */
+  resolveMore?(
+    inputs: Record<string, ExecutionInput>,
+  ): Promise<Record<string, unknown>>;
+  /**
+   * Readies a check this provider offers (see {@link PromptProvider.listChecks})
+   * to judge this run: its resource inputs resolved from this run's lease,
+   * and `args` — the eval's bindings for its schema inputs — resolved and
+   * validated. Rejects when the check doesn't exist or an input fails
+   * validation, which is the check's `error`, never a `fail`.
+   *
+   * @param uri - The check's {@link CheckInfo.uri}.
+   * @param args - Bindings for its schema inputs, by name.
+   */
+  prepareCheck?(
+    uri: string,
+    args: Record<string, ExecutionInput>,
+  ): Promise<PreparedCheck>;
+  /**
    * Releases anything the resolution created that is scoped to this run.
-   * Called once the run settles.
+   * Called once the run settles — or, in an eval, once its checks have run.
    */
   release?(): Promise<void>;
+}
+
+/** A check with its inputs resolved, ready to judge one run. */
+export interface PreparedCheck {
+  /** Judges the run. */
+  run(run: CheckRun): CheckOutcome | Promise<CheckOutcome>;
+  /** How long {@link run} may take. */
+  timeoutMs?: number;
+  /** Whether it runs when the prompt run itself errored. */
+  runsOnError?: boolean;
 }
 
 /**
@@ -324,6 +360,8 @@ export interface PromptProvider<
    *
    * @param ref - The prompt the inputs are for. A bare id means head.
    * @param inputs - The unresolved inputs. See {@link ExecutionInput}.
+   * @param context - The dataset row and slot bindings that `dataset` and
+   *   `input` references resolve against. See `specs/evals.md` §D.1.
    */
   resolveInputs?(
     ref: PromptRefLike,
@@ -331,7 +369,19 @@ export interface PromptProvider<
       functionInputs?: readonly ExecutionInput[];
       executeInputs?: Record<string, ExecutionInput>;
     },
+    context?: ResolutionContext,
   ): Promise<ResolvedPromptInputs>;
+
+  /**
+   * The checks this provider offers an eval: its playground exports made
+   * with `check()`, and the built-ins. Provider-scoped because a check's
+   * resource inputs have to come from the lease of the provider running the
+   * prompt. See `specs/evals.md` §B.4.
+   *
+   * Optional — a provider without it offers only the built-ins, which the
+   * eval runner handles itself.
+   */
+  listChecks?(): Promise<CheckInfo[]>;
 
   /**
    * Performs whatever process-global setup this provider's tracing mechanism

@@ -66,6 +66,7 @@ import {
 import { autosave } from "../autosave";
 import { usePersistentValue } from "../hooks/usePersistentValue";
 import { createInFlight } from "../in-flight";
+import { PromptSplit } from "./ExecPanelShell";
 import type { PanelFill, PanelFillSource } from "./named-inputs";
 import { applyOptimisticUpdates } from "./optimistic-updates";
 import PlaygroundEditor from "./PlaygroundEditor";
@@ -487,97 +488,95 @@ function PlaygroundContent({
   }, [autosaveKey, saving, handleSave]);
 
   return (
-    <div className="pg-playground-wrapper">
-      <div className="pg-prompt-header">
-        <div className="pg-prompt-header-row">
-          <span className="pg-prompt-name">{prompt.name}</span>
-          {versioned && (
-            <PromptRefChip
-              head={prompt}
-              shown={shown}
-              onSelect={next => onRefChange?.(next)}
-            />
-          )}
-          <div className="pg-prompt-header-right">
-            {error && (
-              <div className="pg-header-error">
-                {error}
-                <button
-                  type="button"
-                  className="pg-dismiss"
-                  onClick={() => setError(null)}
-                >
-                  ×
-                </button>
-              </div>
-            )}
+    <PromptSplit
+      loading={loading}
+      header={
+        <div className="pg-prompt-header">
+          <div className="pg-prompt-header-row">
+            <span className="pg-prompt-name">{prompt.name}</span>
             {versioned && (
-              <PromptRefActions
+              <PromptRefChip
+                head={prompt}
                 shown={shown}
-                busy={busy}
-                onSave={handleSave}
-                onDiscard={handleDiscard}
-                onSaveAs={handleSaveAs}
+                onSelect={next => onRefChange?.(next)}
               />
             )}
+            <div className="pg-prompt-header-right">
+              {error && (
+                <div className="pg-header-error">
+                  {error}
+                  <button
+                    type="button"
+                    className="pg-dismiss"
+                    onClick={() => setError(null)}
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+              {versioned && (
+                <PromptRefActions
+                  shown={shown}
+                  busy={busy}
+                  onSave={handleSave}
+                  onDiscard={handleDiscard}
+                  onSaveAs={handleSaveAs}
+                />
+              )}
+            </div>
           </div>
-        </div>
-        {prompt.treePath && prompt.treePath.length > 0 && (
-          <span className="pg-prompt-path">
-            <PromptLinkIcon />
-            <span className="pg-prompt-path-text">
-              {prompt.treePath.join("/")}
+          {prompt.treePath && prompt.treePath.length > 0 && (
+            <span className="pg-prompt-path">
+              <PromptLinkIcon />
+              <span className="pg-prompt-path-text">
+                {prompt.treePath.join("/")}
+              </span>
             </span>
-          </span>
-        )}
-        {openConflict ? (
-          <OpenOnHeadConflicts
-            key={openConflict.key}
-            conflict={openConflict}
-            what={openingLabel(shown)}
-            busy={busy}
-            onReplace={() => openOnHead({ replace: true })}
-            onCancel={() => setOpenConflict(null)}
-            onCombine={choices => openOnHead({ choices })}
-          />
-        ) : (
-          <RefBanner
+          )}
+          {openConflict ? (
+            <OpenOnHeadConflicts
+              key={openConflict.key}
+              conflict={openConflict}
+              what={openingLabel(shown)}
+              busy={busy}
+              onReplace={() => openOnHead({ replace: true })}
+              onCancel={() => setOpenConflict(null)}
+              onCombine={choices => openOnHead({ choices })}
+            />
+          ) : (
+            <RefBanner
+              shown={shown}
+              busy={busy}
+              onOpenOnHead={handleOpenOnHead}
+            />
+          )}
+          <ConflictBar
+            key={JSON.stringify(variation?.pending?.conflicts ?? null)}
             shown={shown}
             busy={busy}
-            onOpenOnHead={handleOpenOnHead}
+            onResolve={handleResolve}
+            onDiscard={handleDiscard}
           />
-        )}
-        <ConflictBar
-          key={JSON.stringify(variation?.pending?.conflicts ?? null)}
-          shown={shown}
-          busy={busy}
-          onResolve={handleResolve}
-          onDiscard={handleDiscard}
+        </div>
+      }
+      editor={
+        <PlaygroundEditor
+          prompt={editorPrompt}
+          onUpdate={handleUpdate}
+          modelDefinition={modelDefinition}
         />
-      </div>
-      <div
-        className={"pg-content" + (loading ? " pg-content--loading" : "")}
-        aria-busy={loading}
-      >
-        <div className="pg-editor-col">
-          <PlaygroundEditor
-            prompt={editorPrompt}
-            onUpdate={handleUpdate}
-            modelDefinition={modelDefinition}
-          />
-        </div>
-        <div className="pg-exec-col">
-          <PlaygroundExecution
-            prompt={shown}
-            promptRef={ref}
-            runDisabledReason={runDisabledReason(shown)}
-            onExecuted={onExecuted}
-            fill={fill}
-            onOpenFillSource={onOpenFillSource}
-          />
-        </div>
-      </div>
-    </div>
+      }
+      panel={
+        <PlaygroundExecution
+          prompt={shown}
+          promptRef={ref}
+          runDisabledReason={runDisabledReason(shown)}
+          onExecuted={onExecuted}
+          fill={fill}
+          onOpenFillSource={onOpenFillSource}
+        />
+      }
+    />
   );
 }
 

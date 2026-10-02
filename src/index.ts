@@ -51,6 +51,46 @@ export {
   type TursoCreateDatasetOptions,
   TursoDatasetProvider,
 } from "./dataset/turso-dataset-provider.ts";
+export { runEvalMigrations } from "./eval/db/migrate.ts";
+export { EvalNotFoundError, type EvalProvider } from "./eval/eval-provider.ts";
+export {
+  DEFAULT_EVAL_CONCURRENCY,
+  EvalRunner,
+  type EvalRunnerOptions,
+  EvalRunRefusedError,
+  type StartEvalRunOptions,
+} from "./eval/eval-runner.ts";
+export type {
+  EvalArm,
+  EvalArmSpec,
+  EvalChangeEvent,
+  EvalChangeType,
+  EvalCheck,
+  EvalCheckOutcome,
+  EvalCheckResult,
+  EvalCounts,
+  EvalDefinition,
+  EvalDefinitionPatch,
+  EvalInputs,
+  EvalProviderInfo,
+  EvalResults,
+  EvalRowResult,
+  EvalRowStatus,
+  EvalRun,
+  EvalRunProgress,
+  EvalRunStatus,
+  EvalRunSummary,
+  EvalSummary,
+  NewEvalDefinition,
+  NewEvalRun,
+  TraceCheckResult,
+} from "./eval/eval-types.ts";
+export {
+  LocalEvalProvider,
+  type LocalEvalProviderOptions,
+  openLocalEvalProvider,
+} from "./eval/local-eval-provider.ts";
+export { TursoEvalProvider } from "./eval/turso-eval-provider.ts";
 export type {
   FileProvider,
   FileWatchCallback,
@@ -64,9 +104,15 @@ export { OverlayFileProvider } from "./file-provider-overlay.ts";
 export {
   canonicalArgumentKey,
   collectInputSlots,
+  findInputCycle,
+  type InputBindings,
+  type InputSignature,
   type InputSlot,
   type InputSource,
+  inputReferenceProblems,
   matchSourcesToSlots,
+  namedBindings,
+  type ResolutionContext,
   type ResourceResolver,
   resolveExecutionInput,
   resolveExecutionInputs,
@@ -96,6 +142,14 @@ export type {
 } from "./prompt/file/prompt-file-type.ts";
 export { TSPromptFileType } from "./prompt/file/ts/ts-prompt-file-type.ts";
 export {
+  type Check,
+  type CheckDefinition,
+  type CheckOutcome,
+  type CheckRun,
+  check,
+  isCheck,
+} from "./prompt/playground/check.ts";
+export {
   type DynamicResourceDefinition,
   isResource,
   isStandardSchema,
@@ -112,6 +166,7 @@ export {
 export {
   DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
   type PlaygroundModuleError,
+  type RegisteredCheck,
   type RegisteredResource,
   type RegisteredSource,
   type ResourceBinding,
@@ -123,6 +178,7 @@ export {
   type ExecuteOptions,
   type ExecuteResult,
   type OpenOnHeadOptions,
+  type PreparedCheck,
   type PromptProvider,
   type PromptRefLike,
   type PromptVariations,
@@ -203,6 +259,7 @@ export type {
   CalleeBinding,
   ChangeEventType,
   ChatPromptUpdates,
+  CheckInfo,
   ConflictChoices,
   ExecuteRequest,
   ExecuteResponse,

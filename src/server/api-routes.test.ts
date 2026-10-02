@@ -17,7 +17,7 @@ import {
   VariationConflictError,
 } from "../prompt/prompt-provider.ts";
 import { PromptRegistry } from "../prompt/prompt-registry.ts";
-import type { ExecuteRequest, SSEData } from "../shared/types.ts";
+import type { ExecuteRequest, PropType, SSEData } from "../shared/types.ts";
 import { runMigrations } from "../trace/db/migrate.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
@@ -27,6 +27,12 @@ import { setupRoutes } from "./api-routes.ts";
 
 const PROVIDER_ID = "fake";
 const TRACE_PROVIDER_ID = "memory";
+
+const STRING: PropType = {
+  kind: "primitive",
+  syntax: "string",
+  base: "string",
+};
 
 /** Minimal fake `PromptProvider` whose `execute` is fully controlled by the test. */
 function fakeProvider(
@@ -55,7 +61,14 @@ function fakeProvider(
         ? {
             id,
             name: "test",
-            functionParameters: [],
+            functionParameters: [
+              { name: "name", optional: false, type: STRING },
+              {
+                name: "nick",
+                optional: true,
+                type: STRING,
+              },
+            ],
             style: "chat",
             modelEditable: true,
             systemEditable: true,
@@ -217,22 +230,65 @@ describe("POST /api/prompts/:providerId/:id/execute", () => {
     expect(seen).toEqual(["Ada", { n: 42 }]);
   });
 
-  it("rejects a dataset input as unimplemented rather than crashing", async () => {
-    // The variant is declared now so the resolver, the matching layer and the
-    // panel are all built over the union before `DatasetProvider` exists. The
-    // seam has to be exercised, not just present.
+  it("rejects a dataset input outside an eval run rather than crashing", async () => {
     const { app } = makeApp();
 
     const res = await app.request(
       executeRequest({
-        functionInputs: [{ kind: "dataset", uri: "rows/1#col" }],
+        functionInputs: [{ kind: "dataset", field: "0" }],
       }),
     );
 
     // A bad request, not a failed run: nothing was dispatched, so there is no
     // trace to carry the error and the caller has to hear it here.
     expect(res.status).toBe(400);
-    expect(((await res.json()) as any).error).toMatch(/not implemented/i);
+    expect(((await res.json()) as any).error).toMatch(/eval run/i);
+  });
+
+  it("resolves an input reference to another slot of the same request", async () => {
+    let seen: any[] | undefined;
+    const { app } = makeApp(async (_prompt, params) => {
+      seen = params;
+    });
+
+    const res = await app.request(
+      executeRequest({
+        functionInputs: [
+          { kind: "value", value: { kind: "primitive", value: "Ada" } },
+          { kind: "input", half: "function", path: "name" },
+        ],
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(seen).toEqual(["Ada", "Ada"]);
+  });
+
+  it.each([
+    [
+      "an unknown slot",
+      [{ kind: "input", half: "function", path: "missing" }],
+      /missing/,
+    ],
+    [
+      "a cycle",
+      [
+        { kind: "input", half: "function", path: "nick" },
+        { kind: "input", half: "function", path: "name" },
+      ],
+      /cycle/i,
+    ],
+  ])("rejects an input reference to %s with a 400", async (_label, functionInputs, message) => {
+    let ran = false;
+    const { app } = makeApp(async () => {
+      ran = true;
+    });
+    const res = await app.request(
+      executeRequest({ functionInputs: functionInputs as any }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).error).toMatch(message);
+    expect(ran).toBe(false);
   });
 
   it("hands the provider the unresolved inputs alongside the resolved values", async () => {
@@ -738,10 +794,10 @@ describe("dataset routes", () => {
     ["a non-object cell", "hello"],
     ["an unknown kind", { kind: "mystery" }],
     ["a value with no PropValue", { kind: "value", value: "raw" }],
-    ["a dataset reference", { kind: "dataset", uri: "tickets#3" }],
+    ["a column reference", { kind: "dataset", field: "3" }],
     [
-      "a nested dataset reference",
-      { kind: "object", properties: { x: { kind: "dataset", uri: "d#1" } } },
+      "a nested column reference",
+      { kind: "object", properties: { x: { kind: "dataset", field: "1" } } },
     ],
     ["a resource with no uri", { kind: "resource" }],
   ])("rejects %s with a 400", async (_label, cell) => {
@@ -912,7 +968,7 @@ describe("dataset routes", () => {
       def: {
         name: "expectedTitle",
         optional: true,
-        type: { kind: "primitive", syntax: "string", base: "string" },
+        type: STRING,
       },
       added: true,
     });

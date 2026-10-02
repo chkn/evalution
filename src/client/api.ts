@@ -1,12 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type {
+  EvalArmSpec,
+  EvalDefinition,
+  EvalDefinitionPatch,
+  EvalProviderInfo,
+  EvalResults,
+  EvalRun,
+  EvalRunSummary,
+  EvalSummary,
+  NewEvalDefinition,
+  TraceCheckResult,
+} from "../eval/eval-types";
 import type { AddDatasetFieldRequest } from "../shared/dataset-fields";
 import type { SetupTask } from "../shared/setup-task";
 import type {
   AddPromptContext,
   Annotation,
   AnnotationKind,
+  CheckInfo,
   ConflictChoices,
   Dataset,
   DatasetField,
@@ -685,6 +698,199 @@ export async function deleteDatasetRow(
 /** Every configured dataset provider. */
 export async function getDatasetProviders(): Promise<DatasetProviderInfo[]> {
   const res = await fetch("/api/dataset-providers");
+  await throwIfError(res);
+  return res.json();
+}
+
+// #region Evals — `specs/evals.md` §F
+
+function evalUrl(providerId: string, evalId?: string, suffix = ""): string {
+  const base = `/api/evals/${encodeURIComponent(providerId)}`;
+  return evalId ? `${base}/${encodeURIComponent(evalId)}${suffix}` : base;
+}
+
+function evalRunUrl(providerId: string, runId: string, suffix = ""): string {
+  return `/api/eval-runs/${encodeURIComponent(providerId)}/${encodeURIComponent(runId)}${suffix}`;
+}
+
+/** Thrown by {@link startEvalRun} when the eval has problems that stop it running. */
+export class EvalRunRefused extends Error {
+  /** What's wrong, one line each. */
+  readonly problems: string[];
+
+  constructor(message: string, problems: string[]) {
+    super(message);
+    this.problems = problems;
+  }
+}
+
+/** Every configured eval provider. */
+export async function getEvalProviders(): Promise<EvalProviderInfo[]> {
+  const res = await fetch("/api/eval-providers");
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Every eval across every eval provider, most recently updated first. */
+export async function getEvals(): Promise<EvalSummary[]> {
+  const res = await fetch("/api/evals");
+  await throwIfError(res);
+  return res.json();
+}
+
+/** An eval's definition. */
+export async function getEval(
+  providerId: string,
+  evalId: string,
+): Promise<EvalDefinition> {
+  const res = await fetch(evalUrl(providerId, evalId));
+  await throwIfError(res);
+  return res.json();
+}
+
+/**
+ * Creates an eval on `providerId`, or on the first eval provider when
+ * omitted.
+ */
+export async function createEval(
+  definition: NewEvalDefinition,
+  providerId?: string,
+): Promise<EvalDefinition & { providerId: string }> {
+  const target = providerId ?? (await getEvalProviders())[0]?.id;
+  if (!target) throw new Error("No eval provider is configured");
+  const res = await fetch(evalUrl(target), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(definition),
+  });
+  await throwIfError(res);
+  return { ...(await res.json()), providerId: target };
+}
+
+/** Changes any of an eval's fields. */
+export async function updateEval(
+  providerId: string,
+  evalId: string,
+  patch: EvalDefinitionPatch,
+): Promise<EvalDefinition> {
+  const res = await fetch(evalUrl(providerId, evalId), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Deletes an eval, with its runs. */
+export async function deleteEval(
+  providerId: string,
+  evalId: string,
+): Promise<void> {
+  const res = await fetch(evalUrl(providerId, evalId), { method: "DELETE" });
+  await throwIfError(res);
+}
+
+/**
+ * Starts a run of an eval. Rejects with {@link EvalRunRefused} when the eval
+ * has problems.
+ */
+export async function startEvalRun(
+  providerId: string,
+  evalId: string,
+  options: { arms?: EvalArmSpec[]; concurrency?: number } = {},
+): Promise<EvalRun> {
+  const res = await fetch(evalUrl(providerId, evalId, "/runs"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    if (Array.isArray(body.problems)) {
+      throw new EvalRunRefused(body.error, body.problems);
+    }
+    throw new Error(body.error ?? `Request failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/** An eval's runs, newest first. */
+export async function getEvalRuns(
+  providerId: string,
+  evalId: string,
+): Promise<EvalRunSummary[]> {
+  const res = await fetch(evalUrl(providerId, evalId, "/runs"));
+  await throwIfError(res);
+  return res.json();
+}
+
+/** A run with its results. */
+export async function getEvalRun(
+  providerId: string,
+  runId: string,
+): Promise<{ run: EvalRun; results: EvalResults; running: boolean }> {
+  const res = await fetch(evalRunUrl(providerId, runId));
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Cancels a running run: queued rows are skipped, rows in flight finish. */
+export async function cancelEvalRun(
+  providerId: string,
+  runId: string,
+): Promise<void> {
+  const res = await fetch(evalRunUrl(providerId, runId, "/cancel"), {
+    method: "POST",
+  });
+  await throwIfError(res);
+}
+
+/**
+ * Deletes a run with its results. A run in flight is cancelled first, so this
+ * resolves once its rows in flight have stopped.
+ */
+export async function deleteEvalRun(
+  providerId: string,
+  runId: string,
+): Promise<void> {
+  const res = await fetch(evalRunUrl(providerId, runId), { method: "DELETE" });
+  await throwIfError(res);
+}
+
+/** Every prompt provider's checks. */
+export async function getChecks(): Promise<
+  { providerId: string; checks: CheckInfo[] }[]
+> {
+  const res = await fetch("/api/checks");
+  await throwIfError(res);
+  return res.json();
+}
+
+/** The check results recorded against a trace, from any eval. */
+export async function getTraceCheckResults(
+  providerId: string,
+  traceId: string,
+): Promise<(TraceCheckResult & { providerId: string })[]> {
+  const res = await fetch(
+    `/api/traces/${encodeURIComponent(providerId)}/${encodeURIComponent(traceId)}/check-results`,
+  );
+  await throwIfError(res);
+  return res.json();
+}
+
+// #endregion
+
+/**
+ * Whether `providerId`'s working tree is clean, and at which commit — what
+ * the eval run dialog warns about. `versioned: false` without versions.
+ */
+export async function getProviderHead(
+  providerId: string,
+): Promise<{ versioned: boolean; clean: boolean; commit?: VersionInfo }> {
+  const res = await fetch(
+    `/api/prompt-providers/${encodeURIComponent(providerId)}/head`,
+  );
   await throwIfError(res);
   return res.json();
 }

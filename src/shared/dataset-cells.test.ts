@@ -58,13 +58,18 @@ describe("parseCell", () => {
       parseCell({
         kind: "resource",
         uri: "a#r",
-        args: { n: { kind: "dataset", uri: "d#1" } },
+        args: { n: { kind: "dataset", field: "1" } },
       }),
     ).toThrow(
       new InvalidCellError(
-        "cell.args.n is a dataset reference; a dataset cell must hold a value, object, or resource",
+        "cell.args.n is a column reference; a dataset cell must hold a value, object, resource, or slot reference",
       ),
     );
+  });
+
+  it("keeps a slot reference as-is", () => {
+    const cell = { kind: "input", half: "execute", path: "ctx.db" };
+    expect(parseCell(cell)).toEqual(cell);
   });
 
   it.each([
@@ -75,6 +80,8 @@ describe("parseCell", () => {
     { kind: "object", properties: [] },
     { kind: "resource", uri: "" },
     { kind: "resource", uri: "a", args: "x" },
+    { kind: "input", half: "other", path: "x" },
+    { kind: "input", half: "function", path: "" },
   ])("rejects %j", cell => {
     expect(() => parseCell(cell)).toThrow(InvalidCellError);
   });

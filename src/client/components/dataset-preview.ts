@@ -84,7 +84,9 @@ export function previewCell(input: ExecutionInput): string {
         : resourceName(input.uri);
     }
     case "dataset":
-      return input.uri;
+      return `= column ${input.field}`;
+    case "input":
+      return `= ${input.half === "execute" ? "execute." : ""}${input.path}`;
   }
 }
 

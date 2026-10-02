@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { shortSyntax } from "ts-proppy/react";
 import type {
   ExecuteRequest,
@@ -14,6 +14,7 @@ import type {
   ResourceInfo,
 } from "../../shared/types";
 import { executePrompt } from "../api";
+import { useStructurallyStable } from "../hooks/useStructurallyStable";
 import { AddToDatasetMenu } from "./AddToDatasetMenu";
 import { CombinedInputEditor } from "./CombinedInputEditor";
 import {
@@ -24,13 +25,16 @@ import {
   isCombinable,
   resolveLayout,
 } from "./combined-inputs";
+import { ExecPanelShell } from "./ExecPanelShell";
 import { brokenResources, ExecutionInputEditor } from "./ExecutionInputEditor";
 import {
   fromExecutionInput,
+  paramStorageKey,
   type ResourceArgs,
   resourceArgsFor,
   type Selections,
   type SlotSelection,
+  type StoredInputs,
   toExecutionInput,
 } from "./execution-input-state";
 import {
@@ -41,6 +45,7 @@ import {
   type PartialExecuteRequest,
   type SkippedInput,
 } from "./named-inputs";
+import { describePseudoSource, withPseudoSources } from "./pseudo-sources";
 import {
   computeClaims,
   type ResourceArgsContext,
@@ -104,17 +109,6 @@ type OverwrittenNotes = {
   exec: Record<string, Record<string, string[]>>;
 };
 
-/** What is persisted between sessions: the inputs themselves, not the values. */
-interface StoredInputs {
-  functionInputs?: Record<string, ExecutionInput>;
-  executeInputs?: Record<string, ExecutionInput>;
-  /** The user's explicit layout choice, by slot path. Absent until they touch the toggle. */
-  layout?: {
-    functionSlots?: Record<string, InputLayout>;
-    executeSlots?: Record<string, InputLayout>;
-  };
-}
-
 /**
  * A top-level slot's own unique position — the root every nested
  * {@link ResourceArgsContext.path} within it is built from. Namespaced by
@@ -129,17 +123,6 @@ function slotPath(which: "fn" | "exec", name: string): string {
 
 /** A stable stand-in for a prompt with no execute parameters, so memos keyed on them hold. */
 const NO_PARAMETERS: PropDefinition[] = [];
-
-/** Whether `el` is scrolled short of its bottom edge. */
-function hasMoreBelow(el: HTMLElement): boolean {
-  return el.scrollHeight - el.scrollTop - el.clientHeight > 1;
-}
-
-// `globalId` survives file moves/renames, so it's the more stable key when
-// present; `id` (always present) is the fallback.
-function paramStorageKey(prompt: NormalizedPrompt): string {
-  return `pg-exec-params:${prompt.globalId ?? prompt.id}`;
-}
 
 /**
  * Restore the panel from what was saved last time.
@@ -240,40 +223,48 @@ function PlaygroundExecution({
   const [error, setError] = useState<string | null>(null);
   const [fillNotice, setFillNotice] = useState<FillNotice | null>(null);
 
-  // Whether `.pg-exec-body` has more content below the fold — cues the
-  // shadow above the run error, which otherwise reads as sitting flush
-  // against the inputs even though it's actually in the non-scrolling
-  // footer below them.
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const [bodyHasMoreBelow, setBodyHasMoreBelow] = useState(false);
-
-  useEffect(() => {
-    const el = bodyRef.current;
-    if (!el) return;
-    const update = () => setBodyHasMoreBelow(hasMoreBelow(el));
-    el.addEventListener("scroll", update, { passive: true });
-    return () => el.removeEventListener("scroll", update);
-  }, []);
-
-  // The listener above only catches the user's own scrolling — this also
-  // re-checks after every render (the first included), so a row appearing, an
-  // argument form opening, or the error itself showing up (all of which can
-  // change how much of `.pg-exec-body` overflows without the user touching
-  // it) keeps the shadow honest too.
-  useEffect(() => {
-    if (bodyRef.current) setBodyHasMoreBelow(hasMoreBelow(bodyRef.current));
-  });
-
   const executeParameters = prompt.executeParameters ?? NO_PARAMETERS;
-  const sources = prompt.inputSources;
-  const broken = brokenResources(sources);
+  const broken = brokenResources(prompt.inputSources);
 
   const resourcesByUri = useMemo(
     () =>
       new Map<string, ResourceInfo>(
-        (sources?.resources ?? []).map(r => [r.uri, r]),
+        (prompt.inputSources?.resources ?? []).map(r => [r.uri, r]),
       ),
-    [sources],
+    [prompt.inputSources],
+  );
+
+  // The other slots, as sources for `input` references (`specs/evals.md`
+  // §B.2.1): offered where their type fits and no cycle would close.
+  const bindings = useMemo(() => {
+    const resolve = (uri: string) =>
+      resourceArgsFor(uri, resourceArgs, resourcesByUri);
+    const named = (defs: readonly PropDefinition[], sel: Selections) =>
+      Object.fromEntries(
+        defs.flatMap(d => {
+          const input = toExecutionInput(sel[d.name], resolve);
+          return input ? [[d.name, input] as const] : [];
+        }),
+      );
+    return {
+      functionInputs: named(prompt.functionParameters, functionSelections),
+      executeInputs: named(executeParameters, executeSelections),
+    };
+  }, [
+    prompt.functionParameters,
+    executeParameters,
+    functionSelections,
+    executeSelections,
+    resourceArgs,
+    resourcesByUri,
+  ]);
+  // Stable while only values change, so typing doesn't remount editors.
+  const sources = useStructurallyStable(
+    withPseudoSources(prompt.inputSources, {
+      functionParameters: prompt.functionParameters,
+      executeParameters,
+      bindings,
+    }),
   );
 
   // Panel order — the first slot to reach a given resource `uri` owns its
@@ -365,9 +356,14 @@ function PlaygroundExecution({
   const argsContextBase: Omit<ResourceArgsContext, "path"> = {
     resourceArgs,
     onResourceArgsChange,
-    resourceSlots: sources?.resourceSlots ?? {},
+    resourceSlots: sources.resourceSlots ?? {},
     claimed,
     depth: 0,
+    describePseudo: (uri, type) =>
+      describePseudoSource(uri, type, {
+        functionParameters: prompt.functionParameters,
+        executeParameters,
+      }),
   };
 
   /** Builds the `args` a chosen resource should carry, from the current {@link resourceArgs} state. */
@@ -471,7 +467,7 @@ function PlaygroundExecution({
         !param.optional &&
         param.defaultValue === undefined
       ) {
-        setError(missingInputMessage(param, !!sources));
+        setError(missingInputMessage(param, !!prompt.inputSources));
         return null;
       }
     }
@@ -484,7 +480,7 @@ function PlaygroundExecution({
       );
       if (input) executeInputs[param.name] = input;
       else if (requireAll && !param.optional) {
-        setError(missingInputMessage(param, !!sources));
+        setError(missingInputMessage(param, !!prompt.inputSources));
         return null;
       }
     }
@@ -668,10 +664,10 @@ function PlaygroundExecution({
     });
 
   return (
-    <div className="pg-exec-inner">
-      <div className="pg-exec-header">
-        <span className="pg-exec-title">Execute</span>
-        {prompt.providerId && (
+    <ExecPanelShell
+      title="Execute"
+      actions={
+        prompt.providerId && (
           <AddToDatasetMenu
             inputs={panelInputs}
             newDatasetFields={fieldsForPrompt(prompt)}
@@ -689,119 +685,97 @@ function PlaygroundExecution({
             }}
             disabled={panelInputs.length === 0}
           />
-        )}
-      </div>
-      <div className="pg-exec-main">
-        <div className="pg-exec-body" ref={bodyRef}>
-          {fillNotice && (
-            <div className="pg-exec-fill-notice" role="status">
-              <span>
-                Filled from{" "}
-                {onOpenFillSource ? (
-                  <button
-                    type="button"
-                    className="pg-exec-fill-link"
-                    onClick={e => {
-                      // Otherwise this bubbles to the pane's own onClick,
-                      // which refocuses *this* pane right back — undoing the
-                      // jump just made.
-                      e.stopPropagation();
-                      onOpenFillSource(fillNotice.from);
-                    }}
-                    title={fillNotice.from.description}
-                  >
-                    {fillNotice.from.type} ↗
-                  </button>
-                ) : (
-                  fillNotice.from.type
-                )}
-                {fillNotice.kept.length > 0 && (
-                  <>
-                    <br />
-                    {"Not filled: "}
-                    {fillNotice.kept.map((name, i) => (
-                      <span key={name}>
-                        {i > 0 && ", "}
-                        <code>{name}</code>
-                      </span>
-                    ))}
-                  </>
-                )}
-              </span>
-              {fillNotice.skipped.map(skip => (
-                <span key={skip.name} className="pg-exec-fill-skipped">
-                  {skipMessage(skip)}
-                </span>
-              ))}
+        )
+      }
+      error={error}
+      onDismissError={() => setError(null)}
+      footer={
+        <button
+          type="button"
+          className="pg-run-btn"
+          onClick={handleRun}
+          disabled={executing || !!runDisabledReason}
+          title={runDisabledReason}
+        >
+          {executing ? "…" : "▶  Run"}
+        </button>
+      }
+    >
+      {fillNotice && (
+        <div className="pg-exec-fill-notice" role="status">
+          <span>
+            Filled from{" "}
+            {onOpenFillSource ? (
               <button
                 type="button"
-                className="pg-dismiss"
-                aria-label="Dismiss"
-                onClick={() => setFillNotice(null)}
+                className="pg-exec-fill-link"
+                onClick={e => {
+                  // Otherwise this bubbles to the pane's own onClick,
+                  // which refocuses *this* pane right back — undoing the
+                  // jump just made.
+                  e.stopPropagation();
+                  onOpenFillSource(fillNotice.from);
+                }}
+                title={fillNotice.from.description}
               >
-                ×
+                {fillNotice.from.type} ↗
               </button>
-            </div>
-          )}
-          {renderSlots(
-            prompt.functionParameters,
-            functionSelections,
-            sources?.functionSlots ?? {},
-            "fn",
-          )}
-
-          {executeParameters.length > 0 && (
-            <>
-              <div className="pg-exec-section" />
-              {renderSlots(
-                executeParameters,
-                executeSelections,
-                sources?.executeSlots ?? {},
-                "exec",
-              )}
-            </>
-          )}
-
-          {broken.map(r => (
-            <div className="pg-exec-error" key={r.uri}>
-              Playground module <code>{r.uri}</code> failed to load: {r.error}
-            </div>
+            ) : (
+              fillNotice.from.type
+            )}
+            {fillNotice.kept.length > 0 && (
+              <>
+                <br />
+                {"Not filled: "}
+                {fillNotice.kept.map((name, i) => (
+                  <span key={name}>
+                    {i > 0 && ", "}
+                    <code>{name}</code>
+                  </span>
+                ))}
+              </>
+            )}
+          </span>
+          {fillNotice.skipped.map(skip => (
+            <span key={skip.name} className="pg-exec-fill-skipped">
+              {skipMessage(skip)}
+            </span>
           ))}
-        </div>
-        <div className="pg-exec-footer">
-          {/* Above the Run button, not in `.pg-exec-body` — a run's own error
-            (as opposed to `broken`, which is about the resources offered
-            above, not about running) should stay in view exactly where the
-            button that caused it is, not scroll away with the inputs. */}
-          {error && (
-            <div
-              className={
-                "pg-exec-error pg-exec-error-run" +
-                (bodyHasMoreBelow ? " pg-exec-error-run-shadow" : "")
-              }
-            >
-              {error}
-              <button
-                type="button"
-                className="pg-dismiss"
-                onClick={() => setError(null)}
-              >
-                ×
-              </button>
-            </div>
-          )}
           <button
             type="button"
-            className="pg-run-btn"
-            onClick={handleRun}
-            disabled={executing || !!runDisabledReason}
-            title={runDisabledReason}
+            className="pg-dismiss"
+            aria-label="Dismiss"
+            onClick={() => setFillNotice(null)}
           >
-            {executing ? "…" : "▶  Run"}
+            ×
           </button>
         </div>
-      </div>
-    </div>
+      )}
+      {renderSlots(
+        prompt.functionParameters,
+        functionSelections,
+        sources?.functionSlots ?? {},
+        "fn",
+      )}
+
+      {executeParameters.length > 0 && (
+        <>
+          <div className="pg-exec-section" />
+          {renderSlots(
+            executeParameters,
+            executeSelections,
+            sources?.executeSlots ?? {},
+            "exec",
+          )}
+        </>
+      )}
+
+      {broken.map(r => (
+        <div className="pg-exec-error" key={r.uri}>
+          Playground module <code>{r.uri}</code> failed to load: {r.error}
+        </div>
+      ))}
+    </ExecPanelShell>
   );
 }
 
