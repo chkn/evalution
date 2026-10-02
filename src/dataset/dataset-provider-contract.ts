@@ -381,17 +381,16 @@ export function runDatasetProviderContractTests(
           "an object cell",
           { kind: "object", properties: {} } satisfies ExecutionInput,
         ],
-      ])("rejects setting %s, changing nothing", async (_label, cell) => {
+      ])("sets %s, as addRows takes", async (_label, cell) => {
         const provider = await makeProvider();
         const { dataset, first, second } = await seeded(provider);
-        const before = await provider.listRows(dataset.id);
-        await expect(
-          provider.updateRows(dataset.id, [
-            { rowId: second.id, cells: { "0": text("changed") } },
-            { rowId: first.id, cells: { "1": cell } },
-          ]),
-        ).rejects.toBeInstanceOf(DatasetValidationError);
-        expect(await provider.listRows(dataset.id)).toEqual(before);
+        await provider.updateRows(dataset.id, [
+          { rowId: second.id, cells: { "1": cell } },
+          { rowId: first.id, cells: { "0": cell } },
+        ]);
+        const rows = await provider.listRows(dataset.id);
+        expect(rows[0].cells["0"]).toEqual(cell);
+        expect(rows[1].cells["1"]).toEqual(cell);
       });
 
       it("rejects an unknown field or row, changing nothing", async () => {

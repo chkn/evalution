@@ -466,16 +466,11 @@ export class TursoDatasetProvider implements DatasetProvider {
 
         // Everything is checked before anything is written, so a bad update
         // anywhere in the batch leaves every row as it was.
-        for (const { rowId, cells } of updates) {
-          for (const [fieldId, cell] of Object.entries(cells)) {
+        for (const { cells } of updates) {
+          for (const fieldId of Object.keys(cells)) {
             if (!fieldIds.has(fieldId)) {
               throw new DatasetValidationError(
                 `Dataset ${datasetId} has no field with id "${fieldId}"`,
-              );
-            }
-            if (cell !== null && cell.kind !== "value") {
-              throw new DatasetValidationError(
-                `Row ${rowId}, field "${fieldId}": only a value cell can be set`,
               );
             }
           }

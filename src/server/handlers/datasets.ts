@@ -207,12 +207,12 @@ function parseRows(value: unknown): NewDatasetRow[] {
 }
 
 /**
- * Checks an update body against the dataset's fields. A cell set on a field
- * of type `string`, `number`, or `boolean` must be a typed-in value of that
- * type, since it's what the grid's editors write; any other field's cell gets
- * the shape check {@link parseRows} applies. `null` clears. Unknown field ids
- * and non-`value` cells are left for the provider to reject, so the rule
- * lives in one place.
+ * Checks an update body against the dataset's fields. Every cell gets the
+ * shape check {@link parseRows} applies, and a typed-in value set on a field
+ * of type `string`, `number`, or `boolean` must also be of that type, since
+ * it's what the grid's editors write. Other kinds of cell (e.g. a resource)
+ * are taken as adding a row takes them. `null` clears. Unknown field ids are
+ * left for the provider to reject, so the rule lives in one place.
  */
 function parseUpdates(
   value: unknown,
@@ -242,7 +242,8 @@ function parseUpdates(
       const base = field && primitiveBase(field.def.type);
       if (
         base &&
-        (parsed.kind !== "value" || !fitsPrimitiveBase(parsed.value, base))
+        parsed.kind === "value" &&
+        !fitsPrimitiveBase(parsed.value, base)
       ) {
         throw new BadRequest(
           `${path} must be a ${base} value for "${field.def.name}: ${field.def.type.syntax}"`,

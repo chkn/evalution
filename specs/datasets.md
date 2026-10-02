@@ -791,7 +791,7 @@ as it does today.
 
 1. `addField` and `updateRows` in both providers, with contract tests in
    `dataset-provider-contract.ts`: minted ids stay unique, duplicate keys are rejected, a merge
-   leaves other cells untouched, `null` removes the key, non-`value` cells are rejected, and a
+   leaves other cells untouched, `null` removes the key, any cell kind `addRows` takes can be set, and a
    batch is all-or-nothing.
 2. Routes, server validation, and the parameter lookup behind `{ from }`.
 3. UI: the "＋" field popover, inline editors with batch edits, paste and delete, the trailing row,

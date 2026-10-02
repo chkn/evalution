@@ -368,7 +368,6 @@ describe("handleUpdateRows", () => {
       "an object value in a string field",
       { "0": { kind: "value", value: { kind: "object", properties: {} } } },
     ],
-    ["a resource in a string field", { "0": { kind: "resource", uri: "a#b" } }],
   ])("rejects %s with a 400, changing nothing", async (_label, cellsIn) => {
     const { update, cells } = await seeded();
     const before = await cells();
@@ -392,10 +391,13 @@ describe("handleUpdateRows", () => {
     expect(
       (await update({ "3": { kind: "value", value: "raw" } })).status,
     ).toBe(400);
-    // Well-formed, but not a value: only the provider knows to refuse it.
-    expect(
-      (await update({ "3": { kind: "resource", uri: "pg.ts#task" } })).status,
-    ).toBe(400);
+  });
+
+  it("sets a resource in any field, as adding a row does", async () => {
+    const { update, cells } = await seeded();
+    const resource: ExecutionInput = { kind: "resource", uri: "pg.ts#task" };
+    expect((await update({ "0": resource, "3": resource })).status).toBe(204);
+    expect(await cells()).toMatchObject({ "0": resource, "3": resource });
   });
 
   it("rejects an unknown field or row, and a malformed body", async () => {
