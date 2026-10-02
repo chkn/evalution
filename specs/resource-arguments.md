@@ -425,6 +425,10 @@ export interface ResourceInstance<T, R = unknown> {
   serially for exactly the resources that declare `reset`**, and in parallel for everything else,
   which is a property the dataset spec has to know rather than discover in a flaky eval. Resettable
   instances are acquired in sorted-URI order so two runs cannot take two locks in opposite orders.
+  Within one lease, a run's inputs resolve in parallel and may reach the same instance from
+  several places at once (`db.db`, `db.workspaceId`, a seeder that takes `db`): each instance is
+  entered once per lease, and every one of those acquires waits on that single entry and its reset.
+  None of them queues on the lock its own lease already holds.
 - **Run-scoped resources ignore it** — they are created fresh per run, so a `reset` on one is a
   misunderstanding worth a load-time warning rather than a silent no-op.
 

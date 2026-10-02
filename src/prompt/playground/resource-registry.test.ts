@@ -1362,6 +1362,92 @@ describe("resource reset (specs/resource-arguments.md §F)", () => {
     ]);
   });
 
+  it("lets one lease acquire a resettable instance concurrently, resetting it once before any use", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        globalThis.__order = [];
+        export const db = resource({
+          scope: "server",
+          create: () => ({
+            value: { conn: "db", id: 1 },
+            reset: async () => {
+              await new Promise(r => setTimeout(r, 5));
+              globalThis.__order.push("reset");
+            },
+          }),
+        });
+        export const task = resource({
+          inputs: { db },
+          create: ({ db }) => ({ value: "task in " + db.conn }),
+        });`,
+    });
+
+    // As an execute request's inputs resolve: in parallel, several reaching
+    // the same resettable instance — directly, by an output path, and through
+    // another resource's inputs.
+    const lease = reg.lease();
+    const all = Promise.all(
+      [
+        "x.playground.ts#db.conn",
+        "x.playground.ts#db.id",
+        "x.playground.ts#task",
+        "x.playground.ts#db",
+      ].map(uri =>
+        lease.acquire(uri).then(value => {
+          (globalThis as any).__order.push(uri);
+          return value;
+        }),
+      ),
+    );
+    const values = await Promise.race([
+      all,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("deadlocked")), 2000),
+      ),
+    ]);
+    expect(values).toEqual(["db", 1, "task in db", { conn: "db", id: 1 }]);
+    // One reset, and nothing used the instance before it finished.
+    expect((globalThis as any).__order[0]).toBe("reset");
+    expect(
+      (globalThis as any).__order.filter((e: string) => e === "reset"),
+    ).toHaveLength(1);
+    await lease.release();
+  });
+
+  it("lets one lease enter two resettable instances concurrently, out of order, while another lease contends", async () => {
+    const { registry: reg } = registry({
+      [p("a.playground.ts")]: `${importHelper}
+        export const res = resource({ scope: "server", create: () => ({ value: "a", reset: async () => {} }) });`,
+      [p("b.playground.ts")]: `${importHelper}
+        export const res = resource({ scope: "server", create: () => ({ value: "b", reset: async () => {} }) });`,
+    });
+
+    const leaseOne = reg.lease();
+    const leaseTwo = reg.lease();
+    const oneDone = (async () => {
+      await Promise.all([
+        leaseOne.acquire("b.playground.ts#res"),
+        leaseOne.acquire("a.playground.ts#res"),
+        leaseOne.acquire("b.playground.ts#res"),
+      ]);
+      await leaseOne.release();
+    })();
+    const twoDone = (async () => {
+      await Promise.all([
+        leaseTwo.acquire("a.playground.ts#res"),
+        leaseTwo.acquire("b.playground.ts#res"),
+      ]);
+      await leaseTwo.release();
+    })();
+
+    await Promise.race([
+      Promise.all([oneDone, twoDone]),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("deadlocked")), 2000),
+      ),
+    ]);
+  });
+
   it("warns at first use rather than resetting a run-scoped resource's declared reset", async () => {
     const { registry: reg } = registry({
       [p("x.playground.ts")]: `${importHelper}

@@ -395,6 +395,12 @@ class ResetLockRegistry {
  * reacquired together in order. A lease therefore never holds locks out of
  * order, which is what keeps two leases from taking two locks in opposite
  * orders and deadlocking (`specs/resource-arguments.md` §F).
+ *
+ * A lease's inputs resolve in parallel, so it may need the same lock from
+ * several places at once. Each (resource, key) is entered once per lease, and
+ * every caller waits on that one entry — reset included — rather than
+ * queueing on a mutex its own lease already holds. Lock acquisitions within
+ * the lease take turns, so the reacquire above never interleaves with itself.
  */
 class LeaseResetLocks {
   private held: {
@@ -403,38 +409,46 @@ class LeaseResetLocks {
     key: string;
     release: () => void;
   }[] = [];
-  private entered = new Map<Resource<unknown>, Set<string>>();
+  private entries = new Map<Resource<unknown>, Map<string, Promise<void>>>();
+  /** The lease's lock acquisitions, one at a time. */
+  private turn: Promise<unknown> = Promise.resolve();
   private readonly registry: ResetLockRegistry;
 
   constructor(registry: ResetLockRegistry) {
     this.registry = registry;
   }
 
-  private hasEntered(target: Resource<unknown>, key: string): boolean {
-    return this.entered.get(target)?.has(key) ?? false;
-  }
-
-  private markEntered(target: Resource<unknown>, key: string): void {
-    let set = this.entered.get(target);
-    if (!set) {
-      set = new Set();
-      this.entered.set(target, set);
-    }
-    set.add(key);
-  }
-
   /**
-   * Locks (resource, key) for this lease's lifetime, if not already locked by
-   * it. Returns whether this call is the one that newly entered it — the
-   * caller's cue to actually run `reset()`.
+   * Locks (resource, key) for this lease's lifetime and runs `reset` once it
+   * holds the lock. Every call for the same (resource, key) in this lease —
+   * concurrent or later — resolves when that one reset has finished.
    */
-  async enter(
+  enter(
     target: Resource<unknown>,
     key: string,
     sortKey: string,
-  ): Promise<boolean> {
-    if (this.hasEntered(target, key)) return false;
+    reset: () => Promise<void>,
+  ): Promise<void> {
+    let byKey = this.entries.get(target);
+    if (!byKey) {
+      byKey = new Map();
+      this.entries.set(target, byKey);
+    }
+    let entry = byKey.get(key);
+    if (!entry) {
+      const locked = this.turn.then(() => this.lock(target, key, sortKey));
+      this.turn = locked.catch(() => {});
+      entry = locked.then(reset);
+      byKey.set(key, entry);
+    }
+    return entry;
+  }
 
+  private async lock(
+    target: Resource<unknown>,
+    key: string,
+    sortKey: string,
+  ): Promise<void> {
     const maxHeld = this.held.at(-1)?.sortKey;
     if (maxHeld !== undefined && sortKey < maxHeld) {
       const wanted = [
@@ -457,9 +471,6 @@ class LeaseResetLocks {
       const release = await this.registry.mutex(target, key).acquire();
       this.held.push({ sortKey, target, key, release });
     }
-
-    this.markEntered(target, key);
-    return true;
   }
 
   releaseAll(): void {
@@ -963,14 +974,13 @@ export class ResourceRegistry {
 
     if (scope === "server" && instance.reset) {
       const sortKey = key ? `${label}@${key}` : label;
-      const isNewToThisLease = await resetLocks.enter(target, key, sortKey);
-      if (isNewToThisLease) {
+      await resetLocks.enter(target, key, sortKey, async () => {
         try {
-          await instance.reset();
+          await instance.reset!();
         } catch (err) {
           throw resourceFailure(label, "reset()", err);
         }
-      }
+      });
     } else if (
       scope === "run" &&
       instance.reset &&
