@@ -264,6 +264,9 @@ export interface Annotation {
   createdAt: number;
 }
 
+/** The fields of an {@link Annotation} that can be changed after it's made. */
+export type AnnotationChanges = Partial<Pick<Annotation, "kind" | "note">>;
+
 /** The kind of change that occurred to a trace. */
 export type TraceChangeType = "add" | "update" | "remove";
 
@@ -282,7 +285,7 @@ export type TraceStreamEvent =
   | { type: "trace-end"; trace: Trace };
 
 /** The change an annotation event describes. */
-export type AnnotationEventOp = "insert" | "delete";
+export type AnnotationEventOp = "insert" | "update" | "delete";
 
 /** The event a per-trace annotation subscription delivers. */
 export interface AnnotationEvent {

@@ -40,6 +40,9 @@ import type {
   PromptID,
   PropDefinition,
 } from "../../shared/types.ts";
+import { SqlQueryError } from "../../trace/db/read-only-query.ts";
+import type { HandlerResult } from "./result.ts";
+import { parseQueryBody } from "./traces.ts";
 
 /** The body of `GET /api/datasets/:providerId/:id`. */
 export interface DatasetWithOverview extends DatasetRowsOverview {
@@ -47,10 +50,7 @@ export interface DatasetWithOverview extends DatasetRowsOverview {
 }
 
 /** What a dataset handler returns; the route relays it. */
-export interface DatasetHandlerResult {
-  status: number;
-  body: unknown;
-}
+export type DatasetHandlerResult = HandlerResult;
 
 /**
  * Maps a stored prompt link to one the client can open — `undefined` when it
@@ -74,7 +74,8 @@ function failure(err: unknown): DatasetHandlerResult {
   if (
     err instanceof DatasetValidationError ||
     err instanceof InvalidCellError ||
-    err instanceof BadRequest
+    err instanceof BadRequest ||
+    err instanceof SqlQueryError
   ) {
     return { status: 400, body: { error: message } };
   }
@@ -107,16 +108,31 @@ function parsePromptLink(value: unknown): PromptID | undefined {
 }
 
 /**
- * Checks a create body's fields: each a `{ def }` whose `def` has a name and
- * a type with `syntax`, unique by `(name, type.syntax)` — the one matching
- * rule datasets use (§B).
+ * Checks a create body's fields, unique by `(name, type.syntax)` — the one
+ * matching rule datasets use (§B). Each is a `{ def }` whose `def` has a name
+ * and a type with `syntax` (what the client derives from a prompt), or — when
+ * the caller can look prompts up — any body {@link handleAddField} takes:
+ * `{ name, type }` or `{ from, name? }`.
  */
-function parseFields(value: unknown): Omit<DatasetField, "id">[] {
+async function parseFields(
+  value: unknown,
+  lookupPrompt?: LookupFieldSourcePrompt,
+): Promise<Omit<DatasetField, "id">[]> {
   if (!Array.isArray(value)) throw new BadRequest("fields must be an array");
   const seen = new Set<string>();
-  return value.map((field, i) => {
+  const fields: Omit<DatasetField, "id">[] = [];
+  for (const [i, field] of value.entries()) {
     const def = isRecord(field) ? field.def : undefined;
-    if (
+    let parsed: PropDefinition;
+    if (def === undefined && lookupPrompt && isRecord(field)) {
+      try {
+        parsed = await parseNewField(field, lookupPrompt);
+      } catch (err) {
+        throw err instanceof BadRequest
+          ? new BadRequest(`fields[${i}]: ${err.message}`)
+          : err;
+      }
+    } else if (
       !isRecord(def) ||
       typeof def.name !== "string" ||
       !def.name ||
@@ -126,16 +142,19 @@ function parseFields(value: unknown): Omit<DatasetField, "id">[] {
       throw new BadRequest(
         `fields[${i}].def must be a PropDefinition with a name and type`,
       );
+    } else {
+      parsed = def as unknown as PropDefinition;
     }
-    const key = `${def.name}\u0000${def.type.syntax}`;
+    const key = `${parsed.name}\u0000${parsed.type.syntax}`;
     if (seen.has(key)) {
       throw new BadRequest(
-        `fields[${i}] duplicates "${def.name}: ${def.type.syntax}"`,
+        `fields[${i}] duplicates "${parsed.name}: ${parsed.type.syntax}"`,
       );
     }
     seen.add(key);
-    return { def: def as unknown as PropDefinition };
-  });
+    fields.push({ def: parsed });
+  }
+  return fields;
 }
 
 function parseSource(
@@ -263,15 +282,23 @@ export async function handleListDatasets(
   }
 }
 
-/** `POST /api/datasets/:providerId` */
+/**
+ * `POST /api/datasets/:providerId` — body `{ name, fields, prompt? }`. With
+ * `lookupPrompt`, a field may also be given as {@link handleAddField} takes
+ * one, rather than as a `{ def }`.
+ */
 export async function handleCreateDataset(
   provider: DatasetProvider,
   body: unknown,
   resolvePrompt: ResolvePromptLink,
+  lookupPrompt?: LookupFieldSourcePrompt,
 ): Promise<DatasetHandlerResult> {
   try {
     const name = parseName(body);
-    const fields = parseFields(isRecord(body) ? body.fields : undefined);
+    const fields = await parseFields(
+      isRecord(body) ? body.fields : undefined,
+      lookupPrompt,
+    );
     const prompt = parsePromptLink(isRecord(body) ? body.prompt : undefined);
     const dataset = await provider.createDataset({
       name,
@@ -578,6 +605,74 @@ export async function handleDeleteRow(
   try {
     await provider.deleteRow(datasetId, rowId);
     return { status: 204, body: undefined };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
+/** The answer for a provider without an optional capability. */
+function unsupported(what: string): DatasetHandlerResult {
+  return {
+    status: 405,
+    body: { error: `This dataset provider does not support ${what}` },
+  };
+}
+
+/** `PATCH /api/datasets/:providerId/:id/fields/:fieldId` — body `{ name }`: rename a field. */
+export async function handleRenameField(
+  provider: DatasetProvider,
+  datasetId: string,
+  fieldId: string,
+  body: unknown,
+): Promise<DatasetHandlerResult> {
+  if (!provider.renameField) return unsupported("renaming fields");
+  try {
+    const field = await provider.renameField(
+      datasetId,
+      fieldId,
+      parseName(body),
+    );
+    return { status: 200, body: field };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
+/** `DELETE /api/datasets/:providerId/:id/fields/:fieldId` — a field and its cells. */
+export async function handleDeleteField(
+  provider: DatasetProvider,
+  datasetId: string,
+  fieldId: string,
+): Promise<DatasetHandlerResult> {
+  if (!provider.deleteField) return unsupported("deleting fields");
+  try {
+    await provider.deleteField(datasetId, fieldId);
+    return { status: 204, body: undefined };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
+/**
+ * `POST /api/datasets/:providerId/:id/query` — body `{ sql, maxRows? }`: one
+ * read-only SQL query against a `rows` view of the dataset, a column per
+ * field (see `src/dataset/dataset-query.ts`).
+ */
+export async function handleQueryRows(
+  provider: DatasetProvider,
+  datasetId: string,
+  body: unknown,
+): Promise<DatasetHandlerResult> {
+  if (!provider.queryRows) return unsupported("SQL queries");
+  const query = parseQueryBody(body);
+  if ("status" in query) return query;
+  try {
+    return {
+      status: 200,
+      body: await provider.queryRows(datasetId, query.sql, {
+        ...(query.maxRows && { maxRows: query.maxRows }),
+      }),
+    };
   } catch (err) {
     return failure(err);
   }

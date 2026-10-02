@@ -196,6 +196,7 @@ export type {
   AddPromptContext,
   AddPromptField,
   Annotation,
+  AnnotationChanges,
   AnnotationEvent,
   AnnotationEventOp,
   AnnotationKind,
@@ -267,6 +268,13 @@ export {
   type LocalTursoClientOptions,
 } from "./trace/db/local-turso-client.ts";
 export { MIGRATIONS_TABLE, runMigrations } from "./trace/db/migrate.ts";
+export { TRACE_QUERY_SCHEMA } from "./trace/db/query-schema.ts";
+export {
+  DEFAULT_MAX_QUERY_ROWS,
+  SqlQueryError,
+  type SqlQueryOptions,
+  type SqlQueryResult,
+} from "./trace/db/read-only-query.ts";
 export {
   LocalDatabaseTraceProvider,
   type LocalDatabaseTraceProviderOptions,

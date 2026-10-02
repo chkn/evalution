@@ -3,10 +3,10 @@
 
 import { useMemo } from "react";
 import { ItemEditor } from "ts-proppy/react";
+import { jsonToPropValue } from "../../shared/json-prop-value";
 import type { PropDefinition, ResourceInfo } from "../../shared/types";
 import { ExecutionInputEditor } from "./ExecutionInputEditor";
 import { rootResourceUri, type Selections } from "./execution-input-state";
-import { jsonToPropValue } from "./json-to-prop-value";
 import {
   MAX_RESOURCE_ARG_DEPTH,
   nested,

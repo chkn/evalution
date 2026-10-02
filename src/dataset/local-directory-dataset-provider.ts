@@ -10,6 +10,10 @@ import {
   assertSqliteFile,
   createLocalTursoClient,
 } from "../trace/db/local-turso-client.ts";
+import type {
+  SqlQueryOptions,
+  SqlQueryResult,
+} from "../trace/db/read-only-query.ts";
 import { mkdirSelfIgnoring } from "../trace/db/self-ignoring-dir.ts";
 import {
   isValidDatasetId,
@@ -383,6 +387,29 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
   ): Promise<DatasetField> {
     const entry = await this.requireEntry(datasetId);
     return entry.inner.addField(entry.innerId, def);
+  }
+
+  async renameField(
+    datasetId: string,
+    fieldId: string,
+    name: string,
+  ): Promise<DatasetField> {
+    const entry = await this.requireEntry(datasetId);
+    return entry.inner.renameField(entry.innerId, fieldId, name);
+  }
+
+  async deleteField(datasetId: string, fieldId: string): Promise<void> {
+    const entry = await this.requireEntry(datasetId);
+    await entry.inner.deleteField(entry.innerId, fieldId);
+  }
+
+  async queryRows(
+    datasetId: string,
+    sql: string,
+    options?: SqlQueryOptions,
+  ): Promise<SqlQueryResult> {
+    const entry = await this.requireEntry(datasetId);
+    return entry.inner.queryRows(entry.innerId, sql, options);
   }
 
   /** Closes every open file. The provider reopens them on next use. */

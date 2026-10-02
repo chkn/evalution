@@ -2,6 +2,10 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type { PropDefinition } from "../shared/types.ts";
+import type {
+  SqlQueryOptions,
+  SqlQueryResult,
+} from "../trace/db/read-only-query.ts";
 import type { PromptID } from "../trace/trace-types.ts";
 import type {
   Dataset,
@@ -130,6 +134,40 @@ export interface DatasetProvider {
    * allowed. See `specs/datasets.md` §B, §P.1.
    */
   addField(datasetId: string, def: PropDefinition): Promise<DatasetField>;
+
+  /**
+   * Renames a field. Its id never changes, so rows are untouched. A name that
+   * would give the field the same name and `type.syntax` as another is
+   * rejected with a {@link DatasetValidationError}, as is an unknown field.
+   *
+   * Optional — the REST and MCP handlers report "not supported" without it.
+   */
+  renameField?(
+    datasetId: string,
+    fieldId: string,
+    name: string,
+  ): Promise<DatasetField>;
+
+  /**
+   * Deletes a field and every row's cell for it. Its id is never reused. An
+   * unknown field is rejected with a {@link DatasetValidationError}.
+   *
+   * Optional — as {@link renameField}.
+   */
+  deleteField?(datasetId: string, fieldId: string): Promise<void>;
+
+  /**
+   * Runs one read-only SQL query against a `rows` view of a dataset's rows —
+   * a column per field, named after it, plus `_id`, `_created_at`,
+   * `_source`, and `_cells` (see `./dataset-query.ts`). Writes are refused.
+   *
+   * Optional — a store not backed by SQL omits it.
+   */
+  queryRows?(
+    datasetId: string,
+    sql: string,
+    options?: SqlQueryOptions,
+  ): Promise<SqlQueryResult>;
 
   /**
    * Registers a callback invoked whenever a dataset is added, changed, or

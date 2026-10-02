@@ -1,18 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import type { EvalutionConfig } from "../config.ts";
-import { LocalDirectoryDatasetProvider } from "../dataset/local-directory-dataset-provider.ts";
 import { startServer } from "../server/index.ts";
 import { TerminalSessionRegistry } from "../server/terminal.ts";
-import { CostFetchingTraceSink } from "../trace/cost-fetching-trace-sink.ts";
-import { LocalDatabaseTraceProvider } from "../trace/local-database-trace-provider.ts";
-import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
-import type { TraceIngestor } from "../trace/trace-ingestor.ts";
-import { isTraceSink } from "../trace/trace-sink.ts";
 import { registerBundlerResolutionFallback } from "./bundler-resolution-hook.ts";
 import {
   registerEvalutionResolver,
@@ -20,8 +13,23 @@ import {
 } from "./config-loader-hooks.ts";
 import { watchForConfigCreation } from "./config-watcher.ts";
 import { findAvailablePort } from "./find-port.ts";
+import {
+  keepStdoutForProtocol,
+  relayMcpToServer,
+  serveMcpInProcess,
+} from "./mcp.ts";
 import { openBrowser } from "./open-browser.ts";
+import { findRootDir, loadConfig, setUpProject } from "./project.ts";
+import { findRunningServer, writeServerInfo } from "./server-discovery.ts";
 import { registerVariationLoaderHook } from "./variation-loader-hook.ts";
+
+/**
+ * This package's version. `../../package.json` from both `src/cli/` and the
+ * bundled `dist/cli/`.
+ */
+const VERSION: string = JSON.parse(
+  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+).version;
 
 // Make a project's config resolve `import ... from 'evalution'` against this
 // CLI rather than the project's node_modules, so configs load even when
@@ -40,48 +48,6 @@ registerBundlerResolutionFallback();
 // this hook answers from memory. See `./variation-loader-hook.ts`.
 registerVariationLoaderHook();
 
-async function findRootDir(
-  startDir: string,
-): Promise<{ rootDir: string; hasConfig: boolean }> {
-  let dir = startDir;
-  while (true) {
-    const configPath = path.join(dir, ".evalution", "config.ts");
-    try {
-      await fs.access(configPath);
-      return { rootDir: dir, hasConfig: true };
-    } catch {
-      const parent = path.dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-  }
-  return { rootDir: startDir, hasConfig: false };
-}
-
-async function loadConfig(rootDir: string): Promise<EvalutionConfig> {
-  const configPath = path.join(rootDir, ".evalution", "config.ts");
-  process.chdir(rootDir);
-  const mod = await import(pathToFileURL(configPath).href);
-  console.log(`⚙️ Loaded config from ${configPath}`);
-  return mod.default ?? {};
-}
-
-function applyDotenv(rootDir: string): void {
-  const envPath = path.join(rootDir, ".env");
-  try {
-    process.loadEnvFile(envPath);
-    console.log(`📄 Loaded environment variables from ${envPath}`);
-  } catch (err: any) {
-    // Missing .env is fine; any other error is worth surfacing.
-    if (err?.code !== "ENOENT") {
-      console.warn(
-        `Warning: failed to load .env from ${envPath}:`,
-        err.message,
-      );
-    }
-  }
-}
-
 async function startConfiguredServer(
   rootDir: string,
   config: EvalutionConfig,
@@ -89,83 +55,30 @@ async function startConfiguredServer(
   port: number,
   terminalSessions: TerminalSessionRegistry,
 ) {
-  if (config.useDotenv !== false) {
-    applyDotenv(rootDir);
-  }
-
-  const promptProviders = config.promptProviders ?? [];
-  let traceProviders = config.traceProviders;
-
-  if (!traceProviders) {
-    // An explicit `rootDir`-relative path rather than `LocalDatabaseTraceProvider`'s
-    // own CWD-relative default: onboarding mode (no config file yet) never
-    // `chdir`s to `rootDir` the way a loaded `config.ts` does, so relying on
-    // CWD here could resolve against the wrong directory when the CLI is
-    // invoked with an explicit path argument (`evalution ui <path>`).
-    const provider = new LocalDatabaseTraceProvider({
-      path: path.join(rootDir, ".evalution", "traces", "local.db"),
-    });
-    traceProviders = [provider];
-  }
-
-  // As for traces: `rootDir`-relative, not the provider's CWD-relative default.
-  const datasetProviders = config.datasetProviders ?? [
-    new LocalDirectoryDatasetProvider({
-      dir: path.join(rootDir, ".evalution", "datasets"),
-    }),
-  ];
-
-  // Each adapter runs its own SDK-specific setup and returns the resulting
-  // ingestor — we stand up nothing here beyond the default provider.
-  const collected = (
-    await Promise.all(promptProviders.map(p => p.setupTraceIngestion?.()))
-  ).filter(i => !!i);
-
-  // Drop ingestors a kept one reports redundant (e.g. a 2nd OTelTraceIngestor
-  // — OTel is one process-global pipeline).
-  const ingestors: TraceIngestor[] = [];
-  for (const ing of collected) {
-    if (!ingestors.some(kept => kept.isRedundant?.(ing))) ingestors.push(ing);
-  }
-
-  // The process's single OTLP ingestor, so an external app can export traces
-  // to this server (`POST /v1/traces`) alongside whatever the playground
-  // records itself.
-  const otlpIngestor = new OtlpTraceIngestor();
-  ingestors.push(otlpIngestor);
-
-  // Stamp `llm.cost` on LLM spans before they reach any provider, rather
-  // than in each provider, so every trace store gets costed spans for free.
-  const costSink = new CostFetchingTraceSink();
-  const traceSinks = traceProviders.filter(p => isTraceSink(p));
-  for (const sink of traceSinks) {
-    costSink.addSink(sink);
-  }
-  for (const ingestor of ingestors) {
-    ingestor.addSink(costSink);
-  }
-
   return startServer({
-    promptProviders,
-    traceProviders,
-    datasetProviders,
+    ...(await setUpProject(rootDir, config)),
     port,
     rootPath: rootDir,
     hasConfig,
     terminalSessions,
-    otlpIngestor,
+    version: VERSION,
   });
 }
 
+const USAGE = "Usage: evalution [ui [path]] | evalution mcp [path]";
+
 async function main() {
   const args = process.argv.slice(2);
+  const command = args[0] ?? "ui";
 
-  // Accept: (no args) | "ui" | "ui <path>"
-  if (args.length > 0 && args[0] !== "ui") {
+  // Accept: (no args) | "ui [path]" | "mcp [path]"
+  if (command !== "ui" && command !== "mcp") {
     console.error(`Unknown command: ${args[0]}`);
-    console.error("Usage: evalution [ui [path]]");
+    console.error(USAGE);
     process.exit(1);
   }
+  // Before anything can print: over stdio, stdout is the protocol's.
+  if (command === "mcp") keepStdoutForProtocol();
 
   const pathArg = args[1];
   const startDir = pathArg ? path.resolve(pathArg) : process.cwd();
@@ -179,6 +92,36 @@ async function main() {
   // prompt module is imported.
   registerPeerDependencyResolver(rootDir);
 
+  if (command === "mcp") {
+    await mcp(rootDir, hasConfig);
+    return;
+  }
+  await ui(rootDir, hasConfig);
+}
+
+/**
+ * `evalution mcp`: relay to the UI if it's serving this project — it holds
+ * the project's databases — else serve in-process.
+ */
+async function mcp(rootDir: string, hasConfig: boolean) {
+  const running = await findRunningServer(rootDir);
+  if (running) {
+    await relayMcpToServer(running);
+    return;
+  }
+  // No onboarding here: with no config yet, the defaults serve (and a config
+  // created later is picked up the next time the agent starts this).
+  const config = hasConfig ? await loadConfig(rootDir) : {};
+  if (!hasConfig) process.chdir(rootDir);
+  await serveMcpInProcess(
+    rootDir,
+    await setUpProject(rootDir, config),
+    VERSION,
+  );
+}
+
+/** `evalution ui`: serve the playground, opening it in a browser. */
+async function ui(rootDir: string, hasConfig: boolean) {
   // Resolve the port once, up front, so the onboarding restart binds the same
   // port the browser was opened on. An explicit `PORT` is honored strictly; a
   // busy default (3000) falls back to the next free port instead of crashing.
@@ -210,6 +153,7 @@ async function main() {
       port,
       terminalSessions,
     );
+    await writeServerInfo(rootDir, handle.url);
     await maybeOpen(handle.url);
     return;
   }
@@ -224,6 +168,7 @@ async function main() {
     port,
     terminalSessions,
   );
+  await writeServerInfo(rootDir, server.url);
   await maybeOpen(server.url);
   console.log(
     `👀 No config found; watching ${path.join(rootDir, ".evalution", "config.ts")} for creation...`,

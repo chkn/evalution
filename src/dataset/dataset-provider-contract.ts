@@ -563,6 +563,191 @@ export function runDatasetProviderContractTests(
       ).rejects.toBeInstanceOf(DatasetNotFoundError);
     });
 
+    describe("renameField", () => {
+      it("renames a field, keeping its id and every row's cells", async () => {
+        const provider = await makeProvider();
+        if (!provider.renameField) return;
+        const dataset = await provider.createDataset({
+          name: "Rename",
+          fields: [{ def: def("a") }, { def: def("b") }],
+        });
+        const rows = await provider.addRows(dataset.id, [
+          { cells: { "0": text("x"), "1": text("y") } },
+        ]);
+        const renamed = await provider.renameField(dataset.id, "0", "alpha");
+        expect(renamed).toEqual({ id: "0", def: def("alpha") });
+        expect((await provider.getDataset(dataset.id))?.fields).toEqual([
+          { id: "0", def: def("alpha") },
+          { id: "1", def: def("b") },
+        ]);
+        expect(await provider.listRows(dataset.id)).toEqual(rows);
+      });
+
+      it("rejects a name that clashes with another field of the same type, or an unknown field", async () => {
+        const provider = await makeProvider();
+        if (!provider.renameField) return;
+        const dataset = await provider.createDataset({
+          name: "Clash",
+          fields: [
+            { def: def("a") },
+            { def: def("b") },
+            { def: def("c", "number") },
+          ],
+        });
+        await expect(
+          provider.renameField(dataset.id, "1", "a"),
+        ).rejects.toThrow("`a: string` already exists");
+        // A different type isn't a clash.
+        await provider.renameField(dataset.id, "2", "a");
+        // Renaming a field to its own name isn't either.
+        await provider.renameField(dataset.id, "0", "a");
+        await expect(
+          provider.renameField(dataset.id, "z", "x"),
+        ).rejects.toBeInstanceOf(DatasetValidationError);
+        await expect(
+          provider.renameField("missing", "0", "x"),
+        ).rejects.toBeInstanceOf(DatasetNotFoundError);
+      });
+    });
+
+    describe("deleteField", () => {
+      it("removes the field and its cells, and never reuses its id", async () => {
+        const provider = await makeProvider();
+        if (!provider.deleteField) return;
+        const dataset = await provider.createDataset({
+          name: "Drop",
+          fields: [{ def: def("a") }, { def: def("b") }],
+        });
+        const [row] = await provider.addRows(dataset.id, [
+          { cells: { "0": text("x"), "1": text("y") } },
+        ]);
+        await provider.deleteField(dataset.id, "0");
+        expect((await provider.getDataset(dataset.id))?.fields).toEqual([
+          { id: "1", def: def("b") },
+        ]);
+        expect(await provider.listRows(dataset.id)).toEqual([
+          { ...row, cells: { "1": text("y") } },
+        ]);
+        const next = await provider.addField(dataset.id, def("a"));
+        expect(next.id).toBe("2");
+      });
+
+      it("rejects an unknown field", async () => {
+        const provider = await makeProvider();
+        if (!provider.deleteField) return;
+        const dataset = await provider.createDataset({
+          name: "Unknown",
+          fields: [{ def: def("a") }],
+        });
+        await expect(
+          provider.deleteField(dataset.id, "9"),
+        ).rejects.toBeInstanceOf(DatasetValidationError);
+        await expect(
+          provider.deleteField("missing", "0"),
+        ).rejects.toBeInstanceOf(DatasetNotFoundError);
+      });
+    });
+
+    describe("queryRows", () => {
+      const number = (value: number): ExecutionInput => ({
+        kind: "value",
+        value: { kind: "primitive", value },
+      });
+
+      it("queries a view with a column per field, named after it", async () => {
+        const provider = await makeProvider();
+        if (!provider.queryRows) return;
+        const dataset = await provider.createDataset({
+          name: "Query",
+          fields: [{ def: def("city") }, { def: def("pop", "number") }],
+        });
+        // Another dataset's rows stay out of the view.
+        const other = await provider.createDataset({
+          name: "Other",
+          fields: [{ def: def("city") }],
+        });
+        await provider.addRows(other.id, [{ cells: { "0": text("Nowhere") } }]);
+        const rows = await provider.addRows(dataset.id, [
+          { cells: { "0": text("Oslo"), "1": number(700) } },
+          { cells: { "0": text("Bergen"), "1": number(290) } },
+          { cells: { "0": text("Tromsø") } },
+        ]);
+
+        const result = await provider.queryRows(
+          dataset.id,
+          "SELECT _id, city, pop FROM rows WHERE pop > 100 ORDER BY pop",
+        );
+        expect(result).toEqual({
+          columns: ["_id", "city", "pop"],
+          rows: [
+            { _id: rows[1].id, city: "Bergen", pop: 290 },
+            { _id: rows[0].id, city: "Oslo", pop: 700 },
+          ],
+        });
+      });
+
+      it("joins a query's own WITH clause, shows non-primitive cells as JSON, and truncates", async () => {
+        const provider = await makeProvider();
+        if (!provider.queryRows) return;
+        const dataset = await provider.createDataset({
+          name: "Shapes",
+          fields: [{ def: def("data", "object") }],
+        });
+        const objectCell: ExecutionInput = {
+          kind: "value",
+          value: {
+            kind: "object",
+            properties: { a: { kind: "primitive", value: 1 } },
+          },
+        };
+        await provider.addRows(dataset.id, [
+          { cells: { "0": objectCell } },
+          { cells: { "0": { kind: "resource", uri: "res://db" } } },
+        ]);
+        const result = await provider.queryRows(
+          dataset.id,
+          "WITH d AS (SELECT data FROM rows) SELECT data FROM d",
+          { maxRows: 1 },
+        );
+        expect(result.truncated).toBe(true);
+        expect(result.rows).toHaveLength(1);
+        expect(JSON.parse(result.rows[0].data as string)).toEqual(
+          objectCell.kind === "value" && objectCell.value,
+        );
+        const all = await provider.queryRows(
+          dataset.id,
+          "SELECT data FROM rows",
+        );
+        expect(JSON.parse(all.rows[1].data as string)).toEqual({
+          kind: "resource",
+          uri: "res://db",
+        });
+      });
+
+      it("refuses writes and reports bad SQL", async () => {
+        const provider = await makeProvider();
+        if (!provider.queryRows) return;
+        const dataset = await provider.createDataset({
+          name: "Safe",
+          fields: [{ def: def("a") }],
+        });
+        await provider.addRows(dataset.id, [{ cells: { "0": text("x") } }]);
+        await expect(
+          provider.queryRows(dataset.id, "DELETE FROM dataset_rows"),
+        ).rejects.toThrow();
+        await expect(
+          provider.queryRows(dataset.id, "SELECT nope FROM rows"),
+        ).rejects.toThrow();
+        expect(await provider.listRows(dataset.id)).toHaveLength(1);
+        // Writes still work afterwards: read-only mode was switched back off.
+        await provider.addRows(dataset.id, [{ cells: {} }]);
+        expect(await provider.listRows(dataset.id)).toHaveLength(2);
+        await expect(
+          provider.queryRows("missing", "SELECT 1"),
+        ).rejects.toBeInstanceOf(DatasetNotFoundError);
+      });
+    });
+
     it("emits change events", async () => {
       const provider = await makeProvider();
       const events: DatasetChangeEvent[] = [];

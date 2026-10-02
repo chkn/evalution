@@ -22,6 +22,7 @@ export type {
 
 export type {
   Annotation,
+  AnnotationChanges,
   AnnotationEvent,
   AnnotationEventOp,
   AnnotationKind,

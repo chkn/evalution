@@ -11,11 +11,18 @@
 import type { Database } from "@tursodatabase/sync";
 import { desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
+import { TRACE_QUERY_SCHEMA } from "./db/query-schema.ts";
+import {
+  runReadOnlyQuery,
+  type SqlQueryOptions,
+  type SqlQueryResult,
+} from "./db/read-only-query.ts";
 import { annotations, spans, traces } from "./db/schema.ts";
 import { mergeSpans } from "./span-merge.ts";
 import { BaseTraceProvider } from "./trace-sink.ts";
 import type {
   Annotation,
+  AnnotationChanges,
   LLMSpanDetails,
   Span,
   SpanKind,
@@ -165,6 +172,7 @@ function rowToAnnotation(row: typeof annotations.$inferSelect): Annotation {
  * queries will fail against an empty database.
  */
 export class TursoTraceProvider extends BaseTraceProvider {
+  private readonly client: Database;
   private readonly db: ReturnType<
     typeof drizzle<Record<string, never>, Database>
   >;
@@ -185,6 +193,7 @@ export class TursoTraceProvider extends BaseTraceProvider {
     description?: string;
   }) {
     super({ id, displayName, description });
+    this.client = client;
     this.db = drizzle({ client });
   }
 
@@ -317,6 +326,22 @@ export class TursoTraceProvider extends BaseTraceProvider {
     }));
   }
 
+  /**
+   * Runs one read-only query against the `traces`, `spans`, and
+   * `annotations` tables. Queued on the write chain, since read-only mode is
+   * a per-connection pragma no write may run under.
+   */
+  query(sql: string, options?: SqlQueryOptions): Promise<SqlQueryResult> {
+    return this.serializeWrite(() =>
+      runReadOnlyQuery(this.client, sql, options),
+    );
+  }
+
+  /** The tables {@link query} runs against — see `./db/query-schema.ts`. */
+  getQuerySchema(): string {
+    return TRACE_QUERY_SCHEMA;
+  }
+
   async hasTrace(traceId: string): Promise<boolean> {
     const [row] = await this.db
       .select({ id: traces.id })
@@ -420,6 +445,30 @@ export class TursoTraceProvider extends BaseTraceProvider {
       this.db.insert(annotations).values(annotationToRow(annotation)),
     );
     return annotation;
+  }
+
+  /**
+   * Changes an annotation's `kind` and/or `note`. Returns it as updated, or
+   * `undefined` if it doesn't exist.
+   */
+  async updateAnnotation(
+    id: string,
+    changes: AnnotationChanges,
+  ): Promise<Annotation | undefined> {
+    const set = {
+      ...(changes.kind !== undefined && { kind: changes.kind }),
+      ...(changes.note !== undefined && { note: changes.note }),
+    };
+    const [row] = await this.serializeWrite(() =>
+      Object.keys(set).length > 0
+        ? this.db
+            .update(annotations)
+            .set(set)
+            .where(eq(annotations.id, id))
+            .returning()
+        : this.db.select().from(annotations).where(eq(annotations.id, id)),
+    );
+    return row ? rowToAnnotation(row) : undefined;
   }
 
   /** Deletes an annotation by id. A no-op if it doesn't exist. */

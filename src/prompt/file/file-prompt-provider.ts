@@ -464,6 +464,12 @@ export class FilePromptProvider
     return variations ? variations.annotateAll(prompts) : prompts;
   }
 
+  /** The absolute path of the file `prompt` is defined in. */
+  getSourcePath(prompt: NormalizedFilePrompt): string | undefined {
+    const relative = prompt.metadata?.relativeFilePath;
+    return relative ? path.join(this.rootDir, relative) : undefined;
+  }
+
   async getPrompt(ref: PromptRefLike): Promise<NormalizedFilePrompt | null> {
     const variations = await this.fileVariations();
     if (variations) return variations.getPrompt(ref);

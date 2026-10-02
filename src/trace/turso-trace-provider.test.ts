@@ -440,3 +440,142 @@ describe("TursoTraceProvider row round-tripping", () => {
     expect(byId.c.annotationCounts).toEqual({ issue: 0, good: 0, note: 0 });
   });
 });
+
+describe("TursoTraceProvider updateAnnotation", () => {
+  let client: Database;
+
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("changes kind and note, leaving the rest, and is undefined for an unknown id", async () => {
+    client = await makeMigratedClient();
+    const provider = new TursoTraceProvider({ client });
+    await provider.recordSpanStart({
+      id: "t:root",
+      traceId: "t",
+      name: "root",
+      kind: "AGENT",
+      startTime: 1,
+    });
+    const created = await provider.createAnnotation({
+      traceId: "t",
+      kind: "note",
+      note: "first",
+      source: "user",
+    });
+
+    const updated = await provider.updateAnnotation(created.id, {
+      kind: "issue",
+    });
+    expect(updated).toEqual({ ...created, kind: "issue" });
+    expect(
+      await provider.updateAnnotation(created.id, { note: "second" }),
+    ).toEqual({ ...created, kind: "issue", note: "second" });
+    expect(await provider.updateAnnotation(created.id, {})).toEqual({
+      ...created,
+      kind: "issue",
+      note: "second",
+    });
+    expect(await provider.listAnnotations("t")).toEqual([
+      { ...created, kind: "issue", note: "second" },
+    ]);
+    expect(
+      await provider.updateAnnotation("nope", { note: "x" }),
+    ).toBeUndefined();
+  });
+});
+
+describe("TursoTraceProvider query", () => {
+  let client: Database;
+
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  async function seeded(): Promise<TursoTraceProvider> {
+    client = await makeMigratedClient();
+    const provider = new TursoTraceProvider({ client });
+    for (const [traceId, model, tokens] of [
+      ["a", "gpt-4o", 10],
+      ["b", "claude", 20],
+      ["c", "claude", 30],
+    ] as const) {
+      await provider.recordSpanStart({
+        id: `${traceId}:root`,
+        traceId,
+        name: `run ${traceId}`,
+        kind: "LLM",
+        startTime: tokens,
+        llm: { model, totalTokens: tokens },
+      });
+    }
+    return provider;
+  }
+
+  it("runs a SELECT against the documented tables", async () => {
+    const provider = await seeded();
+    expect(
+      await provider.query(
+        "SELECT llm_model AS model, sum(llm_total_tokens) AS tokens FROM spans GROUP BY llm_model ORDER BY model",
+      ),
+    ).toEqual({
+      columns: ["model", "tokens"],
+      rows: [
+        { model: "claude", tokens: 50 },
+        { model: "gpt-4o", tokens: 10 },
+      ],
+    });
+    expect(
+      await provider.query("SELECT id FROM traces ORDER BY id", { maxRows: 2 }),
+    ).toEqual({
+      columns: ["id"],
+      rows: [{ id: "a" }, { id: "b" }],
+      truncated: true,
+    });
+  });
+
+  it("refuses writes, and keeps recording afterwards", async () => {
+    const provider = await seeded();
+    for (const sql of [
+      "DELETE FROM traces",
+      "UPDATE spans SET name = 'x'",
+      "DELETE FROM traces RETURNING id",
+      "PRAGMA query_only = 0",
+      "DROP TABLE annotations",
+    ]) {
+      await expect(provider.query(sql), sql).rejects.toThrow();
+    }
+    await expect(provider.query("SELECT nope FROM traces")).rejects.toThrow();
+    await expect(provider.query("  ")).rejects.toThrow("empty");
+    expect(await provider.getAllTraces()).toHaveLength(3);
+    // Read-only mode was switched back off: writes still land.
+    await provider.createAnnotation({
+      traceId: "a",
+      kind: "good",
+      note: "ok",
+      source: "user",
+    });
+    expect(await provider.listAnnotations("a")).toHaveLength(1);
+  });
+
+  it("documents every column of every table in its query schema", async () => {
+    const provider = await seeded();
+    const schema = provider.getQuerySchema();
+    for (const table of ["traces", "spans", "annotations"]) {
+      const { rows } = await provider.query(
+        `SELECT name FROM pragma_table_info('${table}')`,
+      );
+      expect(rows.length).toBeGreaterThan(0);
+      const block = schema.slice(
+        schema.indexOf(`CREATE TABLE ${table} (`),
+        schema.indexOf(");", schema.indexOf(`CREATE TABLE ${table} (`)),
+      );
+      for (const { name } of rows) {
+        expect(block, `${table}.${name}`).toMatch(
+          new RegExp(`^\\s+${name}\\s`, "m"),
+        );
+      }
+    }
+  });
+});

@@ -228,7 +228,7 @@ can't be — the app passed a live `db`), no types, and no names. So:
   resolves to a current prompt through the same `promptRegistry.resolve` path, and a trace whose
   prompt no longer resolves can't be added.
 - Values become `{ kind: "value", value: jsonToPropValue(raw) }` using the existing
-  `json-to-prop-value.ts`.
+  `src/shared/json-prop-value.ts`.
 - Opaque slots (`Db`) get nothing. That's the "values only" decision, and it's correct: the row
   records what the app passed, and §I's fill leaves the panel's own `db` choice in place.
 
