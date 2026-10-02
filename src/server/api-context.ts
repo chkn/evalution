@@ -8,11 +8,11 @@
  * handlers in `./handlers/`.
  */
 
-import type { Tracer } from "@opentelemetry/api";
+import { type Tracer, trace } from "@opentelemetry/api";
 import type { DatasetProvider } from "../dataset/dataset-provider.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
-import type { PromptRegistry } from "../prompt/prompt-registry.ts";
-import type { Span } from "../shared/types.ts";
+import { PromptRegistry } from "../prompt/prompt-registry.ts";
+import type { PromptChangeEvent, Span } from "../shared/types.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
 import type {
   LookupFieldSourcePrompt,
@@ -92,4 +92,61 @@ export function createApiContext(options: ApiContextOptions): ApiContext {
       promptProviders.get(providerId)?.getPrompt({ promptId }) ??
       Promise.resolve(undefined),
   };
+}
+
+/** What {@link createProjectContext} takes. */
+export interface ProjectContextOptions {
+  promptProviders: PromptProvider[];
+  /** At least one; new runs are recorded on the first. */
+  traceProviders: TraceProvider[];
+  datasetProviders?: DatasetProvider[];
+  /** The project's root directory. */
+  rootPath: string;
+  /** See {@link ApiContextOptions.executeDisabledMessage}. */
+  executeDisabledMessage?: string;
+  /**
+   * Called when a prompt changes, after the prompt registry has caught up
+   * with it — e.g. to tell connected browsers.
+   */
+  onPromptChanged?: (providerId: string, event: PromptChangeEvent) => void;
+}
+
+/**
+ * The {@link ApiContext} for a project's providers, as every host serves it:
+ * the prompt registry built and kept current as prompts change (so links in
+ * traces and datasets resolve to wherever a prompt lives now), new runs
+ * recorded on the first trace provider, and spans traced with whatever
+ * tracer an SDK adapter registered globally (a no-op one if none did).
+ */
+export async function createProjectContext({
+  promptProviders,
+  traceProviders,
+  datasetProviders = [],
+  rootPath,
+  executeDisabledMessage,
+  onPromptChanged,
+}: ProjectContextOptions): Promise<ApiContext> {
+  const defaultTraceProvider = traceProviders[0];
+  if (!defaultTraceProvider) {
+    throw new Error("At least one trace provider must be configured");
+  }
+  const promptProviderMap = new Map(promptProviders.map(p => [p.id, p]));
+  const promptRegistry = new PromptRegistry();
+  await promptRegistry.rebuild(promptProviderMap);
+  for (const provider of promptProviders) {
+    provider.watch?.(async event => {
+      await promptRegistry.rebuild(promptProviderMap);
+      onPromptChanged?.(provider.id, event);
+    });
+  }
+  return createApiContext({
+    promptProviders: promptProviderMap,
+    traceProviders: new Map(traceProviders.map(p => [p.id, p])),
+    datasetProviders: new Map(datasetProviders.map(p => [p.id, p])),
+    promptRegistry,
+    rootPath,
+    tracer: trace.getTracer("evalution"),
+    defaultTraceProviderId: defaultTraceProvider.id,
+    ...(executeDisabledMessage !== undefined && { executeDisabledMessage }),
+  });
 }

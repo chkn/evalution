@@ -40,9 +40,8 @@ import type {
   PromptID,
   PropDefinition,
 } from "../../shared/types.ts";
-import { SqlQueryError } from "../../trace/db/read-only-query.ts";
+import { answerQuery } from "./query.ts";
 import type { HandlerResult } from "./result.ts";
-import { parseQueryBody } from "./traces.ts";
 
 /** The body of `GET /api/datasets/:providerId/:id`. */
 export interface DatasetWithOverview extends DatasetRowsOverview {
@@ -74,8 +73,7 @@ function failure(err: unknown): DatasetHandlerResult {
   if (
     err instanceof DatasetValidationError ||
     err instanceof InvalidCellError ||
-    err instanceof BadRequest ||
-    err instanceof SqlQueryError
+    err instanceof BadRequest
   ) {
     return { status: 400, body: { error: message } };
   }
@@ -603,8 +601,22 @@ export async function handleDeleteRow(
   rowId: string,
 ): Promise<DatasetHandlerResult> {
   try {
-    await provider.deleteRow(datasetId, rowId);
+    await provider.deleteRows(datasetId, [rowId]);
     return { status: 204, body: undefined };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
+/** Deletes rows all at once — see {@link DatasetProvider.deleteRows}. */
+export async function handleDeleteRows(
+  provider: DatasetProvider,
+  datasetId: string,
+  rowIds: readonly string[],
+): Promise<DatasetHandlerResult> {
+  try {
+    const deleted = await provider.deleteRows(datasetId, rowIds);
+    return { status: 200, body: { deleted } };
   } catch (err) {
     return failure(err);
   }
@@ -663,17 +675,11 @@ export async function handleQueryRows(
   datasetId: string,
   body: unknown,
 ): Promise<DatasetHandlerResult> {
-  if (!provider.queryRows) return unsupported("SQL queries");
-  const query = parseQueryBody(body);
-  if ("status" in query) return query;
-  try {
-    return {
-      status: 200,
-      body: await provider.queryRows(datasetId, query.sql, {
-        ...(query.maxRows && { maxRows: query.maxRows }),
-      }),
-    };
-  } catch (err) {
-    return failure(err);
-  }
+  const { queryRows } = provider;
+  if (!queryRows) return unsupported("SQL queries");
+  return answerQuery(
+    body,
+    (sql, options) => queryRows.call(provider, datasetId, sql, options),
+    failure,
+  );
 }

@@ -26,8 +26,6 @@ import type {
   PropDefinition,
 } from "../../shared/types";
 
-export { fieldsForPrompt };
-
 /** An input together with the definition that says what it is. */
 export interface NamedInput {
   def: PropDefinition;

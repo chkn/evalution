@@ -271,6 +271,8 @@ export { MIGRATIONS_TABLE, runMigrations } from "./trace/db/migrate.ts";
 export { TRACE_QUERY_SCHEMA } from "./trace/db/query-schema.ts";
 export {
   DEFAULT_MAX_QUERY_ROWS,
+  DEFAULT_QUERY_TIMEOUT_MS,
+  type ReadOnlyQueryRunner,
   SqlQueryError,
   type SqlQueryOptions,
   type SqlQueryResult,

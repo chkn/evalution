@@ -24,7 +24,26 @@ export interface SqlQueryResult {
 export interface SqlQueryOptions {
   /** The most rows to return. Defaults to {@link DEFAULT_MAX_QUERY_ROWS}. */
   maxRows?: number;
+  /**
+   * How long the query may run, in milliseconds, where it runs off the main
+   * thread (see `./query-worker.ts`). Defaults to
+   * {@link DEFAULT_QUERY_TIMEOUT_MS}. A
+   * query on a store's own connection can't be stopped, and ignores this.
+   */
+  timeoutMs?: number;
 }
+
+/**
+ * Runs one ad-hoc, read-only query — how a Turso store answers one when it
+ * isn't to run on the store's own connection (see `./query-worker.ts`).
+ */
+export type ReadOnlyQueryRunner = (
+  query: string,
+  options?: SqlQueryOptions,
+) => Promise<SqlQueryResult>;
+
+/** How long a query may run off the main thread when its caller doesn't say. */
+export const DEFAULT_QUERY_TIMEOUT_MS = 10_000;
 
 /** How many rows a query returns when its caller doesn't say. */
 export const DEFAULT_MAX_QUERY_ROWS = 1000;

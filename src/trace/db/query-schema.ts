@@ -59,7 +59,7 @@ CREATE TABLE annotations (
   span_id    TEXT,            -- spans.id; NULL for a note on the whole trace
   kind       TEXT NOT NULL,   -- 'issue' | 'good' | 'note'
   note       TEXT NOT NULL,
-  source     TEXT NOT NULL,   -- 'user' | 'claude-code' | 'codex'
+  source     TEXT NOT NULL,   -- 'user' | 'claude-code' | 'codex' | 'agent'
   created_at REAL NOT NULL    -- ms since epoch
 );
 `;

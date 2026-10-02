@@ -4,22 +4,16 @@
 import { fileURLToPath } from "node:url";
 import { serve, upgradeWebSocket } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import {
-  createMcpHandler,
-  localhostAllowedOrigins,
-  originValidationResponse,
-} from "@modelcontextprotocol/server";
-import { trace } from "@opentelemetry/api";
 import { Hono } from "hono";
 import { WebSocketServer } from "ws";
 import type { DatasetProvider } from "../dataset/dataset-provider.ts";
-import { createMcpServer } from "../mcp/server.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
-import { PromptRegistry } from "../prompt/prompt-registry.ts";
 import type { SSEData } from "../shared/types.ts";
 import type { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
+import { createProjectContext } from "./api-context.ts";
 import { setupRoutes } from "./api-routes.ts";
+import { mountMcp } from "./mcp-route.ts";
 import { executeSetupStep, resolveSetupTasks } from "./setup-tasks.ts";
 import {
   registerTerminalRoute,
@@ -78,33 +72,6 @@ export async function startServer(
     version,
   } = options;
 
-  const promptProviderMap = new Map(promptProviders.map(p => [p.id, p]));
-  const traceProviderMap = new Map(traceProviders.map(p => [p.id, p]));
-  const datasetProviderMap = new Map(datasetProviders.map(p => [p.id, p]));
-
-  // Maps globally-unique / provider-scoped prompt IDs carried by trace spans
-  // back to a concrete prompt, so runtime traces can link to their prompt.
-  const promptRegistry = new PromptRegistry();
-  await promptRegistry.rebuild(promptProviderMap);
-
-  // Each prompt provider's SDK adapter already ran its own `setupTraceIngestion`
-  // (registering a native v7 integration, or standing up the global OTel
-  // tracer provider + context manager for v6) during `startConfiguredServer`,
-  // before this function was called — so the global tracer provider, if any,
-  // is already in place. Grab a tracer from whatever's registered; OTel spans
-  // produced via the v6/`experimental_telemetry` fallback path land on it.
-  // With no adapter registering one, this is a no-op tracer.
-  const tracer = trace.getTracer("evalution");
-
-  // New traces from the playground are attributed to the first provider.
-  const defaultTraceProvider = traceProviders[0];
-  if (!defaultTraceProvider) {
-    throw new Error("At least one trace provider must be configured");
-  }
-  const defaultTraceProviderId = defaultTraceProvider.id;
-
-  const app = new Hono();
-
   // Hot-reload SSE subscribers. Each `/api/events` connection registers a
   // writer here; `broadcast` fans an event out to all of them.
   const hotReloadSubscribers = new Set<(data: SSEData) => void>();
@@ -112,35 +79,34 @@ export async function startServer(
     for (const send of hotReloadSubscribers) send(data);
   };
 
-  // Setup API routes
-  const context = setupRoutes({
-    app,
-    promptProviders: promptProviderMap,
-    traceProviders: traceProviderMap,
-    datasetProviders: datasetProviderMap,
-    promptRegistry,
-    hotReloadSubscribers,
+  // Each prompt provider's SDK adapter already ran its own `setupTraceIngestion`
+  // (registering a native v7 integration, or standing up the global OTel
+  // tracer provider + context manager for v6) during `startConfiguredServer`,
+  // before this function was called — so the global tracer provider the
+  // context traces with, if any, is already in place.
+  const context = await createProjectContext({
+    promptProviders,
+    traceProviders,
+    datasetProviders,
     rootPath,
+    onPromptChanged: (providerId, event) =>
+      broadcast({ type: "prompt-changed", providerId, event }),
+  });
+
+  const app = new Hono();
+  setupRoutes({
+    app,
+    context,
+    hotReloadSubscribers,
     hasConfig,
-    tracer,
-    defaultTraceProviderId,
     setupTasks: { resolve: resolveSetupTasks, executeStep: executeSetupStep },
     otlpIngestor,
   });
 
   // The same API over MCP (streamable HTTP), for an agent to connect to — or
   // for `evalution mcp` to relay stdio to, since this process holds the
-  // project's databases. A browser page from another origin is turned away,
-  // so a malicious site can't drive it through the user's browser.
-  const mcp = createMcpHandler(() => createMcpServer(context, { version }), {
-    onerror: err => console.error("MCP error:", err),
-  });
-  app.all(
-    "/mcp",
-    c =>
-      originValidationResponse(c.req.raw, localhostAllowedOrigins()) ??
-      mcp.fetch(c.req.raw),
-  );
+  // project's databases.
+  const mcp = mountMcp(app, context, version);
 
   // Interactive terminal for onboarding `run_command`/`install_package` steps.
   // Registered before the static catch-all so the upgrade request is routed.
@@ -152,19 +118,8 @@ export async function startServer(
   const clientRoot = fileURLToPath(new URL("../client/", import.meta.url));
   app.get("*", serveStatic({ root: clientRoot }));
 
-  // Setup file watching for all providers that support it
-  for (const [providerId, provider] of promptProviderMap) {
-    if (provider.watch) {
-      provider.watch(async event => {
-        // Keep the registry in sync so renames/moves resolve to the latest prompt.
-        await promptRegistry.rebuild(promptProviderMap);
-        broadcast({ type: "prompt-changed", providerId, event });
-      });
-    }
-  }
-
   // Forward trace change events to SSE clients
-  for (const [providerId, provider] of traceProviderMap) {
+  for (const [providerId, provider] of context.traceProviders) {
     if (provider.watch) {
       provider.watch(event => {
         broadcast({ type: "trace-changed", providerId, event });

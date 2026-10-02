@@ -13,6 +13,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { TRACE_QUERY_SCHEMA } from "./db/query-schema.ts";
 import {
+  type ReadOnlyQueryRunner,
   runReadOnlyQuery,
   type SqlQueryOptions,
   type SqlQueryResult,
@@ -172,7 +173,8 @@ function rowToAnnotation(row: typeof annotations.$inferSelect): Annotation {
  * queries will fail against an empty database.
  */
 export class TursoTraceProvider extends BaseTraceProvider {
-  private readonly client: Database;
+  /** Answers `query` — see the constructor's `runQuery`. */
+  private readonly runQuery: ReadOnlyQueryRunner;
   private readonly db: ReturnType<
     typeof drizzle<Record<string, never>, Database>
   >;
@@ -182,19 +184,32 @@ export class TursoTraceProvider extends BaseTraceProvider {
 
   constructor({
     client,
+    runQuery,
     id = "turso",
     displayName = "Traces",
     description = "Stores traces in a local (optionally synced) SQLite database.",
   }: {
     /** An already-connected `@tursodatabase/sync` client. */
     client: Database;
+    /**
+     * Runs ad-hoc queries. Defaults to running them on `client` itself,
+     * queued behind its writes; a store over a database file passes
+     * `runQueryInWorker` for that file instead, so a slow query can't block
+     * the event loop.
+     */
+    runQuery?: ReadOnlyQueryRunner;
     id?: string;
     displayName?: string;
     description?: string;
   }) {
     super({ id, displayName, description });
-    this.client = client;
     this.db = drizzle({ client });
+    // Read-only mode is a per-connection pragma no write may run under, so a
+    // query on the store's own connection waits its turn on the write chain.
+    this.runQuery =
+      runQuery ??
+      ((query, options) =>
+        this.serializeWrite(() => runReadOnlyQuery(client, query, options)));
   }
 
   /**
@@ -328,13 +343,10 @@ export class TursoTraceProvider extends BaseTraceProvider {
 
   /**
    * Runs one read-only query against the `traces`, `spans`, and
-   * `annotations` tables. Queued on the write chain, since read-only mode is
-   * a per-connection pragma no write may run under.
+   * `annotations` tables.
    */
   query(sql: string, options?: SqlQueryOptions): Promise<SqlQueryResult> {
-    return this.serializeWrite(() =>
-      runReadOnlyQuery(this.client, sql, options),
-    );
+    return this.runQuery(sql, options);
   }
 
   /** The tables {@link query} runs against — see `./db/query-schema.ts`. */

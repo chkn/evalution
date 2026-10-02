@@ -464,7 +464,12 @@ describe("MCP server", () => {
         datasetId: dataset.id,
         updates: [{ rowId: rowIds[0], values: { pop: 710, city: null } }],
       });
-      await call("delete_rows", { datasetId: dataset.id, rowIds: [rowIds[1]] });
+      expect(
+        await call("delete_rows", {
+          datasetId: dataset.id,
+          rowIds: [rowIds[1], "no-such-row"],
+        }),
+      ).toEqual({ deleted: 1 });
       await call("rename_field", {
         datasetId: dataset.id,
         field: "pop",
@@ -504,6 +509,47 @@ describe("MCP server", () => {
           updates: [{ rowId: rowIds[0], values: { city: 5 } }],
         }),
       ).rejects.toThrow("must be a string value");
+    });
+
+    it("takes back the keys list_dataset_rows gives, even for fields it has to disambiguate", async () => {
+      const { call } = await setup();
+      const dataset = await call("create_dataset", {
+        name: "Ambiguous",
+        fields: [
+          { name: "city", type: "string" },
+          { name: "city", type: "number" },
+          { name: "_id", type: "string" },
+        ],
+      });
+      await call("add_rows", {
+        datasetId: dataset.id,
+        rows: [{ values: { "0": "Oslo", "1": 1, "2": "mine" } }],
+      });
+      const [row] = await call("list_dataset_rows", { datasetId: dataset.id });
+      expect(row.values).toEqual({
+        city: "Oslo",
+        "city#1": 1,
+        "_id#2": "mine",
+      });
+
+      // Every key comes back as it went out.
+      await call("update_rows", {
+        datasetId: dataset.id,
+        updates: [
+          {
+            rowId: row.id,
+            values: { "city#1": 2, "_id#2": "still mine", city: "Bergen" },
+          },
+        ],
+      });
+      const [updated] = await call("list_dataset_rows", {
+        datasetId: dataset.id,
+      });
+      expect(updated.values).toEqual({
+        city: "Bergen",
+        "city#1": 2,
+        "_id#2": "still mine",
+      });
     });
 
     it("renames, lists, and deletes datasets", async () => {

@@ -7,7 +7,7 @@ import type {
   AnnotationSource,
 } from "../../shared/types.ts";
 import type { TraceProvider } from "../../trace/trace-provider.ts";
-import type { HandlerResult } from "./result.ts";
+import { errorResult, type HandlerResult } from "./result.ts";
 
 /** What an annotation handler returns; the route relays it. */
 export type AnnotationHandlerResult = HandlerResult;
@@ -17,12 +17,20 @@ const ANNOTATION_SOURCES: readonly AnnotationSource[] = [
   "user",
   "claude-code",
   "codex",
+  "agent",
 ];
 
-const UNSUPPORTED: AnnotationHandlerResult = {
-  status: 405,
-  body: { error: "This trace provider does not support annotations" },
-};
+const UNSUPPORTED = errorResult(
+  405,
+  "This trace provider does not support annotations",
+);
+
+/** The 400 for a `kind` that isn't one, or `undefined` when it is. */
+function invalidKind(kind: unknown): AnnotationHandlerResult | undefined {
+  return ANNOTATION_KINDS.includes(kind as AnnotationKind)
+    ? undefined
+    : errorResult(400, `kind must be one of ${ANNOTATION_KINDS.join(", ")}`);
+}
 
 /** `GET /api/traces/:providerId/:traceId/annotations` */
 export async function handleListAnnotations(
@@ -39,8 +47,8 @@ export interface CreateAnnotationBody {
   note: string;
   /**
    * Who this annotation is from. The UI inserts `'user'` by default; an
-   * external caller (a coding agent replaying a trace) sets `'claude-code'`
-   * or `'codex'` explicitly to trigger the arrival animation §0f gives
+   * external caller (a coding agent replaying a trace) sets `'claude-code'`,
+   * `'codex'`, or `'agent'` explicitly to trigger the arrival animation §0f gives
    * agent-sourced annotations. Defaults to `'user'` when omitted.
    */
   source?: AnnotationSource;
@@ -56,12 +64,8 @@ export async function handleCreateAnnotation(
   if (!body?.kind || !body?.note) {
     return { status: 400, body: { error: "kind and note are required" } };
   }
-  if (!ANNOTATION_KINDS.includes(body.kind)) {
-    return {
-      status: 400,
-      body: { error: `kind must be one of ${ANNOTATION_KINDS.join(", ")}` },
-    };
-  }
+  const badKind = invalidKind(body.kind);
+  if (badKind) return badKind;
   if (body.source !== undefined && !ANNOTATION_SOURCES.includes(body.source)) {
     return {
       status: 400,
@@ -95,12 +99,8 @@ export async function handleUpdateAnnotation(
 ): Promise<AnnotationHandlerResult> {
   if (!provider.updateAnnotation || !provider.listAnnotations)
     return UNSUPPORTED;
-  if (body?.kind !== undefined && !ANNOTATION_KINDS.includes(body.kind)) {
-    return {
-      status: 400,
-      body: { error: `kind must be one of ${ANNOTATION_KINDS.join(", ")}` },
-    };
-  }
+  const badKind = body?.kind === undefined ? undefined : invalidKind(body.kind);
+  if (badKind) return badKind;
   if (
     body?.note !== undefined &&
     (typeof body.note !== "string" || !body.note)

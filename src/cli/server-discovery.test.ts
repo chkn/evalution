@@ -38,8 +38,12 @@ function serving(rootPath: string): typeof fetch {
 }
 
 /** Records a server as another process — the parent of this one, so it's alive. */
-async function recordOther(rootDir: string, pid = process.ppid) {
-  await writeServerInfo(rootDir, "http://localhost:4567");
+async function recordOther(
+  rootDir: string,
+  pid = process.ppid,
+  kind: "ui" | "mcp" = "ui",
+) {
+  await writeServerInfo(rootDir, "http://localhost:4567", kind);
   const path = serverInfoPath(rootDir);
   const info = JSON.parse(await readFile(path, "utf8"));
   await writeFile(path, JSON.stringify({ ...info, pid }));
@@ -48,10 +52,11 @@ async function recordOther(rootDir: string, pid = process.ppid) {
 describe("server discovery", () => {
   it("writes a self-ignoring record, and removes only its own", async () => {
     const dir = await project();
-    await writeServerInfo(dir, "http://localhost:4567");
+    await writeServerInfo(dir, "http://localhost:4567", "ui");
     expect(JSON.parse(await readFile(serverInfoPath(dir), "utf8"))).toEqual({
       url: "http://localhost:4567",
       pid: process.pid,
+      kind: "ui",
     });
     expect(
       await readFile(join(dir, ".evalution", "run", ".gitignore"), "utf8"),
@@ -67,11 +72,17 @@ describe("server discovery", () => {
     );
   });
 
-  it("finds a live server serving this project", async () => {
+  it("finds a live server serving this project, and which command it is", async () => {
     const dir = await project();
     await recordOther(dir);
-    expect(await findRunningServer(dir, { fetch: serving(dir) })).toBe(
-      "http://localhost:4567",
+    expect(await findRunningServer(dir, { fetch: serving(dir) })).toEqual({
+      url: "http://localhost:4567",
+      pid: process.ppid,
+      kind: "ui",
+    });
+    await recordOther(dir, process.ppid, "mcp");
+    expect(await findRunningServer(dir, { fetch: serving(dir) })).toEqual(
+      expect.objectContaining({ kind: "mcp" }),
     );
   });
 
@@ -81,7 +92,7 @@ describe("server discovery", () => {
       undefined,
     );
 
-    await writeServerInfo(dir, "http://localhost:4567");
+    await writeServerInfo(dir, "http://localhost:4567", "ui");
     expect(await findRunningServer(dir, { fetch: serving(dir) })).toBe(
       undefined,
     );

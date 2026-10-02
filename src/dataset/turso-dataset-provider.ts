@@ -14,6 +14,7 @@ import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { matchKey } from "../shared/dataset-fields.ts";
 import type { ExecutionInput, PropDefinition } from "../shared/types.ts";
 import {
+  type ReadOnlyQueryRunner,
   runReadOnlyQuery,
   type SqlQueryOptions,
   type SqlQueryResult,
@@ -121,7 +122,8 @@ export class TursoDatasetProvider implements DatasetProvider {
   readonly displayName?: string;
   readonly description?: string;
 
-  private readonly client: Database;
+  /** Answers `query` — see the constructor's `runQuery`. */
+  private readonly runQuery: ReadOnlyQueryRunner;
   private readonly db: ReturnType<
     typeof drizzle<Record<string, never>, Database>
   >;
@@ -132,12 +134,20 @@ export class TursoDatasetProvider implements DatasetProvider {
 
   constructor({
     client,
+    runQuery,
     id = "turso-datasets",
     displayName = "Datasets",
     description = "Stores datasets in a (optionally synced) SQLite database.",
   }: {
     /** An already-connected, migrated `@tursodatabase/sync` client. */
     client: Database;
+    /**
+     * Runs ad-hoc queries. Defaults to running them on `client` itself,
+     * queued behind its writes; a store over a database file passes
+     * `runQueryInWorker` for that file instead, so a slow query can't block
+     * the event loop.
+     */
+    runQuery?: ReadOnlyQueryRunner;
     id?: string;
     displayName?: string;
     description?: string;
@@ -145,8 +155,13 @@ export class TursoDatasetProvider implements DatasetProvider {
     this.id = id;
     this.displayName = displayName;
     this.description = description;
-    this.client = client;
     this.db = drizzle({ client });
+    // Read-only mode is a per-connection pragma no write may run under, so a
+    // query on the store's own connection waits its turn on the write chain.
+    this.runQuery =
+      runQuery ??
+      ((query, options) =>
+        this.serializeWrite(() => runReadOnlyQuery(client, query, options)));
   }
 
   /**
@@ -509,27 +524,32 @@ export class TursoDatasetProvider implements DatasetProvider {
     if (changes) this.emit({ type: "update", datasetId });
   }
 
-  async deleteRow(datasetId: string, rowId: string): Promise<void> {
+  async deleteRows(
+    datasetId: string,
+    rowIds: readonly string[],
+  ): Promise<number> {
+    if (rowIds.length === 0) return 0;
     const deleted = await this.serializeWrite(() =>
       this.db.transaction(async tx => {
         const removed = await tx
           .delete(datasetRows)
           .where(
             and(
-              eq(datasetRows.id, rowId),
+              inArray(datasetRows.id, [...rowIds]),
               eq(datasetRows.datasetId, datasetId),
             ),
           )
           .returning({ id: datasetRows.id });
-        if (removed.length === 0) return false;
+        if (removed.length === 0) return 0;
         await tx
           .update(datasets)
           .set({ updatedAt: Date.now() })
           .where(eq(datasets.id, datasetId));
-        return true;
+        return removed.length;
       }),
     );
-    if (deleted) this.emit({ type: "update", datasetId });
+    if (deleted > 0) this.emit({ type: "update", datasetId });
+    return deleted;
   }
 
   async addField(
@@ -649,12 +669,9 @@ export class TursoDatasetProvider implements DatasetProvider {
   ): Promise<SqlQueryResult> {
     const dataset = await this.getDataset(datasetId);
     if (!dataset) throw new DatasetNotFoundError(datasetId);
-    return this.serializeWrite(() =>
-      runReadOnlyQuery(
-        this.client,
-        datasetRowsQuery(datasetId, dataset.fields, query),
-        options,
-      ),
+    return this.runQuery(
+      datasetRowsQuery(datasetId, dataset.fields, query),
+      options,
     );
   }
 

@@ -4,7 +4,6 @@
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import type { DatasetProvider } from "../dataset/dataset-provider.ts";
 import type {
   OpenOnHeadOptions,
   PromptProvider,
@@ -18,12 +17,7 @@ import type {
   UpdatePromptResponse,
 } from "../shared/types.ts";
 import type { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
-import type { TraceProvider } from "../trace/trace-provider.ts";
-import {
-  type ApiContext,
-  type ApiContextOptions,
-  createApiContext,
-} from "./api-context.ts";
+import type { ApiContext } from "./api-context.ts";
 import {
   handleCreateAnnotation,
   handleDeleteAnnotation,
@@ -90,6 +84,26 @@ function relay(c: Context, { status, body }: HandlerResult) {
 }
 
 /**
+ * A route for one of `providers`, named by the `:providerId` param: answers
+ * `handle`'s result, or a 404 with `notFound` when there's no such provider.
+ */
+const providerRoute =
+  <P>(providers: Map<string, P>, notFound: string) =>
+  (
+    handle: (
+      provider: P,
+      params: Record<string, string>,
+      c: Context,
+    ) => HandlerResult | Promise<HandlerResult>,
+  ) =>
+  async (c: Context) => {
+    const params = c.req.param();
+    const provider = providers.get(params.providerId);
+    if (!provider) return c.json({ error: notFound }, 404);
+    return relay(c, await handle(provider, params, c));
+  };
+
+/**
  * The response for an error from a versions or variations call: a conflict is
  * a 409 carrying the conflicting fields, so the client can show them.
  */
@@ -112,8 +126,10 @@ export interface SetupTaskHandlers {
   ): Promise<{ path?: string }>;
 }
 
-export interface SetupRoutesOptions extends ApiContextOptions {
+export interface SetupRoutesOptions {
   app: Hono;
+  /** The providers and lookups the routes answer from. */
+  context: ApiContext;
   /** Registry of hot-reload SSE writers; each `/api/events` client adds one. */
   hotReloadSubscribers: Set<(data: SSEData) => void>;
   /** Whether the server was started with a project config file loaded. */
@@ -134,18 +150,16 @@ export interface SetupRoutesOptions extends ApiContextOptions {
 
 /**
  * Registers every REST route on `app`, answering through the neutral handlers
- * in `./handlers/`. Returns the {@link ApiContext} the routes were built from,
- * so a host can serve the same API over MCP too.
+ * in `./handlers/` from `context` — which a host can serve over MCP too.
  */
 export function setupRoutes({
   app,
+  context,
   hotReloadSubscribers,
   hasConfig,
   setupTasks,
   otlpIngestor,
-  ...contextOptions
-}: SetupRoutesOptions): ApiContext {
-  const context = createApiContext(contextOptions);
+}: SetupRoutesOptions): void {
   const {
     promptProviders,
     traceProviders,
@@ -546,20 +560,7 @@ export function setupRoutes({
 
   // Trace provider routes: resolve the provider, then relay the neutral
   // handler's `{status, body}`.
-  const traceRoute =
-    (
-      handle: (
-        provider: TraceProvider,
-        params: Record<string, string>,
-        c: Context,
-      ) => HandlerResult | Promise<HandlerResult>,
-    ) =>
-    async (c: Context) => {
-      const params = c.req.param();
-      const provider = traceProviders.get(params.providerId);
-      if (!provider) return c.json({ error: "Trace provider not found" }, 404);
-      return relay(c, await handle(provider, params, c));
-    };
+  const traceRoute = providerRoute(traceProviders, "Trace provider not found");
 
   // GET /api/trace-providers/:providerId/schema - The tables a query runs against
   app.get(
@@ -646,22 +647,10 @@ export function setupRoutes({
 
   // Dataset routes: resolve the provider, then relay the neutral handler's
   // `{status, body}`.
-  const datasetRoute =
-    (
-      handle: (
-        provider: DatasetProvider,
-        params: Record<string, string>,
-        c: Context,
-      ) => Promise<HandlerResult>,
-    ) =>
-    async (c: Context) => {
-      const params = c.req.param();
-      const provider = datasetProviders.get(params.providerId);
-      if (!provider) {
-        return c.json({ error: "Dataset provider not found" }, 404);
-      }
-      return relay(c, await handle(provider, params, c));
-    };
+  const datasetRoute = providerRoute(
+    datasetProviders,
+    "Dataset provider not found",
+  );
   const jsonBody = (c: Context) => c.req.json().catch(() => undefined);
 
   // Dataset changes ride the hot-reload stream, as `trace-changed` does —
@@ -841,6 +830,4 @@ export function setupRoutes({
       });
     }),
   );
-
-  return context;
 }

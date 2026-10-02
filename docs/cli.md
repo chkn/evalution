@@ -74,13 +74,18 @@ The server offers tools to:
   rows in bulk, by field name; and query rows with read-only SQL against a
   `rows` view with a column per field (`query_dataset_rows`).
 
-When the playground (`evalution ui`) is already running for the project,
-`evalution mcp` relays to it rather than opening the project's databases a
-second time, which SQLite's locking wouldn't allow. The running playground
-also serves MCP itself, over HTTP at `/mcp` — e.g.
+A SQL query that runs longer than 10 seconds is stopped with an error.
+
+A project's databases can only be open in one process at a time, so the first
+evalution process to serve a project holds them, and every `evalution mcp`
+started after it relays to that one instead. Several agent sessions on one
+project can therefore run side by side. When the playground (`evalution ui`)
+is that first process, annotations agents leave show up in it live. The
+playground also serves MCP itself, over HTTP at `/mcp` — e.g.
 `claude mcp add --transport http evalution http://localhost:3000/mcp`.
-Start the playground first when you use both: if `evalution mcp` is already
-serving the project on its own, the playground can't open its trace database.
+
+Start the playground before your agents when you use both: while an agent's
+`evalution mcp` holds the project, `evalution ui` can't start, and says so.
 
 ## Environment
 

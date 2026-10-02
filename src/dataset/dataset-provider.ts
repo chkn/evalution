@@ -123,8 +123,12 @@ export interface DatasetProvider {
    */
   updateRows(datasetId: string, updates: DatasetRowUpdate[]): Promise<void>;
 
-  /** Deletes one row. A no-op if it doesn't exist. */
-  deleteRow(datasetId: string, rowId: string): Promise<void>;
+  /**
+   * Deletes rows, all at once: either every listed row that exists is gone
+   * afterwards or, if this fails, none is. Ids of rows that don't exist are
+   * skipped. Resolves to how many rows were deleted.
+   */
+  deleteRows(datasetId: string, rowIds: readonly string[]): Promise<number>;
 
   /**
    * Appends a field, minting its id from the dataset's never-decreasing

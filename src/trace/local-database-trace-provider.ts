@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { createLocalTursoClient } from "./db/local-turso-client.ts";
 import { runMigrations } from "./db/migrate.ts";
 import { TRACE_QUERY_SCHEMA } from "./db/query-schema.ts";
+import { runQueryInWorker } from "./db/query-worker.ts";
 import {
   SqlQueryError,
   type SqlQueryOptions,
@@ -141,6 +142,7 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
     await runMigrations(drizzle({ client }));
     const real = new TursoTraceProvider({
       client,
+      runQuery: (query, options) => runQueryInWorker(this.path, query, options),
       id: this.id,
       displayName: this.displayName,
       description: this.description,

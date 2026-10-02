@@ -241,8 +241,11 @@ export interface TraceWithSpans {
   spans: Span[];
 }
 
-/** Where an {@link Annotation} came from. */
-export type AnnotationSource = "user" | "claude-code" | "codex";
+/**
+ * Where an {@link Annotation} came from: the user, a coding agent we know by
+ * name, or any other agent (an MCP client that isn't Claude Code or Codex).
+ */
+export type AnnotationSource = "user" | "claude-code" | "codex" | "agent";
 
 /** What kind of note an {@link Annotation} records. */
 export type AnnotationKind = "issue" | "good" | "note";

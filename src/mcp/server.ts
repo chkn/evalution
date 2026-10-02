@@ -35,7 +35,7 @@ import {
   handleCreateDataset,
   handleDeleteDataset,
   handleDeleteField,
-  handleDeleteRow,
+  handleDeleteRows,
   handleGetDataset,
   handleListDatasets,
   handleListRows,
@@ -69,6 +69,7 @@ import type {
   TraceSummary,
   TraceWithSpans,
 } from "../shared/types.ts";
+import { DEFAULT_QUERY_TIMEOUT_MS } from "../trace/db/read-only-query.ts";
 import { rollupSpans } from "../trace/span-rollup.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
 
@@ -81,7 +82,21 @@ export interface McpServerOptions {
    * seconds. Defaults to 300.
    */
   defaultExecuteTimeoutSeconds?: number;
+  /**
+   * The connected client's name, when the host knows it but this server
+   * instance may not have seen the client's `initialize`: over HTTP, a
+   * 2025-era client is served statelessly, by a fresh instance per request.
+   * See {@link MCP_CLIENT_HEADER}.
+   */
+  clientName?: string;
 }
+
+/**
+ * The header `evalution mcp` sends, relaying to a running server, naming the
+ * client it relays for — which the server's `/mcp` endpoint passes on as
+ * {@link McpServerOptions.clientName}.
+ */
+export const MCP_CLIENT_HEADER = "x-evalution-client";
 
 /** What a tool callback returns. */
 interface ToolResult {
@@ -110,31 +125,28 @@ function fail(message: string): ToolResult {
 /** Thrown inside a tool to answer it with an error. */
 class ToolError extends Error {}
 
-/**
- * A handler's `{ status, body }` as a tool result: its body on success
- * (`fallback` for a bodyless 204), its `error` message on failure.
- */
-function relay(result: HandlerResult, fallback: unknown = { ok: true }) {
-  if (result.status >= 400) {
-    const body = result.body as { error?: string; conflicts?: unknown };
-    return fail(
-      body?.conflicts
-        ? `${body.error}\n${JSON.stringify(body.conflicts)}`
-        : (body?.error ?? `Failed with status ${result.status}`),
-    );
-  }
-  return ok(result.body === undefined ? fallback : result.body);
+/** A failed handler result's message, with the conflicts behind it when it has them. */
+function failureMessage(result: HandlerResult): string {
+  const body = result.body as { error?: string; conflicts?: unknown };
+  const error = body?.error ?? `Failed with status ${result.status}`;
+  return body?.conflicts
+    ? `${error}\n${JSON.stringify(body.conflicts)}`
+    : error;
 }
 
 /** The body of a successful handler result; throws its error otherwise. */
 function unwrap<T>(result: HandlerResult): T {
-  if (result.status >= 400) {
-    throw new ToolError(
-      (result.body as { error?: string })?.error ??
-        `Failed with status ${result.status}`,
-    );
-  }
+  if (result.status >= 400) throw new ToolError(failureMessage(result));
   return result.body as T;
+}
+
+/**
+ * A handler's `{ status, body }` as a tool result: its body on success
+ * (`fallback` for a bodyless 204), its error on failure.
+ */
+function relay(result: HandlerResult, fallback: unknown = { ok: true }) {
+  if (result.status >= 400) return fail(failureMessage(result));
+  return ok(result.body === undefined ? fallback : result.body);
 }
 
 /** Runs a tool body, answering a thrown {@link ToolError} (or anything else) as an error result. */
@@ -232,12 +244,18 @@ async function findTrace(
 }
 
 /**
- * The field `ref` names — its id, or else its name when exactly one field
- * has that name.
+ * The field `ref` names — its id, its column name in `rows` (which is also
+ * how `list_dataset_rows` keys it, e.g. `city#3` for one of two `city`
+ * fields), or else its name when exactly one field has that name.
  */
 function findField(fields: readonly DatasetField[], ref: string): DatasetField {
   const byId = fields.find(f => f.id === ref);
   if (byId) return byId;
+  const column = datasetQueryColumns(fields).find(
+    c => c.fieldId !== undefined && c.column === ref,
+  );
+  const byColumn = column && fields.find(f => f.id === column.fieldId);
+  if (byColumn) return byColumn;
   const named = fields.filter(f => f.def.name === ref);
   if (named.length === 1) return named[0];
   if (named.length > 1) {
@@ -393,8 +411,13 @@ async function waitForTrace(
 
 /** Who an annotation an agent writes is from, judged by the connected client's name. */
 function annotationSourceFor(clientName: string | undefined): AnnotationSource {
-  return clientName && /codex/i.test(clientName) ? "codex" : "claude-code";
+  if (clientName && /codex/i.test(clientName)) return "codex";
+  if (clientName && /claude/i.test(clientName)) return "claude-code";
+  return "agent";
 }
+
+/** How long an ad-hoc SQL query may run, as the query tools describe it. */
+const QUERY_TIMEOUT_SECONDS = DEFAULT_QUERY_TIMEOUT_MS / 1000;
 
 const providerIdParam = (kind: string) =>
   z
@@ -446,7 +469,7 @@ const executionInput = z
  */
 export function createMcpServer(
   context: ApiContext,
-  { version, defaultExecuteTimeoutSeconds = 300 }: McpServerOptions,
+  { version, defaultExecuteTimeoutSeconds = 300, clientName }: McpServerOptions,
 ): McpServer {
   const server = new McpServer(
     { name: "evalution", version },
@@ -689,8 +712,7 @@ export function createMcpServer(
     "query_traces",
     {
       title: "Query traces with SQL",
-      description:
-        "Runs one read-only SQL query (SQLite dialect; a SELECT or WITH … SELECT) against the trace database's traces, spans, and annotations tables, and returns the rows. Call get_trace_schema for the tables and columns. JSON columns can be read with json_extract().",
+      description: `Runs one read-only SQL query (SQLite dialect; a SELECT or WITH … SELECT) against the trace database's traces, spans, and annotations tables, and returns the rows. Call get_trace_schema for the tables and columns. JSON columns can be read with json_extract(). A query that runs longer than ${QUERY_TIMEOUT_SECONDS} seconds is stopped with an error, so filter before joining large tables.`,
       inputSchema: z.object({
         sql: z.string().describe("The query."),
         providerId: providerIdParam("trace"),
@@ -816,7 +838,7 @@ export function createMcpServer(
               note,
               ...(spanId && { spanId }),
               source: annotationSourceFor(
-                server.server.getClientVersion()?.name,
+                server.server.getClientVersion()?.name ?? clientName,
               ),
             },
           ),
@@ -1185,7 +1207,8 @@ export function createMcpServer(
     "delete_rows",
     {
       title: "Delete rows",
-      description: "Deletes rows from a dataset.",
+      description:
+        "Deletes rows from a dataset, all at once: if it fails, no row is deleted. Ids of rows that don't exist are skipped; the result says how many were deleted.",
       inputSchema: z.object({
         datasetId: datasetIdParam,
         rowIds: z.array(z.string()).min(1),
@@ -1194,13 +1217,15 @@ export function createMcpServer(
       annotations: { destructiveHint: true, idempotentHint: true },
     },
     ({ datasetId, rowIds, providerId }) =>
-      guard(async () => {
-        const provider = datasetProvider(providerId);
-        for (const rowId of rowIds) {
-          unwrap(await handleDeleteRow(provider, datasetId, rowId));
-        }
-        return ok({ deleted: rowIds.length });
-      }),
+      guard(async () =>
+        relay(
+          await handleDeleteRows(
+            datasetProvider(providerId),
+            datasetId,
+            rowIds,
+          ),
+        ),
+      ),
   );
 
   server.registerTool(
@@ -1240,8 +1265,7 @@ export function createMcpServer(
     "query_dataset_rows",
     {
       title: "Query dataset rows with SQL",
-      description:
-        "Runs one read-only SQL query (SQLite dialect) against a `rows` view of a dataset: one column per field, named after it, plus _id, _created_at, _source, and _cells. A typed-in string, number, or boolean reads as its plain value; anything else reads as JSON. get_dataset lists the columns. Example: SELECT city, count(*) FROM rows GROUP BY city.",
+      description: `Runs one read-only SQL query (SQLite dialect) against a \`rows\` view of a dataset: one column per field, named after it, plus _id, _created_at, _source, and _cells. A typed-in string, number, or boolean reads as its plain value; anything else reads as JSON. get_dataset lists the columns. Example: SELECT city, count(*) FROM rows GROUP BY city. A query that runs longer than ${QUERY_TIMEOUT_SECONDS} seconds is stopped with an error.`,
       inputSchema: z.object({
         datasetId: datasetIdParam,
         sql: z.string().describe("The query."),

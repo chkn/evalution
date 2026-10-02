@@ -285,20 +285,24 @@ export function runDatasetProviderContractTests(
       });
     });
 
-    it("deletes one row", async () => {
+    it("deletes rows, skipping ids that aren't there", async () => {
       const provider = await makeProvider();
       const dataset = await provider.createDataset({
         name: "Del",
         fields: [{ def: def("a") }],
       });
-      const [first, second] = await provider.addRows(dataset.id, [
+      const [first, second, third] = await provider.addRows(dataset.id, [
         { cells: { "0": text("1") } },
         { cells: { "0": text("2") } },
+        { cells: { "0": text("3") } },
       ]);
-      await provider.deleteRow(dataset.id, first.id);
+      expect(
+        await provider.deleteRows(dataset.id, [first.id, "missing", third.id]),
+      ).toBe(2);
       expect(await provider.listRows(dataset.id)).toEqual([second]);
-      // A no-op for a row that isn't there.
-      await provider.deleteRow(dataset.id, first.id);
+      // A no-op for rows that aren't there.
+      expect(await provider.deleteRows(dataset.id, [first.id])).toBe(0);
+      expect(await provider.deleteRows(dataset.id, [])).toBe(0);
     });
 
     describe("updateRows", () => {

@@ -41,7 +41,6 @@ export async function findRootDir(
 
 export async function loadConfig(rootDir: string): Promise<EvalutionConfig> {
   const configPath = path.join(rootDir, ".evalution", "config.ts");
-  process.chdir(rootDir);
   const mod = await import(pathToFileURL(configPath).href);
   console.log(`⚙️ Loaded config from ${configPath}`);
   return mod.default ?? {};
@@ -94,10 +93,8 @@ export async function setUpProject(
 
   if (!traceProviders) {
     // An explicit `rootDir`-relative path rather than `LocalDatabaseTraceProvider`'s
-    // own CWD-relative default: onboarding mode (no config file yet) never
-    // `chdir`s to `rootDir` the way a loaded `config.ts` does, so relying on
-    // CWD here could resolve against the wrong directory when the CLI is
-    // invoked with an explicit path argument (`evalution ui <path>`).
+    // own CWD-relative default, so this never depends on the caller having
+    // `chdir`ed to `rootDir` first.
     const provider = new LocalDatabaseTraceProvider({
       path: path.join(rootDir, ".evalution", "traces", "local.db"),
     });

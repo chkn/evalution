@@ -8,52 +8,14 @@
  */
 
 import type { Span } from "../../shared/types.ts";
-import { SqlQueryError } from "../../trace/db/read-only-query.ts";
 import type { TraceProvider } from "../../trace/trace-provider.ts";
+import { answerQuery } from "./query.ts";
 import { errorResult, type HandlerResult } from "./result.ts";
-
-/** The most rows one SQL query returns, whatever its caller asks for. */
-export const MAX_QUERY_ROWS = 10_000;
 
 const QUERY_UNSUPPORTED = errorResult(
   405,
   "This trace provider does not support SQL queries",
 );
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Checks a query body — `{ sql, maxRows? }` — returning the query, or the 400
- * it deserves. Shared with the dataset row query.
- */
-export function parseQueryBody(
-  body: unknown,
-): { sql: string; maxRows?: number } | HandlerResult {
-  if (!isRecord(body) || typeof body.sql !== "string" || !body.sql.trim()) {
-    return errorResult(400, "body must be { sql, maxRows? }");
-  }
-  const { maxRows } = body;
-  if (
-    maxRows !== undefined &&
-    (typeof maxRows !== "number" || !Number.isInteger(maxRows) || maxRows < 1)
-  ) {
-    return errorResult(400, "maxRows must be a positive integer");
-  }
-  return {
-    sql: body.sql,
-    ...(maxRows !== undefined && {
-      maxRows: Math.min(maxRows as number, MAX_QUERY_ROWS),
-    }),
-  };
-}
-
-/** Relays a query's failure: the caller's SQL is a 400, anything else a 500. */
-export function queryFailure(err: unknown): HandlerResult {
-  const message = err instanceof Error ? err.message : String(err);
-  return errorResult(err instanceof SqlQueryError ? 400 : 500, message);
-}
 
 /** `GET /api/traces` — summaries of every trace across `providers`, per provider newest first. */
 export async function handleListTraces(
@@ -117,19 +79,11 @@ export async function handleQueryTraces(
   provider: TraceProvider,
   body: unknown,
 ): Promise<HandlerResult> {
-  if (!provider.query) return QUERY_UNSUPPORTED;
-  const query = parseQueryBody(body);
-  if ("status" in query) return query;
-  try {
-    return {
-      status: 200,
-      body: await provider.query(query.sql, {
-        ...(query.maxRows && { maxRows: query.maxRows }),
-      }),
-    };
-  } catch (err) {
-    return queryFailure(err);
-  }
+  const { query } = provider;
+  if (!query) return QUERY_UNSUPPORTED;
+  return answerQuery(body, (sql, options) =>
+    query.call(provider, sql, options),
+  );
 }
 
 /**

@@ -23,6 +23,7 @@ import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
 import { TursoTraceProvider } from "../trace/turso-trace-provider.ts";
+import { createApiContext } from "./api-context.ts";
 import { setupRoutes } from "./api-routes.ts";
 
 const PROVIDER_ID = "fake";
@@ -82,15 +83,17 @@ function makeApp(
 
   setupRoutes({
     app,
-    promptProviders,
-    traceProviders,
-    promptRegistry,
     hotReloadSubscribers: new Set(),
-    rootPath: "/demo",
     hasConfig: true,
-    tracer: trace.getTracer("test"),
-    defaultTraceProviderId: TRACE_PROVIDER_ID,
     otlpIngestor,
+    context: createApiContext({
+      promptProviders,
+      traceProviders,
+      promptRegistry,
+      rootPath: "/demo",
+      tracer: trace.getTracer("test"),
+      defaultTraceProviderId: TRACE_PROVIDER_ID,
+    }),
   });
 
   return { app, traceProvider };
@@ -372,14 +375,16 @@ describe("annotation routes", () => {
     const app = new Hono();
     setupRoutes({
       app,
-      promptProviders: new Map(),
-      traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
-      promptRegistry: new PromptRegistry(),
       hotReloadSubscribers: new Set(),
-      rootPath: "/demo",
       hasConfig: true,
-      tracer: trace.getTracer("test"),
-      defaultTraceProviderId: TRACE_PROVIDER_ID,
+      context: createApiContext({
+        promptProviders: new Map(),
+        traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
+        promptRegistry: new PromptRegistry(),
+        rootPath: "/demo",
+        tracer: trace.getTracer("test"),
+        defaultTraceProviderId: TRACE_PROVIDER_ID,
+      }),
     });
     return app;
   }
@@ -514,14 +519,16 @@ describe("DELETE /api/traces/:providerId/:id", () => {
     const app = new Hono();
     setupRoutes({
       app,
-      promptProviders: new Map(),
-      traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
-      promptRegistry: new PromptRegistry(),
       hotReloadSubscribers: new Set(),
-      rootPath: "/demo",
       hasConfig: true,
-      tracer: trace.getTracer("test"),
-      defaultTraceProviderId: TRACE_PROVIDER_ID,
+      context: createApiContext({
+        promptProviders: new Map(),
+        traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
+        promptRegistry: new PromptRegistry(),
+        rootPath: "/demo",
+        tracer: trace.getTracer("test"),
+        defaultTraceProviderId: TRACE_PROVIDER_ID,
+      }),
     });
     return app;
   }
@@ -589,14 +596,16 @@ describe("GET /api/traces/:providerId/:id", () => {
     const traceProvider = new MemoryTraceProvider({ id: TRACE_PROVIDER_ID });
     setupRoutes({
       app,
-      promptProviders,
-      traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
-      promptRegistry,
       hotReloadSubscribers: new Set(),
-      rootPath: "/demo",
       hasConfig: true,
-      tracer: trace.getTracer("test"),
-      defaultTraceProviderId: TRACE_PROVIDER_ID,
+      context: createApiContext({
+        promptProviders,
+        traceProviders: new Map([[TRACE_PROVIDER_ID, traceProvider]]),
+        promptRegistry,
+        rootPath: "/demo",
+        tracer: trace.getTracer("test"),
+        defaultTraceProviderId: TRACE_PROVIDER_ID,
+      }),
     });
 
     const functionInputs = [
@@ -650,15 +659,17 @@ describe("dataset routes", () => {
     const app = new Hono();
     setupRoutes({
       app,
-      promptProviders,
-      traceProviders: new Map(),
-      datasetProviders: new Map([[DATASET_PROVIDER_ID, datasetProvider]]),
-      promptRegistry,
       hotReloadSubscribers: new Set([(data: SSEData) => events.push(data)]),
-      rootPath: "/demo",
       hasConfig: true,
-      tracer: trace.getTracer("test"),
-      defaultTraceProviderId: TRACE_PROVIDER_ID,
+      context: createApiContext({
+        promptProviders,
+        traceProviders: new Map(),
+        datasetProviders: new Map([[DATASET_PROVIDER_ID, datasetProvider]]),
+        promptRegistry,
+        rootPath: "/demo",
+        tracer: trace.getTracer("test"),
+        defaultTraceProviderId: TRACE_PROVIDER_ID,
+      }),
     });
     return { app, events };
   }
@@ -1144,14 +1155,16 @@ describe("prompt refs on the prompt routes", () => {
     };
     setupRoutes({
       app,
-      promptProviders: new Map([[PROVIDER_ID, provider]]),
-      traceProviders: new Map(),
-      promptRegistry: new PromptRegistry(),
       hotReloadSubscribers: new Set(),
-      rootPath: "/demo",
       hasConfig: true,
-      tracer: trace.getTracer("test"),
-      defaultTraceProviderId: TRACE_PROVIDER_ID,
+      context: createApiContext({
+        promptProviders: new Map([[PROVIDER_ID, provider]]),
+        traceProviders: new Map(),
+        promptRegistry: new PromptRegistry(),
+        rootPath: "/demo",
+        tracer: trace.getTracer("test"),
+        defaultTraceProviderId: TRACE_PROVIDER_ID,
+      }),
     });
     const res = await app.request(
       new Request("http://localhost/api/prompts/fake/cCN0ZXN0/update", {

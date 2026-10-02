@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { readFileSync } from "node:fs";
 import path from "node:path";
+import packageJson from "../../package.json" with { type: "json" };
 import type { EvalutionConfig } from "../config.ts";
 import { startServer } from "../server/index.ts";
 import { TerminalSessionRegistry } from "../server/terminal.ts";
@@ -23,13 +23,8 @@ import { findRootDir, loadConfig, setUpProject } from "./project.ts";
 import { findRunningServer, writeServerInfo } from "./server-discovery.ts";
 import { registerVariationLoaderHook } from "./variation-loader-hook.ts";
 
-/**
- * This package's version. `../../package.json` from both `src/cli/` and the
- * bundled `dist/cli/`.
- */
-const VERSION: string = JSON.parse(
-  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
-).version;
+/** This package's version. */
+const VERSION: string = packageJson.version;
 
 // Make a project's config resolve `import ... from 'evalution'` against this
 // CLI rather than the project's node_modules, so configs load even when
@@ -92,6 +87,9 @@ async function main() {
   // prompt module is imported.
   registerPeerDependencyResolver(rootDir);
 
+  // Prompt and config modules resolve relative paths against the project.
+  process.chdir(rootDir);
+
   if (command === "mcp") {
     await mcp(rootDir, hasConfig);
     return;
@@ -100,19 +98,18 @@ async function main() {
 }
 
 /**
- * `evalution mcp`: relay to the UI if it's serving this project — it holds
- * the project's databases — else serve in-process.
+ * `evalution mcp`: relay to whichever process is serving this project — it
+ * holds the project's databases — else serve in-process.
  */
 async function mcp(rootDir: string, hasConfig: boolean) {
   const running = await findRunningServer(rootDir);
   if (running) {
-    await relayMcpToServer(running);
+    await relayMcpToServer(running.url);
     return;
   }
   // No onboarding here: with no config yet, the defaults serve (and a config
   // created later is picked up the next time the agent starts this).
   const config = hasConfig ? await loadConfig(rootDir) : {};
-  if (!hasConfig) process.chdir(rootDir);
   await serveMcpInProcess(
     rootDir,
     await setUpProject(rootDir, config),
@@ -122,6 +119,22 @@ async function mcp(rootDir: string, hasConfig: boolean) {
 
 /** `evalution ui`: serve the playground, opening it in a browser. */
 async function ui(rootDir: string, hasConfig: boolean) {
+  // Another process already holds the project's databases, so this one
+  // couldn't open them.
+  const running = await findRunningServer(rootDir);
+  if (running?.kind === "ui") {
+    console.log(`✨ Evalution is already running at ${running.url}`);
+    if (!process.env.EVALUTION_NO_OPEN) openBrowser(running.url);
+    return;
+  }
+  if (running) {
+    console.error(
+      `An agent's \`evalution mcp\` (process ${running.pid}) is serving this project, and its databases can only be open in one process at a time. ` +
+        "End that agent session (or stop the process), then run `evalution ui` again. Starting the playground before your agent avoids this: the agent's MCP server then connects to the playground.",
+    );
+    process.exit(1);
+  }
+
   // Resolve the port once, up front, so the onboarding restart binds the same
   // port the browser was opened on. An explicit `PORT` is honored strictly; a
   // busy default (3000) falls back to the next free port instead of crashing.
@@ -153,7 +166,7 @@ async function ui(rootDir: string, hasConfig: boolean) {
       port,
       terminalSessions,
     );
-    await writeServerInfo(rootDir, handle.url);
+    await writeServerInfo(rootDir, handle.url, "ui");
     await maybeOpen(handle.url);
     return;
   }
@@ -168,7 +181,7 @@ async function ui(rootDir: string, hasConfig: boolean) {
     port,
     terminalSessions,
   );
-  await writeServerInfo(rootDir, server.url);
+  await writeServerInfo(rootDir, server.url, "ui");
   await maybeOpen(server.url);
   console.log(
     `👀 No config found; watching ${path.join(rootDir, ".evalution", "config.ts")} for creation...`,
