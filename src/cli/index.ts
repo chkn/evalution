@@ -14,13 +14,19 @@ import {
 import { watchForConfigCreation } from "./config-watcher.ts";
 import { findAvailablePort } from "./find-port.ts";
 import {
+  findOrBecomeHolder,
   keepStdoutForProtocol,
+  type McpHolder,
   relayMcpToServer,
-  serveMcpInProcess,
+  serveMcpHolder,
 } from "./mcp.ts";
 import { openBrowser } from "./open-browser.ts";
 import { findRootDir, loadConfig, setUpProject } from "./project.ts";
-import { findRunningServer, writeServerInfo } from "./server-discovery.ts";
+import {
+  claimServerInfo,
+  findRunningServer,
+  writeServerInfo,
+} from "./server-discovery.ts";
 import { registerVariationLoaderHook } from "./variation-loader-hook.ts";
 
 /** This package's version. */
@@ -98,31 +104,49 @@ async function main() {
 }
 
 /**
- * `evalution mcp`: relay to whichever process is serving this project — it
- * holds the project's databases — else serve in-process.
+ * `evalution mcp`: relay stdio to whichever process is serving this project
+ * — it holds the project's databases — becoming that process when there's
+ * none, now or whenever the one relayed to goes away.
  */
 async function mcp(rootDir: string, hasConfig: boolean) {
-  const running = await findRunningServer(rootDir);
-  if (running) {
-    await relayMcpToServer(running.url);
-    return;
-  }
-  // No onboarding here: with no config yet, the defaults serve (and a config
-  // created later is picked up the next time the agent starts this).
-  const config = hasConfig ? await loadConfig(rootDir) : {};
-  await serveMcpInProcess(
-    rootDir,
-    await setUpProject(rootDir, config),
-    VERSION,
-    hasConfig,
-  );
+  let holder: McpHolder | undefined;
+  const become = async () => {
+    // No onboarding here: with no config yet, the defaults serve (and a
+    // config created later is picked up the next time the agent starts this).
+    const config = hasConfig ? await loadConfig(rootDir) : {};
+    holder = await serveMcpHolder(
+      rootDir,
+      await setUpProject(rootDir, config),
+      VERSION,
+      hasConfig,
+    );
+    return holder.url;
+  };
+  const holderUrl = () =>
+    holder ? Promise.resolve(holder.url) : findOrBecomeHolder(rootDir, become);
+  await relayMcpToServer(await holderUrl(), {
+    reconnect: holderUrl,
+    // Eval runs started here, by any agent, run in this process: let them
+    // finish before the other relays move on to a new holder.
+    beforeExit: async () => {
+      await holder?.idle();
+    },
+  });
 }
 
 /** `evalution ui`: serve the playground, opening it in a browser. */
-async function ui(rootDir: string, hasConfig: boolean) {
+async function ui(rootDir: string, hasConfig: boolean, attempt = 0) {
   // Another process already holds the project's databases, so this one
   // couldn't open them.
   const running = await findRunningServer(rootDir);
+  if (!running && !(await claimServerInfo(rootDir, "ui"))) {
+    // Another process claimed the project just now: go with it.
+    if (attempt < 3) return ui(rootDir, hasConfig, attempt + 1);
+    console.error(
+      "Another evalution process has claimed this project but isn't serving it. Stop it, then run `evalution ui` again.",
+    );
+    process.exit(1);
+  }
   if (running?.kind === "ui") {
     console.log(`✨ Evalution is already running at ${running.url}`);
     if (!process.env.EVALUTION_NO_OPEN) openBrowser(running.url);

@@ -92,6 +92,12 @@ is that first process, annotations agents leave show up in it live. The
 playground also serves MCP itself, over HTTP at `/mcp` — e.g.
 `claude mcp add --transport http evalution http://localhost:3000/mcp`.
 
+When the process holding the project goes away (its agent session ended, or
+the playground was stopped), the other `evalution mcp`s carry on without
+their agents noticing: one of them takes the project over, and the rest relay
+to it. An `evalution mcp` whose agent session ends keeps running until the
+eval runs it holds have finished.
+
 Start the playground before your agents when you use both: while an agent's
 `evalution mcp` holds the project, `evalution ui` can't start, and says so.
 

@@ -7,7 +7,10 @@
  * `InMemoryTransport` tests skip.
  */
 
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { connect, type Database } from "@tursodatabase/sync";
@@ -16,7 +19,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createProjectContext } from "../server/api-context.ts";
 import { runMigrations } from "../trace/db/migrate.ts";
 import { TursoTraceProvider } from "../trace/turso-trace-provider.ts";
-import { type McpHttpServer, relayMcp, serveMcpOverHttp } from "./mcp.ts";
+import {
+  findOrBecomeHolder,
+  type McpHttpServer,
+  type RelayMcpOptions,
+  relayMcp,
+  serveMcpOverHttp,
+} from "./mcp.ts";
+import { serverInfoPath } from "./server-discovery.ts";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 
@@ -48,12 +58,16 @@ async function servedProject(): Promise<McpHttpServer> {
 }
 
 /** An agent connected through a relay to `server`; `ended` settles with the relay's failure, if any. */
-async function relayedAgent(server: McpHttpServer, name: string) {
+async function relayedAgent(
+  server: McpHttpServer,
+  name: string,
+  options?: RelayMcpOptions,
+) {
   const [agentSide, relaySide] = InMemoryTransport.createLinkedPair();
   let ended!: Promise<string | undefined>;
   await new Promise<void>((started, failed) => {
     ended = new Promise(resolve => {
-      relayMcp(relaySide, server.url, resolve).then(started, failed);
+      relayMcp(relaySide, server.url, resolve, options).then(started, failed);
     });
   });
   const agent = new Client({ name, version: "1.0.0" });
@@ -127,5 +141,114 @@ describe("serveMcpOverHttp and relayMcp", () => {
       agent.callTool({ name: "list_traces", arguments: {} }),
     ).rejects.toThrow(/Could not reach the evalution server/);
     expect(await ended).toMatch(/Could not reach the evalution server/);
+  });
+
+  it("moves to the server `reconnect` names once the first is gone, unnoticed by the agent", async () => {
+    const first = await servedProject();
+    const second = await servedProject();
+    let reconnects = 0;
+    const { agent } = await relayedAgent(first, "codex-mcp-client", {
+      reconnect: async () => {
+        reconnects++;
+        return second.url;
+      },
+    });
+    await agent.callTool({ name: "list_traces", arguments: {} });
+    await first.close();
+
+    const [a, b] = await Promise.all([
+      agent.callTool({
+        name: "create_annotation",
+        arguments: { traceId: "t1", kind: "note", note: "after the switch" },
+      }),
+      agent.callTool({ name: "list_traces", arguments: {} }),
+    ]);
+    expect(JSON.parse(text(a)).source).toBe("codex");
+    expect(b.isError).toBeFalsy();
+    // Two failed sends, one switch.
+    expect(reconnects).toBe(1);
+  });
+
+  it("ends with an error when `reconnect` finds no server either", async () => {
+    const server = await servedProject();
+    const { agent, ended } = await relayedAgent(server, "zed", {
+      reconnect: async () => {
+        throw new Error("no holder");
+      },
+    });
+    await agent.callTool({ name: "list_traces", arguments: {} });
+    await server.close();
+    await expect(
+      agent.callTool({ name: "list_traces", arguments: {} }),
+    ).rejects.toThrow(/no holder/);
+    expect(await ended).toMatch(/no holder/);
+  });
+});
+
+/** Real filesystem, deliberately: the claim is a file other processes read. */
+describe("findOrBecomeHolder", () => {
+  async function project(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), "evalution-holder-"));
+    cleanup.push(() => rm(dir, { recursive: true, force: true }));
+    return dir;
+  }
+
+  it("relays to the server running", async () => {
+    const dir = await project();
+    const url = await findOrBecomeHolder(
+      dir,
+      async () => {
+        throw new Error("shouldn't become the holder");
+      },
+      {
+        find: async () => ({ url: "http://127.0.0.1:9", pid: 1, kind: "ui" }),
+      },
+    );
+    expect(url).toBe("http://127.0.0.1:9");
+  });
+
+  it("claims the project before becoming the holder when none is running", async () => {
+    const dir = await project();
+    const url = await findOrBecomeHolder(dir, async () => {
+      // Claimed, though not listening yet.
+      expect(JSON.parse(await readFile(serverInfoPath(dir), "utf8"))).toEqual({
+        pid: process.pid,
+        kind: "mcp",
+      });
+      return "http://127.0.0.1:9";
+    });
+    expect(url).toBe("http://127.0.0.1:9");
+  });
+
+  it("never becomes the holder while another live process has claimed the project", async () => {
+    const dir = await project();
+    await findOrBecomeHolder(dir, async () => "http://127.0.0.1:9");
+    // The parent of this process: alive, and not this one.
+    await writeFile(
+      serverInfoPath(dir),
+      JSON.stringify({ pid: process.ppid, kind: "mcp" }),
+    );
+    let became = false;
+    await expect(
+      findOrBecomeHolder(
+        dir,
+        async () => {
+          became = true;
+          return "http://127.0.0.1:9";
+        },
+        { find: async () => undefined },
+      ),
+    ).rejects.toThrow(/claimed it but isn't serving/);
+    expect(became).toBe(false);
+  });
+
+  it("gives the claim back when becoming the holder fails", async () => {
+    const dir = await project();
+    await expect(
+      findOrBecomeHolder(dir, async () => {
+        throw new Error("bad config");
+      }),
+    ).rejects.toThrow(/bad config/);
+    await expect(readFile(serverInfoPath(dir))).rejects.toThrow();
   });
 });

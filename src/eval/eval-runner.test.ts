@@ -225,6 +225,20 @@ describe("EvalRunner", () => {
     });
   });
 
+  it("is idle once every run in flight has finished", async () => {
+    const { runner, evals, def } = await setUp();
+    await runner.idle();
+    const first = await runner.start(evals, def.id);
+    const second = await runner.start(evals, def.id);
+    await runner.idle();
+    expect(runner.isRunning(first.id)).toBe(false);
+    expect(runner.isRunning(second.id)).toBe(false);
+    expect((await evals.listRuns(def.id)).map(r => r.status)).toEqual([
+      "done",
+      "done",
+    ]);
+  });
+
   it("lists the trace's check results", async () => {
     const { runner, evals, def } = await setUp();
     const run = await runner.start(evals, def.id);

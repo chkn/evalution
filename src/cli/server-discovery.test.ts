@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  claimServerInfo,
   findRunningServer,
   removeServerInfo,
   serverInfoPath,
@@ -113,5 +114,75 @@ describe("server discovery", () => {
     expect(await findRunningServer(dir, { fetch: unreachable })).toBe(
       undefined,
     );
+  });
+
+  it("claims a project only when no live process has, taking over a dead one's record", async () => {
+    const dir = await project();
+    expect(await claimServerInfo(dir, "mcp")).toBe(true);
+    expect(JSON.parse(await readFile(serverInfoPath(dir), "utf8"))).toEqual({
+      pid: process.pid,
+      kind: "mcp",
+    });
+    // Already ours.
+    expect(await claimServerInfo(dir, "mcp")).toBe(true);
+
+    await writeFile(
+      serverInfoPath(dir),
+      JSON.stringify({ pid: process.ppid, kind: "ui" }),
+    );
+    expect(await claimServerInfo(dir, "mcp")).toBe(false);
+
+    await writeFile(
+      serverInfoPath(dir),
+      JSON.stringify({
+        url: "http://localhost:4567",
+        pid: 2 ** 30,
+        kind: "ui",
+      }),
+    );
+    expect(await claimServerInfo(dir, "ui")).toBe(true);
+    expect(JSON.parse(await readFile(serverInfoPath(dir), "utf8"))).toEqual({
+      pid: process.pid,
+      kind: "ui",
+    });
+  });
+
+  it("waits for a process that has claimed the project to start serving it", async () => {
+    const dir = await project();
+    await claimServerInfo(dir, "mcp");
+    await writeFile(
+      serverInfoPath(dir),
+      JSON.stringify({ pid: process.ppid, kind: "mcp" }),
+    );
+    const found = findRunningServer(dir, { fetch: serving(dir) });
+    setTimeout(
+      () =>
+        void writeFile(
+          serverInfoPath(dir),
+          JSON.stringify({
+            url: "http://localhost:4567",
+            pid: process.ppid,
+            kind: "mcp",
+          }),
+        ),
+      200,
+    );
+    expect(await found).toEqual({
+      url: "http://localhost:4567",
+      pid: process.ppid,
+      kind: "mcp",
+    });
+
+    // One that never does is given up on.
+    await writeFile(
+      serverInfoPath(dir),
+      JSON.stringify({ pid: process.ppid, kind: "mcp" }),
+    );
+    expect(
+      await findRunningServer(dir, {
+        fetch: serving(dir),
+        startupTimeoutMs: 200,
+      }),
+    ).toBe(undefined);
   });
 });
