@@ -460,6 +460,27 @@ describe("MCP server", () => {
       expect(rows[0].id).toBe(added.rowIds[0]);
     });
 
+    it("copies a field from a prompt parameter named by its globalId", async () => {
+      const { call } = await setup();
+      const dataset = await call("create_dataset", {
+        name: "From global",
+        fields: [
+          { from: { providerId: "files", promptId: "greet", path: "name" } },
+        ],
+      });
+      expect(
+        (await call("get_dataset", { datasetId: dataset.id })).fields,
+      ).toEqual([{ id: "0", name: "name", type: "string" }]);
+
+      const added = await call("add_field", {
+        datasetId: dataset.id,
+        field: {
+          from: { providerId: "files", promptId: "greet", path: "excited" },
+        },
+      });
+      expect(added.id).toBe("1");
+    });
+
     it("updates and deletes rows, and renames and deletes fields", async () => {
       const { call } = await setup();
       const dataset = await call("create_dataset", {

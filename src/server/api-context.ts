@@ -169,9 +169,17 @@ export function createApiContext(options: ApiContextOptions): ApiContext {
         ? { id: resolved.promptId, providerId: resolved.providerId }
         : undefined;
     },
-    lookupFieldSourcePrompt: (providerId, promptId) =>
-      promptProviders.get(providerId)?.getPrompt({ promptId }) ??
-      Promise.resolve(undefined),
+    lookupFieldSourcePrompt(providerId, promptId) {
+      // The id may be a globalId; the registry maps it to the provider-scoped one.
+      const resolved = promptRegistry.resolve(promptId, providerId);
+      if (!resolved) return Promise.resolve(undefined);
+      return (
+        promptProviders
+          .get(resolved.providerId)
+          ?.getPrompt({ promptId: resolved.promptId }) ??
+        Promise.resolve(undefined)
+      );
+    },
   };
 }
 
