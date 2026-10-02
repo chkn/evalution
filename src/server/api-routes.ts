@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { randomUUID } from "node:crypto";
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -105,7 +104,7 @@ export function mountConfigRoute(
   rootPath: string,
   configured: boolean,
 ): void {
-  const instance = randomUUID();
+  const instance = crypto.randomUUID();
   app.get("/api/config", c => c.json({ rootPath, configured, instance }));
 }
 
