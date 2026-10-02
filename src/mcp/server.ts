@@ -767,7 +767,7 @@ export function createMcpServer(
     {
       title: "Create a dataset",
       description:
-        "Creates a dataset. Give it fields by hand (`fields`), or pass `fromPrompt` to take one field per parameter of that prompt and link the dataset to it — or both.",
+        "Creates a dataset. Pass `fromPrompt` to link it to a prompt and add a field for each parameter of that prompt, and/or give it fields by hand (`fields`).",
       inputSchema: z.object({
         name: z.string().min(1),
         fields: z.array(fieldSpec).optional(),
