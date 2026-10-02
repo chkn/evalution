@@ -16,7 +16,9 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { connect, type Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { afterEach, describe, expect, it } from "vitest";
+import { type PromptProvider, promptIdOf } from "../prompt/prompt-provider.ts";
 import { createProjectContext } from "../server/api-context.ts";
+import type { NormalizedPrompt } from "../shared/types.ts";
 import { runMigrations } from "../trace/db/migrate.ts";
 import { TursoTraceProvider } from "../trace/turso-trace-provider.ts";
 import {
@@ -34,6 +36,46 @@ afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step().catch(() => {});
 });
 
+/** A prompt, `slow`, whose runs take `SLOW_MS` to finish. */
+const SLOW_MS = 800;
+const SLOW: NormalizedPrompt = {
+  id: "slow",
+  name: "slow",
+  style: "chat",
+  functionParameters: [],
+  modelEditable: false,
+  modelParameters: [],
+  systemEditable: false,
+  messages: [],
+  messagesEditable: false,
+};
+
+function slowPrompts(traces: TursoTraceProvider): PromptProvider {
+  return {
+    id: "files",
+    getAllPrompts: async () => [SLOW],
+    getPrompt: async ref => (promptIdOf(ref) === SLOW.id ? SLOW : null),
+    async execute(_ref, _params, options) {
+      const traceId = options?.traceId as string;
+      const span = {
+        id: `${traceId}:root`,
+        traceId,
+        name: "slow",
+        kind: "LLM" as const,
+        startTime: 1,
+      };
+      await traces.recordSpanStart(span);
+      setTimeout(async () => {
+        // The test may be over, and its database closed, by now.
+        await traces
+          .recordSpanEnd({ ...span, endTime: 2, status: "ok" })
+          .catch(() => {});
+        options?.onSettled?.();
+      }, SLOW_MS);
+    },
+  };
+}
+
 /** A project with one trace, `t1`, served over HTTP the way the first process serves it. */
 async function servedProject(): Promise<McpHttpServer> {
   const client: Database = await connect({ path: ":memory:", url: () => null });
@@ -48,7 +90,7 @@ async function servedProject(): Promise<McpHttpServer> {
     startTime: 1,
   });
   const context = await createProjectContext({
-    promptProviders: [],
+    promptProviders: [slowPrompts(traces)],
     traceProviders: [traces],
     rootPath: "/project",
   });
@@ -167,6 +209,44 @@ describe("serveMcpOverHttp and relayMcp", () => {
     expect(b.isError).toBeFalsy();
     // Two failed sends, one switch.
     expect(reconnects).toBe(1);
+  });
+
+  it("is idle only once the requests it's answering are answered", async () => {
+    const server = await servedProject();
+    await server.idle();
+    const { agent } = await relayedAgent(server, "zed");
+    const started = Date.now();
+    const call = agent.callTool({
+      name: "execute_prompt",
+      arguments: { promptId: "slow" },
+    });
+    await new Promise(r => setTimeout(r, SLOW_MS / 4));
+    await server.idle();
+    // Not before the run, and with it the response, was over.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(SLOW_MS);
+    expect((await call).isError).toBeFalsy();
+  });
+
+  it("answers a request in flight with an error when its server goes away, then moves on", async () => {
+    const first = await servedProject();
+    const second = await servedProject();
+    const { agent } = await relayedAgent(first, "zed", {
+      reconnect: async () => second.url,
+    });
+    await agent.callTool({ name: "list_traces", arguments: {} });
+    const started = Date.now();
+    const call = agent.callTool(
+      { name: "execute_prompt", arguments: { promptId: "slow" } },
+      { timeout: 10_000 },
+    );
+    await new Promise(r => setTimeout(r, SLOW_MS / 4));
+    await first.close();
+    await expect(call).rejects.toThrow(/went away while answering/);
+    // Told at once, not after the client's own timeout.
+    expect(Date.now() - started).toBeLessThan(SLOW_MS * 2);
+
+    const after = await agent.callTool({ name: "list_traces", arguments: {} });
+    expect(after.isError).toBeFalsy();
   });
 
   it("ends with an error when `reconnect` finds no server either", async () => {

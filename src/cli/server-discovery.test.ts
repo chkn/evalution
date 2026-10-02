@@ -6,7 +6,7 @@
  * writes and another reads.
  */
 
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -184,5 +184,58 @@ describe("server discovery", () => {
         startupTimeoutMs: 200,
       }),
     ).toBe(undefined);
+  });
+
+  it("waits out a record mid-write, but takes over one a crash left unreadable", async () => {
+    const dir = await project();
+    await claimServerInfo(dir, "mcp");
+    // Half a record, just written: someone's writing it.
+    await writeFile(serverInfoPath(dir), '{"pid":');
+    const found = findRunningServer(dir, { fetch: serving(dir) });
+    setTimeout(
+      () =>
+        void writeFile(
+          serverInfoPath(dir),
+          JSON.stringify({
+            url: "http://localhost:4567",
+            pid: process.ppid,
+            kind: "ui",
+          }),
+        ),
+      200,
+    );
+    expect(await found).toEqual(expect.objectContaining({ kind: "ui" }));
+
+    await writeFile(serverInfoPath(dir), '{"pid":');
+    expect(await claimServerInfo(dir, "mcp")).toBe(false);
+    const past = new Date(Date.now() - 60_000);
+    await utimes(serverInfoPath(dir), past, past);
+    expect(await findRunningServer(dir, { fetch: serving(dir) })).toBe(
+      undefined,
+    );
+    expect(await claimServerInfo(dir, "mcp")).toBe(true);
+  });
+
+  it("never shows a reader half a record", async () => {
+    const dir = await project();
+    await claimServerInfo(dir, "mcp");
+    let stop = false;
+    let unreadable = 0;
+    const reading = (async () => {
+      while (!stop) {
+        const text = await readFile(serverInfoPath(dir), "utf8");
+        try {
+          JSON.parse(text);
+        } catch {
+          unreadable++;
+        }
+      }
+    })();
+    for (let i = 0; i < 200; i++) {
+      await writeServerInfo(dir, `http://localhost:${4000 + i}`, "mcp");
+    }
+    stop = true;
+    await reading;
+    expect(unreadable).toBe(0);
   });
 });

@@ -20,9 +20,15 @@ import type { Hono } from "hono";
 import { createMcpServer, MCP_CLIENT_HEADER } from "../mcp/server.ts";
 import type { ApiContext } from "./api-context.ts";
 
+/** The `/mcp` endpoint {@link mountMcp} serves. */
+export interface McpEndpoint extends McpHttpHandler {
+  /** Resolves once no MCP request is being answered — its response streamed to the end. */
+  idle(): Promise<void>;
+}
+
 /**
  * Serves `context` over MCP at `/mcp` on `app`. Returns the handler, for the
- * host to `close()` when it stops.
+ * host to `close()` when it stops, and to wait on until it's `idle()`.
  *
  * Only requests addressed to localhost, from no page or a localhost one, get
  * through: a site the user visits can't drive the server through their
@@ -33,7 +39,7 @@ export function mountMcp(
   app: Hono,
   context: ApiContext,
   version: string,
-): McpHttpHandler {
+): McpEndpoint {
   const mcp = createMcpHandler(
     ({ requestInfo }) =>
       createMcpServer(context, {
@@ -42,12 +48,68 @@ export function mountMcp(
       }),
     { onerror: err => console.error("MCP error:", err) },
   );
+  // Requests being answered — a tool call's response may stream for minutes.
+  // GETs are left out: a standalone event stream never ends on its own.
+  let inFlight = 0;
+  const waiters: (() => void)[] = [];
+  const settle = () => {
+    if (--inFlight === 0) for (const resolve of waiters.splice(0)) resolve();
+  };
+  const track = async (request: Request): Promise<Response> => {
+    if (request.method !== "POST") return mcp.fetch(request);
+    inFlight++;
+    let response: Response;
+    try {
+      response = await mcp.fetch(request);
+    } catch (err) {
+      settle();
+      throw err;
+    }
+    if (!response.body) {
+      settle();
+      return response;
+    }
+    const reader = response.body.getReader();
+    let open = true;
+    const finish = () => {
+      if (open) {
+        open = false;
+        settle();
+      }
+    };
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const { done, value } = await reader.read();
+          if (done) {
+            finish();
+            controller.close();
+          } else {
+            controller.enqueue(value);
+          }
+        } catch (err) {
+          finish();
+          controller.error(err);
+        }
+      },
+      cancel(reason) {
+        finish();
+        return reader.cancel(reason);
+      },
+    });
+    return new Response(body, response);
+  };
   app.all(
     "/mcp",
     c =>
       hostHeaderValidationResponse(c.req.raw, localhostAllowedHostnames()) ??
       originValidationResponse(c.req.raw, localhostAllowedOrigins()) ??
-      mcp.fetch(c.req.raw),
+      track(c.req.raw),
   );
-  return mcp;
+  return Object.assign(mcp, {
+    idle: () =>
+      inFlight === 0
+        ? Promise.resolve()
+        : new Promise<void>(resolve => waiters.push(resolve)),
+  });
 }

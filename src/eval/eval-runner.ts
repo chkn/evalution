@@ -335,6 +335,11 @@ export class EvalRunner {
     return this.active.has(runId);
   }
 
+  /** Whether any run is in flight. */
+  isBusy(): boolean {
+    return this.active.size > 0;
+  }
+
   /** Resolves once no run is in flight, including runs started meanwhile. */
   async idle(): Promise<void> {
     while (this.active.size > 0) {

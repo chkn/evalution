@@ -13,7 +13,14 @@
  */
 
 import { readFileSync, unlinkSync } from "node:fs";
-import { readFile, stat, unlink, writeFile } from "node:fs/promises";
+import {
+  link,
+  readFile,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { mkdirSelfIgnoring } from "../trace/db/self-ignoring-dir.ts";
 
@@ -54,12 +61,42 @@ function makeRunDir(rootDir: string): Promise<void> {
   return mkdirSelfIgnoring(join(rootDir, ".evalution", "run"));
 }
 
-async function readRecord(path: string): Promise<ServerRecord | undefined> {
+/**
+ * Writes `contents` to `path` whole or not at all, so a reader never sees
+ * half a record: to a temporary file first, then moved into place — or,
+ * `exclusive`ly, linked into place, which fails with `EEXIST` if a record is
+ * there already.
+ */
+async function writeWhole(
+  path: string,
+  contents: string,
+  { exclusive = false }: { exclusive?: boolean } = {},
+): Promise<void> {
+  const temp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  await writeFile(temp, contents);
   try {
-    const record = JSON.parse(await readFile(path, "utf8"));
-    return typeof record?.pid === "number" ? record : undefined;
+    if (exclusive) await link(temp, path);
+    else await rename(temp, path);
+  } finally {
+    if (exclusive) await unlink(temp).catch(() => {});
+  }
+}
+
+/** A record as read: missing, unreadable (a crash's leftovers, or a writer that predates {@link writeWhole}), or there. */
+async function readRecord(
+  path: string,
+): Promise<ServerRecord | "unreadable" | undefined> {
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
   } catch {
     return undefined;
+  }
+  try {
+    const record = JSON.parse(text);
+    return typeof record?.pid === "number" ? record : "unreadable";
+  } catch {
+    return "unreadable";
   }
 }
 
@@ -68,6 +105,15 @@ async function readRecord(path: string): Promise<ServerRecord | undefined> {
  * crash's leftovers rather than a claim mid-write.
  */
 const UNREADABLE_GRACE_MS = 5000;
+
+/** Whether the unreadable record at `path` is recent enough to be a write in progress. */
+async function freshlyWritten(path: string): Promise<boolean> {
+  const age = await stat(path).then(
+    s => Date.now() - s.mtimeMs,
+    () => Number.POSITIVE_INFINITY,
+  );
+  return age < UNREADABLE_GRACE_MS;
+}
 
 /**
  * Claims the project at `rootDir` for this process, before it opens the
@@ -84,21 +130,22 @@ export async function claimServerInfo(
   const record: ServerRecord = { pid: process.pid, kind };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      await writeFile(path, `${JSON.stringify(record)}\n`, { flag: "wx" });
+      await writeWhole(path, `${JSON.stringify(record)}\n`, {
+        exclusive: true,
+      });
       removeOnExit(rootDir);
       return true;
     } catch (err: any) {
       if (err?.code !== "EEXIST") throw err;
     }
     const held = await readRecord(path);
-    if (held?.pid === process.pid) return true;
-    if (held && isAlive(held.pid)) return false;
-    if (!held) {
-      const age = await stat(path).then(
-        s => Date.now() - s.mtimeMs,
-        () => Number.POSITIVE_INFINITY,
-      );
-      if (age < UNREADABLE_GRACE_MS) return false;
+    if (held === undefined) continue;
+    if (held === "unreadable") {
+      if (await freshlyWritten(path)) return false;
+    } else if (held.pid === process.pid) {
+      return true;
+    } else if (isAlive(held.pid)) {
+      return false;
     }
     await unlink(path).catch(() => {});
   }
@@ -117,7 +164,7 @@ export async function writeServerInfo(
 ): Promise<void> {
   await makeRunDir(rootDir);
   const info: ServerInfo = { url, pid: process.pid, kind };
-  await writeFile(serverInfoPath(rootDir), `${JSON.stringify(info)}\n`);
+  await writeWhole(serverInfoPath(rootDir), `${JSON.stringify(info)}\n`);
   removeOnExit(rootDir);
 }
 
@@ -167,17 +214,20 @@ export async function findRunningServer(
 ): Promise<ServerInfo | undefined> {
   const path = serverInfoPath(rootDir);
   const deadline = Date.now() + startupTimeoutMs;
-  let info = await readRecord(path);
-  while (
-    info &&
-    info.url === undefined &&
-    info.pid !== process.pid &&
-    isAlive(info.pid) &&
-    Date.now() < deadline
-  ) {
+  /** Whether `record` is a claim, or a write, still to be waited out. */
+  const starting = async (record: ServerRecord | "unreadable" | undefined) =>
+    record === "unreadable"
+      ? await freshlyWritten(path)
+      : record !== undefined &&
+        record.url === undefined &&
+        record.pid !== process.pid &&
+        isAlive(record.pid);
+  let record = await readRecord(path);
+  while ((await starting(record)) && Date.now() < deadline) {
     await new Promise(resolve => setTimeout(resolve, 100));
-    info = await readRecord(path);
+    record = await readRecord(path);
   }
+  const info = record === "unreadable" ? undefined : record;
   if (
     typeof info?.url !== "string" ||
     info.pid === process.pid ||

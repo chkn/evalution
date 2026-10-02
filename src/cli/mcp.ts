@@ -23,6 +23,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import {
   isJSONRPCRequest,
   type JSONRPCMessage,
+  type RequestId,
   type Transport,
 } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
@@ -57,6 +58,8 @@ export function keepStdoutForProtocol(): void {
 export interface McpHttpServer {
   /** Where it listens, e.g. `http://127.0.0.1:53124`. */
   url: string;
+  /** Resolves once no MCP request is being answered. */
+  idle(): Promise<void>;
   /** Stops it. */
   close(): Promise<void>;
 }
@@ -86,6 +89,7 @@ export async function serveMcpOverHttp(
   });
   return {
     url: `http://127.0.0.1:${port}`,
+    idle: () => mcp.idle(),
     close: () =>
       new Promise((resolve, reject) => {
         void mcp.close();
@@ -99,7 +103,7 @@ export async function serveMcpOverHttp(
 export interface McpHolder {
   /** Where it serves MCP. */
   url: string;
-  /** Resolves once no eval run is in flight here. */
+  /** Resolves once no eval run is in flight here, and no MCP request is being answered. */
   idle(): Promise<void>;
 }
 
@@ -121,7 +125,13 @@ export async function serveMcpHolder(
   return {
     url: http.url,
     idle: async () => {
-      await context.evalRunner?.idle();
+      // Either can start more of the other: a request starts a run, a run
+      // ends and its relay asks for the results. Done once both are idle.
+      for (;;) {
+        await context.evalRunner?.idle();
+        await http.idle();
+        if (!context.evalRunner?.isBusy()) return;
+      }
     },
   };
 }
@@ -138,6 +148,8 @@ export async function findOrBecomeHolder(
   { find = findRunningServer }: { find?: typeof findRunningServer } = {},
 ): Promise<string> {
   for (let attempt = 0; attempt < 5; attempt++) {
+    // Give a process that claimed the project between our looks a moment.
+    if (attempt > 0) await new Promise(r => setTimeout(r, 200 * attempt));
     const running = await find(rootDir);
     if (running) return running.url;
     if (await claimServerInfo(rootDir, "mcp")) {
@@ -188,6 +200,18 @@ export async function relayMcp(
   let initialize: JSONRPCMessage | undefined;
   let initialized: JSONRPCMessage | undefined;
   const replayIds = new Set<string>();
+  // Requests sent and not yet answered, with the server each went to: when
+  // that server goes away mid-answer, the agent is told rather than left
+  // waiting. They aren't resent — a tool call may not be safe to repeat.
+  const pending = new Map<
+    string,
+    {
+      id: RequestId;
+      transport: StreamableHTTPClientTransport;
+      /** Set once `send` has returned; until then a failure is the sender's to handle. */
+      sent?: boolean;
+    }
+  >();
 
   let ended = false;
   const end = (failure?: string) => {
@@ -207,12 +231,37 @@ export async function relayMcp(
       },
     });
     transport.onmessage = message => {
-      if (transport !== remote) return;
-      // The new server's answer to a replayed `initialize` is the relay's.
-      if ("id" in message && replayIds.delete(String(message.id))) return;
+      if ("id" in message && !("method" in message)) {
+        // The new server's answer to a replayed `initialize` is the relay's.
+        if (replayIds.delete(String(message.id))) return;
+        pending.delete(String(message.id));
+      } else if (transport !== remote) {
+        return;
+      }
       void local.send(message);
     };
-    transport.onerror = err => console.error("MCP relay error:", err);
+    transport.onerror = err => {
+      if (![...pending.values()].some(p => p.transport === transport)) return;
+      // A response stream broke. If it's because the server is gone, the
+      // requests it was answering never will be.
+      void reachable(url).then(up => {
+        if (up) {
+          console.error("MCP relay error:", err);
+          return;
+        }
+        abandon(transport, url);
+        if (transport !== remote || ended) return;
+        if (!reconnect) {
+          end(`The evalution server at ${url} went away`);
+          return;
+        }
+        switchServer(transport).catch((switchErr: unknown) =>
+          end(
+            `Could not reach the evalution server at ${url}: ${switchErr instanceof Error ? switchErr.message : String(switchErr)}`,
+          ),
+        );
+      });
+    };
     transport.onclose = () => {
       if (transport === remote && !reconnect) {
         end(`The evalution server at ${url} closed`);
@@ -233,8 +282,10 @@ export async function relayMcp(
       const url = await reconnect!();
       const next = await connect(url);
       const previous = remote;
+      const previousUrl = remoteUrl;
       remote = next;
       remoteUrl = url;
+      abandon(previous, previousUrl);
       void previous.close().catch(() => {});
       if (initialize && "id" in initialize) {
         const id = `evalution-relay-replay-${replayIds.size}-${Date.now()}`;
@@ -248,15 +299,52 @@ export async function relayMcp(
     return switching;
   };
 
+  /** Answers every request still waiting on `transport` with an error. */
+  const abandon = (transport: StreamableHTTPClientTransport, url: string) => {
+    for (const [key, entry] of pending) {
+      if (entry.transport !== transport || !entry.sent) continue;
+      pending.delete(key);
+      void local
+        .send({
+          jsonrpc: "2.0",
+          id: entry.id,
+          error: {
+            code: -32603,
+            message: `The evalution server at ${url} went away while answering this request, which may or may not have taken effect. Check, then retry if needed.`,
+          },
+        })
+        .catch(() => {});
+    }
+  };
+
   const forward = async (message: JSONRPCMessage) => {
     await switching;
-    const target = remote;
+    let target = remote;
+    const key = isJSONRPCRequest(message) ? String(message.id) : undefined;
+    /** Sends to `target`, keeping track of a request until it's answered. */
+    const sendTracked = async () => {
+      if (key === undefined || !isJSONRPCRequest(message)) {
+        await target.send(message);
+        return;
+      }
+      // Tracked before it's sent: its answer can arrive before `send` returns.
+      const entry = { id: message.id, transport: target, sent: false };
+      pending.set(key, entry);
+      try {
+        await target.send(message);
+        entry.sent = true;
+      } catch (err) {
+        if (pending.get(key) === entry) pending.delete(key);
+        throw err;
+      }
+    };
     try {
-      await target.send(message);
+      await sendTracked();
     } catch (err) {
       if (!reconnect) throw err;
       await switchServer(target);
-      await remote.send(message);
+      target = remote;
+      await sendTracked();
     }
   };
 
@@ -297,6 +385,18 @@ export async function relayMcp(
 export interface RelayMcpToServerOptions extends RelayMcpOptions {
   /** Runs before the process exits, once the relay has ended. */
   beforeExit?: () => Promise<void>;
+}
+
+/** Whether a server answers at `url` at all. */
+async function reachable(url: string): Promise<boolean> {
+  try {
+    await fetch(new URL("/api/config", url), {
+      signal: AbortSignal.timeout(1000),
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
