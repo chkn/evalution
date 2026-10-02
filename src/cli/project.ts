@@ -13,6 +13,8 @@ import { pathToFileURL } from "node:url";
 import type { EvalutionConfig } from "../config.ts";
 import type { DatasetProvider } from "../dataset/dataset-provider.ts";
 import { LocalDirectoryDatasetProvider } from "../dataset/local-directory-dataset-provider.ts";
+import type { EvalProvider } from "../eval/eval-provider.ts";
+import { LocalEvalProvider } from "../eval/local-eval-provider.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import { CostFetchingTraceSink } from "../trace/cost-fetching-trace-sink.ts";
 import { LocalDatabaseTraceProvider } from "../trace/local-database-trace-provider.ts";
@@ -67,6 +69,7 @@ export interface ProjectProviders {
   promptProviders: PromptProvider[];
   traceProviders: TraceProvider[];
   datasetProviders: DatasetProvider[];
+  evalProviders: EvalProvider[];
   /**
    * The process's single OTLP ingestor, so an external app can export traces
    * to the server (`POST /v1/traces`) alongside whatever the playground
@@ -77,7 +80,8 @@ export interface ProjectProviders {
 
 /**
  * Stands up the providers `config` names — or the defaults, a local trace
- * database and dataset directory under `<rootDir>/.evalution` — and wires
+ * database, dataset directory, and eval database under `<rootDir>/.evalution`
+ * — and wires
  * every prompt provider's trace ingestion into the trace stores.
  */
 export async function setUpProject(
@@ -105,6 +109,12 @@ export async function setUpProject(
   const datasetProviders = config.datasetProviders ?? [
     new LocalDirectoryDatasetProvider({
       dir: path.join(rootDir, ".evalution", "datasets"),
+    }),
+  ];
+
+  const evalProviders = config.evalProviders ?? [
+    new LocalEvalProvider({
+      path: path.join(rootDir, ".evalution", "evals", "evals.db"),
     }),
   ];
 
@@ -142,6 +152,7 @@ export async function setUpProject(
     promptProviders,
     traceProviders,
     datasetProviders,
+    evalProviders,
     otlpIngestor,
   };
 }

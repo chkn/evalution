@@ -7,6 +7,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { WebSocketServer } from "ws";
 import type { DatasetProvider } from "../dataset/dataset-provider.ts";
+import type { EvalProvider } from "../eval/eval-provider.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import type { SSEData } from "../shared/types.ts";
 import type { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
@@ -25,6 +26,8 @@ export interface ServerOptions {
   traceProviders: TraceProvider[];
   /** Dataset stores. Defaults to none. */
   datasetProviders?: DatasetProvider[];
+  /** Eval stores. Defaults to none. */
+  evalProviders?: EvalProvider[];
   port: number;
   rootPath: string;
   /** Whether the server was started with a project config file loaded. */
@@ -64,6 +67,7 @@ export async function startServer(
     promptProviders,
     traceProviders,
     datasetProviders = [],
+    evalProviders = [],
     port,
     rootPath,
     hasConfig,
@@ -88,6 +92,7 @@ export async function startServer(
     promptProviders,
     traceProviders,
     datasetProviders,
+    evalProviders,
     rootPath,
     onPromptChanged: (providerId, event) =>
       broadcast({ type: "prompt-changed", providerId, event }),

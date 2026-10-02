@@ -464,3 +464,23 @@ export function VariationIcon() {
     </svg>
   );
 }
+
+/** A checked box — the Evals nav tab and eval actions. */
+export function EvalsIcon({ size = 11 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="3" width="18" height="18" rx="3" />
+      <polyline points="8 12.5 11 15.5 16.5 9" />
+    </svg>
+  );
+}

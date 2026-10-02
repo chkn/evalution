@@ -1084,6 +1084,7 @@ export function createMcpServer(
             datasetId,
             field,
             context.lookupFieldSourcePrompt,
+            context.lookupFieldSourceCheck,
           ),
         ),
       ),

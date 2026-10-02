@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { ResourceInfo } from "../../shared/types";
+import type { PropType, ResourceInfo } from "../../shared/types";
 import {
   type ResourceArgs,
   rootResourceUri,
   type Selections,
   type SlotSelection,
 } from "./execution-input-state";
+import { isPseudoUri } from "./pseudo-sources";
 
 /**
  * Nesting cap on a resource's own argument form — a resource whose argument
@@ -74,6 +75,15 @@ export interface ResourceArgsContext {
   path: string;
   /** How many resource-argument forms deep this row already is. */
   depth: number;
+  /**
+   * What a chip for a column or prompt-slot source says, and whether its
+   * type doesn't fit the slot's — see `pseudo-sources.ts`. Absent where no
+   * such source is offered.
+   */
+  describePseudo?: (
+    uri: string,
+    slotType: PropType,
+  ) => { note: string; warning?: string } | undefined;
 }
 
 /**
@@ -144,6 +154,8 @@ export function computeClaims(
   ) => {
     if (!selection?.resources || depth > MAX_RESOURCE_ARG_DEPTH) return;
     for (const [relPath, uri] of Object.entries(selection.resources)) {
+      // A column or another slot isn't an instance anyone shares.
+      if (isPseudoUri(uri)) continue;
       const root = rootResourceUri(uri, resourcesByUri);
       if (claimed.has(root)) continue;
 

@@ -47,6 +47,7 @@ import {
 import { buildGroupedRows, buildRows, computeWindow } from "./trace/rows.ts";
 import { SpanDetails } from "./trace/SpanDetails.tsx";
 import { TraceAnnotations } from "./trace/TraceAnnotations.tsx";
+import { TraceCheckResults } from "./trace/TraceCheckResults.tsx";
 import { computeCostBreakdown, summarizeUsage } from "./trace/usage.ts";
 import { useAnchoredPopover } from "./use-anchored-popover";
 
@@ -69,6 +70,8 @@ interface Props {
   findPrompt?: (prompt: PromptID) => NormalizedPrompt | undefined;
   /** Called after the user deletes this trace, so its tab can be closed. */
   onDeleted?: () => void;
+  /** Bumped on eval changes, so the trace's check results stay current. */
+  evalVersion?: number;
 }
 
 interface TraceState {
@@ -105,6 +108,7 @@ function TraceView({
   onOpenPrompt,
   findPrompt,
   onDeleted,
+  evalVersion,
 }: Props) {
   const [state, setState] = useState<TraceState>({ trace: null, spans: [] });
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(
@@ -458,6 +462,11 @@ function TraceView({
         onDelete={removeAnnotation}
         showForm={showAnnotationForm}
         onCloseForm={() => setShowAnnotationForm(false)}
+      />
+      <TraceCheckResults
+        providerId={providerId}
+        traceId={traceId}
+        version={evalVersion}
       />
 
       <div className="trace-view-body" ref={bodyRef}>

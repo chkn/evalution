@@ -6,8 +6,12 @@ import type { ExecutionInput, PropDefinition } from "../shared/types.ts";
 import {
   canonicalArgumentKey,
   collectInputSlots,
+  findInputCycle,
+  type InputBindings,
   type InputSource,
+  inputReferenceProblems,
   matchSourcesToSlots,
+  namedBindings,
   resolveExecutionInput,
   resolveExecutionInputs,
   stampReceipts,
@@ -201,13 +205,10 @@ describe("resolveExecutionInput", () => {
     expect(resolved).toBe("a/b");
   });
 
-  it("rejects a dataset input with a clear not-implemented error", async () => {
-    // The variant exists so the resolver, the matching layer, and the panel are
-    // all built over the union before `DatasetProvider` lands — but it must say
-    // so rather than crash on an unhandled shape.
+  it("rejects a dataset input outside an eval run, saying why", async () => {
     await expect(
-      resolveExecutionInput({ kind: "dataset", uri: "rows/1#col" }),
-    ).rejects.toThrow(/not implemented/i);
+      resolveExecutionInput({ kind: "dataset", field: "0" }),
+    ).rejects.toThrow(/only be bound in an eval run/);
   });
 
   it("explains itself when a resource is referenced with no resolver", async () => {
@@ -461,5 +462,247 @@ describe("stampReceipts", () => {
     expect(stampReceipts(inputs, {}).functionInputs?.[0]).toMatchObject({
       uri: "pg.ts#db",
     });
+  });
+});
+
+const text = (value: string): ExecutionInput => ({
+  kind: "value",
+  value: { kind: "primitive", value },
+});
+
+describe("dataset and input references", () => {
+  it("resolves a dataset reference to its row's cell, recursively", async () => {
+    const row = {
+      cells: {
+        "0": text("Set up CI"),
+        "1": { kind: "resource", uri: "pg.ts#db" } as ExecutionInput,
+      },
+    };
+    const resolve = vi.fn(async (uri: string) => `created:${uri}`);
+    expect(
+      await resolveExecutionInput({ kind: "dataset", field: "0" }, resolve, {
+        row,
+      }),
+    ).toBe("Set up CI");
+    expect(
+      await resolveExecutionInput({ kind: "dataset", field: "1" }, resolve, {
+        row,
+      }),
+    ).toBe("created:pg.ts#db");
+  });
+
+  it("resolves a column the row leaves empty to nothing", async () => {
+    expect(
+      await resolveExecutionInput({ kind: "dataset", field: "9" }, undefined, {
+        row: { cells: {} },
+      }),
+    ).toBeUndefined();
+  });
+
+  it("binds a resource argument to a column", async () => {
+    const seen: unknown[] = [];
+    await resolveExecutionInput(
+      {
+        kind: "resource",
+        uri: "pg.ts#seededTask",
+        args: { title: { kind: "dataset", field: "0" } },
+      },
+      async (_uri, binding) => {
+        seen.push(await binding?.resolve());
+        return "task";
+      },
+      { row: { cells: { "0": text("Plan it") } } },
+    );
+    expect(seen).toEqual([{ title: "Plan it" }]);
+  });
+
+  it("resolves an input reference to the other slot's value, through the same resolver", async () => {
+    const bindings: InputBindings = {
+      functionInputs: {
+        taskId: { kind: "resource", uri: "pg.ts#seeded.taskId" },
+      },
+      executeInputs: {
+        toolsContext: {
+          kind: "object",
+          properties: {
+            list_tasks: {
+              kind: "object",
+              properties: {
+                rootTaskId: { kind: "input", half: "function", path: "taskId" },
+              },
+            },
+          },
+        },
+      },
+    };
+    // The lease memoizes; the stand-in counts how often it's asked.
+    const calls: string[] = [];
+    const resolve = async (uri: string) => {
+      calls.push(uri);
+      return "tsk_1";
+    };
+    const { functionParams, executeValues } = await resolveExecutionInputs(
+      {
+        functionInputs: [bindings.functionInputs.taskId],
+        executeInputs: bindings.executeInputs,
+      },
+      resolve,
+      { bindings },
+    );
+    expect(functionParams).toEqual(["tsk_1"]);
+    expect(executeValues.toolsContext.list_tasks.rootTaskId).toBe("tsk_1");
+    expect(calls.every(uri => uri === "pg.ts#seeded.taskId")).toBe(true);
+  });
+
+  it("reads a nested path through a typed-in object, and off a resolved value", async () => {
+    const bindings: InputBindings = {
+      functionInputs: {
+        info: {
+          kind: "value",
+          value: {
+            kind: "object",
+            properties: { title: { kind: "primitive", value: "T" } },
+          },
+        },
+        seeded: { kind: "resource", uri: "pg.ts#seeded" },
+      },
+      executeInputs: {},
+    };
+    const resolve = async () => ({ taskId: "tsk_9" });
+    expect(
+      await resolveExecutionInput(
+        { kind: "input", half: "function", path: "info.title" },
+        resolve,
+        { bindings },
+      ),
+    ).toBe("T");
+    expect(
+      await resolveExecutionInput(
+        { kind: "input", half: "function", path: "seeded.taskId" },
+        resolve,
+        { bindings },
+      ),
+    ).toBe("tsk_9");
+  });
+
+  it("fails an input reference with no bindings to read, saying so", async () => {
+    await expect(
+      resolveExecutionInput({ kind: "input", half: "function", path: "a" }),
+    ).rejects.toThrow(/no slot bindings/);
+  });
+
+  it("catches a cycle at run time that only a dataset cell closes", async () => {
+    const bindings: InputBindings = {
+      functionInputs: {
+        a: { kind: "dataset", field: "0" },
+        b: { kind: "input", half: "function", path: "a" },
+      },
+      executeInputs: {},
+    };
+    await expect(
+      resolveExecutionInput(bindings.functionInputs.b, undefined, {
+        bindings,
+        row: {
+          cells: { "0": { kind: "input", half: "function", path: "b" } },
+        },
+      }),
+    ).rejects.toThrow(/Input cycle: a → b → a|Input cycle/);
+  });
+
+  it("names a positional request's inputs by parameter", () => {
+    expect(
+      namedBindings([str("a"), str("b")], {
+        functionInputs: [text("x")],
+        executeInputs: { ctx: text("y") },
+      }),
+    ).toEqual({
+      functionInputs: { a: text("x") },
+      executeInputs: { ctx: text("y") },
+    });
+  });
+});
+
+describe("findInputCycle", () => {
+  it("finds a direct cycle, naming the slots", () => {
+    expect(
+      findInputCycle({
+        functionInputs: {
+          a: { kind: "input", half: "function", path: "b" },
+          b: { kind: "input", half: "function", path: "a" },
+        },
+        executeInputs: {},
+      }),
+    ).toEqual(["a", "b", "a"]);
+  });
+
+  it("finds a slot that names something inside itself", () => {
+    expect(
+      findInputCycle({
+        functionInputs: {
+          a: {
+            kind: "object",
+            properties: { x: { kind: "input", half: "function", path: "a" } },
+          },
+        },
+        executeInputs: {},
+      }),
+    ).toEqual(["a.x", "a.x"]);
+  });
+
+  it("follows references in a resource's arguments", () => {
+    expect(
+      findInputCycle({
+        functionInputs: {
+          taskId: {
+            kind: "resource",
+            uri: "pg.ts#seeded",
+            args: {
+              root: { kind: "input", half: "execute", path: "ctx.root" },
+            },
+          },
+        },
+        executeInputs: {
+          ctx: {
+            kind: "object",
+            properties: {
+              root: { kind: "input", half: "function", path: "taskId" },
+            },
+          },
+        },
+      }),
+    ).toBeDefined();
+  });
+
+  it("accepts references that don't loop", () => {
+    expect(
+      findInputCycle({
+        functionInputs: {
+          taskId: text("t"),
+          other: { kind: "input", half: "function", path: "taskId" },
+        },
+        executeInputs: {
+          ctx: { kind: "input", half: "function", path: "other" },
+        },
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe("inputReferenceProblems", () => {
+  it("names a target the prompt doesn't have, and a cycle", () => {
+    const problems = inputReferenceProblems(
+      {
+        functionInputs: {
+          a: { kind: "input", half: "function", path: "missing" },
+          b: { kind: "input", half: "function", path: "c" },
+          c: { kind: "input", half: "function", path: "b" },
+        },
+        executeInputs: {},
+      },
+      { functionParameters: [str("a"), str("b"), str("c")] },
+    );
+    expect(problems).toHaveLength(2);
+    expect(problems[0]).toMatch(/'missing'/);
+    expect(problems[1]).toMatch(/cycle: b → c → b/);
   });
 });

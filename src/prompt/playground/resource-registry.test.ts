@@ -1043,12 +1043,12 @@ describe("resource arguments (specs/resource-arguments.md)", () => {
 
     const sources = await reg.sources();
     expect(() => reg.describe(sources)).toThrow(
-      /'bad': input 'title' must be another resource or a Standard Schema.*not a string/i,
+      /'bad': input 'title' must be a resource or a Standard Schema.*not a string/i,
     );
 
     const lease = reg.lease();
     await expect(lease.acquire("x.playground.ts#bad")).rejects.toThrow(
-      /'bad': input 'title' must be another resource or a Standard Schema.*not a string/i,
+      /'bad': input 'title' must be a resource or a Standard Schema.*not a string/i,
     );
   });
 

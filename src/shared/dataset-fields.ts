@@ -60,8 +60,8 @@ export function isPrimitiveFieldType(
 
 /**
  * The body of `POST /api/datasets/:providerId/:id/fields`: a name and a
- * primitive type, or a prompt parameter for the server to copy the type of
- * (named after it unless `name` is given). Never a definition.
+ * primitive type, or a prompt or check parameter for the server to copy the
+ * type of (named after it unless `name` is given). Never a definition.
  */
 export type AddDatasetFieldRequest =
   | { name: string; type: PrimitiveFieldType }
@@ -72,6 +72,11 @@ export type AddDatasetFieldRequest =
         half?: "function" | "execute";
         path: string;
       };
+      name?: string;
+    }
+  | {
+      /** A check's parameter, by the check's `CheckInfo.uri`. */
+      from: { providerId: string; checkUri: string; path: string };
       name?: string;
     };
 

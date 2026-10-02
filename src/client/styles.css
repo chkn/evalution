@@ -7026,3 +7026,520 @@ pre {
   background: var(--accent);
   color: var(--on-accent);
 }
+
+/* ── Evals ─────────────────────────────────────────────────────────────── */
+
+/* A pseudo-source chip: a dataset column or another prompt input. */
+.pg-slot-chip-pseudo {
+  border-style: dashed;
+}
+
+.pg-slot-chip-warning .pg-slot-chip-note {
+  color: var(--error-text);
+}
+
+.eval-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--trace-bg);
+  color: var(--trace-text);
+  overflow: hidden;
+  font-size: 12.5px;
+}
+
+.eval-view-error {
+  padding: 24px;
+  color: var(--error-text);
+}
+
+.eval-view-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.eval-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Styled as the questions editor's section headers: `pg-msg-header` and
+   `pg-role-label`; this only clears the heading's own margin. */
+.eval-section-title {
+  margin: 0;
+}
+
+.eval-empty {
+  margin: 0;
+  color: var(--trace-text-dim);
+}
+
+.eval-matched {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--accent-faint);
+  color: var(--accent);
+}
+
+/* Checks are laid out as the questions editor's questions are: set apart by a
+   rule between them, with their fields under a rule down the left. */
+.eval-check {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 14px;
+}
+
+.eval-check + .eval-check {
+  border-top: 1px solid var(--panel-border);
+  padding-top: 10px;
+}
+
+.eval-check-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--panel-border);
+}
+
+.eval-check-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.eval-check-label {
+  font-weight: 600;
+}
+
+.eval-check-group {
+  font-size: 11px;
+  color: var(--trace-text-dim);
+}
+
+.eval-check-remove {
+  margin-left: auto;
+}
+
+.eval-check-missing {
+  color: var(--error-text);
+}
+
+/* A check's parameters, as in the Inputs panel but stacked. */
+.eval-check-params {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.eval-check-params .pg-exec-param {
+  flex: 0 0 auto;
+}
+
+.eval-check-threshold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--trace-text-dim);
+}
+
+.eval-check-threshold input,
+.eval-run-concurrency input {
+  width: 64px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--trace-text);
+  padding: 2px 4px;
+}
+
+.eval-problems {
+  margin: 0;
+  padding: 8px 8px 8px 24px;
+  border: 1px solid var(--error-border);
+  background: var(--error-bg);
+  color: var(--error-text);
+  border-radius: 6px;
+}
+
+/* The panel's notices: spanning under the fields and the Run column alike. */
+.pg-exec-notice {
+  padding: 0 16px 10px;
+}
+
+/* Run fills the footer's width, the warning above it. */
+.eval-run-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.eval-run-control > .pg-run-btn {
+  width: 100% !important;
+}
+
+/* A full row of the panel's body, which lays its fields out side by side. */
+.eval-run-options {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.eval-run-options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.eval-run-concurrency {
+  justify-content: space-between;
+}
+
+/* The footer shrink-wraps its content, so the warning's one-line width would
+   set the footer's — a zero basis with a full-width minimum keeps it out of
+   that sizing and wraps it to what the Run button makes. */
+.eval-run-warning {
+  width: 0;
+  min-width: 100%;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--notice-text);
+}
+
+.eval-runs {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.eval-runs-scroll {
+  overflow-x: auto;
+}
+
+.eval-runs td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--trace-border);
+  white-space: nowrap;
+}
+
+.eval-run-row {
+  cursor: pointer;
+}
+
+.eval-run-row:hover {
+  background: var(--trace-row-hover);
+}
+
+/* The last column: a red trash can, at the right of each row. */
+.eval-run-actions {
+  width: 1%;
+  text-align: right;
+}
+
+.eval-run-delete {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  color: var(--delete-hover-text);
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.eval-run-delete:hover {
+  opacity: 1;
+}
+
+.eval-run-delete:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.eval-run-counts span + span {
+  margin-left: 8px;
+}
+
+.eval-count-fail,
+.eval-count-error,
+.eval-status-error {
+  color: var(--annotation-issue-fg);
+}
+
+.eval-badge {
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 10.5px;
+  padding: 0 6px;
+  border: 1px solid var(--trace-border);
+  border-radius: 8px;
+  color: var(--trace-text-dim);
+}
+
+.eval-arm-summaries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.eval-arm-summary {
+  min-width: 180px;
+  border: 1px solid var(--trace-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.eval-arm-label {
+  font-weight: 600;
+}
+
+.eval-arm-check {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.eval-arm-rate {
+  font-variant-numeric: tabular-nums;
+}
+
+.eval-arm-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--trace-text-dim);
+  font-size: 11px;
+}
+
+.eval-compare-summary {
+  margin: 0;
+  color: var(--trace-text-dim);
+}
+
+.eval-grid-scroll {
+  overflow: auto;
+}
+
+.eval-grid {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.eval-grid th,
+.eval-grid td {
+  border: 1px solid var(--trace-border);
+  padding: 3px 8px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.eval-grid th {
+  font-weight: 600;
+  color: var(--trace-text-dim);
+}
+
+.eval-grid-row {
+  color: var(--trace-text-dim);
+}
+
+.eval-cell {
+  cursor: pointer;
+}
+
+.eval-cell-pass {
+  background: var(--annotation-good-bg);
+  color: var(--annotation-good-fg);
+}
+
+.eval-cell-fail,
+.eval-cell-error {
+  background: var(--annotation-issue-bg);
+  color: var(--annotation-issue-fg);
+}
+
+.eval-cell-skipped {
+  color: var(--trace-text-dim);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.eval-cell-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.eval-cell-changed {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.eval-cell-regressed {
+  box-shadow: inset 0 0 0 2px var(--annotation-issue-fg);
+}
+
+.eval-cell-detail {
+  border: 1px solid var(--trace-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.eval-cell-message {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  font-size: 12px;
+}
+
+/* The trace's check results, under its annotations. */
+.trace-checks {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--trace-border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trace-check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.trace-check-outcome {
+  font-weight: 600;
+  min-width: 48px;
+}
+
+.trace-check-pass .trace-check-outcome {
+  color: var(--annotation-good-fg);
+}
+
+.trace-check-fail .trace-check-outcome,
+.trace-check-error .trace-check-outcome {
+  color: var(--annotation-issue-fg);
+}
+
+.trace-check-meta {
+  color: var(--trace-text-dim);
+}
+
+.trace-check-message {
+  flex-basis: 100%;
+  padding-left: 56px;
+  color: var(--trace-text-dim);
+  white-space: pre-wrap;
+}
+
+/* The eval screen shares the playground's split (`PromptSplit`); these are
+   what's its own: the header's links, and the left column's sections. */
+.eval-view > .pg-playground-wrapper {
+  height: 100%;
+}
+
+.eval-header-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.eval-header-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--panel-text-secondary);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.eval-header-link:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.eval-header-link:disabled {
+  cursor: default;
+  color: var(--error-text);
+}
+
+.eval-header-link-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eval-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 640px;
+}
+
+.eval-select-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: var(--panel-text-secondary);
+}
+
+.eval-select-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.eval-select {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 9px;
+  border: 1px solid var(--pill-border);
+  border-radius: 7px;
+  background: var(--pill-bg);
+  transition: background 0.1s;
+}
+
+.eval-select:hover {
+  background: var(--pill-hover-bg);
+}
+
+.eval-select .proppy-catalog-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--prompt-header-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.eval-select .proppy-catalog-chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 20px;
+  line-height: 1;
+  color: #9ca3af;
+  transform: translateY(-0.1em);
+}

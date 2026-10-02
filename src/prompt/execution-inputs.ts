@@ -2,32 +2,28 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { materializeValue } from "ts-proppy";
-import type {
-  ExecutionInput,
-  PropDefinition,
-  PropType,
-} from "../shared/types.ts";
+import type { DatasetRow } from "../dataset/dataset-types.ts";
+import {
+  type InputBindings,
+  type InputSlot,
+  inputKey,
+} from "../shared/input-references.ts";
+import type { ExecutionInput, PropType, PropValue } from "../shared/types.ts";
 import {
   type ResourceBinding,
   receiptKeyOf,
 } from "./playground/resource-registry.ts";
 
-/**
- * One place an input can be plugged in: a prompt's parameter, or any slot
- * nested inside one.
- *
- * Flattening the parameter tree into paths is what lets a source be matched
- * against a nested field — `toolsContext.list_tasks.db` — without the matching
- * rules having to know anything about the shape they are walking.
- */
-export interface InputSlot {
-  /** Dotted path from the root parameter (`taskId`, `ctx.db`). */
-  path: string;
-  /** The slot's own name — the last path segment. */
-  name: string;
-  /** The slot's type. */
-  type: PropType;
-}
+export {
+  collectInputSlots,
+  findInputCycle,
+  type InputBindings,
+  type InputSignature,
+  type InputSlot,
+  inputReferenceProblems,
+  MAX_SLOT_DEPTH,
+  namedBindings,
+} from "../shared/input-references.ts";
 
 /**
  * A candidate source for a slot, in whatever vocabulary the caller has.
@@ -52,40 +48,6 @@ export interface InputSource {
    * falls back to the name rule.
    */
   fitsType?: (type: PropType, path: string) => boolean;
-}
-
-/**
- * How deep to walk a parameter's type looking for nested slots.
- *
- * The checker-backed walk in `ts/slot-matching.ts` has to agree with this one,
- * or a slot would be offered a source at a path this side never produces.
- */
-export const MAX_SLOT_DEPTH = 4;
-
-/**
- * Flatten `definitions` into every slot a source could be matched against —
- * each parameter, plus the object properties nested inside it.
- *
- * Arrays and unions are not descended into: neither has a stable path a
- * saved input selection could still name after the value changes shape.
- *
- * @param definitions - The parameters to flatten.
- * @param prefix - Path prefix, used when recursing.
- */
-export function collectInputSlots(
-  definitions: readonly PropDefinition[],
-  prefix = "",
-  depth = 0,
-): InputSlot[] {
-  const slots: InputSlot[] = [];
-  for (const def of definitions) {
-    const path = prefix ? `${prefix}.${def.name}` : def.name;
-    slots.push({ path, name: def.name, type: def.type });
-    if (def.type.kind === "object" && depth + 1 < MAX_SLOT_DEPTH) {
-      slots.push(...collectInputSlots(def.type.properties, path, depth + 1));
-    }
-  }
-  return slots;
 }
 
 /**
@@ -198,6 +160,58 @@ function stableStringify(value: unknown): string {
 }
 
 /**
+ * What the `dataset` and `input` variants resolve against. Outside an eval
+ * run there's no row, and outside a run whose other slots are known there
+ * are no bindings; either variant then fails with a message that says so.
+ * See `specs/evals.md` §D.1.
+ */
+export interface ResolutionContext {
+  /** The dataset row being run, for `dataset` references. */
+  row?: Pick<DatasetRow, "cells">;
+  /** The run's own slot bindings, for `input` references. */
+  bindings?: InputBindings;
+}
+
+/** Reads `path` off a resolved value, `undefined` wherever a step is missing. */
+function readPath(value: unknown, path: readonly string[]): unknown {
+  let cursor = value;
+  for (const key of path) {
+    if (cursor === null || typeof cursor !== "object") return undefined;
+    cursor = (cursor as Record<string, unknown>)[key];
+  }
+  return cursor;
+}
+
+/**
+ * The binding at `path` within `bindings`, descending through `object`
+ * inputs and typed-in object values. Where the walk reaches something that
+ * has to be resolved first — a resource, a cell, another `input` — it stops,
+ * and `rest` is what to read off that node's value.
+ */
+export function bindingAt(
+  bindings: InputBindings,
+  half: "function" | "execute",
+  path: string,
+): { node: ExecutionInput | undefined; rest: string[] } {
+  const [head, ...segments] = path.split(".");
+  let node: ExecutionInput | undefined = (
+    half === "function" ? bindings.functionInputs : bindings.executeInputs
+  )[head];
+  const rest = [...segments];
+  while (node && rest.length > 0) {
+    if (node.kind === "object") {
+      node = node.properties[rest.shift()!];
+    } else if (node.kind === "value" && node.value.kind === "object") {
+      const child: PropValue | undefined = node.value.properties[rest.shift()!];
+      node = child ? { kind: "value", value: child } : undefined;
+    } else {
+      break;
+    }
+  }
+  return { node, rest };
+}
+
+/**
  * Turn one {@link ExecutionInput} into the concrete value to pass to a prompt.
  *
  * This runs server-side, which is the point: `materializeValue` has to be able
@@ -206,11 +220,31 @@ function stableStringify(value: unknown): string {
  *
  * @param input - The unresolved input.
  * @param resolveResource - Creates the value behind a `resource` reference.
+ * @param context - The row and bindings `dataset` and `input` references
+ *   resolve against. See {@link ResolutionContext}.
  */
-export async function resolveExecutionInput(
+export function resolveExecutionInput(
   input: ExecutionInput,
   resolveResource?: ResourceResolver,
+  context?: ResolutionContext,
 ): Promise<unknown> {
+  return resolveWithin(input, resolveResource, context ?? {}, []);
+}
+
+/**
+ * {@link resolveExecutionInput}, carrying the chain of `input` references
+ * being followed — the runtime backstop for a cycle the static check
+ * ({@link findInputCycle}) couldn't see, one assembled from dataset cells.
+ */
+async function resolveWithin(
+  input: ExecutionInput,
+  resolveResource: ResourceResolver | undefined,
+  context: ResolutionContext,
+  chain: readonly string[],
+): Promise<unknown> {
+  const recurse = (child: ExecutionInput, nextChain = chain) =>
+    resolveWithin(child, resolveResource, context, nextChain);
+
   switch (input.kind) {
     case "value":
       return materializeValue(input.value);
@@ -218,8 +252,7 @@ export async function resolveExecutionInput(
     case "object": {
       const entries = await Promise.all(
         Object.entries(input.properties).map(
-          async ([k, v]) =>
-            [k, await resolveExecutionInput(v, resolveResource)] as const,
+          async ([k, v]) => [k, await recurse(v)] as const,
         ),
       );
       return Object.fromEntries(entries);
@@ -247,8 +280,7 @@ export async function resolveExecutionInput(
         resolve: async () => {
           const entries = await Promise.all(
             Object.entries(input.args ?? {}).map(
-              async ([k, v]) =>
-                [k, await resolveExecutionInput(v, resolveResource)] as const,
+              async ([k, v]) => [k, await recurse(v)] as const,
             ),
           );
           return Object.fromEntries(entries);
@@ -258,10 +290,34 @@ export async function resolveExecutionInput(
       return resolveResource(input.uri, binding);
     }
 
-    case "dataset":
-      throw new Error(
-        `Dataset inputs are not implemented yet (referenced '${input.uri}').`,
+    case "dataset": {
+      if (!context.row) {
+        throw new Error(
+          `Column '${input.field}' can only be bound in an eval run, which runs a dataset row.`,
+        );
+      }
+      const cell = context.row.cells[input.field];
+      return cell === undefined ? undefined : recurse(cell);
+    }
+
+    case "input": {
+      if (!context.bindings) {
+        throw new Error(
+          `Input '${input.path}' names another slot, but this run has no slot bindings to read it from.`,
+        );
+      }
+      const key = inputKey(input.half, input.path);
+      if (chain.includes(key)) {
+        throw new Error(`Input cycle: ${[...chain, key].join(" → ")}`);
+      }
+      const { node, rest } = bindingAt(
+        context.bindings,
+        input.half,
+        input.path,
       );
+      if (!node) return undefined;
+      return readPath(await recurse(node, [...chain, key]), rest);
+    }
   }
 }
 
@@ -272,6 +328,8 @@ export async function resolveExecutionInput(
  * memoize: a run-scoped resource referenced by both a function input and an
  * execute input must be created **once** per run, which is only decidable when
  * every input is in view.
+ *
+ * @param context - What `dataset` and `input` references resolve against.
  */
 export async function resolveExecutionInputs(
   inputs: {
@@ -279,17 +337,21 @@ export async function resolveExecutionInputs(
     executeInputs?: Record<string, ExecutionInput>;
   },
   resolveResource?: ResourceResolver,
+  context?: ResolutionContext,
 ): Promise<{ functionParams: any[]; executeValues: Record<string, any> }> {
   const functionParams = await Promise.all(
     (inputs.functionInputs ?? []).map(i =>
-      resolveExecutionInput(i, resolveResource),
+      resolveExecutionInput(i, resolveResource, context),
     ),
   );
 
   const executeEntries = await Promise.all(
     Object.entries(inputs.executeInputs ?? {}).map(
       async ([name, input]) =>
-        [name, await resolveExecutionInput(input, resolveResource)] as const,
+        [
+          name,
+          await resolveExecutionInput(input, resolveResource, context),
+        ] as const,
     ),
   );
 
