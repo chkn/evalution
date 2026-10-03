@@ -757,6 +757,97 @@ test("a details-pane edit is saved when the grid is clicked, on the same row or 
   });
 });
 
+test("the details pane offers the linked prompt's resources, with their arguments", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  const seeded = {
+    uri: ".evalution/playground/tasks.ts#seededTask",
+    label: "Seeded task",
+    scope: "run" as const,
+    parameters: [{ ...TICKET, name: "title" }],
+  };
+  const blank = {
+    uri: ".evalution/playground/tasks.ts#blank",
+    label: "Blank task",
+    scope: "run" as const,
+  };
+  await mockDataset(
+    page,
+    {
+      ...SUPPORT,
+      prompt: { id: "src/support.ts#triage", providerId: "files" },
+    },
+    SUPPORT_ROWS,
+    SUPPORT_SHAPE,
+  );
+  const sent = await mockUpdates(page);
+  const component = await mount(
+    <DatasetViewHarness
+      providerId="local"
+      datasetId="tickets"
+      promptName="triage"
+      linkedPrompt={{
+        functionParameters: SUPPORT.fields.map(f => f.def),
+        inputSources: {
+          resources: [seeded, blank],
+          functionSlots: { task: [seeded.uri, blank.uri] },
+          executeSlots: {},
+          resourceSlots: { [seeded.uri]: { title: [] } },
+        },
+      }}
+    />,
+  );
+  await untilRowsShown(component);
+
+  await clickCell(page, 40, 1, true);
+  const pane = component.getByRole("region", { name: "Row details" });
+  await expect(pane.getByText("Blank task")).toBeVisible();
+
+  // Choosing a resource is saved at once.
+  await pane.getByRole("button", { name: "Source for task" }).click();
+  await page
+    .getByRole("menuitem", { name: "Seeded task", exact: true })
+    .click();
+  await expect
+    .poll(() => sent)
+    .toEqual([
+      {
+        updates: [
+          {
+            rowId: "r2",
+            cells: { "1": { kind: "resource", uri: seeded.uri } },
+          },
+        ],
+      },
+    ]);
+
+  // Its argument is typed in like any value: a draft until Enter.
+  const title = pane
+    .locator(".dataset-detail-editor")
+    .nth(1)
+    .locator("textarea");
+  await title.fill("Buy eggs");
+  expect(sent).toHaveLength(1);
+  await title.press("Enter");
+  await expect.poll(() => sent).toHaveLength(2);
+  expect(sent[1]).toEqual({
+    updates: [
+      {
+        rowId: "r2",
+        cells: {
+          "1": {
+            kind: "resource",
+            uri: seeded.uri,
+            args: { title: text("Buy eggs") },
+          },
+        },
+      },
+    ],
+  });
+});
+
 /** Serves one dataset, `tickets`, linked to a prompt, with a single row. */
 function mockLinkedDataset(page: Page) {
   return mockDataset(

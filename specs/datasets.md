@@ -748,12 +748,19 @@ string cell holding a template: the text editor would flatten its interpolation 
   server, dropping every optimistic edit on them (no per-edit undo: two overlapping failed edits
   can't be unwound in order).
 
-**In the row details pane** for everything inline can't do. Every `value` cell of any field gets
-`ItemEditor` against the field's `def`, as the panel does, and commits on blur or Enter rather than
-per keystroke. That covers templates, objects, and arrays such as `threadMsgs`. An empty cell of
-any field can be given a value the same way. `object` and `resource` cells stay read-only in both
-places: editing them means offering resources, which needs a prompt's `inputSources`, and a dataset
-has none (§J). A read-only cell can still be cleared.
+**In the row details pane** for everything inline can't do. Every field gets the execute panel's
+own `ExecutionInputEditor` against the field's `def`, and typed edits commit on blur or Enter
+rather than per keystroke. That covers templates, objects, and arrays such as `threadMsgs`, and an
+empty cell of any field can be given a value the same way.
+
+A dataset has no `inputSources` of its own (§J), so the pane borrows the linked prompt's: a field
+that matches a parameter by §B's rule takes that parameter's slots, whose paths are the field's as
+they stand since the names are equal. Resources, nested resource fields (`object` cells), and a
+resource's arguments are then picked and edited as in the panel, with the arguments shared by uri
+across the row's fields (§I of `resource-arguments.md`). Choosing or dropping a resource commits at
+once; a commit sends every field whose cell changed, as one `updateRows`. Without a linked prompt
+that's loaded, `object` and `resource` cells stay read-only, since the pane couldn't tell their
+resources from ones that are gone. A read-only cell can still be cleared.
 
 **Clearing a cell removes its key**, keeping rows sparse (§A).
 

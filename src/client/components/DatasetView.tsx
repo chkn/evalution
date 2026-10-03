@@ -53,6 +53,7 @@ import {
   renameDataset,
   updateDatasetRows,
 } from "../api";
+import { useStructurallyStable } from "../hooks/useStructurallyStable";
 import { DatasetAddField } from "./DatasetAddField";
 import { DatasetRowDetails } from "./DatasetRowDetails";
 import { DetailsPane, DetailsPaneHeader, useIsWide } from "./DetailsPane";
@@ -78,6 +79,7 @@ import {
   RowPager,
   serializeDatasetLayout,
 } from "./dataset-grid";
+import { datasetInputSources } from "./dataset-row-editing";
 import { GRID_HEADER_ICONS } from "./grid-sprites";
 import type { NewEvalSeed } from "./NewEvalDialog";
 import {
@@ -429,6 +431,12 @@ function DatasetView({
   }, [providerId, datasetId, version, reload, pager]);
 
   const linkedPrompt = dataset?.prompt ? findPrompt(dataset.prompt) : undefined;
+  // The linked prompt's resources, offered on the fields that match its
+  // parameters. Stable while their content is, so typing in the details pane
+  // doesn't remount its editors.
+  const rowSources = useStructurallyStable(
+    dataset ? datasetInputSources(dataset.fields, linkedPrompt) : undefined,
+  );
 
   const columns = useMemo(
     () =>
@@ -626,10 +634,16 @@ function DatasetView({
     [pager, providerId, datasetId, overview.rowCount],
   );
 
-  /** Sets or clears one cell of one row — the details pane's edits. */
-  const saveCell = useCallback(
-    (rowId: string, fieldId: string, cell: ExecutionInput | null) =>
-      saveEdits([{ rowId, fieldId, cell }]),
+  /** Sets or clears cells of one row, by field id — the details pane's edits. */
+  const saveCells = useCallback(
+    (rowId: string, cells: Record<string, ExecutionInput | null>) =>
+      saveEdits(
+        Object.entries(cells).map(([fieldId, cell]) => ({
+          rowId,
+          fieldId,
+          cell,
+        })),
+      ),
     [saveEdits],
   );
 
@@ -831,9 +845,8 @@ function DatasetView({
         dataset={dataset}
         row={selectedRow}
         onOpenTrace={onOpenTrace}
-        onChangeCell={(fieldId, cell) =>
-          saveCell(selectedRow.id, fieldId, cell)
-        }
+        onChangeCells={cells => saveCells(selectedRow.id, cells)}
+        sources={rowSources}
       />
     </>
   );
