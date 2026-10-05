@@ -8,6 +8,7 @@ import {
   type SortValue,
   sortItems,
 } from "./summary-list";
+import { ChevronIcon } from "./trace/icons.tsx";
 
 /** One column of a {@link SummaryList} besides the always-shown Name. */
 export interface SummaryColumn<T> {
@@ -45,6 +46,12 @@ interface SummaryListProps<T> {
   itemTitle?: (item: T) => string;
   /** Shown before the name, e.g. a trace's status dot. */
   itemMarker?: (item: T) => ReactNode;
+  /**
+   * The items grouped under `item`, making it a group: a row that expands
+   * (collapsed at first) to show them, indented, rather than being selected.
+   * `undefined` for an ordinary item.
+   */
+  itemChildren?: (item: T) => T[] | undefined;
   selectedKey: string | null;
   onSelect: (item: T) => void;
   defaultSort: SortState;
@@ -88,6 +95,60 @@ function SortableHeader({
         </span>
       </button>
     </th>
+  );
+}
+
+/** One row of a {@link SummaryList}, in either layout. */
+interface ListRow<T> {
+  item: T;
+  key: string;
+  /** Set for a group: its items. */
+  children?: T[];
+  /** Whether a group is expanded. */
+  open?: boolean;
+  /** Whether the row is one of a group's items. */
+  child?: boolean;
+}
+
+/** A row's class names: `base`, plus its modifiers. */
+function rowClassName<T>(
+  base: string,
+  row: ListRow<T>,
+  selectedKey: string | null,
+): string {
+  let name = base;
+  if (row.key === selectedKey) name += ` ${base}-selected`;
+  if (row.children) name += ` ${base}-group`;
+  if (row.child) name += ` ${base}-child`;
+  return name;
+}
+
+/**
+ * A row's name, in either layout: after a group's chevron and the marker, and
+ * before a group's count.
+ */
+function RowLabel<T>({
+  row,
+  itemName,
+  itemMarker,
+}: {
+  row: ListRow<T>;
+  itemName: (item: T) => string;
+  itemMarker?: (item: T) => ReactNode;
+}) {
+  return (
+    <>
+      {row.children && (
+        <span className="trace-list-chevron">
+          <ChevronIcon open={!!row.open} />
+        </span>
+      )}
+      {itemMarker?.(row.item)}
+      <span className="trace-list-name">{itemName(row.item)}</span>
+      {row.children && (
+        <span className="trace-list-group-count">{row.children.length}</span>
+      )}
+    </>
   );
 }
 
@@ -172,11 +233,33 @@ export function SummaryList<T>({
   itemName,
   itemTitle = itemName,
   itemMarker,
+  itemChildren,
   selectedKey,
   onSelect,
   defaultSort,
 }: SummaryListProps<T>) {
   const [sort, setSort] = useState<SortState>(defaultSort);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const toggleExpanded = (key: string) =>
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+
+  // Reveal a newly selected item inside a collapsed group (one opened from
+  // elsewhere, say) — once, so the user can still collapse it afterwards.
+  const [revealedKey, setRevealedKey] = useState(selectedKey);
+  if (selectedKey !== revealedKey) {
+    setRevealedKey(selectedKey);
+    const group = items.find(item =>
+      itemChildren?.(item)?.some(child => itemKey(child) === selectedKey),
+    );
+    const groupKey = group && itemKey(group);
+    if (groupKey !== undefined && !expanded.has(groupKey)) {
+      setExpanded(prev => new Set(prev).add(groupKey));
+    }
+  }
 
   const header = (
     <div className="section-panel-header">
@@ -205,12 +288,32 @@ export function SummaryList<T>({
   }
 
   const sortColumn = columns.find(c => c.key === sort.key);
-  const sorted =
+  const sortList = (list: T[]) =>
     sort.key === "name"
-      ? sortItems(items, itemName, sort.dir)
+      ? sortItems(list, itemName, sort.dir)
       : sortColumn?.sortValue
-        ? sortItems(items, sortColumn.sortValue, sort.dir)
-        : items;
+        ? sortItems(list, sortColumn.sortValue, sort.dir)
+        : list;
+  // Groups sort among the other items, and their own items among themselves.
+  const rows: ListRow<T>[] = sortList(items).flatMap(item => {
+    const key = itemKey(item);
+    const children = itemChildren?.(item);
+    if (!children) return [{ item, key }];
+    const open = expanded.has(key);
+    return [
+      { item, key, children, open },
+      ...(open
+        ? sortList(children).map(child => ({
+            item: child,
+            key: itemKey(child),
+            child: true,
+          }))
+        : []),
+    ];
+  });
+  // A group's row toggles it; any other row selects its item.
+  const onRowClick = (row: ListRow<T>) =>
+    row.children ? toggleExpanded(row.key) : onSelect(row.item);
   const cardColumns = columns.slice(0, cardColumnCount);
   const onSort = (key: string) => setSort(prev => nextSort(prev, key));
 
@@ -222,18 +325,25 @@ export function SummaryList<T>({
             gets too narrow for the table's columns (its meta row disappears
             below that). */}
         <div className="trace-list-cards">
-          {sorted.map(item => {
-            const key = itemKey(item);
+          {rows.map(row => {
+            const { item } = row;
             return (
               <div
-                key={key}
-                className={`trace-list-row${key === selectedKey ? " trace-list-row-selected" : ""}`}
-                onClick={() => onSelect(item)}
+                key={row.key}
+                className={rowClassName("trace-list-row", row, selectedKey)}
+                onClick={() => onRowClick(row)}
                 title={itemTitle(item)}
+                {...(row.children && {
+                  role: "button",
+                  "aria-expanded": row.open,
+                })}
               >
                 <div className="trace-list-row-top">
-                  {itemMarker?.(item)}
-                  <span className="trace-list-name">{itemName(item)}</span>
+                  <RowLabel
+                    row={row}
+                    itemName={itemName}
+                    itemMarker={itemMarker}
+                  />
                 </div>
                 <div className="trace-list-row-meta">
                   {cardColumns.map(column => {
@@ -296,19 +406,23 @@ export function SummaryList<T>({
             </tr>
           </thead>
           <tbody>
-            {sorted.map(item => {
-              const key = itemKey(item);
+            {rows.map(row => {
+              const { item } = row;
               return (
                 <tr
-                  key={key}
-                  className={`trace-table-row${key === selectedKey ? " trace-table-row-selected" : ""}`}
-                  onClick={() => onSelect(item)}
+                  key={row.key}
+                  className={rowClassName("trace-table-row", row, selectedKey)}
+                  onClick={() => onRowClick(row)}
                   title={itemTitle(item)}
+                  aria-expanded={row.children ? row.open : undefined}
                 >
                   <td>
                     <div className="trace-table-name-cell">
-                      {itemMarker?.(item)}
-                      <span className="trace-list-name">{itemName(item)}</span>
+                      <RowLabel
+                        row={row}
+                        itemName={itemName}
+                        itemMarker={itemMarker}
+                      />
                     </div>
                   </td>
                   {columns.map(column => (

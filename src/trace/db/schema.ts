@@ -89,6 +89,8 @@ export const spans = sqliteTable(
 
     /** JSON `Record<string, unknown>`. */
     attributes: text("attributes"),
+    /** JSON `Record<string, unknown>`: the OTel resource that produced the span. */
+    resource: text("resource"),
     /** JSON `PromptID`. */
     prompt: text("prompt"),
     /** JSON `ToolSpanDetails`. */

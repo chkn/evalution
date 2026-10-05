@@ -19,7 +19,10 @@ import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import { CostFetchingTraceSink } from "../trace/cost-fetching-trace-sink.ts";
 import { LocalDatabaseTraceProvider } from "../trace/local-database-trace-provider.ts";
 import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
-import type { TraceIngestor } from "../trace/trace-ingestor.ts";
+import {
+  PLAYGROUND_RESOURCE,
+  type TraceIngestor,
+} from "../trace/trace-ingestor.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
 import { isTraceSink } from "../trace/trace-sink.ts";
 
@@ -129,6 +132,13 @@ export async function setUpProject(
   const ingestors: TraceIngestor[] = [];
   for (const ing of collected) {
     if (!ingestors.some(kept => kept.isRedundant?.(ing))) ingestors.push(ing);
+  }
+
+  // Everything those record is a run this server made itself — from the
+  // playground, an eval, or an MCP client. The OTLP ingestor below keeps
+  // whatever resource the exporting app sends.
+  for (const ingestor of ingestors) {
+    ingestor.setResource?.(PLAYGROUND_RESOURCE);
   }
 
   // The process's single OTLP ingestor, so an external app can export traces

@@ -48,6 +48,7 @@ CREATE TABLE spans (
   llm_output            TEXT,           -- JSON: always encoded, so a text output is a JSON string
   llm_parameters        TEXT,           -- JSON object of model parameters (temperature, ...)
   attributes            TEXT,           -- JSON object of free-form attributes
+  resource              TEXT,           -- JSON object: the OTel resource that produced the span ("service.name", "deployment.environment.name" = 'playground' for runs evalution made, ...)
   prompt                TEXT,           -- JSON {id, providerId?, version?, variation?, functionInputs?, executeInputs?, ...}: the prompt this span ran
   tool                  TEXT            -- JSON {toolName, input, output?} for TOOL spans
 );

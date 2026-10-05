@@ -488,3 +488,105 @@ test.describe("row height at the smallest layout", () => {
     expect(narrowRow.nameOffset).toBe(wideRow.nameOffset);
   });
 });
+
+test.describe("eval-run groups", () => {
+  const evalRun = {
+    providerId: "ev",
+    evalId: "e1",
+    evalName: "Answers eval",
+    runId: "r1",
+    startedAt: 1_757_336_000_000,
+  };
+  const TRACES: TraceSummary[] = [
+    {
+      id: "solo",
+      providerId: "p1",
+      name: "playground run",
+      startTime: 1_757_400_000_000,
+      endTime: 1_757_400_001_000,
+      status: "ok",
+      spanCount: 1,
+      annotationCounts: { issue: 0, good: 0, note: 0 },
+    },
+    ...["cats", "dogs"].map(
+      (id, i): TraceSummary => ({
+        id,
+        providerId: "p1",
+        name: `answer ${id}`,
+        startTime: 1_757_336_000_000 + i * 1000,
+        endTime: 1_757_336_000_500 + i * 1000,
+        status: "ok",
+        spanCount: 2,
+        annotationCounts: { issue: 0, good: 0, note: 0 },
+        evalRun,
+      }),
+    ),
+  ];
+
+  for (const [layout, width, rowClass] of [
+    ["cards", 260, ".trace-list-row"],
+    ["table", 420, ".trace-table-row"],
+  ] as const) {
+    test(`${layout}: a run's traces start collapsed under one row, and expand indented`, async ({
+      mount,
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 700 });
+      const component = await mount(<TraceListHarness traces={TRACES} />);
+      const rows = component.locator(rowClass);
+      const group = rows.filter({ hasText: "Answers eval" });
+
+      await expect(rows).toHaveCount(2);
+      await expect(group).toHaveAttribute("aria-expanded", "false");
+      await expect(group.locator(".trace-list-group-count")).toHaveText("2");
+
+      await group.click();
+      await expect(group).toHaveAttribute("aria-expanded", "true");
+      await expect(rows).toHaveCount(4);
+      const children = component.locator(`${rowClass}-child`);
+      await expect(children).toHaveCount(2);
+
+      // Indented: a child's name starts right of its group's.
+      const groupX = (await group.locator(".trace-list-name").boundingBox())!.x;
+      const childX = (await children
+        .first()
+        .locator(".trace-list-name")
+        .boundingBox())!.x;
+      expect(childX).toBeGreaterThan(groupX);
+
+      // A child selects its trace; the group itself never is selected.
+      await children.first().click();
+      await expect(children.first()).toHaveClass(/-selected/);
+      await expect(group).not.toHaveClass(/-selected/);
+
+      await group.click();
+      await expect(rows).toHaveCount(2);
+    });
+  }
+});
+
+test("a stretch of playground runs starts collapsed under one Playground row", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 420, height: 700 });
+  const traces: TraceSummary[] = [2, 1].map(i => ({
+    id: `p${i}`,
+    providerId: "p1",
+    name: `run ${i}`,
+    startTime: 1_757_336_000_000 + i * 1000,
+    endTime: 1_757_336_000_500 + i * 1000,
+    status: "ok",
+    spanCount: 1,
+    annotationCounts: { issue: 0, good: 0, note: 0 },
+    environment: "playground",
+  }));
+  const component = await mount(<TraceListHarness traces={traces} />);
+  const rows = component.locator(".trace-table-row");
+
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText("Playground");
+  await expect(rows.first()).toHaveAttribute("title", "Playground — 2 runs");
+  await rows.first().click();
+  await expect(component.locator(".trace-table-row-child")).toHaveCount(2);
+});

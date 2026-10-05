@@ -89,6 +89,7 @@ function spanToRow(span: Span) {
       ? JSON.stringify(span.llm.modelParameters)
       : null,
     attributes: span.attributes ? JSON.stringify(span.attributes) : null,
+    resource: span.resource ? JSON.stringify(span.resource) : null,
     prompt: span.prompt ? JSON.stringify(span.prompt) : null,
     tool: span.tool ? JSON.stringify(span.tool) : null,
   };
@@ -131,6 +132,7 @@ function rowToSpan(row: typeof spans.$inferSelect): Span {
     status: row.status ?? undefined,
     errorMessage: row.errorMessage ?? undefined,
     attributes: parseJson(row.attributes),
+    resource: parseJson(row.resource),
     ...(hasLlm && { llm }),
     prompt: parseJson(row.prompt),
     tool: parseJson(row.tool),
@@ -249,7 +251,8 @@ export class TursoTraceProvider extends BaseTraceProvider {
     // span set both. `model` is the one model every model-reporting span
     // agrees on (`model_count = 1`), else NULL. `promptVersion` and
     // `promptVariation` come off whichever span recorded the run's prompt
-    // reference — its root, in practice.
+    // reference — its root, in practice. `environment` is the root span's
+    // resource's `deployment.environment.name`.
     const spanRollups = this.db
       .select({
         traceId: spans.traceId,
@@ -269,6 +272,10 @@ export class TursoTraceProvider extends BaseTraceProvider {
         promptVariation:
           sql`min(json_extract(${spans.prompt}, '$.variation'))`.as(
             "promptVariation",
+          ),
+        environment:
+          sql`max(case when ${spans.parentId} is null then json_extract(${spans.resource}, '$."deployment.environment.name"') end)`.as(
+            "environment",
           ),
       })
       .from(spans)
@@ -308,6 +315,7 @@ export class TursoTraceProvider extends BaseTraceProvider {
         model: sql<string | null>`${spanRollups.model}`,
         promptVersion: sql<string | null>`${spanRollups.promptVersion}`,
         promptVariation: sql<string | null>`${spanRollups.promptVariation}`,
+        environment: sql<string | null>`${spanRollups.environment}`,
         annotIssue: sql<number>`coalesce(${annotationCounts.issue}, 0)`,
         annotGood: sql<number>`coalesce(${annotationCounts.good}, 0)`,
         annotNote: sql<number>`coalesce(${annotationCounts.note}, 0)`,
@@ -333,6 +341,7 @@ export class TursoTraceProvider extends BaseTraceProvider {
       ...(row.promptVariation != null && {
         promptVariation: row.promptVariation,
       }),
+      ...(row.environment != null && { environment: row.environment }),
       annotationCounts: {
         issue: Number(row.annotIssue),
         good: Number(row.annotGood),

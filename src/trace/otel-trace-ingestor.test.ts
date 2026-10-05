@@ -8,6 +8,7 @@ import type { Span, TraceStreamEvent } from "../shared/types.ts";
 import { MemoryTraceProvider } from "./memory-trace-provider.ts";
 import { OTelTraceIngestor } from "./otel-trace-ingestor.ts";
 import { mergeSpans } from "./span-merge.ts";
+import { PLAYGROUND_RESOURCE } from "./trace-ingestor.ts";
 import {
   PROMPT_ID_ATTRIBUTE,
   PROMPT_INPUTS_ATTRIBUTE,
@@ -43,6 +44,28 @@ describe("OTelTraceIngestor", () => {
     expect(loaded?.spans).toHaveLength(1);
     expect(loaded?.spans[0].kind).toBe("LLM");
     expect(loaded?.spans[0].endTime).toBeDefined();
+  });
+
+  it("records the span's resource, with the ingestor's own merged over it", async () => {
+    const ingestor = new OTelTraceIngestor();
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
+    ingestor.setResource(PLAYGROUND_RESOURCE);
+    const tracer = makeTracer(ingestor);
+
+    const span = tracer.startSpan("hello");
+    const { traceId } = span.spanContext();
+    span.end();
+
+    await ingestor.drainPendingHandlers();
+    const [root] = (await provider.getTrace(traceId))!.spans;
+    // The SDK's default resource, with its `unknown_service` name replaced.
+    expect(root!.resource).toMatchObject({
+      "telemetry.sdk.name": "opentelemetry",
+      "service.name": "evalution",
+      "deployment.environment.name": "playground",
+    });
+    expect((await provider.getAllTraces())[0]!.environment).toBe("playground");
   });
 
   it("reads the run's inputs back, so the OTel path can replay too", async () => {
@@ -331,6 +354,17 @@ describe("mergeSpans", () => {
   it("unions attributes from both snapshots", () => {
     const merged = mergeSpans(base, { ...base, attributes: { "at.end": "b" } });
     expect(merged.attributes).toEqual({ "at.start": "a", "at.end": "b" });
+  });
+
+  it("unions resources from both snapshots", () => {
+    const merged = mergeSpans(
+      { ...base, resource: { "service.name": "shop" } },
+      { ...base, resource: { "service.version": "2" } },
+    );
+    expect(merged.resource).toEqual({
+      "service.name": "shop",
+      "service.version": "2",
+    });
   });
 
   it("fills in end-only fields without dropping start-only data", () => {

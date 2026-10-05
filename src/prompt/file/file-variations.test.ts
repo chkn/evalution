@@ -16,6 +16,7 @@ import { runVariationMigrations } from "../variations/db/migrate.ts";
 import { TursoVariationStore } from "../variations/turso-variation-store.ts";
 import type {
   HeadState,
+  VersionHistoryOptions,
   VersioningAdapter,
 } from "../versioning/versioning-adapter.ts";
 import { FilePromptProvider } from "./file-prompt-provider.ts";
@@ -88,13 +89,16 @@ class MemoryVersioning implements VersioningAdapter {
     return this.commits.find(c => c.info.id === version)?.files.get(rel);
   }
 
-  async history(rel: string) {
-    return this.commits
+  async history(rel: string, { limit, before }: VersionHistoryOptions = {}) {
+    let history = this.commits
       .filter(
         (c, i) => c.files.get(rel) !== this.commits[i - 1]?.files.get(rel),
       )
       .map(c => c.info)
       .reverse();
+    if (before)
+      history = history.slice(history.findIndex(v => v.id === before) + 1);
+    return history.slice(0, limit);
   }
 
   async get(id: string) {
@@ -572,6 +576,23 @@ describe("FilePromptProvider WIP variations", () => {
 
     const history = await provider.versions!.history(ID);
     expect(history.map(v => v.id)).toEqual([current, version]);
+  });
+
+  it("a prompt's history stops where it was renamed", async () => {
+    const { provider, fileProvider, versioning } = await setup();
+    await fileProvider.writeFile(FILE, SOURCE.replace("greet", "welcome"));
+    const renamed = await versioning.commit("renamed");
+    await fileProvider.writeFile(
+      FILE,
+      SOURCE.replace("greet", "welcome").replace("Hello", "Hi"),
+    );
+    const changed = await versioning.commit("changed");
+
+    const renamedId = "greet.prompt.ts#welcome";
+    const history = await provider.versions!.history(renamedId);
+    expect(history.map(v => v.id)).toEqual([changed, renamed]);
+    const limited = await provider.versions!.history(renamedId, { limit: 1 });
+    expect(limited.map(v => v.id)).toEqual([changed]);
   });
 
   it("editing an old version makes a WIP there, which opens on head", async () => {

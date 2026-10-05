@@ -238,6 +238,21 @@ describe("eval routes", () => {
       expect.objectContaining({ providerId: "ev", outcome: "pass" }),
     ]);
 
+    // The trace list says which run the trace came from.
+    const traces = await call("GET", "/api/traces");
+    expect(traces.body).toEqual([
+      expect.objectContaining({
+        id: traceId,
+        evalRun: {
+          providerId: "ev",
+          evalId: def.id,
+          evalName: "Answers",
+          runId: started.body.id,
+          startedAt: started.body.startedAt,
+        },
+      }),
+    ]);
+
     // Over: nothing to cancel.
     expect(
       (await call("POST", `/api/eval-runs/ev/${started.body.id}/cancel`))

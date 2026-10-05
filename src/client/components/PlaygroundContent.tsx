@@ -42,6 +42,7 @@ function NewVariantIcon() {
   );
 }
 */
+import { shortId } from "../../shared/helpers";
 import type {
   ConflictChoices,
   ExecuteResponse,
@@ -273,6 +274,8 @@ function PlaygroundContent({
       setRefPrompt(null);
       return;
     }
+    // Not yet shown: the user just picked it, or it's the tab's first read.
+    const firstRead = loadedFor !== currentRefKey;
     // A version or named variation never changes: one read before, it
     // shows at once — refreshed below, for head's annotations.
     const cached = refCache.current.get(currentRefKey);
@@ -295,8 +298,14 @@ function PlaygroundContent({
         }
         adopt(read);
       })
-      .catch(() => {
+      .catch(err => {
         if (cancelled) return;
+        // One just picked says why it didn't open; one already shown that
+        // stopped resolving just goes back to head.
+        if (firstRead) {
+          const what = ref.version ? shortId(ref.version) : "this variation";
+          setError(`Can't open ${what}: ${err.message}`);
+        }
         setRefPrompt(null);
         onRefChange?.(undefined);
         onRefresh?.();

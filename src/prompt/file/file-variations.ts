@@ -16,6 +16,7 @@ import type {
   VariationId,
   VariationInfo,
   VersionId,
+  VersionInfo,
 } from "../../shared/types.ts";
 import {
   type OpenOnHeadOptions,
@@ -46,6 +47,7 @@ import type {
 } from "../variations/variation-store.ts";
 import type {
   HeadState,
+  VersionHistoryOptions,
   VersioningAdapter,
 } from "../versioning/versioning-adapter.ts";
 import type {
@@ -1063,13 +1065,38 @@ export class FileVariations {
     });
   }
 
+  /**
+   * The versions that changed `promptId`'s file, newest first, back to where
+   * the prompt was created or renamed: before that, its file holds no prompt
+   * by this name — or someone else's — and there's nothing to open.
+   */
+  private async promptHistory(
+    promptId: string,
+    options?: VersionHistoryOptions,
+  ): Promise<VersionInfo[]> {
+    // What it returns is a prefix of the file's history, so `limit` applies
+    // to that as is.
+    const all = await this.requireVersioning().history(
+      this.relativePathOf(promptId),
+      options,
+    );
+    const history: VersionInfo[] = [];
+    for (const version of all) {
+      const prompt = await this.promptAtVersion(version.id, promptId).catch(
+        () => undefined,
+      );
+      if (!prompt) break;
+      history.push(version);
+    }
+    return history;
+  }
+
   // ── The public capabilities ───────────────────────────────────────────────
 
   /** {@link PromptVersions} over this provider's versioning adapter. */
   readonly versions: PromptVersions = {
     head: () => this.requireVersioning().head(),
-    history: (promptId, options) =>
-      this.requireVersioning().history(this.relativePathOf(promptId), options),
+    history: (promptId, options) => this.promptHistory(promptId, options),
     get: id => this.requireVersioning().get(id),
   };
 

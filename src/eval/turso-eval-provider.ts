@@ -8,7 +8,7 @@
  */
 
 import type { Database } from "@tursodatabase/sync";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import type { ExecutionInput } from "../shared/types.ts";
 import type { PromptID } from "../trace/trace-types.ts";
@@ -36,6 +36,7 @@ import {
   type EvalRunStatus,
   type EvalRunSummary,
   type EvalSummary,
+  type EvalTraceRun,
   emptyCounts,
   type NewEvalDefinition,
   type NewEvalRun,
@@ -615,6 +616,34 @@ export class TursoEvalProvider implements EvalProvider {
         }
       }
       return out;
+    });
+  }
+
+  listTraceRuns(): Promise<EvalTraceRun[]> {
+    return this.serialize(async () => {
+      const rows = await this.db
+        .selectDistinct({
+          traceProviderId: evalRowResults.traceProviderId,
+          traceId: evalRowResults.traceId,
+          runId: evalRuns.id,
+          evalId: evals.id,
+          evalName: evals.name,
+          startedAt: evalRuns.startedAt,
+        })
+        .from(evalRowResults)
+        .innerJoin(evalRuns, eq(evalRuns.id, evalRowResults.runId))
+        .innerJoin(evals, eq(evals.id, evalRuns.evalId))
+        .where(
+          and(
+            isNotNull(evalRowResults.traceProviderId),
+            isNotNull(evalRowResults.traceId),
+          ),
+        );
+      return rows.map(row => ({
+        ...row,
+        traceProviderId: row.traceProviderId!,
+        traceId: row.traceId!,
+      }));
     });
   }
 

@@ -35,7 +35,11 @@ message Span {
   Status status = 15;
 }
 message ScopeSpans { repeated Span spans = 2; }
-message ResourceSpans { repeated ScopeSpans scope_spans = 2; }
+message Resource { repeated KeyValue attributes = 1; }
+message ResourceSpans {
+  Resource resource = 1;
+  repeated ScopeSpans scope_spans = 2;
+}
 message ExportTraceServiceRequest { repeated ResourceSpans resource_spans = 1; }
 `;
 const testRoot = protobuf.parse(TEST_PROTO, { keepCase: false }).root;
@@ -98,6 +102,41 @@ describe("decodeOtlpProtobuf + normalizeOtlpRequest", () => {
       temperature: 0.7,
       tags: ["a", "b"],
     });
+  });
+
+  it("carries each batch's resource onto its spans", () => {
+    const span = (id: string) => ({
+      traceId: hexToBytes("0102030405060708090a0b0c0d0e0f10"),
+      spanId: hexToBytes(id),
+      name: "chat",
+    });
+    const bytes = TestRequest.encode(
+      TestRequest.create({
+        resourceSpans: [
+          {
+            resource: {
+              attributes: [
+                { key: "service.name", value: { stringValue: "shop" } },
+                {
+                  key: "deployment.environment.name",
+                  value: { stringValue: "production" },
+                },
+              ],
+            },
+            scopeSpans: [{ spans: [span("0000000000000001")] }],
+          },
+          // No resource at all: nothing to carry.
+          { scopeSpans: [{ spans: [span("0000000000000002")] }] },
+        ],
+      }),
+    ).finish();
+
+    const [first, second] = normalizeOtlpRequest(decodeOtlpProtobuf(bytes));
+    expect(first!.resource).toEqual({
+      "service.name": "shop",
+      "deployment.environment.name": "production",
+    });
+    expect(second!.resource).toBeUndefined();
   });
 
   it("normalizes an error status and keeps the message", () => {

@@ -164,6 +164,9 @@ export class LocalEvalProvider implements EvalProvider {
       }
     );
   }
+  async listTraceRuns() {
+    return (await (await this.existing())?.listTraceRuns()) ?? [];
+  }
   async resultsForTrace(traceProviderId: string, traceId: string) {
     return (
       (await (

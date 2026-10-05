@@ -33,5 +33,14 @@ export const bundledMigrations: MigrationMeta[] = [
     "sql": [
       "-- SPDX\u002DLicense-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nALTER TABLE `spans` ADD `llm_finish_reason` text;\n"
     ]
+  },
+  {
+    "name": "20261005101155_charming_black_widow",
+    "hash": "3eb61759c7ce9c02589be63f49bba073391c4b671b286b002e43dcef58cf8cca",
+    "folderMillis": 1791195115000,
+    "bps": true,
+    "sql": [
+      "-- SPDX\u002DLicense-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nALTER TABLE `spans` ADD `resource` text;\n"
+    ]
   }
 ];

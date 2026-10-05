@@ -6,6 +6,7 @@ import type { Locator } from "@playwright/test";
 import {
   PlaygroundContentHarness,
   SavedVariationHarness,
+  VersionRefHarness,
 } from "./PlaygroundContentHarness";
 import { SAVED_VARIATION_ID, savedVariationPrompt } from "./saved-variation";
 
@@ -108,4 +109,27 @@ test("a saved variation shows read-only, with the way to edit it", async ({
   await expect(
     editor.getByRole("button", { name: /Add message/ }),
   ).toBeDisabled();
+});
+
+test("a version that can't be opened says why, and goes back to head", async ({
+  mount,
+  page,
+}) => {
+  const version = "f4e8ebab3cc3c59e285aa71e4634807221dcffa3";
+  await page.route("**/api/**", async route => {
+    const url = route.request().url();
+    if (url.includes(`version=${version}`)) {
+      await route.fulfill({ status: 404, json: { error: "Prompt not found" } });
+    } else if (url.includes("/model-parameters")) {
+      await route.fulfill({ json: [] });
+    } else {
+      await route.fulfill({ json: null });
+    }
+  });
+  const component = await mount(<VersionRefHarness version={version} />);
+
+  await expect(component.getByTestId("tab-ref")).toHaveText("head");
+  await expect(component.locator(".pg-header-error")).toContainText(
+    "Can't open f4e8eba: Prompt not found",
+  );
 });

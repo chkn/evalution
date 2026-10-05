@@ -478,7 +478,10 @@ export function createMcpServer(
             ? traceProviders.values()
             : [traceProvider(providerId)];
         const traces = unwrap<TraceSummary[]>(
-          await handleListTraces(providers),
+          await handleListTraces(providers, {
+            providers: context.evalProviders.values(),
+            runner: context.evalRunner,
+          }),
         ).sort((a, b) => b.startTime - a.startTime);
         return ok({
           total: traces.length,

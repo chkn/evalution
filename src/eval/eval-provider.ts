@@ -12,6 +12,7 @@ import type {
   EvalRunStatus,
   EvalRunSummary,
   EvalSummary,
+  EvalTraceRun,
   NewEvalDefinition,
   NewEvalRun,
   TraceCheckResult,
@@ -96,6 +97,12 @@ export interface EvalProvider {
     traceProviderId: string,
     traceId: string,
   ): Promise<TraceCheckResult[]>;
+
+  /**
+   * Every trace a recorded row result points at, with its run — so the trace
+   * list can group an eval run's traces.
+   */
+  listTraceRuns(): Promise<EvalTraceRun[]>;
 
   /**
    * Registers a callback invoked whenever an eval or one of its runs is

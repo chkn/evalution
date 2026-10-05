@@ -417,6 +417,35 @@ describe("EvalRunner", () => {
     expect(summary).toMatchObject({ drifted: true });
   });
 
+  it("links each row's trace to its run, in flight and once recorded", async () => {
+    const { runner, evals, def, prompts } = await setUp({
+      provider: { hang: () => true },
+      runner: { traceWait: { intervalMs: 5, timeoutMs: 20 } },
+    });
+    const run = await runner.start(evals, def.id, { concurrency: 1 });
+    while (prompts.calls.length === 0) await new Promise(r => setTimeout(r, 5));
+
+    // Dispatched but not recorded: only the runner knows.
+    const link = {
+      providerId: evals.id,
+      traceProviderId: "mem",
+      traceId: expect.any(String),
+      evalId: def.id,
+      evalName: "Answers",
+      runId: run.id,
+      startedAt: run.startedAt,
+    };
+    expect(runner.traceRuns()).toEqual([link]);
+    expect(await evals.listTraceRuns()).toEqual([]);
+
+    // A row stopped after it was dispatched keeps its trace.
+    runner.cancel(run.id);
+    await runner.finished(run.id);
+    expect(runner.traceRuns()).toEqual([]);
+    const { providerId: _, ...recorded } = link;
+    expect(await evals.listTraceRuns()).toEqual([recorded]);
+  });
+
   describe("a row that never settles", () => {
     it("errors after the row timeout, and the run still finishes", async () => {
       const { runner, evals, def } = await setUp({

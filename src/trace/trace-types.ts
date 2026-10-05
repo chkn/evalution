@@ -179,6 +179,12 @@ export interface Span {
   errorMessage?: string;
   /** Free-form attributes to show in the span's details pane. */
   attributes?: Record<string, unknown>;
+  /**
+   * The OpenTelemetry resource that produced the span: attributes describing
+   * the process or service it ran in rather than the span itself
+   * (`service.name`, `deployment.environment.name`, …).
+   */
+  resource?: Record<string, unknown>;
   /** LLM-specific details (present for `chat`/`completion`/`embedding` spans). */
   llm?: LLMSpanDetails;
   /**
@@ -231,9 +237,48 @@ export interface TraceSummary extends TraceBase {
   promptVersion?: string;
   /** The prompt variation the run applied (`PromptID.variation`). */
   promptVariation?: string;
+  /**
+   * The deployment environment the run happened in: its root span's
+   * resource's `deployment.environment.name` — `"playground"` for a run
+   * evalution itself made.
+   */
+  environment?: string;
   /** How many annotations of each kind are attached to the trace (trace-level or on any of its spans). */
   annotationCounts: Record<AnnotationKind, number>;
+  /**
+   * The eval run that produced the trace, if any. Trace providers never set
+   * it — the server fills it in when listing, from the eval providers' results
+   * and the runs in flight.
+   */
+  evalRun?: TraceEvalRun;
 }
+
+/** The eval run a trace came from — what the trace list groups by. */
+export interface TraceEvalRun {
+  /** The eval provider the run is recorded on. */
+  providerId: string;
+  evalId: string;
+  /** The eval's name. */
+  evalName: string;
+  runId: string;
+  /** When the run started (ms). */
+  startedAt: number;
+}
+
+/**
+ * The OpenTelemetry semantic-convention resource attribute naming the
+ * service that produced a span.
+ */
+export const SERVICE_NAME_ATTRIBUTE = "service.name";
+
+/**
+ * The OpenTelemetry semantic-convention resource attribute naming the
+ * deployment environment a span was produced in.
+ */
+export const DEPLOYMENT_ENVIRONMENT_ATTRIBUTE = "deployment.environment.name";
+
+/** {@link DEPLOYMENT_ENVIRONMENT_ATTRIBUTE}'s value on a run evalution itself made. */
+export const PLAYGROUND_ENVIRONMENT = "playground";
 
 /** A trace together with all of its spans. */
 export interface TraceWithSpans {

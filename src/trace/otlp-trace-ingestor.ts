@@ -69,6 +69,7 @@ function toSpan(s: NormalizedOtlpSpan): Span {
       errorMessage: s.statusMessage || eventErrorMessage(s.events),
     }),
     attributes: s.attributes,
+    ...(s.resource && { resource: s.resource }),
     ...llmAndPrompt(s.attributes),
   };
 }

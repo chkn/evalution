@@ -8,7 +8,12 @@
 // `src/trace/` modules). See LICENSING.md.
 
 import type { TraceSink } from "./trace-sink.ts";
-import type { Span } from "./trace-types.ts";
+import {
+  DEPLOYMENT_ENVIRONMENT_ATTRIBUTE,
+  PLAYGROUND_ENVIRONMENT,
+  SERVICE_NAME_ATTRIBUTE,
+  type Span,
+} from "./trace-types.ts";
 
 /**
  * A source of trace data. Translates some upstream signal (OTel spans, native
@@ -37,7 +42,24 @@ export interface TraceIngestor {
    * pipeline.
    */
   isRedundant?(other: TraceIngestor): boolean;
+
+  /**
+   * Optional: sets the resource attributes merged into every span this
+   * ingestor records from now on, over whatever resource the source itself
+   * reported. The server stamps {@link PLAYGROUND_RESOURCE} on the ingestors
+   * that record its own runs.
+   */
+  setResource?(resource: Record<string, unknown>): void;
 }
+
+/**
+ * The resource of every run evalution itself makes — from the playground, an
+ * eval, or an MCP client — as opposed to one an app exported to it.
+ */
+export const PLAYGROUND_RESOURCE: Readonly<Record<string, string>> = {
+  [SERVICE_NAME_ATTRIBUTE]: "evalution",
+  [DEPLOYMENT_ENVIRONMENT_ATTRIBUTE]: PLAYGROUND_ENVIRONMENT,
+};
 
 /**
  * Base class that holds the added sinks and fans each normalized record out
@@ -46,6 +68,17 @@ export interface TraceIngestor {
  */
 export abstract class BaseTraceIngestor implements TraceIngestor {
   protected sinks: TraceSink[] = [];
+  private resource?: Record<string, unknown>;
+
+  setResource(resource: Record<string, unknown>): void {
+    this.resource = { ...resource };
+  }
+
+  /** `span` with this ingestor's resource, if it has one, merged into its own. */
+  private withResource(span: Span): Span {
+    if (!this.resource) return span;
+    return { ...span, resource: { ...span.resource, ...this.resource } };
+  }
 
   addSink(sink: TraceSink): void {
     this.sinks.push(sink);
@@ -59,11 +92,13 @@ export abstract class BaseTraceIngestor implements TraceIngestor {
   }
 
   protected async recordSpanStart(span: Span): Promise<void> {
-    await Promise.all(this.sinks.map(s => s.recordSpanStart(span)));
+    const stamped = this.withResource(span);
+    await Promise.all(this.sinks.map(s => s.recordSpanStart(stamped)));
   }
 
   protected async recordSpanEnd(span: Span): Promise<void> {
-    await Promise.all(this.sinks.map(s => s.recordSpanEnd(span)));
+    const stamped = this.withResource(span);
+    await Promise.all(this.sinks.map(s => s.recordSpanEnd(stamped)));
   }
 
   protected async failTrace(traceId: string, msg: string): Promise<void> {

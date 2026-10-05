@@ -37,6 +37,8 @@ export interface NormalizedOtlpSpan {
   statusMessage?: string;
   attributes: Record<string, unknown>;
   events?: NormalizedOtlpEvent[];
+  /** The attributes of the resource the span was exported under, if any. */
+  resource?: Record<string, unknown>;
 }
 
 type Raw = any;
@@ -152,9 +154,12 @@ function normalizeSpan(s: Raw): NormalizedOtlpSpan {
 export function normalizeOtlpRequest(body: Raw): NormalizedOtlpSpan[] {
   const spans: NormalizedOtlpSpan[] = [];
   for (const rs of body?.resourceSpans ?? []) {
+    const resource = attributesToRecord(rs.resource?.attributes);
+    const hasResource = Object.keys(resource).length > 0;
     for (const ss of rs.scopeSpans ?? []) {
       for (const s of ss.spans ?? []) {
-        spans.push(normalizeSpan(s));
+        const span = normalizeSpan(s);
+        spans.push(hasResource ? { ...span, resource } : span);
       }
     }
   }

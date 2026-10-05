@@ -605,7 +605,13 @@ export function setupRoutes({
 
   // GET /api/traces - List all traces across all trace providers
   app.get("/api/traces", async c =>
-    relay(c, await handleListTraces(traceProviders.values())),
+    relay(
+      c,
+      await handleListTraces(traceProviders.values(), {
+        providers: context.evalProviders.values(),
+        runner: context.evalRunner,
+      }),
+    ),
   );
 
   // Trace provider routes: resolve the provider, then relay the neutral

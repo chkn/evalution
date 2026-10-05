@@ -110,6 +110,33 @@ export function runTraceProviderContractTests(
       });
     });
 
+    it("stores each span's resource, and summarizes the root's environment", async () => {
+      const provider = await makeProvider();
+      const resource = {
+        "service.name": "shop",
+        "deployment.environment.name": "production",
+      };
+      await provider.recordSpanStart(rootSpan("t1", { resource }));
+      // A span from another service, in another environment, doesn't count.
+      await provider.recordSpanStart({
+        ...rootSpan("t1"),
+        id: "child",
+        parentId: "t1:root",
+        resource: { "deployment.environment.name": "staging" },
+      });
+      await provider.recordSpanStart(rootSpan("t2"));
+
+      const loaded = (await provider.getTrace("t1")) as any;
+      expect(loaded.spans.find((s: Span) => !s.parentId).resource).toEqual(
+        resource,
+      );
+      const summaries = (await provider.getAllTraces()) as any[];
+      expect(summaries.find(s => s.id === "t1").environment).toBe("production");
+      expect(summaries.find(s => s.id === "t2")).not.toHaveProperty(
+        "environment",
+      );
+    });
+
     it("does not create a trace for a non-root span", async () => {
       const provider = await makeProvider();
       const child = rootSpan("t1", { id: "t1:child", parentId: "t1:root" });

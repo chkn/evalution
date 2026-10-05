@@ -16,6 +16,14 @@ function hrTimeToMs(time: HrTime): number {
   return time[0] * 1000 + time[1] / 1e6;
 }
 
+/** `span`'s resource attributes as a {@link Span.resource}, if it has any. */
+function resourceOf(span: ReadableSpan): Pick<Span, "resource"> {
+  const attributes = span.resource?.attributes;
+  return attributes && Object.keys(attributes).length > 0
+    ? { resource: { ...attributes } }
+    : {};
+}
+
 /**
  * {@link TraceIngestor} populated by OpenTelemetry spans. Register the
  * processor returned by {@link getSpanProcessor} on a `BasicTracerProvider`
@@ -74,6 +82,7 @@ export class OTelTraceIngestor extends BaseTraceIngestor {
       kind: readKind(span.attributes),
       startTime: hrTimeToMs(span.startTime),
       attributes: { ...span.attributes },
+      ...resourceOf(span),
       ...llmAndPrompt(span.attributes),
     };
     await this.recordSpanStart(ourSpan);
@@ -101,6 +110,7 @@ export class OTelTraceIngestor extends BaseTraceIngestor {
           ? span.status.message
           : undefined,
       attributes: { ...span.attributes },
+      ...resourceOf(span),
       ...llmAndPrompt(span.attributes),
     };
     await this.recordSpanEnd(ended);

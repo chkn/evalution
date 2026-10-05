@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   AnnotationKind,
@@ -44,6 +44,7 @@ import {
   traceVariationLabel,
   traceVersionLabel,
 } from "./trace-columns";
+import { groupTraces, type TraceListItem } from "./trace-groups";
 import { useAnchoredPopover } from "./use-anchored-popover";
 
 const COLUMN_STORAGE_KEY = "trace-list-columns";
@@ -253,6 +254,16 @@ interface TraceListProps {
   onResizeSidebar: (width: number) => void;
 }
 
+/** A row's tooltip: a trace's name, or what a group gathers. */
+function groupTitle(item: TraceListItem): string {
+  const { children } = item;
+  if (!children) return item.name;
+  const count = `${children.length} ${item.evalRun ? "trace" : "run"}${children.length === 1 ? "" : "s"}`;
+  return item.evalRun
+    ? `${item.name} — eval run started ${formatTimestampCompact(item.evalRun.startedAt)}, ${count}`
+    : `Playground — ${count}`;
+}
+
 const traceKey = (t: { providerId: string; id: string }) =>
   `${t.providerId}:${t.id}`;
 
@@ -341,6 +352,7 @@ function TraceList({
 }: TraceListProps) {
   const [columns, setColumns] = useState<TraceColumnState[]>(loadColumnState);
   const variations = useVariationLookups(traces, columns);
+  const items = useMemo(() => groupTraces(traces), [traces]);
 
   useEffect(() => {
     try {
@@ -372,7 +384,7 @@ function TraceList({
     }));
 
   return (
-    <SummaryList
+    <SummaryList<TraceListItem>
       title="Traces"
       headerActions={
         <>
@@ -398,10 +410,12 @@ function TraceList({
           <p className="trace-list-hint">Run a prompt to create one.</p>
         </>
       }
-      items={traces}
+      items={items}
       columns={visibleColumns}
       itemKey={traceKey}
       itemName={t => t.name}
+      itemTitle={groupTitle}
+      itemChildren={t => t.children}
       itemMarker={t => (
         <span className={`trace-status-dot trace-status-${t.status}`} />
       )}

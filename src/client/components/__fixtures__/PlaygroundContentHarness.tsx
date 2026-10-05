@@ -5,6 +5,7 @@ import { useState } from "react";
 import type {
   NormalizedMessage,
   NormalizedPrompt,
+  PromptRef,
   PropDefinition,
 } from "../../../shared/types";
 import PlaygroundContent from "../PlaygroundContent";
@@ -79,6 +80,34 @@ export function SavedVariationHarness() {
       <PlaygroundContent
         prompt={prompt}
         promptRef={{ promptId: "test", variation: SAVED_VARIATION_ID }}
+        onUpdate={setPrompt}
+        onDirtyChange={() => {}}
+      />
+    </div>
+  );
+}
+
+/**
+ * Mounts PlaygroundContent on a versioned prompt opened at `version`, and
+ * shows which version the tab is on after the ref changes.
+ */
+export function VersionRefHarness({ version }: { version: string }) {
+  const [prompt, setPrompt] = useState<NormalizedPrompt>({
+    ...makePrompt(1, []),
+    ref: { promptId: "test" },
+    atHead: true,
+  });
+  const [promptRef, setPromptRef] = useState<PromptRef | undefined>({
+    promptId: "test",
+    version,
+  });
+  return (
+    <div className="main-content" style={{ width: 900, height: 500 }}>
+      <output data-testid="tab-ref">{promptRef?.version ?? "head"}</output>
+      <PlaygroundContent
+        prompt={prompt}
+        promptRef={promptRef}
+        onRefChange={setPromptRef}
         onUpdate={setPrompt}
         onDirtyChange={() => {}}
       />

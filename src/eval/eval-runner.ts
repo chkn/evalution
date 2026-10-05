@@ -46,6 +46,7 @@ import type {
   EvalRun,
   EvalRunProgress,
   EvalRunStatus,
+  EvalTraceRun,
 } from "./eval-types.ts";
 import { emptyCounts } from "./eval-types.ts";
 import {
@@ -136,6 +137,10 @@ interface ActiveRun {
   counts: EvalCounts;
   drifted: boolean;
   finished: Promise<void>;
+  /** The eval's name as the run started with it. */
+  evalName: string;
+  /** The traces the run's rows have produced so far. */
+  traceIds: Set<string>;
 }
 
 /** Resolves after `ms`. */
@@ -287,6 +292,8 @@ export class EvalRunner {
       counts: emptyCounts(),
       drifted: false,
       finished: Promise.resolve(),
+      evalName: definition.name,
+      traceIds: new Set(),
     };
     this.active.set(run.id, active);
 
@@ -350,6 +357,24 @@ export class EvalRunner {
   /** Resolves once `runId` has finished, or at once when it isn't running. */
   async finished(runId: string): Promise<void> {
     await this.active.get(runId)?.finished;
+  }
+
+  /**
+   * The traces the runs in flight have produced so far, with their runs — so
+   * the trace list can group a run's traces before their rows are recorded.
+   */
+  traceRuns(): (EvalTraceRun & { providerId: string })[] {
+    return Array.from(this.active.values(), active =>
+      Array.from(active.traceIds, traceId => ({
+        providerId: active.provider.id,
+        traceProviderId: this.options.traceProviderId,
+        traceId,
+        evalId: active.run.evalId,
+        evalName: active.evalName,
+        runId: active.run.id,
+        startedAt: active.run.startedAt,
+      })),
+    ).flat();
   }
 
   private progress(active: ActiveRun, status: EvalRunStatus): void {
@@ -462,6 +487,8 @@ export class EvalRunner {
     job: Job,
     reason: string,
     status: EvalRowResult["status"] = "skipped",
+    /** The trace of a row that was dispatched before it stopped. */
+    traceId?: string,
   ): RowResults {
     const key = {
       runId: active.run.id,
@@ -474,6 +501,10 @@ export class EvalRunner {
         ...key,
         rowIndex: job.rowIndex,
         rowCells: job.row.cells,
+        ...(traceId && {
+          traceProviderId: this.options.traceProviderId,
+          traceId,
+        }),
         status,
         error: reason,
       },
@@ -559,6 +590,7 @@ export class EvalRunner {
       resolved = ran.resolved;
       settled = ran.settled;
       traceId = ran.response.traceId;
+      active.traceIds.add(traceId);
       version = ran.response.version;
       variation = ran.response.variation;
     } catch (err: any) {
@@ -590,6 +622,7 @@ export class EvalRunner {
             ? "The run was cancelled before this row finished"
             : `The prompt didn't finish within ${timeoutMs < 1000 ? `${timeoutMs}ms` : `${Math.round(timeoutMs / 1000)}s`}`,
           "error",
+          traceId,
         );
       }
       const { trace, incomplete } = await this.waitForTrace(traceId);

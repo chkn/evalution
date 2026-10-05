@@ -10,7 +10,7 @@
  * an N-row fetch per trace just to summarize it. Keep the two in sync.
  */
 
-import type { Span } from "./trace-types.ts";
+import { DEPLOYMENT_ENVIRONMENT_ATTRIBUTE, type Span } from "./trace-types.ts";
 
 /** Token/cost/model rollup across a trace's spans, as carried by `TraceSummary`. */
 export interface SpanRollup {
@@ -19,6 +19,7 @@ export interface SpanRollup {
   model?: string;
   promptVersion?: string;
   promptVariation?: string;
+  environment?: string;
 }
 
 /**
@@ -73,10 +74,15 @@ export function rollupSpans(spans: Span[]): SpanRollup {
     s => s.prompt?.version || s.prompt?.variation,
   )?.prompt;
 
+  const environment = spans.find(s => !s.parentId)?.resource?.[
+    DEPLOYMENT_ENVIRONMENT_ATTRIBUTE
+  ];
+
   return {
     totalTokens,
     cost,
     model,
+    ...(typeof environment === "string" && { environment }),
     ...(prompt?.version && { promptVersion: prompt.version }),
     ...(prompt?.variation && { promptVariation: prompt.variation }),
   };

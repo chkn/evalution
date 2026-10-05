@@ -39,6 +39,20 @@ describe("OtlpTraceIngestor", () => {
     expect(loaded?.spans[0].endTime).toBe(200);
   });
 
+  it("keeps the resource the app exported the span under", async () => {
+    const ingestor = new OtlpTraceIngestor();
+    const provider = new MemoryTraceProvider();
+    ingestor.addSink(provider);
+
+    const resource = { "deployment.environment.name": "production" };
+    await ingestor.ingest([span({ endTimeMs: 1, resource })]);
+
+    expect((await provider.getTrace("t1"))?.spans[0].resource).toEqual(
+      resource,
+    );
+    expect((await provider.getAllTraces())[0]!.environment).toBe("production");
+  });
+
   it("leaves a still-running trace when a span carries no end time", async () => {
     const ingestor = new OtlpTraceIngestor();
     const provider = new MemoryTraceProvider();

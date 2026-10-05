@@ -14,7 +14,7 @@ import type {
   VariationId,
   VersionId,
 } from "../shared/types.ts";
-import type { PromptID } from "../trace/trace-types.ts";
+import type { PromptID, TraceEvalRun } from "../trace/trace-types.ts";
 
 /** One check, as an eval uses it. See `specs/evals.md` §A. */
 export interface EvalCheck {
@@ -241,6 +241,12 @@ export interface TraceCheckResult extends EvalCheckResult {
   /** The check's label as the run's definition had it. */
   checkLabel: string;
   armLabel: string;
+}
+
+/** A trace an eval run produced, with the run — see `EvalProvider.listTraceRuns`. */
+export interface EvalTraceRun extends Omit<TraceEvalRun, "providerId"> {
+  traceProviderId: string;
+  traceId: string;
 }
 
 /** The kind of change an {@link EvalChangeEvent} describes. */

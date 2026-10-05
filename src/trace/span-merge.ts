@@ -8,10 +8,10 @@ import type { Span } from "./trace-types.ts";
  *
  * OpenTelemetry reports each span twice — at `onStart` (creation-time
  * attributes only) and at `onEnd` (the full set) — and the two snapshots can
- * carry complementary data. This unions their `attributes` and lets any
- * *defined* field on `incoming` update `existing`, so nothing recorded at start
- * is lost when the span ends, and end-only fields (status, timings, token
- * usage, …) are filled in.
+ * carry complementary data. This unions their `attributes` and `resource`,
+ * and lets any *defined* field on `incoming` update `existing`, so nothing
+ * recorded at start is lost when the span ends, and end-only fields (status,
+ * timings, token usage, …) are filled in.
  */
 export function mergeSpans(existing: Span, incoming: Span): Span {
   const merged = { ...existing } as Record<string, unknown>;
@@ -21,6 +21,9 @@ export function mergeSpans(existing: Span, incoming: Span): Span {
   const result = merged as unknown as Span;
   if (existing.attributes || incoming.attributes) {
     result.attributes = { ...existing.attributes, ...incoming.attributes };
+  }
+  if (existing.resource || incoming.resource) {
+    result.resource = { ...existing.resource, ...incoming.resource };
   }
   return result;
 }

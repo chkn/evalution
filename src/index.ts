@@ -81,6 +81,7 @@ export type {
   EvalRunStatus,
   EvalRunSummary,
   EvalSummary,
+  EvalTraceRun,
   NewEvalDefinition,
   NewEvalRun,
   TraceCheckResult,
@@ -304,6 +305,7 @@ export type {
   Trace,
   TraceChangeEvent,
   TraceChangeType,
+  TraceEvalRun,
   TraceLiveEvent,
   TraceProviderInfo,
   TraceStreamEvent,
@@ -367,9 +369,15 @@ export {
 export { mergeSpans } from "./trace/span-merge.ts";
 export {
   BaseTraceIngestor,
+  PLAYGROUND_RESOURCE,
   type TraceIngestor,
 } from "./trace/trace-ingestor.ts";
 export type { TraceProvider } from "./trace/trace-provider.ts";
 export { BaseTraceProvider, type TraceSink } from "./trace/trace-sink.ts";
-export { spanMessages } from "./trace/trace-types.ts";
+export {
+  DEPLOYMENT_ENVIRONMENT_ATTRIBUTE,
+  PLAYGROUND_ENVIRONMENT,
+  SERVICE_NAME_ATTRIBUTE,
+  spanMessages,
+} from "./trace/trace-types.ts";
 export { TursoTraceProvider } from "./trace/turso-trace-provider.ts";

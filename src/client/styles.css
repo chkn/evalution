@@ -1561,10 +1561,11 @@ pre {
   gap: 6px;
 }
 
-:where([data-theme="dark"]) .pg-ref-btn {
+:where([data-theme="dark"]) .pg-ref-btn:not(.pg-ref-btn--primary) {
   background: rgba(255, 255, 255, 0.06);
 }
-:where([data-theme="dark"]) .pg-ref-btn:hover:not(:disabled) {
+:where([data-theme="dark"])
+  .pg-ref-btn:not(.pg-ref-btn--primary):hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.11);
 }
 
@@ -3794,6 +3795,38 @@ pre {
   gap: 6px;
   overflow: hidden;
   color: var(--tree-text);
+}
+
+/* ─── Trace groups (both layouts) ────────────────────────────────────────── */
+/* An eval run's traces, or a stretch of playground runs, sit under one
+   collapsible group row, indented one step: past the group's chevron and
+   status dot (10px + 8px, plus a 6px gap after each), so their dots line up
+   under the group's name. */
+
+.trace-list-chevron {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 10px;
+  color: var(--tree-text-secondary);
+}
+
+.trace-list-group-count {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--tree-hover);
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--tree-text-secondary);
+}
+
+.trace-list-row-child {
+  padding-left: 42px;
+}
+
+.trace-table-row-child .trace-table-name-cell {
+  padding-left: 30px;
 }
 
 /* ─── Column picker popover ──────────────────────────────────────────────── */

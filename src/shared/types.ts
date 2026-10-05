@@ -41,6 +41,7 @@ export type {
   Trace,
   TraceChangeEvent,
   TraceChangeType,
+  TraceEvalRun,
   TraceLiveEvent,
   TraceProviderInfo,
   TraceStreamEvent,
