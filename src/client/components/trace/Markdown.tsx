@@ -20,9 +20,19 @@
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
-import { Streamdown, type StreamdownProps } from "streamdown";
+import remarkBreaks from "remark-breaks";
+import {
+  defaultRemarkPlugins,
+  Streamdown,
+  type StreamdownProps,
+} from "streamdown";
 
 const plugins = { cjk, code, math };
+// Passing `remarkPlugins` replaces streamdown's defaults (GFM etc.), so keep
+// them and add `remark-breaks`: transcripts aren't always strict Markdown, and
+// a single newline in them is meant to show as a line break, not collapse into
+// a space. Code blocks and blank-line paragraph breaks are unaffected.
+const remarkPlugins = [...Object.values(defaultRemarkPlugins), remarkBreaks];
 const linkSafety = { enabled: true };
 
 type Tag = keyof React.JSX.IntrinsicElements;
@@ -75,6 +85,7 @@ export function Markdown({ children }: { children: string }) {
     <div className="markdown">
       <Streamdown
         plugins={plugins}
+        remarkPlugins={remarkPlugins}
         linkSafety={linkSafety}
         components={components}
       >

@@ -4,6 +4,9 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // Client `.tsx` files are compiled with the automatic JSX runtime
+  // (`tsconfig.client.json`); the root tsconfig vitest reads doesn't say so.
+  esbuild: { jsx: "automatic" },
   test: {
     globals: true,
     environment: "node",
