@@ -1068,23 +1068,28 @@ export class FileVariations {
   /**
    * The versions that changed `promptId`'s file, newest first, back to where
    * the prompt was created or renamed: before that, its file holds no prompt
-   * by this name — or someone else's — and there's nothing to open.
+   * by this name — or someone else's — and there's nothing to open. A version
+   * that can't be read is skipped, not the end: older ones may still open.
    */
   private async promptHistory(
     promptId: string,
-    options?: VersionHistoryOptions,
+    { limit, before }: VersionHistoryOptions = {},
   ): Promise<VersionInfo[]> {
-    // What it returns is a prefix of the file's history, so `limit` applies
-    // to that as is.
+    // Unlimited: with unreadable versions skipped, filling `limit` may take
+    // more than `limit` of the file's.
     const all = await this.requireVersioning().history(
       this.relativePathOf(promptId),
-      options,
+      before !== undefined ? { before } : {},
     );
     const history: VersionInfo[] = [];
     for (const version of all) {
-      const prompt = await this.promptAtVersion(version.id, promptId).catch(
-        () => undefined,
-      );
+      if (limit !== undefined && history.length >= limit) break;
+      let prompt: NormalizedFilePrompt | undefined;
+      try {
+        prompt = await this.promptAtVersion(version.id, promptId);
+      } catch {
+        continue;
+      }
       if (!prompt) break;
       history.push(version);
     }

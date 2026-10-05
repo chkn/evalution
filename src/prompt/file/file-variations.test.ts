@@ -595,6 +595,25 @@ describe("FilePromptProvider WIP variations", () => {
     expect(limited.map(v => v.id)).toEqual([changed]);
   });
 
+  it("a prompt's history skips a version that can't be read, and goes on past it", async () => {
+    const { provider, fileProvider, versioning, initial } = await setup();
+    await fileProvider.writeFile(FILE, SOURCE.replace("0.5", "0.7"));
+    const unreadable = await versioning.commit("unreadable");
+    await fileProvider.writeFile(FILE, SOURCE.replace("Hello", "Hi"));
+    const changed = await versioning.commit("changed");
+    const readFile = versioning.readFile.bind(versioning);
+    versioning.readFile = async (version, rel) => {
+      if (version === unreadable) throw new Error("bad object");
+      return readFile(version, rel);
+    };
+
+    const history = await provider.versions!.history(ID);
+    expect(history.map(v => v.id)).toEqual([changed, initial]);
+    // Still `limit` versions, when there are that many to open.
+    const limited = await provider.versions!.history(ID, { limit: 2 });
+    expect(limited.map(v => v.id)).toEqual([changed, initial]);
+  });
+
   it("editing an old version makes a WIP there, which opens on head", async () => {
     const { provider, fileProvider, initial: version } = await setup();
     await fileProvider.writeFile(FILE, SOURCE.replace("0.5", "0.9"));
