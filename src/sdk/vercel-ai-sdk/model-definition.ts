@@ -129,21 +129,21 @@ function model(provider: string, label: string, modelId: string): CuratedModel {
  */
 export const CURATED_MODELS: readonly CuratedModel[] = [
   model("openai", "GPT-6 Astra", "gpt-6-astra"),
+  model("openai", "GPT-6.1 Sol", "gpt-6.1-sol"),
   model("openai", "GPT-6 Sol", "gpt-6-sol"),
   model("openai", "GPT-6 Luna", "gpt-6-luna"),
   model("openai", "GPT-5.6 Sol", "gpt-5.6-sol"),
   model("openai", "GPT-5.6 Terra", "gpt-5.6-terra"),
   model("openai", "GPT-5.6 Luna", "gpt-5.6-luna"),
-  model("openai", "GPT-5.3 Codex", "gpt-5.3-codex"),
   model("openai", "GPT-5.5 Pro", "gpt-5.5-pro"),
   model("openai", "GPT-5.5", "gpt-5.5"),
   model("openai", "GPT-5.4 Pro", "gpt-5.4-pro"),
   model("openai", "GPT-5.4", "gpt-5.4"),
   model("openai", "GPT-5.4 mini", "gpt-5.4-mini"),
-  model("openai", "GPT-5.4 nano", "gpt-5.4-nano"),
 
   model("anthropic", "Claude Fable 5.1", "claude-fable-5-1"),
   model("anthropic", "Claude Opus 5.5", "claude-opus-5-5"),
+  model("anthropic", "Claude Sonnet 5.5", "claude-sonnet-5-5"),
   model("anthropic", "Claude Sonnet 5", "claude-sonnet-5"),
   model("anthropic", "Claude Haiku 4.5", "claude-haiku-4-5"),
   model("anthropic", "Claude Fable 5", "claude-fable-5"),
