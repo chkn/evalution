@@ -511,6 +511,11 @@ memory:
   shared): when it was added, its source, then every field in full — long text wraps, and a
   resource shows its arguments nested beneath it. Open-in-playground and delete live there, and
   only there — the grid has no ▶ column. "trace ↗" in the source column still opens the trace.
+  Selecting a *cell* opens it after a short pause (300ms): Glide starts a cell's editor on the
+  second click, so opening at once would put the pane up on the first click of a double-click, just
+  as the cell is being typed into. An editor starting (double-click, Enter) on an editable cell
+  cancels the pending open. Once the pane is open it follows the selection immediately, and the
+  row markers open it immediately.
 - **Expanded fields and hand-resized columns persist per dataset** in
   `localStorage` (`dataset-layout:<providerId>:<datasetId>`), as the trace list's columns do. A
   per-viewer convenience: storage that's unavailable or hand-edited falls back to the default

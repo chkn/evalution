@@ -422,6 +422,43 @@ test("selecting a row shows it in full in the details pane", async ({
   await expect(pane).toHaveCount(0);
 });
 
+test("double-clicking a cell to edit it in place doesn't open the details pane", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await untilRowsShown(component);
+  const pane = component.getByRole("region", { name: "Row details" });
+
+  const box = await page.getByTestId("data-grid-canvas").boundingBox();
+  if (!box) throw new Error("grid canvas not laid out");
+  // A double-click as a hand makes it, not Playwright's instant one: the
+  // pause between its clicks is long enough for a pane to open in.
+  const at = {
+    x: box.x + GRID.marker + 40,
+    y: box.y + GRID.group + GRID.header + GRID.row / 2,
+  };
+  await page.mouse.click(at.x, at.y);
+  await page.waitForTimeout(100);
+  await page.mouse.click(at.x, at.y);
+  await expect(page.locator(".dataset-grid-portal textarea")).toBeVisible();
+  // Well past the pause a single click waits out.
+  await page.waitForTimeout(600);
+  await expect(pane).toHaveCount(0);
+
+  // A click that doesn't go on to edit still opens it, once it has paused...
+  await page.keyboard.press("Escape");
+  await clickCell(page, 240 + 40, 0, true);
+  await expect(pane).toContainText("Row 1");
+  // ...and, open, it follows the selection at once.
+  await clickCell(page, 40, 1, true);
+  await expect(pane).toContainText("Row 2");
+});
+
 test("the details pane opens a row in the playground and deletes it", async ({
   mount,
   page,

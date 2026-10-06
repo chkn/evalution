@@ -215,6 +215,14 @@ const ROW_HEIGHT = 32;
 const HEADER_HEIGHT = 32;
 const GROUP_HEADER_HEIGHT = 26;
 
+/**
+ * How long a cell must stay selected before the details pane opens for it.
+ * Glide starts a cell's editor on a second click, so the first click of a
+ * double-click would otherwise open the pane — shifting the grid — just as the
+ * cell is being typed into. A click's pause is about this long.
+ */
+const PANE_DELAY_MS = 300;
+
 const NO_PROMPTS: readonly NormalizedPrompt[] = [];
 
 const NO_SELECTION: GridSelection = {
@@ -533,8 +541,30 @@ function DatasetView({
   // The row shown in the details pane is the selected cell's, or the row
   // selected by its marker. A selected cell stays a cell selection — not
   // folded into its row — so it can be typed into, pasted over, and cleared.
+  const cell = selection.current?.cell;
+  const cellKey = cell ? `${cell[0]},${cell[1]}` : null;
+  // The cell whose row the pane has been opened for. A cell selected while
+  // the pane is closed waits out PANE_DELAY_MS first, which the cell's editor
+  // starting cuts short; once the pane is open it follows the selection at
+  // once.
+  const [paneCell, setPaneCell] = useState<string | null>(null);
+  const paneOpen = paneCell !== null || selection.rows.length > 0;
+  const paneOpenRef = useRef(paneOpen);
+  paneOpenRef.current = paneOpen;
+  const paneTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    clearTimeout(paneTimer.current);
+    if (cellKey === null || paneOpenRef.current) {
+      setPaneCell(cellKey);
+      return;
+    }
+    paneTimer.current = setTimeout(() => setPaneCell(cellKey), PANE_DELAY_MS);
+    return () => clearTimeout(paneTimer.current);
+  }, [cellKey]);
   const selectedIndex =
-    selection.current?.cell[1] ?? selection.rows.first() ?? null;
+    (cell && cellKey === paneCell ? cell[1] : undefined) ??
+    selection.rows.first() ??
+    null;
   const inRange = selectedIndex !== null && selectedIndex < overview.rowCount;
   const loadedRow = inRange ? pager.get(selectedIndex) : undefined;
   // The pane keeps showing its row even once the pager drops that row's page
@@ -715,6 +745,19 @@ function DatasetView({
       }
     },
     [columns, pager, onOpenTrace],
+  );
+
+  /**
+   * A cell's editor is opening (a double-click, Enter): the row isn't wanted
+   * beside it, so a pane still waiting to open for the cell doesn't.
+   */
+  const onCellActivated = useCallback(
+    ([col, row]: Item) => {
+      if (editableCell(pager.get(row), columns[col])) {
+        clearTimeout(paneTimer.current);
+      }
+    },
+    [columns, pager],
   );
 
   const onGroupHeaderClicked = useCallback(
@@ -1077,6 +1120,7 @@ function DatasetView({
               gridSelection={selection}
               onGridSelectionChange={setSelection}
               onCellClicked={onCellClicked}
+              onCellActivated={onCellActivated}
               onGroupHeaderClicked={onGroupHeaderClicked}
               onHeaderMenuClick={onHeaderMenuClick}
               onCellsEdited={onCellsEdited}
