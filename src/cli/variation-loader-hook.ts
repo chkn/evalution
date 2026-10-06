@@ -11,10 +11,25 @@ const SOURCE_PATTERN = new RegExp(
   `[?&]${VARIATION_SOURCE_PARAM}=([0-9a-f]{64})(?:&|$)`,
 );
 
-/** Registered sources by SHA-256. Content-addressed, so never stale. */
-const sources = new Map<string, string>();
+/**
+ * The hook's state, kept on `globalThis` rather than in module scope so every
+ * copy of this module in the process shares it. There can be more than one:
+ * the dev server runs the CLI from `src/` while a project's config imports
+ * `evalution` from `dist/`, so the copy that registers the hook is not the
+ * copy that `LocalFileProvider.importSource` checks and registers sources in.
+ */
+interface VariationLoaderState {
+  /** Whether the load hook has been registered with Node. */
+  registered: boolean;
+  /** Registered sources by SHA-256. Content-addressed, so never stale. */
+  sources: Map<string, string>;
+}
 
-let registered = false;
+const STATE_KEY = Symbol.for("evalution.variationLoader");
+
+const scope = globalThis as { [STATE_KEY]?: VariationLoaderState };
+scope[STATE_KEY] ??= { registered: false, sources: new Map() };
+const state: VariationLoaderState = scope[STATE_KEY];
 
 /**
  * Registers `source` for import and returns its SHA-256, to put in the
@@ -23,13 +38,13 @@ let registered = false;
  */
 export function registerVariationSource(source: string): string {
   const sha = createHash("sha256").update(source).digest("hex");
-  sources.set(sha, source);
+  state.sources.set(sha, source);
   return sha;
 }
 
 /** Whether {@link registerVariationLoaderHook} has run in this process. */
 export function isVariationLoaderHookRegistered(): boolean {
-  return registered;
+  return state.registered;
 }
 
 /**
@@ -44,15 +59,16 @@ export function isVariationLoaderHookRegistered(): boolean {
  * URLs, and so two module instances.
  *
  * Uses `module.registerHooks` (synchronous, same-thread), like the other CLI
- * hooks. Registering twice is harmless.
+ * hooks. Registering twice is harmless, even from different copies of this
+ * module.
  */
 export function registerVariationLoaderHook(): void {
-  if (registered) return;
-  registered = true;
+  if (state.registered) return;
+  state.registered = true;
   module.registerHooks({
     load(url, context, nextLoad) {
       const match = SOURCE_PATTERN.exec(url);
-      const source = match && sources.get(match[1]);
+      const source = match && state.sources.get(match[1]);
       if (source === undefined || source === null) {
         return nextLoad(url, context);
       }

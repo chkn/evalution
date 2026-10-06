@@ -21,7 +21,10 @@ afterEach(async () => {
  * A child process, because the hook is process-global and vitest's own module
  * runner would answer the import before Node's loader ever saw it.
  */
-async function run(body: string): Promise<any> {
+async function run(
+  body: string,
+  hookUrl: string = src("cli/variation-loader-hook.ts"),
+): Promise<any> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "evalution-varhook-"));
   tmpDirs.push(root);
   await fs.writeFile(
@@ -44,7 +47,7 @@ async function run(body: string): Promise<any> {
   await fs.writeFile(
     runner,
     [
-      `import { registerVariationLoaderHook } from ${JSON.stringify(src("cli/variation-loader-hook.ts"))};`,
+      `import { registerVariationLoaderHook } from ${JSON.stringify(hookUrl)};`,
       `import { LocalFileProvider } from ${JSON.stringify(src("file-provider-local.ts"))};`,
       `import { OverlayFileProvider } from ${JSON.stringify(src("file-provider-overlay.ts"))};`,
       `import { TSPromptFileType } from ${JSON.stringify(src("prompt/file/ts/ts-prompt-file-type.ts"))};`,
@@ -100,6 +103,21 @@ describe("variation loader hook", () => {
       separate: true,
       runs: [3, 2],
       sameSourceSameModule: true,
+    });
+  });
+
+  it("runs a variation when the hook was registered by another copy of the module", async () => {
+    // The dev server registers the hook from `src/` while the project's
+    // config gets its `LocalFileProvider` from `dist/`: two module instances.
+    const result = await run(
+      `const mod = await local.importSource(file, patch("Other copy"));
+      return mod.odin("Ada");`,
+      `${src("cli/variation-loader-hook.ts")}?copy=other`,
+    );
+    expect(result).toEqual({
+      system: "Other copy",
+      tool: "real tool",
+      name: "Ada",
     });
   });
 
