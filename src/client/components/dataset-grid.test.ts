@@ -22,6 +22,8 @@ import {
   groupEdits,
   groupHeader,
   layoutStorageKey,
+  layoutWithoutField,
+  menuFieldId,
   parseDatasetLayout,
   RowPager,
   readPath,
@@ -139,6 +141,19 @@ describe("group headers", () => {
     });
     // The source column and the like: no group, so no triangle.
     expect(groupHeader("", byGroup, new Set())).toEqual({ name: "" });
+  });
+});
+
+describe("menuFieldId", () => {
+  it("names the field for a field's own columns, and nothing for the rest", () => {
+    const cols = columns(["1"]);
+    expect(menuFieldId(byId(cols, "0"))).toBe("0");
+    // An expanded resource field's head stands for the field...
+    expect(menuFieldId(byId(cols, "1/"))).toBe("1");
+    // ...but the keys inside it, and the source, aren't fields.
+    expect(menuFieldId(byId(cols, "1/title"))).toBeUndefined();
+    expect(menuFieldId(byId(cols, "source"))).toBeUndefined();
+    expect(menuFieldId(undefined)).toBeUndefined();
   });
 });
 
@@ -651,6 +666,19 @@ describe("dataset layout storage", () => {
     for (const raw of [null, 42, "{}", [], { expanded: "1" }]) {
       expect(parseDatasetLayout(raw)).toEqual(DEFAULT_LAYOUT);
     }
+  });
+
+  it("forgets a deleted field's expansion and column widths, and no one else's", () => {
+    const layout = {
+      expanded: new Set(["1", "2"]),
+      widths: { "0": 100, "1": 200, "1/": 210, "1/title": 220, "10/x": 300 },
+    };
+    expect(layoutWithoutField(layout, "1")).toEqual({
+      expanded: new Set(["2"]),
+      widths: { "0": 100, "10/x": 300 },
+    });
+    // The input is left as it was.
+    expect(layout.expanded).toEqual(new Set(["1", "2"]));
   });
 
   it("drops entries a hand-edited value might hold", () => {

@@ -1307,3 +1307,153 @@ test("clicking the grid closes the add-field popover", async ({
   await clickGrid(page, 40, 10);
   await expect(popover).toHaveCount(0);
 });
+
+/**
+ * Serves `tickets` with fields `ticket` and `note`, and `PATCH`/`DELETE
+ * …/fields/:id` as the server would: renaming (refusing a name another field
+ * has) or dropping a field. Returns what was asked of it, as `"PATCH 1 note2"`
+ * or `"DELETE 1"`.
+ */
+async function mockFieldEdits(page: Page) {
+  let dataset: Dataset = {
+    ...SUPPORT,
+    fields: [
+      { id: "0", def: TICKET },
+      { id: "1", def: { ...TICKET, name: "note" } },
+    ],
+  };
+  const requests: string[] = [];
+  const base = "**/api/datasets/local/tickets";
+  await page.route(base, route =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: { dataset, rowCount: 1, fields: {} } })
+      : route.fallback(),
+  );
+  await page.route(`${base}/rows?*`, route =>
+    route.fulfill({
+      json: [{ id: "r1", cells: { "0": text("Hi") }, createdAt: 1 }],
+    }),
+  );
+  await page.route(`${base}/fields/*`, route => {
+    const request = route.request();
+    const id = new URL(request.url()).pathname.split("/").at(-1);
+    if (request.method() === "DELETE") {
+      requests.push(`DELETE ${id}`);
+      dataset = { ...dataset, fields: dataset.fields.filter(f => f.id !== id) };
+      return route.fulfill({ status: 204 });
+    }
+    const { name } = request.postDataJSON();
+    requests.push(`PATCH ${id} ${name}`);
+    if (dataset.fields.some(f => f.id !== id && f.def.name === name)) {
+      return route.fulfill({
+        status: 400,
+        json: { error: `\`${name}: string\` already exists` },
+      });
+    }
+    const field = dataset.fields.find(f => f.id === id);
+    if (!field) return route.fulfill({ status: 404, json: { error: "none" } });
+    const renamed = { ...field, def: { ...field.def, name } };
+    dataset = {
+      ...dataset,
+      fields: dataset.fields.map(f => (f.id === id ? renamed : f)),
+    };
+    return route.fulfill({ json: renamed });
+  });
+  return requests;
+}
+
+/**
+ * Opens a column header's menu: hover the header, then click the menu icon at
+ * its right edge. `x` is where the column starts, past the row markers.
+ */
+async function openColumnMenu(page: Page, x: number, width = 240) {
+  const box = await page.getByTestId("data-grid-canvas").boundingBox();
+  if (!box) throw new Error("grid canvas not laid out");
+  await page.mouse.move(box.x + x + 20, box.y + GRID.header / 2);
+  await page.mouse.click(box.x + x + width - 16, box.y + GRID.header / 2);
+}
+
+test("a column header's menu renames its field, saying why a rename is refused", async ({
+  mount,
+  page,
+}) => {
+  const requests = await mockFieldEdits(page);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(inGrid(component, "columnheader", "note")).toBeAttached();
+
+  await openColumnMenu(page, GRID.marker + 240);
+  await page.getByRole("menuitem", { name: "Rename field…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Rename field" });
+  const name = dialog.getByLabel("Field name");
+  await expect(name).toHaveValue("note");
+  await expect(name).toBeFocused();
+
+  // `ticket` is taken: the dialog stays, with the server's reason.
+  await name.fill("ticket");
+  await name.press("Enter");
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "`ticket: string` already exists",
+  );
+
+  await name.fill("comment");
+  await name.press("Enter");
+  await expect(dialog).toHaveCount(0);
+  await expect(inGrid(component, "columnheader", "comment")).toBeAttached();
+  await expect(inGrid(component, "columnheader", "note")).toHaveCount(0);
+  expect(requests).toEqual(["PATCH 1 ticket", "PATCH 1 comment"]);
+});
+
+test("a column header's menu deletes its field after confirming", async ({
+  mount,
+  page,
+}) => {
+  const requests = await mockFieldEdits(page);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(inGrid(component, "columnheader", "note")).toBeAttached();
+
+  const messages: string[] = [];
+  let accept = false;
+  page.on("dialog", dialog => {
+    messages.push(dialog.message());
+    return accept ? dialog.accept() : dialog.dismiss();
+  });
+
+  // Declined: nothing is sent, and the column stays.
+  await openColumnMenu(page, GRID.marker + 240);
+  await page.getByRole("menuitem", { name: "Delete field" }).click();
+  await expect.poll(() => messages.length).toBe(1);
+  expect(requests).toEqual([]);
+  await expect(inGrid(component, "columnheader", "note")).toBeAttached();
+
+  accept = true;
+  await openColumnMenu(page, GRID.marker + 240);
+  await page.getByRole("menuitem", { name: "Delete field" }).click();
+  await expect(inGrid(component, "columnheader", "note")).toHaveCount(0);
+  expect(messages).toEqual([
+    "Delete the field “note” and its values in every row?",
+    "Delete the field “note” and its values in every row?",
+  ]);
+  expect(requests).toEqual(["DELETE 1"]);
+  await expect(inGrid(component, "columnheader", "ticket")).toBeAttached();
+});
+
+test("clicking the grid closes a column header's menu", async ({
+  mount,
+  page,
+}) => {
+  await mockFieldEdits(page);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
+
+  await openColumnMenu(page, GRID.marker);
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  await clickGrid(page, 100, 60);
+  await expect(menu).toHaveCount(0);
+});

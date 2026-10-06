@@ -38,6 +38,7 @@ import { createPortal } from "react-dom";
 import { shortSyntax } from "ts-proppy/react";
 import type {
   Dataset,
+  DatasetField,
   DatasetRow,
   DatasetRowsOverview,
   ExecutionInput,
@@ -47,14 +48,17 @@ import type {
 import {
   addDatasetRows,
   deleteDataset,
+  deleteDatasetField,
   deleteDatasetRow,
   getDataset,
   getDatasetRows,
   renameDataset,
+  renameDatasetField,
   updateDatasetRows,
 } from "../api";
 import { useStructurallyStable } from "../hooks/useStructurallyStable";
 import { DatasetAddField } from "./DatasetAddField";
+import { DatasetColumnMenu } from "./DatasetColumnMenu";
 import { DatasetRowDetails } from "./DatasetRowDetails";
 import { DetailsPane, DetailsPaneHeader, useIsWide } from "./DetailsPane";
 import {
@@ -75,6 +79,8 @@ import {
   groupEdits,
   groupHeader,
   layoutStorageKey,
+  layoutWithoutField,
+  menuFieldId,
   parseDatasetLayout,
   RowPager,
   serializeDatasetLayout,
@@ -384,6 +390,12 @@ function DatasetView({
     onClose: closeMenu,
     matchTriggerWidth: false,
   });
+  /** The column header menu that's open: its field, and where it opened from. */
+  const [columnMenu, setColumnMenu] = useState<{
+    fieldId: string;
+    anchor: Rectangle;
+  } | null>(null);
+  const closeColumnMenu = useCallback(() => setColumnMenu(null), []);
   const theme = useGridTheme();
   /** Where Glide opens a cell's editor — see the portal below the header. */
   const editorPortalRef = useRef<HTMLDivElement>(null);
@@ -466,6 +478,7 @@ function DatasetView({
         id: c.id,
         title: c.title,
         width: widths[c.id] ?? c.width,
+        hasMenu: menuFieldId(c) !== undefined,
         ...(c.group !== undefined && { group: c.group }),
       })),
     [columns, widths],
@@ -484,6 +497,8 @@ function DatasetView({
       const end = range.y + range.height;
       visibleRef.current = { start, end };
       pager.ensure(start, Math.min(end, overview.rowCount));
+      // Scrolled: the header the menu opened from has moved out from under it.
+      setColumnMenu(null);
     },
     [pager, overview.rowCount],
   );
@@ -715,6 +730,14 @@ function DatasetView({
     [columns, expanded, layout, updateLayout],
   );
 
+  const onHeaderMenuClick = useCallback(
+    (col: number, anchor: Rectangle) => {
+      const fieldId = menuFieldId(columns[col]);
+      if (fieldId !== undefined) setColumnMenu({ fieldId, anchor });
+    },
+    [columns],
+  );
+
   const act = async (action: () => Promise<void>) => {
     try {
       await action();
@@ -750,6 +773,40 @@ function DatasetView({
   const startRename = () => {
     setName(dataset.name);
     setRenaming(true);
+  };
+
+  const menuField = columnMenu
+    ? dataset.fields.find(f => f.id === columnMenu.fieldId)
+    : undefined;
+
+  const renameField = async (field: DatasetField, name: string) => {
+    const renamed = await renameDatasetField(
+      providerId,
+      datasetId,
+      field.id,
+      name,
+    );
+    setDataset({
+      ...dataset,
+      fields: dataset.fields.map(f => (f.id === renamed.id ? renamed : f)),
+    });
+    setReload(n => n + 1);
+  };
+
+  const handleDeleteField = (field: DatasetField) => {
+    setColumnMenu(null);
+    if (
+      !window.confirm(
+        `Delete the field “${field.def.name}” and its values in every row?`,
+      )
+    )
+      return;
+    void act(async () => {
+      await deleteDatasetField(providerId, datasetId, field.id);
+      updateLayout(layoutWithoutField(layout, field.id));
+      setSelection(NO_SELECTION);
+      setReload(n => n + 1);
+    });
   };
 
   const handleDelete = () => {
@@ -950,6 +1007,16 @@ function DatasetView({
         </div>
       </div>
       {menu}
+      {columnMenu && menuField && (
+        <DatasetColumnMenu
+          key={menuField.id}
+          field={menuField}
+          anchor={columnMenu.anchor}
+          onRename={name => renameField(menuField, name)}
+          onDelete={() => handleDeleteField(menuField)}
+          onClose={closeColumnMenu}
+        />
+      )}
       {createPortal(
         // Glide draws a cell's editor over the canvas, into this layer: at
         // the viewport's origin, above everything, and placed from the
@@ -1011,6 +1078,7 @@ function DatasetView({
               onGridSelectionChange={setSelection}
               onCellClicked={onCellClicked}
               onGroupHeaderClicked={onGroupHeaderClicked}
+              onHeaderMenuClick={onHeaderMenuClick}
               onCellsEdited={onCellsEdited}
               validateCell={validateCell}
               onDelete={onDelete}

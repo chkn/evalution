@@ -2,7 +2,13 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { addDatasetField, createEmptyDataset, getTrace } from "./api.ts";
+import {
+  addDatasetField,
+  createEmptyDataset,
+  deleteDatasetField,
+  getTrace,
+  renameDatasetField,
+} from "./api.ts";
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -153,5 +159,60 @@ describe("addDatasetField", () => {
     await expect(
       addDatasetField("local", "d", { name: "title", type: "string" }),
     ).rejects.toThrow("`title: string` already exists");
+  });
+});
+
+describe("renameDatasetField", () => {
+  it("patches the field's route with the new name", async () => {
+    const field = { id: "2", def: { name: "title" } };
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) =>
+      jsonResponse(field, 200),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(
+      await renameDatasetField("local", "odin tasks", "2", "title"),
+    ).toEqual(field);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/datasets/local/odin%20tasks/fields/2");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body as string)).toEqual({ name: "title" });
+  });
+
+  it("rejects with the server's message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ error: "`title: string` already exists" }, 400),
+      ),
+    );
+    await expect(
+      renameDatasetField("local", "d", "1", "title"),
+    ).rejects.toThrow("`title: string` already exists");
+  });
+});
+
+describe("deleteDatasetField", () => {
+  it("deletes the field's route", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init: RequestInit) =>
+        new Response(null, { status: 204 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deleteDatasetField("local", "odin tasks", "2");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/datasets/local/odin%20tasks/fields/2");
+    expect(init.method).toBe("DELETE");
+  });
+
+  it("rejects with the server's message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ error: "No such field" }, 400)),
+    );
+    await expect(deleteDatasetField("local", "d", "9")).rejects.toThrow(
+      "No such field",
+    );
   });
 });

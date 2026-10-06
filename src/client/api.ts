@@ -682,6 +682,42 @@ export async function addDatasetField(
   return res.json();
 }
 
+/**
+ * Renames a dataset's field. Its id never changes, so rows are untouched.
+ * Rejected (with the server's message) when another field would then have the
+ * same name and type.
+ */
+export async function renameDatasetField(
+  providerId: string,
+  datasetId: string,
+  fieldId: string,
+  name: string,
+): Promise<DatasetField> {
+  const res = await fetch(
+    datasetUrl(providerId, datasetId, `/fields/${encodeURIComponent(fieldId)}`),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    },
+  );
+  await throwIfError(res);
+  return res.json();
+}
+
+/** Deletes a dataset's field and every row's cell for it. */
+export async function deleteDatasetField(
+  providerId: string,
+  datasetId: string,
+  fieldId: string,
+): Promise<void> {
+  const res = await fetch(
+    datasetUrl(providerId, datasetId, `/fields/${encodeURIComponent(fieldId)}`),
+    { method: "DELETE" },
+  );
+  await throwIfError(res);
+}
+
 /** Deletes one row of a dataset. */
 export async function deleteDatasetRow(
   providerId: string,

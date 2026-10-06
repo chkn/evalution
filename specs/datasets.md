@@ -722,8 +722,16 @@ column mid-edit, and a field needs a name and type before it can exist.
 - **It matches like any field.** A user-added `title: string` matches a prompt's `title: string`
   parameter by §B's rule. So it fills the panel through "Open in playground", and pre-fills an eval
   binding (`evals.md` §F.1).
-- **No rename, retype, or removal yet.** `nextFieldId` already makes removal safe to add later
-  (§B). Renaming a field can quietly break the evals bound to it, so it waits for a reason.
+- **Rename and delete live in the column header's menu** (added 2026-10-06; retyping still
+  waits). A field's own column — its whole column, or the head of an expanded resource field —
+  shows Glide's menu icon on hover; the per-key columns inside an expanded field and `source` have
+  none, since they aren't fields (collapse the group to reach the field's menu). "Rename field…"
+  turns the menu into a name box that shows the server's rejection (a name already taken with the
+  same type) and closes on success. "Delete field" confirms, then calls
+  `DELETE …/fields/:fieldId`, and the view forgets the field's expansion and column widths. Both
+  use the `PATCH`/`DELETE …/fields/:fieldId` routes and `DatasetProvider.renameField`/
+  `deleteField`. `nextFieldId` makes removal safe (§B); renaming a field can quietly break the
+  evals bound to it by name.
 
 ### P.2 Cell editing: inline in the grid, and in the details pane
 

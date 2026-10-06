@@ -163,6 +163,19 @@ export function buildColumns({
 }
 
 /**
+ * The field a column's header menu renames or deletes, or `undefined` for a
+ * column that has no menu: the source, and the per-key columns of an expanded
+ * field, which are paths inside a field rather than fields of their own.
+ */
+export function menuFieldId(
+  column: DatasetColumn | undefined,
+): string | undefined {
+  return column?.role === "whole" || column?.role === "head"
+    ? column.path.fieldId
+    : undefined;
+}
+
+/**
  * Which field each group header belongs to. Glide hands its callbacks a
  * group's name, which is a field's name; two fields sharing a name would
  * share a header anyway, so the first one wins.
@@ -694,6 +707,24 @@ export function parseDatasetLayout(raw: unknown): DatasetLayout {
     ),
     widths: cleanWidths,
   };
+}
+
+/**
+ * `layout` without what it remembers of a deleted field: that it was
+ * expanded, and the widths of its columns (see {@link DatasetColumn.id}).
+ */
+export function layoutWithoutField(
+  layout: DatasetLayout,
+  fieldId: string,
+): DatasetLayout {
+  const expanded = new Set(layout.expanded);
+  expanded.delete(fieldId);
+  const widths = Object.fromEntries(
+    Object.entries(layout.widths).filter(
+      ([id]) => id !== fieldId && !id.startsWith(`${fieldId}/`),
+    ),
+  );
+  return { expanded, widths };
 }
 
 /** A layout as it's stored: a `Set` doesn't survive `JSON.stringify`. */
