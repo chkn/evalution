@@ -4,17 +4,20 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
+import type { TerminalTarget } from "../../shared/agent";
 import {
   SETUP_STEP_DONE_EVENT,
   type SetupStepDoneDetail,
 } from "../../shared/setup-task";
+import { useStructurallyStable } from "../hooks/useStructurallyStable";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalViewProps {
-  /** Id of the setup task this terminal's step belongs to. */
-  taskId: string;
-  /** Id of the step whose command this terminal runs. */
-  stepId: string;
+  /**
+   * What this terminal runs — a setup step or a coding agent — by reference;
+   * the server resolves the command from it.
+   */
+  target: TerminalTarget;
   /** The command, shown queued up before the user runs it. Display only. */
   command: string;
 }
@@ -42,13 +45,12 @@ const RECONNECT_DELAY_MS = 500;
 const MAX_RECONNECT_ATTEMPTS = 20;
 
 /** Builds the terminal WebSocket URL, honouring the page's host and TLS. */
-function terminalSocketUrl(
-  taskId: string,
-  stepId: string,
-  sessionId: string,
-): string {
+function terminalSocketUrl(target: TerminalTarget, sessionId: string): string {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const params = new URLSearchParams({ taskId, stepId, sessionId });
+  const params = new URLSearchParams({
+    target: JSON.stringify(target),
+    sessionId,
+  });
   return `${proto}://${location.host}/api/terminal?${params}`;
 }
 
@@ -56,20 +58,30 @@ function terminalSocketUrl(
  * Interactive terminal pane. Renders the queued command and waits for the user
  * to press Return; on Return it asks the server to spawn the command in a PTY,
  * streams the output into an xterm view, and forwards the user's keystrokes
- * back so interactive prompts work. On a clean exit it broadcasts
- * {@link SETUP_STEP_DONE_EVENT} so the setup list can mark the step complete.
+ * back so interactive prompts work. On a clean exit of a setup step it
+ * broadcasts {@link SETUP_STEP_DONE_EVENT} so the setup list can mark the step
+ * complete.
  *
  * The connection is identified by a per-mount `sessionId`, so if the socket
  * drops while a command is running — notably when the server restarts itself
  * after a config file appears — the client reconnects, the server re-attaches
  * the still-running PTY, and any output produced during the gap is replayed.
  */
-export function TerminalView({ taskId, stepId, command }: TerminalViewProps) {
+export function TerminalView({ target, command }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Kept while its content is, so the effect below depends on its value, not
+  // its identity.
+  const stableTarget = useStructurallyStable(target);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+
+    // The setup step this terminal runs, if it runs one — announced on success.
+    const setupStep: SetupStepDoneDetail | undefined =
+      stableTarget.kind === "setup"
+        ? { taskId: stableTarget.taskId, stepId: stableTarget.stepId }
+        : undefined;
 
     const css = getComputedStyle(container);
     const term = new Terminal({
@@ -168,9 +180,7 @@ export function TerminalView({ taskId, stepId, command }: TerminalViewProps) {
     };
 
     const connect = () => {
-      const socket = new WebSocket(
-        terminalSocketUrl(taskId, stepId, sessionId),
-      );
+      const socket = new WebSocket(terminalSocketUrl(stableTarget, sessionId));
       ws = socket;
 
       socket.onopen = () => {
@@ -214,10 +224,10 @@ export function TerminalView({ taskId, stepId, command }: TerminalViewProps) {
                 ? `\r\n\x1b[32m✓ Completed successfully.\x1b[0m\r\n`
                 : `\r\n\x1b[31m✗ Exited with code ${msg.code}.\x1b[0m\r\n`,
             );
-            if (msg.code === 0) {
+            if (msg.code === 0 && setupStep) {
               window.dispatchEvent(
                 new CustomEvent<SetupStepDoneDetail>(SETUP_STEP_DONE_EVENT, {
-                  detail: { taskId, stepId },
+                  detail: setupStep,
                 }),
               );
             }
@@ -276,7 +286,7 @@ export function TerminalView({ taskId, stepId, command }: TerminalViewProps) {
       ws?.close();
       term.dispose();
     };
-  }, [taskId, stepId, command]);
+  }, [stableTarget, command]);
 
   return <div className="terminal-view" ref={containerRef} />;
 }

@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type PtyLike,
-  resolveTerminalCommand,
+  resolveSetupStepCommand,
   type SocketLike,
   type SpawnOptions,
   shellCommandArgs,
@@ -12,20 +12,22 @@ import {
   TerminalSessionRegistry,
 } from "./terminal.ts";
 
-describe("resolveTerminalCommand", () => {
+describe("resolveSetupStepCommand", () => {
   it("maps an install_package step to its npm command", () => {
-    expect(resolveTerminalCommand("vercel-ai-sdk", "install-ai")).toBe(
+    expect(resolveSetupStepCommand("vercel-ai-sdk", "install-ai")).toBe(
       "npm i ai",
     );
   });
 
   it("returns null for a create_config step (it writes a file, not a command)", () => {
-    expect(resolveTerminalCommand("vercel-ai-sdk", "create-config")).toBeNull();
+    expect(
+      resolveSetupStepCommand("vercel-ai-sdk", "create-config"),
+    ).toBeNull();
   });
 
   it("returns null for unknown task or step ids", () => {
-    expect(resolveTerminalCommand("nope", "install-ai")).toBeNull();
-    expect(resolveTerminalCommand("vercel-ai-sdk", "nope")).toBeNull();
+    expect(resolveSetupStepCommand("nope", "install-ai")).toBeNull();
+    expect(resolveSetupStepCommand("vercel-ai-sdk", "nope")).toBeNull();
   });
 });
 

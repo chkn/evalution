@@ -21,6 +21,7 @@ import type {
   EvalRunProgress,
   EvalRunSummary,
 } from "../../eval/eval-types";
+import type { AgentInfo } from "../../shared/agent";
 import type {
   CheckInfo,
   DatasetSummary,
@@ -47,6 +48,7 @@ import {
   updateEval,
 } from "../api";
 import { useStructurallyStable } from "../hooks/useStructurallyStable";
+import { AskAgentButton } from "./AskAgentButton";
 import { datasetKey } from "./DatasetList";
 import { ExecPanelShell, PromptSplit } from "./ExecPanelShell";
 import { ExecutionInputEditor } from "./ExecutionInputEditor";
@@ -107,6 +109,13 @@ interface Props {
   onDeleted: () => void;
   /** Called once one of the eval's runs is deleted, so its tab can close. */
   onRunDeleted: (run: EvalRunSummary) => void;
+  /** Coding agents the "Ask" button offers. */
+  agents?: readonly AgentInfo[];
+  /**
+   * Launches a coding agent about this eval. Without it (or without
+   * `agents`), there's no "Ask" button.
+   */
+  onAskAgent?: (agent: AgentInfo) => void;
 }
 
 /** Editor state for the eval's bindings, in the execute panel's shape. */
@@ -172,6 +181,8 @@ function EvalView({
   onOpenDataset,
   onDeleted,
   onRunDeleted,
+  agents = [],
+  onAskAgent,
 }: Props) {
   const [def, setDef] = useState<EvalDefinition | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -714,6 +725,7 @@ function EvalView({
               </button>
             </div>
           )}
+          {onAskAgent && <AskAgentButton agents={agents} onAsk={onAskAgent} />}
           <button
             type="button"
             className="trace-view-prompt-btn trace-view-delete-btn"

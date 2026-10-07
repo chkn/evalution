@@ -130,9 +130,8 @@ function resolveStepStatus(rootPath: string, step: SetupStep): SetupStep {
         result.completed = isPackageInstalled(rootPath, step.package);
       }
       const bin = setupStepCommand(step).split(/\s+/)[0];
-      if (bin && !isBinaryOnPath(bin)) {
-        result.disabledReason = `${bin} not found in PATH`;
-      }
+      const disabledReason = bin && missingBinaryReason(bin);
+      if (disabledReason) result.disabledReason = disabledReason;
       return result;
     }
     default: {
@@ -141,6 +140,17 @@ function resolveStepStatus(rootPath: string, step: SetupStep): SetupStep {
       throw new Error();
     }
   }
+}
+
+/**
+ * Why the executable `bin` can't be run — it isn't on `PATH` — or `undefined`
+ * when it can. Disables onboarding steps whose command isn't installed, and
+ * hides coding agents whose CLI isn't (see `./agents.ts`).
+ *
+ * @param bin - The bare executable name to look for, e.g. `claude`.
+ */
+export function missingBinaryReason(bin: string): string | undefined {
+  return isBinaryOnPath(bin) ? undefined : `${bin} not found in PATH`;
 }
 
 /**

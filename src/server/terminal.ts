@@ -4,13 +4,14 @@
 import * as pty from "@lydell/node-pty";
 import type { Hono } from "hono";
 import type { UpgradeWebSocket, WSContext } from "hono/ws";
+import { parseTerminalTarget, type TerminalTarget } from "../shared/agent.ts";
 import { setupStepCommand } from "../shared/setup-task.ts";
 import { findSetupStep } from "./setup-tasks.ts";
 
 /**
  * Messages the terminal client sends up the WebSocket. The command is never
- * sent by the client — it is resolved server-side from the setup registry by
- * the `taskId`/`stepId` query params — so these only ever carry intent (start,
+ * sent by the client — it is resolved server-side from the `target` query
+ * param (a {@link TerminalTarget}) — so these only ever carry intent (start,
  * keystrokes, resize, detach), not anything the server will execute verbatim.
  */
 type ClientMessage =
@@ -59,7 +60,7 @@ export function shellCommandArgs(command: string): string[] {
  * Returns `null` when the step is unknown or is not a runnable command (e.g.
  * `create_config`, which writes a file instead of running in a terminal).
  */
-export function resolveTerminalCommand(
+export function resolveSetupStepCommand(
   taskId: string,
   stepId: string,
 ): string | null {
@@ -67,6 +68,15 @@ export function resolveTerminalCommand(
   if (!step || step.kind === "create_config") return null;
   return setupStepCommand(step);
 }
+
+/**
+ * Resolves the shell command a terminal runs for `target`, or `null` when
+ * there's none — an unknown step or agent, or an entity that's gone. Supplied
+ * by the host, which knows how to resolve each kind.
+ */
+export type ResolveTerminalCommand = (
+  target: TerminalTarget,
+) => Promise<string | null>;
 
 /**
  * The subset of `@lydell/node-pty`'s `IPty` a {@link TerminalSession} relies on.
@@ -282,9 +292,10 @@ function sendError(ws: WSContext, message: string): void {
 /**
  * Registers the interactive-terminal WebSocket route at `/api/terminal`.
  *
- * The client connects with `taskId`, `stepId`, and a client-generated
- * `sessionId` query param. The server resolves the actual command from its own
- * registry (never from the request body). On the first connection for a session
+ * The client connects with a `target` query param (a JSON
+ * {@link TerminalTarget}) and a client-generated `sessionId`. The server
+ * resolves the actual command through `resolveCommand` (never from the
+ * request). On the first connection for a session
  * the client signals `start` and the server spawns the command in a PTY rooted
  * at the project; output is streamed to the client and the client's keystrokes
  * are written to the process, so prompts (e.g. npm's "Ok to proceed?") work.
@@ -294,23 +305,31 @@ function sendError(ws: WSContext, message: string): void {
  * reconnecting client (same `sessionId`) re-attaches and replays the gap.
  *
  * The trust boundary mirrors the step-execute route: the client can only ask to
- * run a step that already exists server-side.
+ * run a step or agent that already exists server-side.
  */
 export function registerTerminalRoute(
   app: Hono,
   upgradeWebSocket: UpgradeWebSocket,
   rootPath: string,
   sessions: TerminalSessionRegistry,
+  resolveCommand: ResolveTerminalCommand,
 ): void {
   app.get(
     "/api/terminal",
     upgradeWebSocket(c => {
-      const taskId = c.req.query("taskId");
-      const stepId = c.req.query("stepId");
-      // Falls back to a per-step key so older clients without a sessionId still
-      // get a stable id (at the cost of colliding if the step is opened twice).
-      const sessionId = c.req.query("sessionId") ?? `${taskId}:${stepId}`;
+      const rawTarget = c.req.query("target");
+      const target = parseTerminalTargetParam(rawTarget);
+      // Falls back to the target itself so a client without a sessionId still
+      // gets a stable id (at the cost of colliding if it's opened twice).
+      const sessionId = c.req.query("sessionId") ?? rawTarget ?? "";
       let session: TerminalSession | undefined;
+      // Set while the command for a `start` is being resolved, so a second
+      // `start` arriving meanwhile is ignored like one after it.
+      let starting = false;
+      // Set once the socket has closed, so a `start` that finishes resolving
+      // afterwards doesn't spawn a PTY nobody is attached to (and that no
+      // `onClose` would ever reap).
+      let closed = false;
       // Set when the client asked us to reap on close, so onClose doesn't also
       // start a (now pointless) grace period.
       let leaving = false;
@@ -325,7 +344,7 @@ export function registerTerminalRoute(
             existing.attach(ws);
           }
         },
-        onMessage(evt, ws) {
+        async onMessage(evt, ws) {
           let msg: ClientMessage;
           try {
             msg = JSON.parse(String(evt.data));
@@ -334,13 +353,14 @@ export function registerTerminalRoute(
           }
           switch (msg.type) {
             case "start": {
-              if (session) return; // already running/attached; ignore
-              const command =
-                taskId && stepId
-                  ? resolveTerminalCommand(taskId, stepId)
-                  : null;
+              if (session || starting) return; // already running/attached; ignore
+              starting = true;
+              const command = target
+                ? await resolveCommand(target).catch(() => null)
+                : null;
+              if (closed || leaving) return;
               if (!command) {
-                sendError(ws, "Unknown or non-runnable setup step.");
+                sendError(ws, "Unknown or non-runnable terminal command.");
                 ws.close();
                 return;
               }
@@ -367,6 +387,7 @@ export function registerTerminalRoute(
           }
         },
         onClose() {
+          closed = true;
           // A plain socket drop (server restart, network blip) detaches and
           // starts the grace window; an explicit `detach` already reaped it.
           if (!leaving) session?.detach();
@@ -374,4 +395,16 @@ export function registerTerminalRoute(
       };
     }),
   );
+}
+
+/** The `target` query param as a {@link TerminalTarget}, or `undefined` if it isn't one. */
+function parseTerminalTargetParam(
+  raw: string | undefined,
+): TerminalTarget | undefined {
+  if (!raw) return undefined;
+  try {
+    return parseTerminalTarget(JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
 }

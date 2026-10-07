@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AgentInfo } from "../../shared/agent";
 /*
 function TracesIcon() {
   return (
@@ -67,6 +68,7 @@ import {
 import { autosave } from "../autosave";
 import { usePersistentValue } from "../hooks/usePersistentValue";
 import { createInFlight } from "../in-flight";
+import { AskAgentButton } from "./AskAgentButton";
 import { PromptSplit } from "./ExecPanelShell";
 import type { PanelFill, PanelFillSource } from "./named-inputs";
 import { applyOptimisticUpdates } from "./optimistic-updates";
@@ -121,6 +123,13 @@ interface Props {
   fill?: PanelFill;
   /** Opens where a fill came from — the notice's "trace ↗" / "dataset ↗". */
   onOpenFillSource?: (from: PanelFillSource) => void;
+  /** Coding agents the "Ask" button offers. */
+  agents?: readonly AgentInfo[];
+  /**
+   * Launches a coding agent about this prompt. Without it (or without
+   * `agents`), there's no "Ask" button.
+   */
+  onAskAgent?: (agent: AgentInfo) => void;
 }
 
 function stableKey(value: unknown): string {
@@ -187,6 +196,8 @@ function PlaygroundContent({
   onExecuted,
   fill,
   onOpenFillSource,
+  agents = [],
+  onAskAgent,
 }: Props) {
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -522,6 +533,9 @@ function PlaygroundContent({
                     ×
                   </button>
                 </div>
+              )}
+              {onAskAgent && (
+                <AskAgentButton agents={agents} onAsk={onAskAgent} />
               )}
               {versioned && (
                 <PromptRefActions

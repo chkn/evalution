@@ -24,7 +24,7 @@ import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
 import { TursoTraceProvider } from "../trace/turso-trace-provider.ts";
 import { createApiContext } from "./api-context.ts";
-import { setupRoutes } from "./api-routes.ts";
+import { type AgentHandlers, setupRoutes } from "./api-routes.ts";
 
 const PROVIDER_ID = "fake";
 const TRACE_PROVIDER_ID = "memory";
@@ -86,6 +86,7 @@ function fakeProvider(
 function makeApp(
   execute?: PromptProvider["execute"],
   otlpIngestor?: OtlpTraceIngestor,
+  agents?: AgentHandlers,
 ) {
   const app = new Hono();
   const promptProvider = fakeProvider(execute);
@@ -99,6 +100,7 @@ function makeApp(
     hotReloadSubscribers: new Set(),
     hasConfig: true,
     otlpIngestor,
+    agents,
     context: createApiContext({
       promptProviders,
       traceProviders,
@@ -308,6 +310,65 @@ describe("POST /api/prompts/:providerId/:id/execute", () => {
     await app.request(executeRequest({ functionInputs }));
 
     expect(opts.inputs.functionInputs).toEqual(functionInputs);
+  });
+});
+
+describe("coding-agent routes", () => {
+  const CLAUDE = { id: "claude-code", label: "Claude Code", icon: "Anthropic" };
+  const handlers: AgentHandlers = {
+    list: () => [CLAUDE],
+    async command(agentId, context) {
+      if (agentId !== CLAUDE.id || context.type !== "trace") {
+        const error = new Error("not found");
+        error.name = "AskAgentNotFoundError";
+        throw error;
+      }
+      return `claude --about ${context.traceId}`;
+    },
+  };
+  const commandRequest = (agentId: string, body: unknown) =>
+    new Request(`http://localhost/api/agents/${agentId}/command`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("lists the host's agents, or none without handlers", async () => {
+    const { app } = makeApp(undefined, undefined, handlers);
+    expect(await (await app.request("/api/agents")).json()).toEqual([CLAUDE]);
+    const { app: bare } = makeApp();
+    expect(await (await bare.request("/api/agents")).json()).toEqual([]);
+  });
+
+  it("builds the command for an agent and a context", async () => {
+    const { app } = makeApp(undefined, undefined, handlers);
+    const res = await app.fetch(
+      commandRequest("claude-code", {
+        context: { type: "trace", providerId: "memory", traceId: "t1" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ command: "claude --about t1" });
+  });
+
+  it("responds 400 for a missing or malformed context", async () => {
+    const { app } = makeApp(undefined, undefined, handlers);
+    for (const body of [{}, { context: { type: "trace" } }]) {
+      const res = await app.fetch(commandRequest("claude-code", body));
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("responds 404 for an unknown agent or entity, or without handlers", async () => {
+    const context = { type: "dataset", providerId: "x", datasetId: "d" };
+    const { app } = makeApp(undefined, undefined, handlers);
+    expect(
+      (await app.fetch(commandRequest("claude-code", { context }))).status,
+    ).toBe(404);
+    const { app: bare } = makeApp();
+    expect(
+      (await bare.fetch(commandRequest("claude-code", { context }))).status,
+    ).toBe(404);
   });
 });
 

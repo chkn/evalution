@@ -13,6 +13,7 @@ import type {
   NewEvalDefinition,
   TraceCheckResult,
 } from "../eval/eval-types";
+import type { AgentContext, AgentInfo } from "../shared/agent";
 import type { AddDatasetFieldRequest } from "../shared/dataset-fields";
 import type { SetupTask } from "../shared/setup-task";
 import type {
@@ -108,6 +109,34 @@ export async function executeSetupStep(
   );
   await throwIfError(res);
   return res.json();
+}
+
+/** Fetches the coding agents that can be launched (their CLI is installed). */
+export async function getAgents(): Promise<AgentInfo[]> {
+  const res = await fetch("/api/agents");
+  await throwIfError(res);
+  return res.json();
+}
+
+/**
+ * The command line that launches `agentId` about what `context` names — for
+ * showing in the terminal before it runs. The terminal itself has the server
+ * resolve the command again from the same ids, rather than run this string.
+ */
+export async function getAgentCommand(
+  agentId: string,
+  context: AgentContext,
+): Promise<string> {
+  const res = await fetch(
+    `/api/agents/${encodeURIComponent(agentId)}/command`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ context }),
+    },
+  );
+  await throwIfError(res);
+  return (await res.json()).command;
 }
 
 export async function getPromptProviders(): Promise<PromptProviderInfo[]> {

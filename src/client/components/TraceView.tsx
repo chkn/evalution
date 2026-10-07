@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { AgentInfo } from "../../shared/agent";
 import type {
   NormalizedPrompt,
   PromptID,
@@ -13,6 +14,7 @@ import type {
 import { deleteTrace, getTrace, subscribeTraceEvents } from "../api";
 import { useAnnotations } from "../hooks/useAnnotations.ts";
 import { AddToDatasetMenu, isInAddToDatasetMenu } from "./AddToDatasetMenu";
+import { AskAgentButton, AskAgentMenuItems } from "./AskAgentButton";
 import { DetailsPane, DetailsPaneHeader, useIsWide } from "./DetailsPane";
 import { fieldsForTrace, fromTrace, hasRecordedInputs } from "./named-inputs";
 import { ChatFlow } from "./trace/ChatFlow.tsx";
@@ -72,6 +74,13 @@ interface Props {
   onDeleted?: () => void;
   /** Bumped on eval changes, so the trace's check results stay current. */
   evalVersion?: number;
+  /** Coding agents the "Ask" button offers. */
+  agents?: readonly AgentInfo[];
+  /**
+   * Launches a coding agent about this trace. Without it (or without
+   * `agents`), there's no "Ask" button.
+   */
+  onAskAgent?: (agent: AgentInfo) => void;
 }
 
 interface TraceState {
@@ -109,6 +118,8 @@ function TraceView({
   findPrompt,
   onDeleted,
   evalVersion,
+  agents = [],
+  onAskAgent,
 }: Props) {
   const [state, setState] = useState<TraceState>({ trace: null, spans: [] });
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(
@@ -312,6 +323,17 @@ function TraceView({
         ref={headerMenuRef}
         style={headerMenuStyle}
       >
+        {onAskAgent && (
+          <AskAgentMenuItems
+            // Only those that can run: the button's own menu is where the
+            // rest, and "Other", are offered.
+            agents={agents.filter(agent => !agent.disabledReason)}
+            onAsk={agent => {
+              setHeaderMenuOpen(false);
+              onAskAgent(agent);
+            }}
+          />
+        )}
         {addToDatasetProps && (
           <AddToDatasetMenu
             {...addToDatasetProps}
@@ -367,6 +389,9 @@ function TraceView({
           </div>
           <div className="trace-view-header-actions">
             <div className="trace-view-header-actions-full">
+              {onAskAgent && (
+                <AskAgentButton agents={agents} onAsk={onAskAgent} />
+              )}
               {addToDatasetProps && (
                 <AddToDatasetMenu
                   {...addToDatasetProps}

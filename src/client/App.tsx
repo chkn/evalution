@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import type { EvalRunProgress } from "../eval/eval-types";
+import type { AgentContext, AgentInfo, TerminalTarget } from "../shared/agent";
 import { samePrompt } from "../shared/dataset-fields";
 import type {
   ExecuteResponse,
@@ -19,7 +20,7 @@ import type {
   PromptRef,
   SSEData,
 } from "../shared/types";
-import { renamePrompt } from "./api";
+import { getAgentCommand, getAgents, renamePrompt } from "./api";
 import AddPromptDialog from "./components/AddPromptDialog";
 import DatasetList, { datasetKey } from "./components/DatasetList";
 import EvalList, { evalKey } from "./components/EvalList";
@@ -117,8 +118,7 @@ interface SettingsTab {
 interface TerminalTab {
   type: "terminal";
   id: string;
-  taskId: string;
-  stepId: string;
+  target: TerminalTarget;
   command: string;
   label: string;
 }
@@ -355,6 +355,8 @@ function App() {
   ]);
   const [focusedPaneId, setFocusedPaneId] = useState(INIT_PANE);
   const [rootPath, setRootPath] = useState("");
+  // Coding agents the views' "Ask" button offers — those not installed greyed out.
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [configured, setConfigured] = useState(false);
   const [activeSection, setActiveSection] = useState<
     "prompts" | "traces" | "datasets" | "evals" | "settings"
@@ -403,6 +405,14 @@ function App() {
   useEffect(() => {
     refetchConfig();
   }, [refetchConfig]);
+
+  useEffect(() => {
+    getAgents()
+      .then(setAgents)
+      .catch(() => {
+        /* no agents: the views just don't offer the button */
+      });
+  }, []);
 
   const handleSSEMessage = useCallback(
     (data: SSEData) => {
@@ -691,23 +701,46 @@ function App() {
     });
   };
 
-  /** Opens an interactive terminal tab (split right) with a setup step queued up. */
+  /**
+   * Opens an interactive terminal tab (split right) with `target`'s command
+   * queued up — a setup step, or a coding agent.
+   */
   const openTerminalRightOf = (
     fromPaneId: string,
-    taskId: string,
-    stepId: string,
+    target: TerminalTarget,
     command: string,
     label?: string,
   ) => {
     const tab: TerminalTab = {
       type: "terminal",
       id: `t${++_terminalSeq}`,
-      taskId,
-      stepId,
+      target,
       command,
       label: label ?? command,
     };
     openTabRightOf(fromPaneId, tab);
+  };
+
+  /**
+   * A view's "Ask" button: opens a terminal (split right) with `agent` queued
+   * up, connected to evalution's MCP server and told about `context`.
+   */
+  const askAgentRightOf = async (
+    fromPaneId: string,
+    agent: AgentInfo,
+    context: AgentContext,
+  ) => {
+    try {
+      const command = await getAgentCommand(agent.id, context);
+      openTerminalRightOf(
+        fromPaneId,
+        { kind: "agent", agentId: agent.id, context },
+        command,
+        agent.label,
+      );
+    } catch (err) {
+      console.error(`Couldn't launch ${agent.label}:`, err);
+    }
   };
 
   /** The loaded prompt a provider-scoped reference names, if any. */
@@ -1390,8 +1423,7 @@ function App() {
                               ) =>
                                 openTerminalRightOf(
                                   pane.id,
-                                  taskId,
-                                  stepId,
+                                  { kind: "setup", taskId, stepId },
                                   command,
                                   label,
                                 )
@@ -1404,8 +1436,7 @@ function App() {
                         return (
                           <div key={key} style={visible}>
                             <TerminalView
-                              taskId={tab.taskId}
-                              stepId={tab.stepId}
+                              target={tab.target}
                               command={tab.command}
                             />
                           </div>
@@ -1445,6 +1476,14 @@ function App() {
                               onOpenFillSource={from =>
                                 openFillSource(pane.id, from)
                               }
+                              agents={agents}
+                              onAskAgent={agent =>
+                                askAgentRightOf(pane.id, agent, {
+                                  type: "prompt",
+                                  providerId: tab.providerId,
+                                  promptId: tab.promptId,
+                                })
+                              }
                             />
                           </div>
                         );
@@ -1473,6 +1512,14 @@ function App() {
                                 }
                                 onDeleted={() => closeTabEverywhere(key)}
                                 onNewEval={setNewEvalSeed}
+                                agents={agents}
+                                onAskAgent={agent =>
+                                  askAgentRightOf(pane.id, agent, {
+                                    type: "dataset",
+                                    providerId: tab.providerId,
+                                    datasetId: tab.datasetId,
+                                  })
+                                }
                               />
                             </Suspense>
                           </div>
@@ -1520,6 +1567,14 @@ function App() {
                                     }),
                                   )
                                 }
+                                agents={agents}
+                                onAskAgent={agent =>
+                                  askAgentRightOf(pane.id, agent, {
+                                    type: "eval",
+                                    providerId: tab.providerId,
+                                    evalId: tab.evalId,
+                                  })
+                                }
                               />
                             </Suspense>
                           </div>
@@ -1566,6 +1621,14 @@ function App() {
                               closeTabEverywhere(key);
                               refetchTraces();
                             }}
+                            agents={agents}
+                            onAskAgent={agent =>
+                              askAgentRightOf(pane.id, agent, {
+                                type: "trace",
+                                providerId: tab.providerId,
+                                traceId: tab.traceId,
+                              })
+                            }
                           />
                         </div>
                       );

@@ -2,6 +2,11 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type { SetupStep, SetupTask } from "../shared/setup-task.ts";
+import {
+  type AgentCommandBuilder,
+  ClaudeCodeCommandBuilder,
+  CodexCommandBuilder,
+} from "./command-builder.ts";
 
 const AGENT_SETUP_DOMAIN = "evalut.io";
 
@@ -12,48 +17,72 @@ const AGENT_SETUP_URL = `https://${AGENT_SETUP_DOMAIN}/n/docs/setup.md`;
 // exported for the tests
 export const AGENT_SETUP_PROMPT = `Follow manual setup steps from ${AGENT_SETUP_URL}`;
 
+/** A coding agent evalution can launch in a terminal. */
+export interface CodingAgent {
+  /** Stable identifier, also the agent's setup {@link SetupTask.id}. */
+  id: string;
+  /** Display name, e.g. `Claude Code`. */
+  label: string;
+  /** Icon identifier, keyed into the client's `ProviderIcon`. */
+  icon: string;
+  /** A fresh builder for this agent's launch command. */
+  commandBuilder(): AgentCommandBuilder;
+}
+
 /**
- * Every coding agent offered a one-click launcher in onboarding, in display
- * order. This is the single source of truth for which agents exist and their
- * task ids — each is a {@link SetupTask} whose lone {@link SetupStep} runs the
- * agent's CLI with the setup prompt queued up in an interactive terminal.
- *
- * Mirrors {@link AI_SDK_REGISTRY} in `../sdk/registry.ts`, but agents have no
- * adapter class, so they live here as plain tasks. `icon` keys into the
- * client's `ProviderIcon`.
+ * Every coding agent evalution can launch, in display order. This is the
+ * single source of truth for which agents exist: onboarding offers each as a
+ * one-click setup launcher ({@link AGENT_REGISTRY}), and the "Ask" button on
+ * the prompt, trace, dataset, and eval views offers those whose CLI is
+ * installed.
  */
-export const AGENT_REGISTRY: readonly SetupTask[] = [
+export const CODING_AGENTS: readonly CodingAgent[] = [
   {
     id: "claude-code",
     label: "Claude Code",
     icon: "Anthropic",
-    steps: [
-      {
-        kind: "run_command",
-        id: "launch",
-        // The prompt must come before `--allowedTools`: that flag is variadic
-        // (`<tools...>`), so anything after it — including the prompt — is
-        // swallowed as another tool name and never reaches the CLI's positional.
-        command: `claude "${AGENT_SETUP_PROMPT}" --allowedTools "WebFetch(domain:${AGENT_SETUP_DOMAIN})"`,
-        label: "Claude Code",
-      },
-    ],
+    commandBuilder: () => new ClaudeCodeCommandBuilder(),
   },
   {
     id: "codex",
     label: "Codex",
     icon: "OpenAI",
+    commandBuilder: () => new CodexCommandBuilder(),
+  },
+];
+
+/** Look up a {@link CodingAgent} by its id, or `undefined` if none matches. */
+export function findAgent(agentId: string): CodingAgent | undefined {
+  return CODING_AGENTS.find(agent => agent.id === agentId);
+}
+
+/**
+ * Every coding agent offered a one-click launcher in onboarding, in display
+ * order — each is a {@link SetupTask} whose lone {@link SetupStep} runs the
+ * agent's CLI with the setup prompt queued up in an interactive terminal.
+ *
+ * Mirrors {@link AI_SDK_REGISTRY} in `../sdk/registry.ts`, but agents have no
+ * adapter class, so they're derived here from {@link CODING_AGENTS}.
+ */
+export const AGENT_REGISTRY: readonly SetupTask[] = CODING_AGENTS.map(
+  agent => ({
+    id: agent.id,
+    label: agent.label,
+    icon: agent.icon,
     steps: [
       {
         kind: "run_command",
         id: "launch",
-        // See https://developers.openai.com/codex/agent-approvals-security#network-isolation
-        command: `codex -c 'features.network_proxy.enabled=true' -c 'features.network_proxy.domains={ "${AGENT_SETUP_DOMAIN}" = "allow" }' -c 'sandbox_workspace_write.network_access=true' "${AGENT_SETUP_PROMPT}"`,
-        label: "Codex",
+        command: agent
+          .commandBuilder()
+          .setPrompt(AGENT_SETUP_PROMPT)
+          .addAllowedDomain(AGENT_SETUP_DOMAIN)
+          .build(),
+        label: agent.label,
       },
     ],
-  },
-];
+  }),
+);
 
 /** Look up an agent {@link SetupTask} by its id, or `undefined` if none matches. */
 export function findSetupTask(taskId: string): SetupTask | undefined {

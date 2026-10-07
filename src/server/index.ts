@@ -12,12 +12,14 @@ import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import type { SSEData } from "../shared/types.ts";
 import type { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
+import { buildAskAgentCommand, listAgents } from "./agents.ts";
 import { createProjectContext } from "./api-context.ts";
-import { setupRoutes } from "./api-routes.ts";
+import { type AgentHandlers, setupRoutes } from "./api-routes.ts";
 import { mountMcp } from "./mcp-route.ts";
 import { executeSetupStep, resolveSetupTasks } from "./setup-tasks.ts";
 import {
   registerTerminalRoute,
+  resolveSetupStepCommand,
   type TerminalSessionRegistry,
 } from "./terminal.ts";
 
@@ -98,6 +100,14 @@ export async function startServer(
       broadcast({ type: "prompt-changed", providerId, event }),
   });
 
+  // Launched agents connect back to this server's own MCP endpoint (below).
+  const url = `http://localhost:${port}`;
+  const agents: AgentHandlers = {
+    list: listAgents,
+    command: (agentId, agentContext) =>
+      buildAskAgentCommand(context, `${url}/mcp`, agentId, agentContext),
+  };
+
   const app = new Hono();
   setupRoutes({
     app,
@@ -105,6 +115,7 @@ export async function startServer(
     hotReloadSubscribers,
     hasConfig,
     setupTasks: { resolve: resolveSetupTasks, executeStep: executeSetupStep },
+    agents,
     otlpIngestor,
   });
 
@@ -113,9 +124,19 @@ export async function startServer(
   // project's databases.
   const mcp = mountMcp(app, context, version);
 
-  // Interactive terminal for onboarding `run_command`/`install_package` steps.
-  // Registered before the static catch-all so the upgrade request is routed.
-  registerTerminalRoute(app, upgradeWebSocket, rootPath, terminalSessions);
+  // Interactive terminal for onboarding `run_command`/`install_package` steps
+  // and launched coding agents. Registered before the static catch-all so the
+  // upgrade request is routed.
+  registerTerminalRoute(
+    app,
+    upgradeWebSocket,
+    rootPath,
+    terminalSessions,
+    async target =>
+      target.kind === "setup"
+        ? resolveSetupStepCommand(target.taskId, target.stepId)
+        : agents.command(target.agentId, target.context),
+  );
 
   // Serve the built client. `serveStatic`'s root is resolved against
   // `process.cwd()`, which the CLI changes to the user's project, so anchor it
@@ -135,7 +156,6 @@ export async function startServer(
   // Start server. `noServer: true` lets @hono/node-server own the HTTP upgrade
   // handshake and hand matching requests to the WebSocket routes above.
   const wss = new WebSocketServer({ noServer: true });
-  const url = `http://localhost:${port}`;
 
   // When running from a bundled build the client is served by this process;
   // when running from source (`npm run dev`) the client lives on a separate

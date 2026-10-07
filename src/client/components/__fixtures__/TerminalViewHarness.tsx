@@ -85,8 +85,11 @@ export function TerminalViewHarness({
         grow
       </button>
       <TerminalView
-        taskId="vercel-ai-sdk"
-        stepId="install-ai"
+        target={{
+          kind: "setup",
+          taskId: "vercel-ai-sdk",
+          stepId: "install-ai",
+        }}
         command="npm i ai"
       />
     </div>

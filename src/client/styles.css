@@ -4105,8 +4105,8 @@ pre {
 }
 
 /* The actions collapse into the ⋯ menu sooner than the date shortens: with
-   "Add to dataset" beside "Add annotation" they need the room. */
-@container trace-header (max-width: 760px) {
+   "Ask …" and "Add to dataset" beside "Add annotation" they need the room. */
+@container trace-header (max-width: 900px) {
   .trace-view-header-actions-full {
     display: none;
   }
@@ -6684,7 +6684,7 @@ pre {
   container-name: dataset-header;
 }
 
-@container dataset-header (max-width: 360px) {
+@container dataset-header (max-width: 500px) {
   .trace-view-header-actions-full {
     display: none;
   }
@@ -7575,4 +7575,40 @@ pre {
   line-height: 1;
   color: #9ca3af;
   transform: translateY(-0.1em);
+}
+
+/* "Ask AI" in a view's header: kept on one line. */
+.ask-agent-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* An agent whose CLI isn't installed, greyed out in the "Ask" menus. */
+.trace-header-menu-item:disabled {
+  cursor: default;
+  color: var(--dropdown-text-faint);
+  background: none;
+}
+
+.trace-header-menu-item:disabled .trace-header-menu-item-icon {
+  opacity: 0.45;
+}
+
+/* The "Not found" beside a greyed-out agent. */
+.ask-agent-item-status {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--dropdown-text-faint);
+}
+
+/* "Other" is a link; it reads like the buttons above it. */
+a.trace-header-menu-item {
+  text-decoration: none;
+}
+
+.ask-agent-menu-divider {
+  height: 1px;
+  border: none;
+  margin: 4px 6px;
+  background: var(--dropdown-border);
 }

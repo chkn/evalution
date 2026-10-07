@@ -10,6 +10,11 @@ import type {
   OpenOnHeadOptions,
   PromptProvider,
 } from "../prompt/prompt-provider.ts";
+import {
+  type AgentContext,
+  type AgentInfo,
+  parseAgentContext,
+} from "../shared/agent.ts";
 import { isPromptStyle } from "../shared/helpers.ts";
 import type { SetupTask } from "../shared/setup-task.ts";
 import type {
@@ -158,6 +163,23 @@ export interface SetupTaskHandlers {
   ): Promise<{ path?: string }>;
 }
 
+/**
+ * "Ask a coding agent" handling, injected by the host like
+ * {@link SetupTaskHandlers}: the Node CLI passes the implementation from
+ * `./agents.ts`; hosts without a terminal omit it and the routes report no
+ * agents.
+ */
+export interface AgentHandlers {
+  /** Every coding agent, those that can't be launched marked so. */
+  list(): AgentInfo[];
+  /**
+   * The command line that launches `agentId` about `context`, for the client
+   * to show before it runs. Rejects with an error named
+   * `AskAgentNotFoundError` when the agent or what `context` names is unknown.
+   */
+  command(agentId: string, context: AgentContext): Promise<string>;
+}
+
 export interface SetupRoutesOptions {
   app: Hono;
   /** The providers and lookups the routes answer from. */
@@ -171,6 +193,11 @@ export interface SetupRoutesOptions {
    * routes report no tasks / 404 (used by hosts without a filesystem).
    */
   setupTasks?: SetupTaskHandlers;
+  /**
+   * Optional coding-agent handlers. When omitted, `/api/agents` lists none
+   * and building a command is a 404.
+   */
+  agents?: AgentHandlers;
   /**
    * The process's OTLP ingestor, if any. When set, `POST /v1/traces` (and the
    * `/otel/v1/traces` alias) accept incoming OTLP trace exports and feed them
@@ -190,6 +217,7 @@ export function setupRoutes({
   hotReloadSubscribers,
   hasConfig,
   setupTasks,
+  agents,
   otlpIngestor,
 }: SetupRoutesOptions): void {
   const {
@@ -219,6 +247,27 @@ export function setupRoutes({
     } catch (error: any) {
       // SetupStepNotFoundError sets `.name`; map it to 404, others to 400.
       const status = error?.name === "SetupStepNotFoundError" ? 404 : 400;
+      return c.json({ error: error.message }, status);
+    }
+  });
+
+  // GET /api/agents - Coding agents a view can launch, the uninstalled marked
+  app.get("/api/agents", c => c.json(agents ? agents.list() : []));
+
+  // POST /api/agents/:agentId/command - The command that launches an agent
+  // about what the body's `context` names, to show before it runs
+  app.post("/api/agents/:agentId/command", async c => {
+    if (!agents)
+      return c.json({ error: "Coding agents are not available" }, 404);
+    const body = await c.req.json().catch(() => undefined);
+    const context = parseAgentContext(body?.context);
+    if (!context) return c.json({ error: "Missing or invalid context" }, 400);
+    try {
+      return c.json({
+        command: await agents.command(c.req.param("agentId"), context),
+      });
+    } catch (error: any) {
+      const status = error?.name === "AskAgentNotFoundError" ? 404 : 500;
       return c.json({ error: error.message }, status);
     }
   });

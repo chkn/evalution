@@ -61,6 +61,28 @@ test("starts the PTY at the rendered terminal size", async ({
   expect(start!.rows).toBeGreaterThan(5);
 });
 
+test("names what to run by target, never by command", async ({
+  mount,
+  page,
+}) => {
+  const component = await mount(<TerminalViewHarness />);
+  await pressReturn(component, page);
+
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__wsUrls.length))
+    .toBeGreaterThan(0);
+  const [url]: string[] = await page.evaluate(() => (window as any).__wsUrls);
+  const params = new URL(url).searchParams;
+  // The server resolves the command from the target; the displayed command
+  // never goes up the wire.
+  expect(JSON.parse(params.get("target")!)).toEqual({
+    kind: "setup",
+    taskId: "vercel-ai-sdk",
+    stepId: "install-ai",
+  });
+  expect(url).not.toContain("npm");
+});
+
 test("shows a spinner after Return and clears it on first output", async ({
   mount,
   page,

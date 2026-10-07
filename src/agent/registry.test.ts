@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_REGISTRY,
   AGENT_SETUP_PROMPT,
+  CODING_AGENTS,
+  findAgent,
   findSetupStep,
   findSetupTask,
 } from "./registry.ts";
@@ -19,8 +21,22 @@ describe("coding-agent registry", () => {
       expect(step?.kind).toBe("run_command");
       if (step?.kind === "run_command") {
         expect(step.command).toContain(AGENT_SETUP_PROMPT);
+        // The agent may fetch the setup docs without asking.
+        expect(step.command).toContain("evalut.io");
       }
     }
+  });
+
+  it("derives a setup task from every coding agent, built by its command builder", () => {
+    expect(AGENT_REGISTRY.map(t => t.id)).toEqual(CODING_AGENTS.map(a => a.id));
+    for (const agent of CODING_AGENTS) {
+      const step = findSetupStep(agent.id, "launch");
+      expect(step?.kind === "run_command" && step.command).toMatch(
+        new RegExp(`^${agent.commandBuilder().executable} `),
+      );
+      expect(findAgent(agent.id)).toBe(agent);
+    }
+    expect(findAgent("nope")).toBeUndefined();
   });
 
   it("gives every task a unique id with unique step ids", () => {

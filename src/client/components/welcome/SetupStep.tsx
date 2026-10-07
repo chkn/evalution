@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { type ReactElement, useEffect, useState } from "react";
+import { OTHER_AGENT_URL } from "../../../shared/agent";
 import {
   CONFIG_DOCS_URL,
   SETUP_STEP_DONE_EVENT,
@@ -18,10 +19,6 @@ import type { WizardStepProps } from "./types";
 /** URL for requesting support for an AI SDK we don't list. */
 const OTHER_SDK_URL =
   "https://github.com/chkn/evalution/issues/new?template=sdk-request.yml";
-
-/** URL for requesting support for a coding agent we don't list. */
-const OTHER_AGENT_URL =
-  "https://github.com/chkn/evalution/issues/new?template=agent-request.yml";
 
 /** Guide the user is pointed at once their project is configured. */
 const MANUAL_SETUP_URL = "https://evalut.io/n/docs/setup";

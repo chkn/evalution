@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { AgentInfo } from "../../shared/agent";
+import { AskAgentButton, AskAgentMenuItems } from "./AskAgentButton";
 import "@glideapps/glide-data-grid/dist/index.css";
 import {
   booleanCellRenderer,
@@ -132,6 +134,13 @@ interface Props {
   onDeleted: () => void;
   /** "New eval…" — opens the dialog with this dataset and its linked prompt chosen. */
   onNewEval?: (seed: NewEvalSeed) => void;
+  /** Coding agents the "Ask" button offers. */
+  agents?: readonly AgentInfo[];
+  /**
+   * Launches a coding agent about this dataset. Without it (or without
+   * `agents`), there's no "Ask" button.
+   */
+  onAskAgent?: (agent: AgentInfo) => void;
 }
 
 /**
@@ -224,6 +233,7 @@ const GROUP_HEADER_HEIGHT = 26;
 const PANE_DELAY_MS = 300;
 
 const NO_PROMPTS: readonly NormalizedPrompt[] = [];
+const NO_AGENTS: readonly AgentInfo[] = [];
 
 const NO_SELECTION: GridSelection = {
   columns: CompactSelection.empty(),
@@ -340,6 +350,8 @@ function DatasetView({
   onOpenTrace,
   onDeleted,
   onNewEval,
+  agents = NO_AGENTS,
+  onAskAgent,
 }: Props) {
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [overview, setOverview] = useState<DatasetRowsOverview>({
@@ -870,6 +882,17 @@ function DatasetView({
     menuOpen &&
     createPortal(
       <div className="trace-header-menu" ref={menuRef} style={menuStyle}>
+        {onAskAgent && (
+          <AskAgentMenuItems
+            // Only those that can run: the button's own menu is where the
+            // rest, and "Other", are offered.
+            agents={agents.filter(agent => !agent.disabledReason)}
+            onAsk={agent => {
+              setMenuOpen(false);
+              onAskAgent(agent);
+            }}
+          />
+        )}
         {onNewEval && (
           <button
             type="button"
@@ -986,6 +1009,9 @@ function DatasetView({
           </div>
           <div className="trace-view-header-actions">
             <div className="trace-view-header-actions-full">
+              {onAskAgent && (
+                <AskAgentButton agents={agents} onAsk={onAskAgent} />
+              )}
               {onNewEval && (
                 <button
                   type="button"
