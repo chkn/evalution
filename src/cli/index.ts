@@ -27,6 +27,7 @@ import {
   findRunningServer,
   writeServerInfo,
 } from "./server-discovery.ts";
+import { registerTypeScriptTransformFallback } from "./typescript-transform-hook.ts";
 import { registerVariationLoaderHook } from "./variation-loader-hook.ts";
 
 /** This package's version. */
@@ -48,6 +49,13 @@ registerBundlerResolutionFallback();
 // imported under the real file's URL plus `?evalution-src=<sha256>`, which
 // this hook answers from memory. See `./variation-loader-hook.ts`.
 registerVariationLoaderHook();
+
+// Node's loader only strips types, so a prompt file (or anything it imports)
+// written for `tsc` — parameter properties, enums, namespaces — would fail to
+// load. This compiles just those modules with the `typescript` package
+// instead. Registered after the variation hook so it runs first (hooks run
+// last-registered first) and sees variations' in-memory sources too.
+registerTypeScriptTransformFallback();
 
 async function startConfiguredServer(
   rootDir: string,
