@@ -27,17 +27,11 @@ describe("previewPropValue", () => {
 });
 
 describe("previewCell", () => {
-  it("names a resource by its export, with an arguments summary", () => {
+  it("names a resource instance, and the output read from it", () => {
+    expect(previewCell({ kind: "instance", name: "db" })).toBe("db");
     expect(
-      previewCell({
-        kind: "resource",
-        uri: ".evalution/playground/tasks.ts#seededTask",
-        args: {
-          title: { kind: "value", value: { kind: "primitive", value: "Milk" } },
-          owner: { kind: "resource", uri: "db.ts#db" },
-        },
-      }),
-    ).toBe('seededTask(title: "Milk", owner: db)');
+      previewCell({ kind: "instance", name: "root", output: "taskId" }),
+    ).toBe("root.taskId");
   });
 
   it("truncates a long value", () => {
@@ -53,7 +47,7 @@ describe("previewCell", () => {
     const cell = {
       kind: "object" as const,
       properties: {
-        db: { kind: "resource" as const, uri: "db.ts#db" },
+        db: { kind: "instance" as const, name: "db" },
         userId: {
           kind: "value" as const,
           value: { kind: "primitive" as const, value: "u1" },

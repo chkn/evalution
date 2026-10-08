@@ -24,6 +24,7 @@ import type {
   NormalizedPrompt,
   PromptID,
   PropDefinition,
+  RunResources,
 } from "../../shared/types";
 
 /** An input together with the definition that says what it is. */
@@ -55,6 +56,8 @@ export interface SkippedInput {
 export interface PartialExecuteRequest {
   functionInputs: Record<string, ExecutionInput>;
   executeInputs: Record<string, ExecutionInput>;
+  /** The run's named resource instances, which slots may reference. */
+  resources?: RunResources;
 }
 
 /**
@@ -167,7 +170,9 @@ export function hasRecordedInputs(recorded: PromptID | undefined): boolean {
 
 /**
  * Cells for a row of a dataset with `fields`: each input lands in the field
- * that matches it, receipts stripped. An input matching no field is skipped;
+ * that matches it. A cell references the row's resource instances by name;
+ * the instances themselves travel beside the cells, as the row's
+ * `resources` (receipts stripped — see {@link rowResources}). An input matching no field is skipped;
  * a second input matching an already-filled field is the same value arriving
  * twice (a function and an execute parameter of one name and type) and is
  * neither matched again nor skipped.
@@ -191,22 +196,32 @@ export function toCells(
       continue;
     }
     if (field.id in cells) continue;
-    cells[field.id] = stripReceipts(input);
+    cells[field.id] = input;
     matched++;
   }
   return { cells, matched, skipped };
 }
 
-/** Every resource `uri` an input names, at any depth (arguments included). */
-function resourceUris(input: ExecutionInput): string[] {
+/**
+ * The resource instances a dataset row keeps: `resources` without receipts,
+ * or `undefined` when there are none. A receipt makes a run reconstruct a
+ * *past* instance; a row is a recipe for new runs.
+ */
+export function rowResources(
+  resources: RunResources | undefined,
+): RunResources | undefined {
+  return resources && Object.keys(resources).length > 0
+    ? stripReceipts(resources)
+    : undefined;
+}
+
+/** Every instance name an input references, at any depth. */
+function instanceNames(input: ExecutionInput): string[] {
   switch (input.kind) {
-    case "resource":
-      return [
-        input.uri,
-        ...Object.values(input.args ?? {}).flatMap(resourceUris),
-      ];
+    case "instance":
+      return [input.name];
     case "object":
-      return Object.values(input.properties).flatMap(resourceUris);
+      return Object.values(input.properties).flatMap(instanceNames);
     default:
       return [];
   }
@@ -215,17 +230,25 @@ function resourceUris(input: ExecutionInput): string[] {
 /**
  * Panel inputs for `prompt`: each input fills every slot it matches — a
  * function and an execute parameter of one name and type are one value, so
- * both get it. An input naming a resource outside this prompt's
- * `inputSources` is skipped rather than filled: the chip couldn't resolve,
- * and would only fail at Run.
+ * both get it. `resources` come along, receipts stripped, except an instance
+ * of a resource outside this prompt's `inputSources`: it couldn't be created
+ * here, so it's dropped, and an input referencing it is skipped rather than
+ * filled — it would only fail at Run.
  */
 export function toPanel(
   inputs: NamedInputs,
   prompt: NormalizedPrompt,
+  resources?: RunResources,
 ): PartialExecuteRequest & { skipped: SkippedInput[] } {
   const inScope = new Set(
     (prompt.inputSources?.resources ?? []).map(r => r.uri),
   );
+  const kept: RunResources = {};
+  const dropped = new Set<string>();
+  for (const [name, spec] of Object.entries(rowResources(resources) ?? {})) {
+    if (inScope.has(spec.uri)) kept[name] = spec;
+    else dropped.add(name);
+  }
   const functionInputs: Record<string, ExecutionInput> = {};
   const executeInputs: Record<string, ExecutionInput> = {};
   const skipped: SkippedInput[] = [];
@@ -238,15 +261,19 @@ export function toPanel(
       skipped.push({ name: def.name, reason: "no-match" });
       continue;
     }
-    if (resourceUris(input).some(uri => !inScope.has(uri))) {
+    if (instanceNames(input).some(name => dropped.has(name))) {
       skipped.push({ name: def.name, reason: "resource-out-of-scope" });
       continue;
     }
-    const clean = stripReceipts(input);
-    if (fnDef) functionInputs[fnDef.name] = clean;
-    if (execDef) executeInputs[execDef.name] = clean;
+    if (fnDef) functionInputs[fnDef.name] = input;
+    if (execDef) executeInputs[execDef.name] = input;
   }
-  return { functionInputs, executeInputs, skipped };
+  return {
+    functionInputs,
+    executeInputs,
+    ...(Object.keys(kept).length > 0 && { resources: kept }),
+    skipped,
+  };
 }
 
 /** A schema for "New dataset" from a set of inputs: one field per distinct input. */
@@ -323,6 +350,8 @@ export type PanelFillSource = { description: string } & (
 export interface PanelFill {
   functionInputs: Record<string, ExecutionInput>;
   executeInputs: Record<string, ExecutionInput>;
+  /** Resource instances the inputs reference, receipts stripped. */
+  resources?: RunResources;
   /** Shown in the notice: "trace 3f2a1b2c…" / "Support tickets, row 4". */
   from: PanelFillSource;
   /** What didn't fit, named in the notice. */
@@ -333,18 +362,27 @@ export interface PanelFill {
 
 let fillSeq = 0;
 
-/** A {@link PanelFill} for `prompt` from `inputs`, with a fresh nonce. */
+/**
+ * A {@link PanelFill} for `prompt` from `inputs` and the resource instances
+ * they came with — a row's, or a trace's recorded ones — with a fresh nonce.
+ */
 export function panelFill(
   inputs: NamedInputs,
   prompt: NormalizedPrompt,
   from: PanelFillSource,
+  resources?: RunResources,
 ): PanelFill {
-  const { functionInputs, executeInputs, skipped } = toPanel(inputs, prompt);
+  const { functionInputs, executeInputs, skipped, ...rest } = toPanel(
+    inputs,
+    prompt,
+    resources,
+  );
   // Time-based as well as sequential, so a nonce minted after a reload never
   // collides with one an earlier page load already applied.
   return {
     functionInputs,
     executeInputs,
+    ...(rest.resources && { resources: rest.resources }),
     from,
     skipped,
     nonce: Date.now() * 1000 + (fillSeq++ % 1000),

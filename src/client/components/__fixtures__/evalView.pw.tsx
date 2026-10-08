@@ -142,6 +142,60 @@ test("binds a same-named column to the prompt's input, marked as matched, and sa
   await expect(component.getByRole("button", { name: /Run/ })).toBeEnabled();
 });
 
+test("the inputs panel has the run's Resources above the slots, saved with the eval", async ({
+  mount,
+  page,
+}) => {
+  const seeded = {
+    uri: ".evalution/playground/tasks.ts#seededTask",
+    label: "Seeded task",
+    scope: "run" as const,
+    parameters: [string("title")],
+  };
+  const withResources = {
+    ...TRIAGE,
+    inputSources: {
+      resources: [seeded],
+      functionSlots: {},
+      executeSlots: {},
+    },
+  } as NormalizedPrompt;
+  const patches = await mockEval(page, EVAL);
+  const component = await mount(
+    <EvalViewHarness
+      providerId="local-evals"
+      evalId="e1"
+      prompts={[withResources]}
+      datasets={[TICKETS_SUMMARY]}
+    />,
+  );
+
+  const resources = component.getByRole("region", { name: "Resources" });
+  await resources.getByRole("button", { name: "＋ Add resource" }).click();
+  await page
+    .getByRole("menuitem", { name: "Seeded task", exact: true })
+    .click();
+  const card = resources.locator("[data-instance-card='seededTask']");
+  await expect(card).toContainText("not bound to a slot");
+
+  // Its argument can take a column, as any slot in an eval can.
+  await card.locator(".pg-slot-source-wrap").click();
+  await page
+    .getByRole("menuitem", { name: /ticket/ })
+    .first()
+    .click();
+  await expect
+    .poll(() => patches.at(-1)?.inputs)
+    .toMatchObject({
+      resources: {
+        seededTask: {
+          uri: seeded.uri,
+          args: { title: { kind: "dataset", field: "0" } },
+        },
+      },
+    });
+});
+
 test("lists an unbound check parameter as a problem, and won't run until it's bound", async ({
   mount,
   page,

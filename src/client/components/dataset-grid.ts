@@ -6,12 +6,11 @@
  * it has, what each cell shows, and the paged cache rows are read through.
  * Pure and grid-agnostic — `DatasetView` maps it onto Glide Data Grid.
  *
- * A column is a *path* into a row: a whole field, or one key inside it — a
- * resource's argument, an object's property, or a property of a typed-in
- * object value. The keys come from {@link DatasetRowsOverview}, found in the
- * rows rather than the schema, and merged by name, so one `title` column
- * spans every resource that takes a `title`. A path is also what sorting and
- * filtering will name when they arrive.
+ * A column is a *path* into a row: a whole field, or one key inside it — an
+ * object's property, or a property of a typed-in object value. The keys come
+ * from {@link DatasetRowsOverview}, found in the rows rather than the schema,
+ * and merged by name. A path is also what sorting and filtering will name
+ * when they arrive.
  *
  * Some cells are typed into in place — see {@link editableCell}. An edit is
  * reported per cell and sent per row ({@link groupEdits}), and the page it
@@ -32,13 +31,13 @@ import type {
   ExecutionInput,
   PropValue,
 } from "../../shared/types";
-import { previewCell, previewPropValue, resourceName } from "./dataset-preview";
+import { previewCell, previewPropValue } from "./dataset-preview";
 import { DISCLOSURE_COLLAPSED, DISCLOSURE_EXPANDED } from "./grid-sprites";
 
 /** Where a column reads from: a field, or one key one level inside it. */
 export interface CellPath {
   fieldId: string;
-  /** A resource argument's or object property's name. */
+  /** An object property's name. */
   key?: string;
 }
 
@@ -62,13 +61,8 @@ export type DatasetColumn = {
   base?: EditableBase;
 } & (
   | {
-      /**
-       * `whole`: a field in one column. `head`: the column naming which
-       * resource fills an expanded field, beside one `key` column per
-       * argument. A field of objects has no head: its own cell would only
-       * ever read `{…}` next to the columns holding what's in it.
-       */
-      role: "whole" | "head";
+      /** A field in one column. */
+      role: "whole";
       path: CellPath;
     }
   | { role: "key"; path: Required<CellPath> }
@@ -76,7 +70,7 @@ export type DatasetColumn = {
   | { role: "source" }
 );
 
-const WIDTHS = { whole: 240, head: 140, key: 160, source: 96 };
+const WIDTHS = { whole: 240, key: 160, source: 96 };
 
 /**
  * A field's group header, which is its name: only fields with keys have one,
@@ -131,17 +125,6 @@ export function buildColumns({
       columns.push({ ...whole, group });
       continue;
     }
-    if (fieldShape?.resource) {
-      columns.push({
-        id: `${field.id}/`,
-        title: field.def.name,
-        type,
-        group,
-        role: "head",
-        path,
-        width: WIDTHS.head,
-      });
-    }
     for (const key of fieldKeys) {
       columns.push({
         id: `${field.id}/${key}`,
@@ -170,9 +153,7 @@ export function buildColumns({
 export function menuFieldId(
   column: DatasetColumn | undefined,
 ): string | undefined {
-  return column?.role === "whole" || column?.role === "head"
-    ? column.path.fieldId
-    : undefined;
+  return column?.role === "whole" ? column.path.fieldId : undefined;
 }
 
 /**
@@ -213,8 +194,7 @@ export function groupHeader(
 
 /**
  * What a path reads in a row: the input there, `"absent"` when the row has
- * nothing there, or `"n/a"` when the field's cell has no such key — a
- * different resource, taking other arguments, say.
+ * nothing there, or `"n/a"` when the field's cell has no such key.
  *
  * A typed-in object's property is a `PropValue`, not an `ExecutionInput`; it
  * comes back wrapped as the value cell it would have been on its own.
@@ -233,12 +213,7 @@ export function readPath(
       ? { kind: "value", value: value.properties[key] }
       : "n/a";
   }
-  const inner =
-    cell.kind === "resource"
-      ? cell.args
-      : cell.kind === "object"
-        ? cell.properties
-        : undefined;
+  const inner = cell.kind === "object" ? cell.properties : undefined;
   return inner && Object.hasOwn(inner, key) ? inner[key] : "n/a";
 }
 
@@ -391,7 +366,10 @@ export function groupEdits(edits: readonly CellEdit[]): DatasetRowUpdate[] {
   return [...byRow.values()];
 }
 
-/** `row` with `update`'s cells set or cleared, as the server will store it. */
+/**
+ * `row` with `update`'s cells and resource instances set or cleared, as the
+ * server will store it.
+ */
 export function applyUpdate(
   row: DatasetRow,
   update: DatasetRowUpdate,
@@ -401,7 +379,18 @@ export function applyUpdate(
     if (cell === null) delete cells[fieldId];
     else cells[fieldId] = cell;
   }
-  return { ...row, cells };
+  if (!update.resources) return { ...row, cells };
+  const resources = { ...row.resources };
+  for (const [name, spec] of Object.entries(update.resources)) {
+    if (spec === null) delete resources[name];
+    else resources[name] = spec;
+  }
+  const { resources: _, ...rest } = row;
+  return {
+    ...rest,
+    cells,
+    ...(Object.keys(resources).length > 0 && { resources }),
+  };
 }
 
 /** How the grid should draw one cell. */
@@ -409,10 +398,10 @@ export type CellView =
   | { kind: "loading" }
   /** Nothing here: a sparse row. Drawn as a dim dash. */
   | { kind: "empty" }
-  /** Not applicable: this row's resource doesn't take this argument. */
+  /** Not applicable: this row's cell has no such key. */
   | { kind: "n/a" }
   | { kind: "text"; text: string; tone?: "dim" | "link" }
-  /** A resource, drawn as a chip. */
+  /** A resource instance, drawn as a chip. */
   | { kind: "chip"; text: string }
   /**
    * A cell typed into in place (see {@link editableCell}): `value` is what
@@ -434,7 +423,7 @@ function previewObject(
   return `{ ${entries
     .map(
       ([key, child]) =>
-        `${key}: ${child.kind === "resource" ? `◆ ${previewCell(child)}` : previewCell(child)}`,
+        `${key}: ${child.kind === "instance" ? `◆ ${previewCell(child)}` : previewCell(child)}`,
     )
     .join(", ")} }`;
 }
@@ -451,22 +440,12 @@ function previewValueObject(
 }
 
 /** How an input is drawn in a column of `role`. */
-function inputView(
-  input: ExecutionInput,
-  role: "whole" | "head" | "key",
-): CellView {
+function inputView(input: ExecutionInput): CellView {
   switch (input.kind) {
-    case "resource":
-      return {
-        kind: "chip",
-        // An expanded field's head names the resource; the arguments have
-        // their own columns beside it.
-        text: `◆ ${role === "head" ? resourceName(input.uri) : previewCell(input)}`,
-      };
+    case "instance":
+      return { kind: "chip", text: `◆ ${previewCell(input)}` };
     case "object":
-      return role === "head"
-        ? { kind: "text", text: "{…}", tone: "dim" }
-        : { kind: "text", text: previewObject(input) };
+      return { kind: "text", text: previewObject(input) };
     default:
       return {
         kind: "text",
@@ -504,7 +483,7 @@ export function cellView(
       }
       if (found === "absent") return { kind: "empty" };
       if (found === "n/a") return { kind: "n/a" };
-      return inputView(found, column.role);
+      return inputView(found);
     }
   }
 }

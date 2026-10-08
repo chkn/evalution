@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type {
   ExecutionInput,
   PropDefinition,
@@ -632,7 +632,9 @@ describe("findInputCycle", () => {
           root: { uri: "pg.ts#task" },
           child: {
             uri: "pg.ts#task",
-            args: { parentId: { kind: "instance", name: "root", output: "id" } },
+            args: {
+              parentId: { kind: "instance", name: "root", output: "id" },
+            },
           },
         },
         functionInputs: { taskId: { kind: "instance", name: "child" } },
@@ -706,7 +708,9 @@ describe("inputReferenceProblems", () => {
           resources: {
             seeded: {
               uri: "pg.ts#seeded",
-              args: { title: { kind: "input", half: "function", path: "nope" } },
+              args: {
+                title: { kind: "input", half: "function", path: "nope" },
+              },
             },
           },
         },

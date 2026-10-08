@@ -345,7 +345,10 @@ function declaredInstance(
             await Promise.all(
               args.map(
                 async ([k, v]) =>
-                  [k, await resolveExecutionInput(v, resolver, context)] as const,
+                  [
+                    k,
+                    await resolveExecutionInput(v, resolver, context),
+                  ] as const,
               ),
             ),
           ),

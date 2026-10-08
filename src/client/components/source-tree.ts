@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type { ResourceInfo } from "../../shared/types";
+import { NEW_GROUP } from "./pseudo-sources";
 
 /**
  * One entry in the nested source menu {@link SourcePicker} renders — a
@@ -99,7 +100,15 @@ export function buildSourceTree(
     if (node) items.push({ group: root.group ?? [], node });
   }
 
-  return groupTree(items);
+  const tree = groupTree(items);
+  // The catalog sits under **New** only to make room for the run's own
+  // instances above it; for a slot none of them fits, it's all there is, so
+  // it's opened in place rather than behind one more click.
+  const [only] = tree;
+  if (tree.length === 1 && only.kind === "group" && only.label === NEW_GROUP) {
+    return only.children ?? [];
+  }
+  return tree;
 }
 
 /** `["Tasks", "Regressions"]` + `"Task A"` → `"Tasks / Regressions / Task A"`. */
@@ -236,7 +245,9 @@ function finalize(
     }
     const children = finalize(entry.children);
     if (children.length === 0) continue; // every member pruned away
-    if (children.length === 1) {
+    // **New** stays a group however little is in it: a pick from it adds an
+    // instance, which must not read like the run's own instances beside it.
+    if (children.length === 1 && entry.label !== NEW_GROUP) {
       resolved.push(children[0]); // nothing left to disambiguate
     } else {
       resolved.push({

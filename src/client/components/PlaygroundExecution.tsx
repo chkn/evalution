@@ -31,8 +31,6 @@ import { brokenResources, ExecutionInputEditor } from "./ExecutionInputEditor";
 import {
   fromExecutionInput,
   paramStorageKey,
-  type ResourceArgs,
-  resourceArgsFor,
   type Selections,
   type SlotSelection,
   type StoredInputs,
@@ -45,11 +43,24 @@ import {
   type PartialExecuteRequest,
   type SkippedInput,
 } from "./named-inputs";
-import { describePseudoSource, withPseudoSources } from "./pseudo-sources";
 import {
-  computeClaims,
-  type ResourceArgsContext,
-} from "./resource-args-context";
+  describePseudoSource,
+  withInstanceSources,
+  withPseudoSources,
+} from "./pseudo-sources";
+import {
+  type InstanceEdit,
+  instanceSourceContext,
+  ResourcesSection,
+} from "./ResourcesSection";
+import {
+  fromWireResources,
+  type InstanceSelections,
+  referencesTo,
+  retargetSelections,
+  toWireResources,
+} from "./run-resources-state";
+import { useRunInstances } from "./use-run-instances";
 
 interface Props {
   prompt: NormalizedPrompt;
@@ -109,20 +120,35 @@ type OverwrittenNotes = {
   exec: Record<string, Record<string, string[]>>;
 };
 
-/**
- * A top-level slot's own unique position — the root every nested
- * {@link ResourceArgsContext.path} within it is built from. Namespaced by
- * `which` so a function parameter and an execute parameter of the same name
- * (a real case — `PromptInputSources.functionSlots` /
- * `executeSlots` are already a parallel split for exactly this reason) don't
- * collide.
- */
-function slotPath(which: "fn" | "exec", name: string): string {
-  return `${which}.${name}`;
-}
-
 /** A stable stand-in for a prompt with no execute parameters, so memos keyed on them hold. */
 const NO_PARAMETERS: PropDefinition[] = [];
+/** The same, for a prompt with no resources in scope. */
+const NO_RESOURCES: ResourceInfo[] = [];
+
+/** `selections` as inputs by slot name, empty slots left out. */
+function namedInputs(
+  defs: readonly PropDefinition[],
+  selections: Selections,
+): Record<string, ExecutionInput> {
+  return Object.fromEntries(
+    defs.flatMap(d => {
+      const input = toExecutionInput(selections[d.name]);
+      return input ? [[d.name, input] as const] : [];
+    }),
+  );
+}
+
+/** Editor state for a set of stored or recorded inputs, by slot name. */
+function restoreSelections(
+  inputs: Record<string, ExecutionInput> = {},
+): Selections {
+  return Object.fromEntries(
+    Object.entries(inputs).map(([name, input]) => [
+      name,
+      fromExecutionInput(input),
+    ]),
+  );
+}
 
 /**
  * Restore the panel from what was saved last time.
@@ -130,50 +156,34 @@ const NO_PARAMETERS: PropDefinition[] = [];
  * An {@link ExecutionInput} is what gets stored, rather than a bare value: a
  * resource choice has no value to save, and storing the recipe is what lets a
  * template come back as a template rather than as the string it flattened to.
- *
- * Arguments ride inside those same stored inputs (a resource node's `args`)
- * rather than in a second key — `resourceArgs` here is *derived*, by pulling
- * every `args` a stored reference carries back out into
- * `specs/resource-arguments.md` §J's shared-by-uri shape, from wherever in
- * the tree it turns up.
+ * The run's resource instances are stored beside the slots, as the request
+ * sends them.
  */
 function loadStored(prompt: NormalizedPrompt): {
   fn: Selections;
   exec: Selections;
   layout: LayoutChoices;
-  resourceArgs: ResourceArgs;
+  instances: InstanceSelections;
 } {
   const empty = {
     fn: {},
     exec: {},
     layout: { fn: {}, exec: {} },
-    resourceArgs: {},
+    instances: {},
   };
   try {
     const raw = localStorage.getItem(paramStorageKey(prompt));
     if (!raw) return empty;
     const parsed = JSON.parse(raw) as StoredInputs;
     if (!parsed || typeof parsed !== "object") return empty;
-    const resourcesByUri = new Map<string, ResourceInfo>(
-      (prompt.inputSources?.resources ?? []).map(r => [r.uri, r]),
-    );
-    const resourceArgs: ResourceArgs = {};
-    const restore = (inputs: Record<string, ExecutionInput> = {}) =>
-      Object.fromEntries(
-        Object.entries(inputs).map(([name, input]) => {
-          const recovered = fromExecutionInput(input, resourcesByUri);
-          Object.assign(resourceArgs, recovered.resourceArgs);
-          return [name, recovered.selection];
-        }),
-      );
     return {
-      fn: restore(parsed.functionInputs),
-      exec: restore(parsed.executeInputs),
+      fn: restoreSelections(parsed.functionInputs),
+      exec: restoreSelections(parsed.executeInputs),
       layout: {
         fn: parsed.layout?.functionSlots ?? {},
         exec: parsed.layout?.executeSlots ?? {},
       },
-      resourceArgs,
+      instances: fromWireResources(parsed.resources),
     };
   } catch {
     /* ignore (private browsing, quota, corrupt entry, etc.) */
@@ -212,9 +222,6 @@ function PlaygroundExecution({
   const [layoutChoices, setLayoutChoices] = useState<LayoutChoices>(
     stored.layout,
   );
-  const [resourceArgs, setResourceArgs] = useState<ResourceArgs>(
-    stored.resourceArgs,
-  );
   const [overwrittenNotes, setOverwrittenNotes] = useState<OverwrittenNotes>({
     fn: {},
     exec: {},
@@ -226,108 +233,64 @@ function PlaygroundExecution({
   const executeParameters = prompt.executeParameters ?? NO_PARAMETERS;
   const broken = brokenResources(prompt.inputSources);
 
+  const catalog = prompt.inputSources?.resources ?? NO_RESOURCES;
   const resourcesByUri = useMemo(
-    () =>
-      new Map<string, ResourceInfo>(
-        (prompt.inputSources?.resources ?? []).map(r => [r.uri, r]),
-      ),
-    [prompt.inputSources],
+    () => new Map<string, ResourceInfo>(catalog.map(r => [r.uri, r])),
+    [catalog],
+  );
+  const { instances, setInstances, adopt } = useRunInstances(
+    stored.instances,
+    resourcesByUri,
   );
 
   // The other slots, as sources for `input` references (`specs/evals.md`
   // §B.2.1): offered where their type fits and no cycle would close.
   const bindings = useMemo(() => {
-    const resolve = (uri: string) =>
-      resourceArgsFor(uri, resourceArgs, resourcesByUri);
-    const named = (defs: readonly PropDefinition[], sel: Selections) =>
-      Object.fromEntries(
-        defs.flatMap(d => {
-          const input = toExecutionInput(sel[d.name], resolve);
-          return input ? [[d.name, input] as const] : [];
-        }),
-      );
+    const resources = toWireResources(instances);
     return {
-      functionInputs: named(prompt.functionParameters, functionSelections),
-      executeInputs: named(executeParameters, executeSelections),
+      functionInputs: namedInputs(
+        prompt.functionParameters,
+        functionSelections,
+      ),
+      executeInputs: namedInputs(executeParameters, executeSelections),
+      ...(resources && { resources }),
     };
   }, [
     prompt.functionParameters,
     executeParameters,
     functionSelections,
     executeSelections,
-    resourceArgs,
-    resourcesByUri,
+    instances,
   ]);
   // Stable while only values change, so typing doesn't remount editors.
   const sources = useStructurallyStable(
-    withPseudoSources(prompt.inputSources, {
+    withPseudoSources(withInstanceSources(prompt.inputSources, instances), {
       functionParameters: prompt.functionParameters,
       executeParameters,
       bindings,
     }),
   );
 
-  // Panel order — the first slot to reach a given resource `uri` owns its
-  // argument form; every later selection of it just points back (§I).
-  // Recomputed purely from the current selections on every render (rather
-  // than mutated as rows render) so it behaves identically under React
-  // StrictMode's double-invoked renders.
-  const claimed = useMemo(
-    () =>
-      computeClaims(
-        [
-          ...prompt.functionParameters.map(p => ({
-            path: slotPath("fn", p.name),
-            label: p.name,
-            selection: functionSelections[p.name],
-          })),
-          ...executeParameters.map(p => ({
-            path: slotPath("exec", p.name),
-            label: p.name,
-            selection: executeSelections[p.name],
-          })),
-        ],
-        resourceArgs,
-        resourcesByUri,
-      ),
-    [
-      prompt.functionParameters,
-      executeParameters,
-      functionSelections,
-      executeSelections,
-      resourceArgs,
-      resourcesByUri,
-    ],
-  );
-
-  const persist = (
-    fn: Selections,
-    exec: Selections,
-    layout: LayoutChoices,
-    args: ResourceArgs,
-  ) => {
+  // Every edit lands in storage, whichever piece of state it changed.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `bindings` is derived from exactly the state that matters.
+  useEffect(() => {
     try {
-      const resolveArgs = (uri: string) =>
-        resourceArgsFor(uri, args, resourcesByUri);
-      const collect = (defs: readonly PropDefinition[], sel: Selections) =>
-        Object.fromEntries(
-          defs.flatMap(d => {
-            const input = toExecutionInput(sel[d.name], resolveArgs);
-            return input ? [[d.name, input] as const] : [];
-          }),
-        );
       localStorage.setItem(
         paramStorageKey(prompt),
         JSON.stringify({
-          functionInputs: collect(prompt.functionParameters, fn),
-          executeInputs: collect(executeParameters, exec),
-          layout: { functionSlots: layout.fn, executeSlots: layout.exec },
+          functionInputs: bindings.functionInputs,
+          executeInputs: bindings.executeInputs,
+          ...(bindings.resources && { resources: bindings.resources }),
+          layout: {
+            functionSlots: layoutChoices.fn,
+            executeSlots: layoutChoices.exec,
+          },
         } satisfies StoredInputs),
       );
     } catch {
       /* ignore (private browsing, quota, etc.) */
     }
-  };
+  }, [bindings, layoutChoices]);
 
   const change =
     (which: "fn" | "exec") => (name: string, selection: SlotSelection) => {
@@ -341,34 +304,30 @@ function PlaygroundExecution({
           : executeSelections;
       setFunctionSelections(fn);
       setExecuteSelections(exec);
-      persist(fn, exec, layoutChoices, resourceArgs);
     };
 
-  const onResourceArgsChange = (uri: string, next: Selections) => {
-    const args = { ...resourceArgs, [uri]: next };
-    setResourceArgs(args);
-    persist(functionSelections, executeSelections, layoutChoices, args);
+  const changeInstances = (
+    next: Parameters<typeof setInstances>[0],
+    edit?: InstanceEdit,
+  ) => {
+    setInstances(next);
+    if (!edit) return;
+    const [from, to] =
+      edit.kind === "rename" ? [edit.from, edit.to] : [edit.name, null];
+    setFunctionSelections(s => retargetSelections(s, from, to));
+    setExecuteSelections(s => retargetSelections(s, from, to));
   };
 
-  // Not itself a valid row's context — `path` is meaningless at this level —
-  // but every field *other* than `path` is shared, so each slot spreads this
-  // and sets its own `path` (see `renderSlots`) rather than repeating the rest.
-  const argsContextBase: Omit<ResourceArgsContext, "path"> = {
-    resourceArgs,
-    onResourceArgsChange,
-    resourceSlots: sources.resourceSlots ?? {},
-    claimed,
-    depth: 0,
-    describePseudo: (uri, type) =>
+  const context = instanceSourceContext({
+    instances,
+    catalogByUri: resourcesByUri,
+    adopt,
+    describeOther: (uri, type) =>
       describePseudoSource(uri, type, {
         functionParameters: prompt.functionParameters,
         executeParameters,
       }),
-  };
-
-  /** Builds the `args` a chosen resource should carry, from the current {@link resourceArgs} state. */
-  const resolveArgs = (uri: string) =>
-    resourceArgsFor(uri, resourceArgs, resourcesByUri);
+  });
 
   /**
    * A slot's effective layout (§B precedence): the user's own stored choice,
@@ -388,7 +347,7 @@ function PlaygroundExecution({
     )?.[def.name];
     return resolveLayout(
       groups,
-      toExecutionInput(selections[def.name], resolveArgs),
+      toExecutionInput(selections[def.name]),
       layoutChoices[which][def.name],
       hint,
     );
@@ -410,13 +369,9 @@ function PlaygroundExecution({
 
     if (next === "combined") {
       const selections = which === "fn" ? fn : exec;
-      const storedInput = toExecutionInput(selections[def.name], resolveArgs);
+      const storedInput = toExecutionInput(selections[def.name]);
       const { selection, overwritten } = collapseLossy(groups, storedInput);
-      // Any `args` the round trip carries came from `resourceArgs` itself (via
-      // `resolveArgs`), so only the plain selection is needed back out.
-      const merged = fromExecutionInput(
-        expand(groups, selection, resolveArgs),
-      ).selection;
+      const merged = fromExecutionInput(expand(groups, selection));
       if (which === "fn") fn = { ...fn, [def.name]: merged };
       else exec = { ...exec, [def.name]: merged };
       setFunctionSelections(fn);
@@ -428,9 +383,7 @@ function PlaygroundExecution({
       setOverwrittenNotes(prev => withEntry(prev, which, def.name, undefined));
     }
 
-    const layout = withEntry(layoutChoices, which, def.name, next);
-    setLayoutChoices(layout);
-    persist(fn, exec, layout, resourceArgs);
+    setLayoutChoices(withEntry(layoutChoices, which, def.name, next));
   };
 
   /**
@@ -457,10 +410,7 @@ function PlaygroundExecution({
   }): PartialExecuteRequest | null => {
     const functionInputs: Record<string, ExecutionInput> = {};
     for (const param of prompt.functionParameters) {
-      const input = toExecutionInput(
-        functionSelections[param.name],
-        resolveArgs,
-      );
+      const input = toExecutionInput(functionSelections[param.name]);
       if (input) functionInputs[param.name] = input;
       else if (
         requireAll &&
@@ -474,10 +424,7 @@ function PlaygroundExecution({
 
     const executeInputs: Record<string, ExecutionInput> = {};
     for (const param of executeParameters) {
-      const input = toExecutionInput(
-        executeSelections[param.name],
-        resolveArgs,
-      );
+      const input = toExecutionInput(executeSelections[param.name]);
       if (input) executeInputs[param.name] = input;
       else if (requireAll && !param.optional) {
         setError(missingInputMessage(param, !!prompt.inputSources));
@@ -485,7 +432,11 @@ function PlaygroundExecution({
       }
     }
 
-    return { functionInputs, executeInputs };
+    return {
+      functionInputs,
+      executeInputs,
+      ...(bindings.resources && { resources: bindings.resources }),
+    };
   };
 
   /** The request to run: every slot, positionally, defaults filled in. */
@@ -499,7 +450,11 @@ function PlaygroundExecution({
           ? { kind: "value", value: param.defaultValue }
           : { kind: "value", value: { kind: "primitive", value: undefined } }),
     );
-    return { functionInputs, executeInputs: collected.executeInputs };
+    return {
+      functionInputs,
+      executeInputs: collected.executeInputs,
+      ...(collected.resources && { resources: collected.resources }),
+    };
   };
 
   // Applies a fill once: matched slots overwritten, every other slot left as
@@ -509,39 +464,37 @@ function PlaygroundExecution({
     if (!fill || appliedFills.has(fill.nonce)) return;
     appliedFills.add(fill.nonce);
 
-    const recoveredArgs: ResourceArgs = {};
-    const restore = (inputs: Record<string, ExecutionInput>) =>
-      Object.fromEntries(
-        Object.entries(inputs).map(([name, input]) => {
-          const recovered = fromExecutionInput(input, resourcesByUri);
-          Object.assign(recoveredArgs, recovered.resourceArgs);
-          return [name, recovered.selection];
-        }),
-      );
     const kept = [
       ...prompt.functionParameters
         .filter(
           p =>
             !(p.name in fill.functionInputs) &&
-            toExecutionInput(functionSelections[p.name], resolveArgs),
+            toExecutionInput(functionSelections[p.name]),
         )
         .map(p => p.name),
       ...executeParameters
         .filter(
           p =>
             !(p.name in fill.executeInputs) &&
-            toExecutionInput(executeSelections[p.name], resolveArgs),
+            toExecutionInput(executeSelections[p.name]),
         )
         .map(p => p.name),
     ];
 
-    const fn = { ...functionSelections, ...restore(fill.functionInputs) };
-    const exec = { ...executeSelections, ...restore(fill.executeInputs) };
-    const args = { ...resourceArgs, ...recoveredArgs };
-    setFunctionSelections(fn);
-    setExecuteSelections(exec);
-    setResourceArgs(args);
-    persist(fn, exec, layoutChoices, args);
+    setFunctionSelections({
+      ...functionSelections,
+      ...restoreSelections(fill.functionInputs),
+    });
+    setExecuteSelections({
+      ...executeSelections,
+      ...restoreSelections(fill.executeInputs),
+    });
+    // The fill's instances replace any of the same name; the rest stay, as
+    // unfilled slots do.
+    if (fill.resources) {
+      const filled = fromWireResources(fill.resources);
+      setInstances(latest => ({ ...latest, ...filled }));
+    }
     setFillNotice({ from: fill.from, kept, skipped: fill.skipped });
   }, [fill?.nonce]);
 
@@ -579,10 +532,6 @@ function PlaygroundExecution({
       const groups = fanOutGroups(def);
       const combinable = isCombinable(groups);
       const layout = combinable ? layoutFor(which, def, groups) : "expanded";
-      const slotArgsContext: ResourceArgsContext = {
-        ...argsContextBase,
-        path: slotPath(which, def.name),
-      };
 
       return (
         <div className="pg-exec-param" key={def.name}>
@@ -630,24 +579,19 @@ function PlaygroundExecution({
               propDef={def}
               groups={groups}
               selection={
-                collapseLossy(
-                  groups,
-                  toExecutionInput(selections[def.name], resolveArgs),
-                ).selection
+                collapseLossy(groups, toExecutionInput(selections[def.name]))
+                  .selection
               }
               onChange={combined =>
-                // As in `toggleLayout`: `args` in the round trip are already
-                // in `resourceArgs`, edited directly by each row's own form.
                 change(which)(
                   def.name,
-                  fromExecutionInput(expand(groups, combined, resolveArgs))
-                    .selection,
+                  fromExecutionInput(expand(groups, combined)),
                 )
               }
               resources={sources?.resources ?? []}
               slots={slots}
               overwritten={overwrittenNotes[which][def.name]}
-              argsContext={slotArgsContext}
+              context={context}
             />
           ) : (
             <ExecutionInputEditor
@@ -656,7 +600,7 @@ function PlaygroundExecution({
               onChange={selection => change(which)(def.name, selection)}
               resources={sources?.resources ?? []}
               slots={slots}
-              argsContext={slotArgsContext}
+              context={context}
             />
           )}
         </div>
@@ -670,6 +614,7 @@ function PlaygroundExecution({
         prompt.providerId && (
           <AddToDatasetMenu
             inputs={panelInputs}
+            resources={bindings.resources}
             newDatasetFields={fieldsForPrompt(prompt)}
             prompt={{
               link: {
@@ -750,6 +695,21 @@ function PlaygroundExecution({
             ×
           </button>
         </div>
+      )}
+      {(catalog.length > 0 || Object.keys(instances).length > 0) && (
+        <ResourcesSection
+          instances={instances}
+          onChange={changeInstances}
+          sources={sources}
+          catalog={catalog}
+          referencedBy={name =>
+            referencesTo(name, instances, [
+              { selections: functionSelections },
+              { selections: executeSelections },
+            ])
+          }
+          context={context}
+        />
       )}
       {renderSlots(
         prompt.functionParameters,

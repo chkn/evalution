@@ -297,9 +297,9 @@ describe("resource lifecycle", () => {
 
     // A value that outlives the run must not close over one that doesn't.
     const lease = reg.lease();
-    await expect(acquireUri(lease, "x.playground.ts#longLived")).rejects.toThrow(
-      /run-scoped/,
-    );
+    await expect(
+      acquireUri(lease, "x.playground.ts#longLived"),
+    ).rejects.toThrow(/run-scoped/);
   });
 
   it("collects receipts so a trace can show what a resource produced", async () => {
@@ -360,7 +360,9 @@ describe("static value resources", () => {
     });
 
     const lease = reg.lease();
-    expect(await acquireUri(lease, "x.playground.ts#client")).toBe("client-secret");
+    expect(await acquireUri(lease, "x.playground.ts#client")).toBe(
+      "client-secret",
+    );
     await lease.release();
   });
 
@@ -629,9 +631,7 @@ describe("resource outputs (specs/resource-hierarchy.md §A, §C)", () => {
     const lease = reg.lease();
     await expect(
       acquireUri(lease, "tasks.playground.ts#taskA.title"),
-    ).rejects.toThrow(
-      "Resource instance 'taskA': no output 'title'",
-    );
+    ).rejects.toThrow("Resource instance 'taskA': no output 'title'");
   });
 
   it("records the instance's own receipt for an output reference too, not the output's bare value (specs/resource-arguments.md §E)", async () => {
@@ -1035,9 +1035,9 @@ describe("resource arguments (specs/resource-arguments.md)", () => {
     });
 
     const lease = reg.lease();
-    await expect(acquireUri(lease, "x.playground.ts#longLived")).rejects.toThrow(
-      /run-scoped/,
-    );
+    await expect(
+      acquireUri(lease, "x.playground.ts#longLived"),
+    ).rejects.toThrow(/run-scoped/);
   });
 });
 
@@ -1066,9 +1066,10 @@ describe("named instances (specs/resource-instances.md)", () => {
     (globalThis as any).__disposed = [];
   });
 
-  const titled =
-    (title: string, extra: () => Promise<Record<string, unknown>> = async () => ({})) =>
-    ({ resolve: async () => ({ title, ...(await extra()) }) });
+  const titled = (
+    title: string,
+    extra: () => Promise<Record<string, unknown>> = async () => ({}),
+  ) => ({ resolve: async () => ({ title, ...(await extra()) }) });
 
   it("creates two instances of one resource even with identical arguments", async () => {
     const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
@@ -1279,8 +1280,10 @@ describe("failures in author-written resource code", () => {
         });`,
     });
 
-    const error = (await acquireUri(reg.lease(), "x.playground.ts#broken")
-      .catch(e => e)) as Error;
+    const error = (await acquireUri(
+      reg.lease(),
+      "x.playground.ts#broken",
+    ).catch(e => e)) as Error;
     expect(error.message).toBe(
       "Resource 'broken (x.playground.ts#broken)': create() failed — boom",
     );
@@ -1300,8 +1303,9 @@ describe("failures in author-written resource code", () => {
         });`,
     });
 
-    const error = (await acquireUri(reg.lease(), "x.playground.ts#db")
-      .catch(e => e)) as Error;
+    const error = (await acquireUri(reg.lease(), "x.playground.ts#db").catch(
+      e => e,
+    )) as Error;
     expect(error.message).toMatch(
       /^Resource 'db \(x\.playground\.ts#db\)': reset\(\) failed — /,
     );
@@ -1315,9 +1319,9 @@ describe("failures in author-written resource code", () => {
         export const top = resource({ inputs: { dep }, create: () => ({ value: 1 }) });`,
     });
 
-    await expect(acquireUri(reg.lease(), "x.playground.ts#top")).rejects.toThrow(
-      "Resource 'x.playground.ts#dep': create() failed — nope",
-    );
+    await expect(
+      acquireUri(reg.lease(), "x.playground.ts#top"),
+    ).rejects.toThrow("Resource 'x.playground.ts#dep': create() failed — nope");
   });
 });
 

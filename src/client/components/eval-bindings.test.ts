@@ -17,7 +17,7 @@ const obj = (name: string, properties: PropDefinition[]): PropDefinition => ({
   type: { kind: "object", syntax: `{…}`, properties },
 });
 
-const db: ExecutionInput = { kind: "resource", uri: "db.ts#db" };
+const db: ExecutionInput = { kind: "instance", name: "db" };
 const text = (value: string): ExecutionInput => ({
   kind: "value",
   value: { kind: "primitive", value },
@@ -56,11 +56,17 @@ describe("prefillBindings", () => {
       stored: {
         functionInputs: { title: text("hi") },
         executeInputs: { db },
+        resources: {
+          db: { uri: "db.ts#db", receipt: "r" },
+          unused: { uri: "db.ts#other" },
+        },
       },
     });
+    // The instance a taken binding names comes along; the rest don't.
     expect(inputs).toEqual({
       functionInputs: { title: text("hi") },
       executeInputs: { db },
+      resources: { db: { uri: "db.ts#db" } },
     });
   });
 

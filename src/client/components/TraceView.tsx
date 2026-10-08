@@ -7,6 +7,7 @@ import type { AgentInfo } from "../../shared/agent";
 import type {
   NormalizedPrompt,
   PromptID,
+  RunResources,
   Span,
   Trace,
   TraceLiveEvent,
@@ -270,6 +271,7 @@ function TraceView({
     traceInputs.length > 0 &&
     ({
       inputs: traceInputs,
+      resources: rootPrompt.resources as RunResources | undefined,
       newDatasetFields: fieldsForTrace(rootPrompt, currentPrompt, traceInputs),
       prompt: currentPrompt?.providerId
         ? {

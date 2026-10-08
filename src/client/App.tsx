@@ -18,6 +18,7 @@ import type {
   NormalizedPrompt,
   PromptID,
   PromptRef,
+  RunResources,
   SSEData,
 } from "../shared/types";
 import { getAgentCommand, getAgents, renamePrompt } from "./api";
@@ -182,7 +183,7 @@ function flashPane(paneId: string) {
     block: "nearest",
     inline: "nearest",
   });
-  // Restart-safe, as in `SourceRow.tsx`'s `scrollToRow`: removing the class
+  // Restart-safe, as in `ResourcesSection.tsx`'s `scrollToInstance`: removing the class
   // and forcing a reflow before adding it back makes a repeat click flash
   // again instead of no-op-ing into an animation already in flight.
   el.classList.remove("pane-flash");
@@ -783,12 +784,17 @@ function App() {
     const current = findPrompt(recorded);
     const fill =
       current && hasRecordedInputs(recorded)
-        ? panelFill(fromTrace(recorded, current), current, {
-            type: "trace",
-            description: `trace ${traceId.slice(0, 8)}…`,
-            providerId: traceProviderId,
-            traceId,
-          })
+        ? panelFill(
+            fromTrace(recorded, current),
+            current,
+            {
+              type: "trace",
+              description: `trace ${traceId.slice(0, 8)}…`,
+              providerId: traceProviderId,
+              traceId,
+            },
+            recorded.resources as RunResources | undefined,
+          )
         : undefined;
     // At the variation the run applied, else the version it ran against —
     // the server opens head when that version is what's on disk now.

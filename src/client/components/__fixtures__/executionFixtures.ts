@@ -175,26 +175,6 @@ export const TITLE_GENERATOR: ResourceInfo = {
 };
 
 /**
- * A second parameterized resource whose own argument happens to be named
- * `taskId` — the exact same name as a top-level prompt parameter a test
- * might also be filling from {@link PARAMETERIZED_SEEDED_TASK}. Regression
- * fixture for the name-collision bug a bare-label "who owns this form" check
- * fell into: two rows named `taskId` at different depths in the tree are not
- * the same row.
- */
-export const SEEDED_RUN_TASK_ID_PARAM: PropDefinition = {
-  name: "taskId",
-  type: { kind: "primitive", syntax: "TaskId", base: "string" },
-  optional: false,
-};
-export const SEEDED_RUN: ResourceInfo = {
-  uri: "seeded-task.playground.ts#seededRun",
-  label: "Seeded run",
-  scope: "run",
-  parameters: [SEEDED_RUN_TASK_ID_PARAM],
-};
-
-/**
  * A static `value` resource the server already knows, so the panel can
  * preview it — unlike {@link SEEDED_TASK}, which only exists once a run
  * creates it.
@@ -281,3 +261,22 @@ export function sourcesFor(
     ...(resourceSlots ? { resourceSlots } : {}),
   };
 }
+
+/**
+ * A task that can be seeded under another — `specs/resource-instances.md`'s
+ * hierarchy case: its `parentId` argument takes the id of another instance
+ * of the very same resource.
+ */
+export const TREE_TASK: ResourceInfo = {
+  uri: "tree.playground.ts#task",
+  label: "Seeded task",
+  scope: "run",
+  parameters: [
+    SEEDED_TASK_PARAM,
+    {
+      name: "parentId",
+      type: { kind: "primitive", syntax: "TaskId", base: "string" },
+      optional: true,
+    },
+  ],
+};

@@ -7,13 +7,19 @@ import { fromExecutionInput, toExecutionInput } from "./execution-input-state";
 import {
   checkParameterSources,
   columnUri,
+  describeInstanceSource,
   describePseudoSource,
+  INSTANCES_GROUP,
   inputUri,
+  instanceUri,
   NEW_COLUMN_URI,
+  NEW_GROUP,
+  parseInstanceUri,
   pseudoInput,
+  withInstanceSources,
   withPseudoSources,
 } from "./pseudo-sources";
-import { computeClaims } from "./resource-args-context";
+import { buildSourceTree } from "./source-tree";
 
 const def = (name: string, syntax: string, base = syntax): PropDefinition => ({
   name,
@@ -35,8 +41,10 @@ describe("pseudo-source URIs", () => {
     for (const input of [
       { kind: "dataset", field: "3" },
       { kind: "input", half: "execute", path: "ctx.db" },
+      { kind: "instance", name: "root" },
+      { kind: "instance", name: "root", output: "taskId" },
     ] as const) {
-      const { selection } = fromExecutionInput(input);
+      const selection = fromExecutionInput(input);
       expect(toExecutionInput(selection)).toEqual(input);
     }
     expect(pseudoInput(columnUri("a"))).toEqual({
@@ -47,24 +55,74 @@ describe("pseudo-source URIs", () => {
     expect(pseudoInput(NEW_COLUMN_URI)).toBeUndefined();
   });
 
-  it("are never claimed as a shared instance", () => {
-    const claims = computeClaims(
-      [
-        {
-          path: "fn.a",
-          label: "a",
-          selection: { resources: { "": columnUri("0") } },
-        },
-        {
-          path: "fn.b",
-          label: "b",
-          selection: { resources: { "": columnUri("0") } },
-        },
-      ],
-      {},
-      new Map(),
+  it("name an instance and an output of it", () => {
+    expect(parseInstanceUri(instanceUri("root"))).toEqual({ name: "root" });
+    expect(parseInstanceUri(instanceUri("root", "taskId"))).toEqual({
+      name: "root",
+      output: "taskId",
+    });
+    expect(parseInstanceUri(columnUri("0"))).toBeUndefined();
+  });
+});
+
+describe("withInstanceSources", () => {
+  const catalog: ResourceInfo[] = [
+    { uri: "t.ts#task", label: "Seeded task", scope: "run" },
+    {
+      uri: "t.ts#task.id",
+      label: "Task ID",
+      scope: "run",
+      parent: "t.ts#task",
+    },
+    { uri: "t.ts#other", label: "Other", scope: "run", group: ["Misc"] },
+  ];
+  const sources = {
+    resources: catalog,
+    functionSlots: { taskId: ["t.ts#task.id"], other: ["t.ts#other"] },
+    executeSlots: {},
+  };
+  const instances = { root: { uri: "t.ts#task" }, child: { uri: "t.ts#task" } };
+
+  it("offers each instance first wherever its resource or output fits", () => {
+    const withInstances = withInstanceSources(sources, instances);
+    expect(withInstances.functionSlots.taskId).toEqual([
+      instanceUri("root", "id"),
+      instanceUri("child", "id"),
+      "t.ts#task.id",
+    ]);
+    expect(withInstances.functionSlots.other).toEqual(["t.ts#other"]);
+    expect(
+      withInstances.resources.filter(r => r.group?.[0] === INSTANCES_GROUP),
+    ).toHaveLength(4);
+  });
+
+  it("lists instances first and the catalog under New, opened in place where no instance fits", () => {
+    const { resources, functionSlots } = withInstanceSources(
+      sources,
+      instances,
     );
-    expect(claims.size).toBe(0);
+    const pick = (uris: string[]) =>
+      buildSourceTree(resources, uris).map(n => n.label);
+    expect(pick(functionSlots.taskId!)).toEqual([INSTANCES_GROUP, NEW_GROUP]);
+    expect(pick(functionSlots.other!)).toEqual(["Other"]);
+  });
+
+  it("leaves sources alone for a run with no instances", () => {
+    expect(withInstanceSources(sources, {}).resources).toEqual(catalog);
+  });
+
+  it("describes a chip by the instance's resource, or says it's gone", () => {
+    const byUri = new Map(catalog.map(r => [r.uri, r]));
+    expect(
+      describeInstanceSource(instanceUri("root", "id"), instances, byUri),
+    ).toEqual({ label: "root.id", note: "Seeded task" });
+    expect(
+      describeInstanceSource(instanceUri("gone"), instances, byUri),
+    ).toEqual({
+      label: "gone",
+      note: "resource no longer in this run",
+      missing: true,
+    });
   });
 });
 

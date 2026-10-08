@@ -2,11 +2,13 @@
 // Copyright (c) 2026 Alexander Corrado
 
 /**
- * Columns and prompt slots as sources: `ResourceInfo` entries with URIs the
- * server never sees, grouped as **Columns** and **Prompt inputs**, so the
+ * Columns, prompt slots and the run's resource instances as sources:
+ * `ResourceInfo` entries with URIs the server never sees, grouped as
+ * **Columns**, **Prompt inputs** and **Resources in this run**, so the
  * existing picker, chips and slot matching offer them without knowing they
- * aren't resources. `toExecutionInput` turns a chosen one into the `dataset`
- * or `input` variant it stands for. See `specs/evals.md` §B.2 and §F.
+ * aren't resources. `toExecutionInput` turns a chosen one into the
+ * `dataset`, `input` or `instance` variant it stands for. See
+ * `specs/evals.md` §B.2 and §F, and `specs/resource-instances.md` §G.
  */
 
 import type { DatasetField } from "../../dataset/dataset-types";
@@ -26,6 +28,7 @@ import type {
 
 const COLUMN_PREFIX = "@@column/";
 const INPUT_PREFIX = "@@input/";
+const INSTANCE_PREFIX = "@@instance/";
 
 /** The picker entry that adds a dataset column from the slot it's chosen for. */
 export const NEW_COLUMN_URI = "@@new-column";
@@ -34,6 +37,10 @@ export const NEW_COLUMN_URI = "@@new-column";
 export const COLUMNS_GROUP = "Dataset columns";
 /** The group other prompt slots are listed under. */
 export const PROMPT_INPUTS_GROUP = "Prompt inputs";
+/** The group the run's own resource instances are listed under, first. */
+export const INSTANCES_GROUP = "Resources in this run";
+/** The group the resource catalog moves under once the run has instances to list first. */
+export const NEW_GROUP = "New";
 
 /** The pseudo-source URI for dataset field `field`. */
 export function columnUri(field: string): string {
@@ -43,6 +50,25 @@ export function columnUri(field: string): string {
 /** The pseudo-source URI for the prompt slot `path` in `half`. */
 export function inputUri(half: "function" | "execute", path: string): string {
   return `${INPUT_PREFIX}${half}/${path}`;
+}
+
+/** The pseudo-source URI for the run's instance `name`, or its `output`. */
+export function instanceUri(name: string, output?: string): string {
+  return output === undefined
+    ? `${INSTANCE_PREFIX}${name}`
+    : `${INSTANCE_PREFIX}${name}/${output}`;
+}
+
+/** The instance (and output) an {@link instanceUri} names, or `undefined` for any other URI. */
+export function parseInstanceUri(
+  uri: string,
+): { name: string; output?: string } | undefined {
+  if (!uri.startsWith(INSTANCE_PREFIX)) return undefined;
+  const rest = uri.slice(INSTANCE_PREFIX.length);
+  const slash = rest.indexOf("/");
+  return slash < 0
+    ? { name: rest }
+    : { name: rest.slice(0, slash), output: rest.slice(slash + 1) };
 }
 
 /** Whether `uri` names a pseudo-source rather than a resource. */
@@ -65,6 +91,8 @@ export function pseudoInput(uri: string): ExecutionInput | undefined {
     if (half !== "function" && half !== "execute") return undefined;
     return { kind: "input", half, path: rest.slice(slash + 1) };
   }
+  const instance = parseInstanceUri(uri);
+  if (instance) return { kind: "instance", ...instance };
   return undefined;
 }
 
@@ -72,6 +100,7 @@ export function pseudoInput(uri: string): ExecutionInput | undefined {
 export function pseudoUriOf(input: ExecutionInput): string | undefined {
   if (input.kind === "dataset") return columnUri(input.field);
   if (input.kind === "input") return inputUri(input.half, input.path);
+  if (input.kind === "instance") return instanceUri(input.name, input.output);
   return undefined;
 }
 
@@ -350,4 +379,144 @@ export function describePseudoSource(
   return type && !typesFit(type, slotType)
     ? { note, warning: `${type.syntax} into ${slotType.syntax}` }
     : { note };
+}
+
+/** A run's instances, as the picker needs them: by name, in listing order. */
+type InstanceUris = Readonly<Record<string, { uri: string }>>;
+
+/**
+ * `resources` with the run's instances (and their outputs) listed first, as
+ * **Resources in this run**, and the catalog moved under **New** once there
+ * is any instance to list ahead of it. See {@link withInstanceSources}.
+ */
+export function withInstanceResources(
+  resources: readonly ResourceInfo[],
+  instances: InstanceUris,
+): ResourceInfo[] {
+  const named = Object.entries(instances);
+  if (named.length === 0) return [...resources];
+  const byUri = new Map(resources.map(r => [r.uri, r]));
+  const outputsOf = new Map<string, ResourceInfo[]>();
+  for (const r of resources) {
+    if (r.parent) {
+      outputsOf.set(r.parent, [...(outputsOf.get(r.parent) ?? []), r]);
+    }
+  }
+  const instanceEntries: ResourceInfo[] = named.flatMap(([name, { uri }]) => {
+    const root = byUri.get(uri);
+    const scope = root?.scope ?? "run";
+    return [
+      {
+        uri: instanceUri(name),
+        label: name,
+        scope,
+        group: [INSTANCES_GROUP],
+        // A static resource's instance is its value: the slot previews it.
+        ...(root?.value !== undefined && { value: root.value }),
+      },
+      ...(outputsOf.get(uri) ?? []).map(
+        (output): ResourceInfo => ({
+          uri: instanceUri(name, output.uri.slice(uri.length + 1)),
+          label: output.label,
+          scope,
+          group: [INSTANCES_GROUP],
+          parent: instanceUri(name),
+          ...(output.value !== undefined && { value: output.value }),
+        }),
+      ),
+    ];
+  });
+  return [
+    ...instanceEntries,
+    ...resources.map(r =>
+      isPseudoUri(r.uri) ? r : { ...r, group: [NEW_GROUP, ...(r.group ?? [])] },
+    ),
+  ];
+}
+
+/**
+ * `slots` (slot path → offered URIs) with each run instance offered ahead of
+ * the catalog entries it stands for: an instance of `seededTask` wherever
+ * `seededTask` is offered, and its `taskId` wherever `seededTask.taskId` is.
+ *
+ * @param resources - The catalog, to tell an output's resource.
+ */
+export function withInstanceSlots(
+  slots: Readonly<Record<string, string[]>> | undefined,
+  resources: readonly ResourceInfo[],
+  instances: InstanceUris,
+): Record<string, string[]> {
+  const named = Object.entries(instances);
+  if (named.length === 0) return { ...slots };
+  const parentOf = new Map(
+    resources.flatMap(r => (r.parent ? [[r.uri, r.parent] as const] : [])),
+  );
+  return Object.fromEntries(
+    Object.entries(slots ?? {}).map(([path, offered]) => {
+      const fitting: string[] = [];
+      for (const [name, { uri }] of named) {
+        for (const candidate of offered) {
+          if (candidate === uri) fitting.push(instanceUri(name));
+          else if (parentOf.get(candidate) === uri) {
+            fitting.push(instanceUri(name, candidate.slice(uri.length + 1)));
+          }
+        }
+      }
+      return [path, [...fitting, ...offered]];
+    }),
+  );
+}
+
+/**
+ * `sources`, with the run's own instances offered first wherever their
+ * resource (or one of its outputs) fits — the picker's **Resources in this
+ * run** group — and the catalog moved under **New** once there is any
+ * instance to list ahead of it. Picking from **New** adds an instance (see
+ * `adoptCatalogPick`); picking from the instances group only references
+ * one. No new matching is needed: an instance of `seededTask` fits wherever
+ * `seededTask` does, and its `taskId` wherever `seededTask.taskId` does.
+ *
+ * @param instances - The run's instances, by name, in the order to list them.
+ */
+export function withInstanceSources(
+  sources: PromptInputSources | undefined,
+  instances: InstanceUris,
+): PromptInputSources {
+  const resources = sources?.resources ?? [];
+  const extend = (slots: Record<string, string[]> | undefined) =>
+    withInstanceSlots(slots, resources, instances);
+  return {
+    resources: withInstanceResources(resources, instances),
+    functionSlots: extend(sources?.functionSlots),
+    executeSlots: extend(sources?.executeSlots),
+    ...(sources?.resourceSlots && {
+      resourceSlots: Object.fromEntries(
+        Object.entries(sources.resourceSlots).map(([uri, slots]) => [
+          uri,
+          extend(slots),
+        ]),
+      ),
+    }),
+  };
+}
+
+/**
+ * What a chip for instance reference `uri` says: what it is, or that the run
+ * no longer has it.
+ */
+export function describeInstanceSource(
+  uri: string,
+  instances: InstanceUris,
+  resourcesByUri: ReadonlyMap<string, ResourceInfo>,
+): { label: string; note: string; missing?: boolean } | undefined {
+  const ref = parseInstanceUri(uri);
+  if (!ref) return undefined;
+  const instance = instances[ref.name];
+  const label =
+    ref.output === undefined ? ref.name : `${ref.name}.${ref.output}`;
+  if (!instance) {
+    return { label, note: "resource no longer in this run", missing: true };
+  }
+  const resource = resourcesByUri.get(instance.uri);
+  return { label, note: resource?.label ?? instance.uri };
 }

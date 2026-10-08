@@ -278,7 +278,8 @@ export function inputReferenceProblems(
   const instances = bindings.resources ?? {};
   const problems: string[] = [];
   for (const ref of findRefs(bindings)) {
-    const at = "instance" in ref.at ? locationKey(ref.at) : `'${locationKey(ref.at)}'`;
+    const at =
+      "instance" in ref.at ? locationKey(ref.at) : `'${locationKey(ref.at)}'`;
     if ("instance" in ref.target) {
       if (
         !options.undeclaredInstances &&

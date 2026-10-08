@@ -109,11 +109,11 @@ export {
   type InputSignature,
   type InputSlot,
   type InputSource,
+  type InstanceResolver,
   inputReferenceProblems,
   matchSourcesToSlots,
   namedBindings,
   type ResolutionContext,
-  type InstanceResolver,
   resolveExecutionInput,
   resolveExecutionInputs,
   stampReceipts,
@@ -164,9 +164,8 @@ export {
   type StaticResourceDefinition,
 } from "./prompt/playground/resource.ts";
 export {
-  type DeclaredInstance,
   DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
-  isValidInstanceName,
+  type DeclaredInstance,
   type PlaygroundModuleError,
   type RegisteredCheck,
   type RegisteredResource,
@@ -250,6 +249,7 @@ export {
   VercelAISDKTelemetry,
   type VercelAISDKTelemetryOptions,
 } from "./sdk/vercel-ai-sdk/telemetry.ts";
+export { isValidInstanceName } from "./shared/instance-names.ts";
 export type {
   AddPromptContext,
   AddPromptField,
@@ -293,7 +293,9 @@ export type {
   QuestionsPromptUpdates,
   RebaseResult,
   ResourceInfo,
+  ResourceInstanceInput,
   ResourceScope,
+  RunResources,
   SourceSpan,
   Span,
   SpanContentPart,

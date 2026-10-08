@@ -210,8 +210,7 @@ function parseRows(value: unknown): NewDatasetRow[] {
     return {
       cells,
       ...(source && { source }),
-      ...(resources &&
-        Object.keys(resources).length > 0 && { resources }),
+      ...(resources && Object.keys(resources).length > 0 && { resources }),
     };
   });
 }

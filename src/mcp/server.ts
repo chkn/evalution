@@ -61,9 +61,9 @@ import { jsonToPropValue } from "../shared/json-prop-value.ts";
 import type {
   AnnotationSource,
   ExecuteResponse,
-  RunResources,
   ExecutionInput,
   NormalizedPrompt,
+  RunResources,
   Span,
   TraceSummary,
   TraceWithSpans,
@@ -76,8 +76,6 @@ import {
   describeField,
   describeRow,
   executionInput,
-  resourceInstance,
-  runResources,
   findField,
   findPrompt,
   findTrace,
@@ -87,6 +85,8 @@ import {
   providerIdParam,
   refOf,
   relay,
+  resourceInstance,
+  runResources,
   unwrap,
 } from "./tool-helpers.ts";
 

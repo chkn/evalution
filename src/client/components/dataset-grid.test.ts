@@ -46,7 +46,7 @@ const FIELDS = [
   field("2", "info", "Info"),
 ];
 const SHAPE = {
-  "1": { keys: ["title", "owner"], resource: true },
+  "1": { keys: ["title", "owner"] },
   "2": { keys: ["title"] },
 };
 
@@ -59,12 +59,16 @@ const info: ExecutionInput = {
   },
 };
 
+/** An object grafting a resource instance in beside a typed-in value. */
 const seeded: ExecutionInput = {
-  kind: "resource",
-  uri: "tasks.ts#seededTask",
-  args: { title: text("Milk"), owner: { kind: "resource", uri: "db.ts#db" } },
+  kind: "object",
+  properties: {
+    title: text("Milk"),
+    owner: { kind: "instance", name: "db" },
+  },
 };
-const blank: ExecutionInput = { kind: "resource", uri: "tasks.ts#blank" };
+const blank: ExecutionInput = { kind: "object", properties: {} };
+const task: ExecutionInput = { kind: "instance", name: "root", output: "id" };
 
 const row = (
   cells: DatasetRow["cells"],
@@ -98,10 +102,9 @@ describe("buildColumns", () => {
     expect(cols[1].type).toBe("Task");
   });
 
-  it("splits an expanded resource field into its head and one column per key", () => {
+  it("splits an expanded field into one column per key", () => {
     expect(columns(["1"]).map(c => [c.id, c.title, c.role, c.group])).toEqual([
       ["0", "ticket", "whole", undefined],
-      ["1/", "task", "head", "task"],
       ["1/title", "title", "key", "task"],
       ["1/owner", "owner", "key", "task"],
       ["2", "info", "whole", "info"],
@@ -148,9 +151,7 @@ describe("menuFieldId", () => {
   it("names the field for a field's own columns, and nothing for the rest", () => {
     const cols = columns(["1"]);
     expect(menuFieldId(byId(cols, "0"))).toBe("0");
-    // An expanded resource field's head stands for the field...
-    expect(menuFieldId(byId(cols, "1/"))).toBe("1");
-    // ...but the keys inside it, and the source, aren't fields.
+    // The keys inside an expanded field, and the source, aren't fields.
     expect(menuFieldId(byId(cols, "1/title"))).toBeUndefined();
     expect(menuFieldId(byId(cols, "source"))).toBeUndefined();
     expect(menuFieldId(undefined)).toBeUndefined();
@@ -164,17 +165,10 @@ describe("readPath", () => {
     expect(readPath(row({}), { fieldId: "1", key: "title" })).toBe("absent");
   });
 
-  it("reads a resource's argument and an object's property by key", () => {
+  it("reads an object's property by key", () => {
     expect(
       readPath(row({ "1": seeded }), { fieldId: "1", key: "title" }),
     ).toEqual(text("Milk"));
-    const object: ExecutionInput = {
-      kind: "object",
-      properties: { title: text("Eggs") },
-    };
-    expect(
-      readPath(row({ "1": object }), { fieldId: "1", key: "title" }),
-    ).toEqual(text("Eggs"));
   });
 
   it("reads a typed-in object's property, wrapped as the value cell it would be", () => {
@@ -186,7 +180,7 @@ describe("readPath", () => {
     );
   });
 
-  it("is n/a when the row's resource takes no such argument", () => {
+  it("is n/a when the row's cell has no such key", () => {
     expect(readPath(row({ "1": blank }), { fieldId: "1", key: "title" })).toBe(
       "n/a",
     );
@@ -201,9 +195,9 @@ describe("cellView", () => {
     expect(cellView(undefined, columns()[0])).toEqual({ kind: "loading" });
   });
 
-  it("previews a value, an empty cell, and a resource chip with its arguments", () => {
+  it("previews a value, an empty cell, and a resource instance as a chip", () => {
     const cols = columns();
-    const r = row({ "0": text("Hi"), "1": seeded });
+    const r = row({ "0": text("Hi"), "1": task });
     // `ticket: string` is typed into in place, so it's an editor's view.
     expect(cellView(r, byId(cols, "0"))).toEqual({
       kind: "edit",
@@ -220,17 +214,13 @@ describe("cellView", () => {
     expect(cellView(row({}), byId(cols, "1"))).toEqual({ kind: "empty" });
     expect(cellView(r, byId(cols, "1"))).toEqual({
       kind: "chip",
-      text: '◆ seededTask(title: "Milk", owner: db)',
+      text: "◆ root.id",
     });
   });
 
-  it("names just the resource in an expanded head, with arguments in their own columns", () => {
+  it("splits an expanded object's keys into their own columns", () => {
     const cols = columns(["1"]);
     const r = row({ "1": seeded });
-    expect(cellView(r, byId(cols, "1/"))).toEqual({
-      kind: "chip",
-      text: "◆ seededTask",
-    });
     expect(cellView(r, byId(cols, "1/title"))).toEqual({
       kind: "text",
       text: '"Milk"',
@@ -260,7 +250,7 @@ describe("cellView", () => {
     const object: ExecutionInput = {
       kind: "object",
       properties: {
-        db: { kind: "resource", uri: "db.ts#db" },
+        db: { kind: "instance", name: "db" },
         userId: text("u1"),
       },
     };

@@ -418,9 +418,9 @@ describe("handleUpdateRows", () => {
     const [stored] = await provider.listRows(dataset.id);
     expect(stored.resources).toEqual({ task: { uri: "pg.ts#task" } });
 
-    expect((await updateResources({ "1bad": { uri: "pg.ts#db" } })).status).toBe(
-      400,
-    );
+    expect(
+      (await updateResources({ "1bad": { uri: "pg.ts#db" } })).status,
+    ).toBe(400);
     expect((await updateResources({ db: { uri: "" } })).status).toBe(400);
   });
 

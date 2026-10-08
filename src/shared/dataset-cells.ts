@@ -11,6 +11,7 @@ import {
   isPrimitiveFieldType,
   type PrimitiveFieldType,
 } from "./dataset-fields.ts";
+import { isValidInstanceName } from "./instance-names.ts";
 import type {
   ExecutionInput,
   PropType,
@@ -161,7 +162,10 @@ function parseInput(
  */
 export function parseResources(
   value: unknown,
-  { columns = false, path = "resources" }: { columns?: boolean; path?: string } = {},
+  {
+    columns = false,
+    path = "resources",
+  }: { columns?: boolean; path?: string } = {},
 ): RunResources {
   if (!isRecord(value)) {
     throw new InvalidCellError(`${path} must be an object`);
@@ -169,7 +173,7 @@ export function parseResources(
   const out: RunResources = {};
   for (const [name, spec] of Object.entries(value)) {
     const at = `${path}.${name}`;
-    if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(name)) {
+    if (!isValidInstanceName(name)) {
       throw new InvalidCellError(
         `${at}: a resource name uses letters, digits, '_' and '-', not starting with a digit or '-'`,
       );

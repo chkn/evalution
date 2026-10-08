@@ -1860,8 +1860,8 @@ pre {
   color: var(--panel-text-secondary);
 }
 
-/* The "same instance as ▲ X" link inside a chip note — reset to read as
-   text, not a button, until hovered/focused.
+/* An instance chip's name (`◆ root.taskId`), which opens the instance's
+   card — reset to read as text, not a button, until hovered/focused.
    The underline is a `border-bottom`, not `text-decoration`: a `<button>`
    can't actually become `display: inline` (browsers keep native form
    controls as an atomic inline-block box regardless), and `text-decoration`
@@ -1872,6 +1872,9 @@ pre {
    misalign. */
 .pg-slot-instance-link {
   display: inline-block;
+  /* The chip is a column flexbox, which would stretch it across. */
+  align-self: flex-start;
+  text-align: left;
   border: none;
   border-bottom: 1px solid currentcolor;
   margin: 0;
@@ -1893,15 +1896,10 @@ pre {
   outline-offset: 1px;
 }
 
-/* The chevron reads smaller than the label it points above. */
-.pg-slot-instance-link span {
-  font-size: 8px;
-}
-
-/* Briefly flags the row `scrollToRow` (SourceRow.tsx) just landed on, so
-   following a "same instance as ▲ X" link reads as "here it is", not just a
-   jump. Removed by a timeout, and safe to re-add before it fires — see
-   `scrollToRow`. */
+/* Briefly flags the card `scrollToInstance` (ResourcesSection.tsx) just
+   landed on, so following an instance chip reads as "here it is", not just
+   a jump. Removed by a timeout, and safe to re-add before it fires — see
+   `scrollToInstance`. */
 .pg-row-highlight {
   animation: pg-row-flash 1.2s ease-out;
   border-radius: 6px;
@@ -1967,24 +1965,8 @@ pre {
   font-size: 10.5px;
 }
 
-/* A resource's argument form, rendered beneath its chip by `SourceRow`
-   (specs/resource-arguments.md §I). `.pg-slot-stack` wraps the row and the
-   form so the two lay out as a column without disturbing `.pg-slot`'s own
-   (row) layout. */
-.pg-slot-stack {
-  display: flex;
-  flex-direction: column;
-}
-
-/* The chip and its own argument form read as one continuous block, not two
-   stacked cards: the chip rounds only its top corners and drops its bottom
-   border, and the form (same background) is pulled up over that now-flat
-   edge — see `.pg-slot-stack .pg-args-form` below — rather than leaving a
-   gap and a doubled border line between them. */
-.pg-slot-stack .pg-slot-chip {
-  border-radius: 6px 6px 0 6px;
-}
-
+/* A resource instance's argument form, in its card in the Resources section
+   (specs/resource-instances.md §G). */
 .pg-args-form {
   display: flex;
   flex-direction: column;
@@ -1994,15 +1976,6 @@ pre {
   border-left: 2px solid var(--exec-border);
   border-radius: 0 6px 6px 0;
   background: var(--panel-card-bg);
-}
-
-.pg-slot-stack .pg-args-form {
-  /* Overlaps the chip's own bottom edge by a hair (its border, were it not
-     already removed above) rather than merely closing the gap to 0. */
-  margin-top: -1px;
-  border-right: 1px solid var(--exec-border);
-  border-bottom: 1px solid var(--exec-border);
-  border-radius: 0 6px 6px 0;
 }
 
 .pg-args-row {
@@ -2015,6 +1988,175 @@ pre {
   font-size: 11px;
   font-weight: 600;
   color: var(--panel-text-secondary);
+}
+
+/* ─── Resources section (specs/resource-instances.md §G) ──────────────────── */
+
+/* The run's named resource instances, above the slots: one card each, then
+   the dependencies the run doesn't declare. */
+.pg-resources {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.pg-resources-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Reads like the section dividers (.pg-exec-section) the panel already
+   uses. */
+.pg-resources-title {
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--panel-text-secondary);
+}
+
+.pg-resources-add {
+  padding: 3px 8px;
+  border: 1px solid var(--exec-border);
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  color: var(--panel-text-secondary);
+  cursor: pointer;
+}
+
+.pg-resources-add:hover,
+.pg-resources-add:focus-visible {
+  color: var(--panel-text-primary);
+  border-color: var(--accent);
+}
+
+.pg-resource-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--exec-border);
+  border-radius: 6px;
+  background: var(--panel-card-bg);
+  font-size: 12px;
+  color: var(--panel-text-primary);
+  min-width: 0;
+}
+
+/* A dependency the run doesn't declare: there, but not the run's to edit
+   until it's configured. */
+.pg-resource-dependency {
+  border-style: dashed;
+}
+
+.pg-resource-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.pg-resource-name {
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--panel-text-primary);
+}
+
+.pg-resource-rename {
+  border: none;
+  margin: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
+/* The pencil only shows where it can be acted on. */
+.pg-resource-rename span {
+  font-size: 10px;
+  color: var(--panel-text-secondary);
+  opacity: 0;
+}
+
+.pg-resource-rename:hover span,
+.pg-resource-rename:focus-visible span {
+  opacity: 1;
+}
+
+.pg-resource-name-input {
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 12px;
+  width: 14ch;
+  padding: 1px 4px;
+  border: 1px solid var(--exec-border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--panel-text-primary);
+}
+
+.pg-resource-name-input[aria-invalid="true"] {
+  border-color: var(--error-text);
+}
+
+.pg-resource-meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--panel-text-secondary);
+}
+
+.pg-resource-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.pg-resource-action {
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  color: var(--panel-text-secondary);
+  cursor: pointer;
+}
+
+.pg-resource-action:hover,
+.pg-resource-action:focus-visible {
+  color: var(--panel-text-primary);
+  border-color: var(--exec-border);
+}
+
+/* What references the instance (`→ taskId`), or that nothing does. */
+.pg-resource-refs {
+  font-size: 10.5px;
+  color: var(--panel-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.pg-resource-refs-warning {
+  font-size: 10.5px;
+  color: var(--error-text);
+}
+
+/* In a card, the form already sits on the card's own background. */
+.pg-resource-card .pg-args-form {
+  margin-left: 0;
+  padding: 4px 0 2px 10px;
+  border-radius: 0;
+  background: none;
 }
 
 /* Narrow (bottom-docked): pinned to the bottom of the scrolling pane — via

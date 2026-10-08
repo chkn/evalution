@@ -5,6 +5,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { FileProvider } from "../../file-provider.ts";
+import { isValidInstanceName } from "../../shared/instance-names.ts";
 import type { ResourceInfo, ResourceScope } from "../../shared/types.ts";
 import { type Check, isCheck } from "./check.ts";
 import {
@@ -323,11 +324,6 @@ export interface DeclaredInstance {
   uri: string;
   /** Its arguments and replay receipt, if it has either. */
   binding?: ResourceBinding;
-}
-
-/** Whether `name` is a valid instance name: `[A-Za-z_][A-Za-z0-9_-]*`. */
-export function isValidInstanceName(name: string): boolean {
-  return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(name);
 }
 
 /**
@@ -941,7 +937,9 @@ export class ResourceRegistry {
     // Checked here rather than in `create`: a static resource's one instance
     // exists from discovery on, so `create` never runs for it.
     if ("value" in target && decl.binding?.resolve) {
-      throw new Error(`Resource '${label}': static resources take no arguments`);
+      throw new Error(
+        `Resource '${label}': static resources take no arguments`,
+      );
     }
     const scope = target.scope ?? defaultScope(target);
     const instance = await this.instantiate(

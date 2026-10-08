@@ -284,8 +284,7 @@ export class TursoDatasetProvider implements DatasetProvider {
         id: row.id,
         cells: parseJson<Record<string, ExecutionInput>>(row.cells) ?? {},
         ...(row.source && { source: parseJson<DatasetRowSource>(row.source) }),
-        ...(resources &&
-          Object.keys(resources).length > 0 && { resources }),
+        ...(resources && Object.keys(resources).length > 0 && { resources }),
         createdAt: row.createdAt,
       };
     });
@@ -418,27 +417,29 @@ export class TursoDatasetProvider implements DatasetProvider {
         );
 
         const now = Date.now();
-        const minted: DatasetRow[] = rows.map(({ cells, source, resources }) => {
-          // Absent cells aren't stored: a missing field is a missing key.
-          const present = Object.entries(cells).filter(
-            ([, cell]) => cell !== undefined && cell !== null,
-          );
-          for (const [fieldId] of present) {
-            if (!fieldIds.has(fieldId)) {
-              throw new DatasetValidationError(
-                `Dataset ${datasetId} has no field with id "${fieldId}"`,
-              );
+        const minted: DatasetRow[] = rows.map(
+          ({ cells, source, resources }) => {
+            // Absent cells aren't stored: a missing field is a missing key.
+            const present = Object.entries(cells).filter(
+              ([, cell]) => cell !== undefined && cell !== null,
+            );
+            for (const [fieldId] of present) {
+              if (!fieldIds.has(fieldId)) {
+                throw new DatasetValidationError(
+                  `Dataset ${datasetId} has no field with id "${fieldId}"`,
+                );
+              }
             }
-          }
-          return {
-            id: mintRowId(),
-            cells: Object.fromEntries(present),
-            ...(source && { source }),
-            ...(resources &&
-              Object.keys(resources).length > 0 && { resources }),
-            createdAt: now,
-          };
-        });
+            return {
+              id: mintRowId(),
+              cells: Object.fromEntries(present),
+              ...(source && { source }),
+              ...(resources &&
+                Object.keys(resources).length > 0 && { resources }),
+              createdAt: now,
+            };
+          },
+        );
 
         if (minted.length > 0) {
           await tx.insert(datasetRows).values(

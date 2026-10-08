@@ -14,6 +14,7 @@ import type {
   ExecutionInput,
   PropDefinition,
   PropValue,
+  RunResources,
 } from "./types.ts";
 
 /** What {@link prefillBindings} takes. */
@@ -36,6 +37,8 @@ export interface PrefillInput {
   stored?: {
     functionInputs?: Record<string, ExecutionInput>;
     executeInputs?: Record<string, ExecutionInput>;
+    /** The playground's resource instances, which its inputs may reference. */
+    resources?: RunResources;
   };
 }
 
@@ -128,6 +131,45 @@ function fillSlot(
   return current;
 }
 
+/** Every instance name `input` references, at any depth. */
+function instanceNames(input: ExecutionInput): string[] {
+  switch (input.kind) {
+    case "instance":
+      return [input.name];
+    case "object":
+      return Object.values(input.properties).flatMap(instanceNames);
+    default:
+      return [];
+  }
+}
+
+/**
+ * `own`, plus every instance of `stored` that the bindings (or those
+ * instances' own arguments) reference and `own` doesn't already declare — so
+ * a binding taken from what the playground last ran keeps the instance it
+ * names. `undefined` when there are none.
+ */
+function withReferencedInstances(
+  inputs: EvalInputs,
+  own: RunResources | undefined,
+  stored: RunResources | undefined,
+): RunResources | undefined {
+  const out: RunResources = { ...own };
+  const pending = [
+    ...Object.values(inputs.functionInputs),
+    ...Object.values(inputs.executeInputs),
+  ].flatMap(instanceNames);
+  while (pending.length > 0) {
+    const name = pending.pop()!;
+    const spec = stored?.[name];
+    if (Object.hasOwn(out, name) || !spec) continue;
+    const { receipt: _, ...rest } = spec;
+    out[name] = rest;
+    pending.push(...Object.values(spec.args ?? {}).flatMap(instanceNames));
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /**
  * Proposes bindings for every unbound slot and check parameter, never
  * touching one already set (`specs/evals.md` §F.1):
@@ -178,8 +220,13 @@ export function prefillBindings(input: PrefillInput): Prefilled {
       stored?.executeInputs,
       "exec",
     ),
-    ...(input.inputs.resources && { resources: input.inputs.resources }),
   };
+  const resources = withReferencedInstances(
+    inputs,
+    input.inputs.resources,
+    stored?.resources,
+  );
+  if (resources) inputs.resources = resources;
 
   const checks = input.checks.map(check => {
     const info = input.checkInfos.find(c => c.uri === check.uri);

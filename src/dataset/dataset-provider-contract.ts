@@ -268,8 +268,7 @@ export function runDatasetProviderContractTests(
             },
           },
         },
-        // A resource instance adds no keys, but marks the field as one a
-        // resource fills.
+        // A cell naming a resource instance adds no keys.
         {
           cells: {
             "1": { kind: "instance", name: "task", output: "taskId" },
@@ -291,7 +290,7 @@ export function runDatasetProviderContractTests(
       expect(await provider.describeRows(dataset.id)).toEqual({
         rowCount: 3,
         fields: {
-          "1": { keys: ["title", "owner", "due"], resource: true },
+          "1": { keys: ["title", "owner", "due"] },
           "2": { keys: ["db", "userId"] },
           "3": { keys: ["title", "note"] },
         },

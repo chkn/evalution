@@ -15,6 +15,7 @@ import type {
   DatasetRowSource,
   DatasetSummary,
   PromptID,
+  RunResources,
 } from "../../shared/types";
 import {
   addDatasetRows,
@@ -25,6 +26,7 @@ import {
 import {
   countMatches,
   type NamedInputs,
+  rowResources,
   type SkippedInput,
   toCells,
 } from "./named-inputs";
@@ -34,6 +36,8 @@ import { useAnchoredPopover } from "./use-anchored-popover";
 interface Props {
   /** What would be added — one row's worth. */
   inputs: NamedInputs;
+  /** The resource instances `inputs` may reference, kept on the row. */
+  resources?: RunResources;
   /** The schema "New dataset…" creates. */
   newDatasetFields: Omit<DatasetField, "id">[];
   /**
@@ -86,6 +90,7 @@ function describeSkipped(skipped: SkippedInput[]): string {
  */
 export function AddToDatasetMenu({
   inputs,
+  resources,
   newDatasetFields,
   prompt,
   source,
@@ -150,7 +155,10 @@ export function AddToDatasetMenu({
     fields: readonly DatasetField[],
   ) => {
     const { cells, skipped } = toCells(inputs, fields);
-    await addDatasetRows(target.providerId, target.id, [{ cells, source }]);
+    const kept = rowResources(resources);
+    await addDatasetRows(target.providerId, target.id, [
+      { cells, source, ...(kept && { resources: kept }) },
+    ]);
     setOutcome({
       ok: true,
       message: `Added to ${target.name}${describeSkipped(skipped)}`,
