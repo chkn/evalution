@@ -329,9 +329,12 @@ function PlaygroundContent({
   // Edits sent but not yet landed. A save waits them out: sent ahead of them,
   // it would write the unsaved edits without them.
   const [updatesInFlight] = useState(createInFlight);
+  // Bumped per edit sent, so a landing echo can tell it's been superseded.
+  const updateSeq = useRef(0);
 
   const applyUpdate = useCallback(
     async (updates: NormalizedPromptUpdates) => {
+      const seq = ++updateSeq.current;
       const basePrompt = shownRef.current;
       const atRef = refRef.current;
       const optimisticPrompt = applyOptimisticUpdates(basePrompt, updates);
@@ -352,6 +355,10 @@ function PlaygroundContent({
           atRef,
         );
         if (!versioned) {
+          // A later edit was sent on top of this one: its echo carries this
+          // one too, while this stale echo would overwrite (and re-render
+          // mid-typing) whatever was typed since.
+          if (seq !== updateSeq.current) return;
           if (promptKey(updated) !== promptKey(shownRef.current)) {
             shownRef.current = updated;
             onUpdate(updated);
