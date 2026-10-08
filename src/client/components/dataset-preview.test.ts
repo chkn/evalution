@@ -2,11 +2,13 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
+import type { ExecutionInput } from "../../shared/types";
 import {
   previewCell,
   previewPropValue,
   propValueToJson,
   resourceName,
+  UNSUPPORTED_PREVIEW,
 } from "./dataset-preview";
 
 describe("previewPropValue", () => {
@@ -32,6 +34,18 @@ describe("previewCell", () => {
     expect(
       previewCell({ kind: "instance", name: "root", output: "taskId" }),
     ).toBe("root.taskId");
+  });
+
+  it("shows a stored node of a removed kind as unsupported", () => {
+    const legacy = {
+      kind: "resource",
+      uri: "db.ts#seededTask",
+      args: {},
+    } as unknown as ExecutionInput;
+    expect(previewCell(legacy)).toBe(UNSUPPORTED_PREVIEW);
+    expect(previewCell({ kind: "object", properties: { db: legacy } })).toBe(
+      "{…}",
+    );
   });
 
   it("truncates a long value", () => {

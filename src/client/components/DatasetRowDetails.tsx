@@ -111,6 +111,10 @@ export function InputView({ input }: { input: ExecutionInput }) {
       return (
         <code className="dataset-detail-scalar">{previewCell(input)}</code>
       );
+    default:
+      return (
+        <span className="dataset-detail-scalar">{previewCell(input)}</span>
+      );
   }
 }
 

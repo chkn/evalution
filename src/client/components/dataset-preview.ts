@@ -58,6 +58,13 @@ export function resourceName(uri: string): string {
   return hash >= 0 ? uri.slice(hash + 1) : uri;
 }
 
+/**
+ * How a cell of a kind this client doesn't know is shown — say, an inline
+ * `resource` node stored before named instances replaced it
+ * (`specs/resource-instances.md` §A.1).
+ */
+export const UNSUPPORTED_PREVIEW = "(unsupported)";
+
 /** A one-line preview of any cell. */
 export function previewCell(input: ExecutionInput): string {
   switch (input.kind) {
@@ -73,6 +80,8 @@ export function previewCell(input: ExecutionInput): string {
       return `= column ${input.field}`;
     case "input":
       return `= ${input.half === "execute" ? "execute." : ""}${input.path}`;
+    default:
+      return UNSUPPORTED_PREVIEW;
   }
 }
 

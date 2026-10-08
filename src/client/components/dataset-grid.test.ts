@@ -260,6 +260,27 @@ describe("cellView", () => {
     });
   });
 
+  it("draws a stored inline resource node as unsupported text, not undefined", () => {
+    // Rows saved before named instances hold `{ kind: "resource" }` cells,
+    // whole and nested; Glide crashes on a text cell with no text.
+    const legacy = {
+      kind: "resource",
+      uri: "db.ts#db",
+    } as unknown as ExecutionInput;
+    const object: ExecutionInput = {
+      kind: "object",
+      properties: { db: legacy },
+    };
+    expect(cellView(row({ "1": legacy }), byId(columns(), "1"))).toEqual({
+      kind: "text",
+      text: "(unsupported)",
+    });
+    expect(cellView(row({ "1": object }), byId(columns(), "1"))).toEqual({
+      kind: "text",
+      text: "{ db: (unsupported) }",
+    });
+  });
+
   it("links a trace source and dims a playground one", () => {
     const source = byId(columns(), "source");
     expect(
