@@ -954,25 +954,6 @@ function EvalView({
     >
       {prompt ? (
         <>
-          {((prompt.inputSources?.resources.length ?? 0) > 0 ||
-            Object.keys(state.instances).length > 0) && (
-            <ResourcesSection
-              instances={state.instances}
-              onChange={changeInstances}
-              sources={sources}
-              catalog={prompt.inputSources?.resources ?? []}
-              referencedBy={instance =>
-                referencesTo(instance, state.instances, [
-                  { selections: state.fn },
-                  { selections: state.exec },
-                  ...Object.values(state.checks).map(selections => ({
-                    selections,
-                  })),
-                ])
-              }
-              context={context}
-            />
-          )}
           {renderSlots(functionParameters, "fn")}
           {executeParameters.length > 0 && (
             <>
@@ -986,6 +967,26 @@ function EvalView({
         </>
       ) : (
         <p className="eval-empty">Choose a prompt.</p>
+      )}
+      <div className="pg-exec-section" />
+      {((prompt?.inputSources?.resources.length ?? 0) > 0 ||
+        Object.keys(state.instances).length > 0) && (
+        <ResourcesSection
+          instances={state.instances}
+          onChange={changeInstances}
+          sources={sources}
+          catalog={prompt?.inputSources?.resources ?? []}
+          referencedBy={instance =>
+            referencesTo(instance, state.instances, [
+              { selections: state.fn },
+              { selections: state.exec },
+              ...Object.values(state.checks).map(selections => ({
+                selections,
+              })),
+            ])
+          }
+          context={context}
+        />
       )}
       <div className="pg-exec-section" />
       <RunOptions choices={runChoices} />

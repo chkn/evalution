@@ -302,44 +302,6 @@ function RowFields({
   const editableRows = !!onChangeRow && !!sources;
   return (
     <>
-      {editableRows ? (
-        <DetailRow
-          label={<span className="dataset-detail-field">Resources</span>}
-        >
-          <div
-            className="dataset-detail-editor"
-            onBlur={(e: FocusEvent<HTMLDivElement>) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-                commitPending();
-              }
-            }}
-            onKeyDown={commitOnEnter}
-          >
-            <ResourcesSection
-              instances={instances}
-              onChange={changeInstances}
-              sources={sectionSources}
-              catalog={catalog}
-              referencedBy={name =>
-                referencesTo(name, instances, [
-                  {
-                    selections: Object.fromEntries(
-                      fields.flatMap(f =>
-                        state.selections[f.id]
-                          ? [[f.def.name, state.selections[f.id]!] as const]
-                          : [],
-                      ),
-                    ),
-                  },
-                ])
-              }
-              context={context}
-            />
-          </div>
-        </DetailRow>
-      ) : (
-        <RowResources row={row} />
-      )}
       {fields.map(field => {
         const input = row.cells[field.id];
         return (
@@ -411,6 +373,42 @@ function RowFields({
           </DetailRow>
         );
       })}
+      {editableRows ? (
+        <DetailRow label={<span className="dataset-detail-field"></span>}>
+          <div
+            className="dataset-detail-editor"
+            onBlur={(e: FocusEvent<HTMLDivElement>) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                commitPending();
+              }
+            }}
+            onKeyDown={commitOnEnter}
+          >
+            <ResourcesSection
+              instances={instances}
+              onChange={changeInstances}
+              sources={sectionSources}
+              catalog={catalog}
+              referencedBy={name =>
+                referencesTo(name, instances, [
+                  {
+                    selections: Object.fromEntries(
+                      fields.flatMap(f =>
+                        state.selections[f.id]
+                          ? [[f.def.name, state.selections[f.id]!] as const]
+                          : [],
+                      ),
+                    ),
+                  },
+                ])
+              }
+              context={context}
+            />
+          </div>
+        </DetailRow>
+      ) : (
+        <RowResources row={row} />
+      )}
     </>
   );
 }

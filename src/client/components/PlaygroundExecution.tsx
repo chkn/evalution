@@ -696,21 +696,6 @@ function PlaygroundExecution({
           </button>
         </div>
       )}
-      {(catalog.length > 0 || Object.keys(instances).length > 0) && (
-        <ResourcesSection
-          instances={instances}
-          onChange={changeInstances}
-          sources={sources}
-          catalog={catalog}
-          referencedBy={name =>
-            referencesTo(name, instances, [
-              { selections: functionSelections },
-              { selections: executeSelections },
-            ])
-          }
-          context={context}
-        />
-      )}
       {renderSlots(
         prompt.functionParameters,
         functionSelections,
@@ -728,6 +713,22 @@ function PlaygroundExecution({
             "exec",
           )}
         </>
+      )}
+
+      {(catalog.length > 0 || Object.keys(instances).length > 0) && (
+        <ResourcesSection
+          instances={instances}
+          onChange={changeInstances}
+          sources={sources}
+          catalog={catalog}
+          referencedBy={name =>
+            referencesTo(name, instances, [
+              { selections: functionSelections },
+              { selections: executeSelections },
+            ])
+          }
+          context={context}
+        />
       )}
 
       {broken.map(r => (

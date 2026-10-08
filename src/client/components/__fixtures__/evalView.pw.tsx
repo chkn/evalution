@@ -363,7 +363,8 @@ test("what to run against is always showing, in the scrolling body above Run", a
   await expect(options.getByLabel("Working tree")).toBeChecked();
   await expect(options.getByLabel("Parallel workers")).toHaveValue("4");
   // Set off from the inputs above by a rule, as the execute inputs are.
-  const rule = component.locator(".pg-exec-body > .pg-exec-section");
+  // (the last divider; others separate the inputs and the resources)
+  const rule = component.locator(".pg-exec-body > .pg-exec-section").last();
   expect(
     await rule.evaluate((el: Element) => getComputedStyle(el).borderTopWidth),
   ).toBe("1px");
