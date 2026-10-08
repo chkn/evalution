@@ -8,11 +8,13 @@ import {
   type InputSlot,
   inputKey,
 } from "../shared/input-references.ts";
-import type { ExecutionInput, PropType, PropValue } from "../shared/types.ts";
-import {
-  type ResourceBinding,
-  receiptKeyOf,
-} from "./playground/resource-registry.ts";
+import type {
+  ExecutionInput,
+  PropType,
+  PropValue,
+  RunResources,
+} from "../shared/types.ts";
+import type { DeclaredInstance } from "./playground/resource-registry.ts";
 
 export {
   collectInputSlots,
@@ -112,51 +114,15 @@ export function matchSourcesToSlots(
 }
 
 /**
- * How an {@link ExecutionInput} of kind `resource` is turned into a value.
- *
- * `binding` is passed when the resource has arguments and/or a replay
- * receipt to hand back — see {@link ResourceBinding} and
- * `specs/resource-arguments.md` §D. A resolver that ignores it (as any
- * resolver predating arguments does) still gets the resource's plain value,
- * unparameterized, the same as before.
+ * How a run's named resource instances are created — what
+ * `ResourceRegistry.lease()` hands back satisfies it. See
+ * `specs/resource-instances.md` §B.
  */
-export type ResourceResolver = (
-  uri: string,
-  binding?: ResourceBinding,
-) => Promise<unknown>;
-
-/**
- * The stable JSON encoding of a resource reference's `args` — object keys
- * sorted recursively, computed over the *unresolved* recipe so a resolved
- * argument that turns out to be a live handle never has to be compared or
- * hashed. Absent `args` and `{}` both encode to `""`, which is what makes an
- * existing argument-free reference key identically to before this existed.
- *
- * This is the lease's memoization key for one (resource, arguments) pair —
- * see `specs/resource-arguments.md` §D.
- */
-export function canonicalArgumentKey(
-  args: Record<string, ExecutionInput> | undefined,
-): string {
-  if (!args || Object.keys(args).length === 0) return "";
-  return stableStringify(args);
-}
-
-/** `JSON.stringify`, but with every object's keys sorted first. */
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-  const keys = Object.keys(value).sort();
-  return `{${keys
-    .map(
-      k =>
-        `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`,
-    )
-    .join(",")}}`;
+export interface InstanceResolver {
+  /** Declares the run's instances. Called once, before anything is acquired. */
+  declare(instances: Record<string, DeclaredInstance>): Promise<void>;
+  /** The declared instance `name`'s value, or its `output`. Created once per run. */
+  acquire(name: string, output?: string): Promise<unknown>;
 }
 
 /**
@@ -219,16 +185,17 @@ export function bindingAt(
  * created in the process that will run the prompt.
  *
  * @param input - The unresolved input.
- * @param resolveResource - Creates the value behind a `resource` reference.
+ * @param resolver - Creates the run's resource instances, for `instance`
+ *   references. Without one, an `instance` reference fails.
  * @param context - The row and bindings `dataset` and `input` references
  *   resolve against. See {@link ResolutionContext}.
  */
 export function resolveExecutionInput(
   input: ExecutionInput,
-  resolveResource?: ResourceResolver,
+  resolver?: InstanceResolver,
   context?: ResolutionContext,
 ): Promise<unknown> {
-  return resolveWithin(input, resolveResource, context ?? {}, []);
+  return resolveWithin(input, resolver, context ?? {}, []);
 }
 
 /**
@@ -238,12 +205,12 @@ export function resolveExecutionInput(
  */
 async function resolveWithin(
   input: ExecutionInput,
-  resolveResource: ResourceResolver | undefined,
+  resolver: InstanceResolver | undefined,
   context: ResolutionContext,
   chain: readonly string[],
 ): Promise<unknown> {
   const recurse = (child: ExecutionInput, nextChain = chain) =>
-    resolveWithin(child, resolveResource, context, nextChain);
+    resolveWithin(child, resolver, context, nextChain);
 
   switch (input.kind) {
     case "value":
@@ -258,36 +225,13 @@ async function resolveWithin(
       return Object.fromEntries(entries);
     }
 
-    case "resource": {
-      if (!resolveResource) {
+    case "instance": {
+      if (!resolver) {
         throw new Error(
-          `Cannot resolve resource '${input.uri}': this provider does not offer resources.`,
+          `Cannot resolve resource '${input.name}': this provider does not offer resources.`,
         );
       }
-      // No binding at all — not even one carrying an empty `args` — for a
-      // reference with neither arguments nor a receipt, so a lease sees
-      // exactly the call it would have seen before either existed.
-      if (!input.args && input.receipt === undefined) {
-        return resolveResource(input.uri);
-      }
-      const binding: ResourceBinding = {
-        key: canonicalArgumentKey(input.args),
-        // Recursion is free: an argument is itself an `ExecutionInput`, so
-        // resolving the whole `args` map is exactly resolving an `object`
-        // input's `properties` — see the `object` case above. Evaluated
-        // lazily, only once the lease has decided this binding doesn't hit
-        // its memo (see `ResourceBinding.resolve`).
-        resolve: async () => {
-          const entries = await Promise.all(
-            Object.entries(input.args ?? {}).map(
-              async ([k, v]) => [k, await recurse(v)] as const,
-            ),
-          );
-          return Object.fromEntries(entries);
-        },
-        receipt: input.receipt,
-      };
-      return resolveResource(input.uri, binding);
+      return resolver.acquire(input.name, input.output);
     }
 
     case "dataset": {
@@ -324,10 +268,13 @@ async function resolveWithin(
 /**
  * Resolve a whole execute request's inputs.
  *
- * Both halves are resolved together, and `resolveResource` is expected to
- * memoize: a run-scoped resource referenced by both a function input and an
- * execute input must be created **once** per run, which is only decidable when
- * every input is in view.
+ * The run's named resource instances (`inputs.resources`) are declared to
+ * `resolver` and **all** created first — whether or not any slot names
+ * them, which is what lets an instance exist purely for its side effects
+ * (`specs/resource-instances.md` §B). Each instance's arguments resolve
+ * under the same `context`, so they may name another instance's output,
+ * another slot, or a dataset cell. Slots then resolve, and an `instance`
+ * reference among them gets the instance already created.
  *
  * @param context - What `dataset` and `input` references resolve against.
  */
@@ -335,23 +282,39 @@ export async function resolveExecutionInputs(
   inputs: {
     functionInputs?: readonly ExecutionInput[];
     executeInputs?: Record<string, ExecutionInput>;
+    resources?: RunResources;
   },
-  resolveResource?: ResourceResolver,
+  resolver?: InstanceResolver,
   context?: ResolutionContext,
 ): Promise<{ functionParams: any[]; executeValues: Record<string, any> }> {
+  const resources = Object.entries(inputs.resources ?? {});
+  if (resources.length > 0) {
+    if (!resolver) {
+      throw new Error(
+        `Cannot create resource '${resources[0][0]}': this provider does not offer resources.`,
+      );
+    }
+    await resolver.declare(
+      Object.fromEntries(
+        resources.map(([name, spec]) => [
+          name,
+          declaredInstance(spec, resolver, context),
+        ]),
+      ),
+    );
+    await Promise.all(resources.map(([name]) => resolver.acquire(name)));
+  }
+
   const functionParams = await Promise.all(
     (inputs.functionInputs ?? []).map(i =>
-      resolveExecutionInput(i, resolveResource, context),
+      resolveExecutionInput(i, resolver, context),
     ),
   );
 
   const executeEntries = await Promise.all(
     Object.entries(inputs.executeInputs ?? {}).map(
       async ([name, input]) =>
-        [
-          name,
-          await resolveExecutionInput(input, resolveResource, context),
-        ] as const,
+        [name, await resolveExecutionInput(input, resolver, context)] as const,
     ),
   );
 
@@ -362,59 +325,55 @@ export async function resolveExecutionInputs(
 }
 
 /**
- * Returns `inputs` with every resource reference's `receipt` set from
- * `receipts` — the shape `ResourceLease.receipts()` /
- * `ResolvedPromptInputs.receipts` produce — so the inputs recorded on a
- * trace carry what this run's resources actually produced.
+ * What the lease is told about one instance: its arguments as a thunk —
+ * resolved only once the instance is actually created, under the run's own
+ * context — and its replay receipt.
+ */
+function declaredInstance(
+  spec: RunResources[string],
+  resolver: InstanceResolver,
+  context: ResolutionContext | undefined,
+): DeclaredInstance {
+  const args = Object.entries(spec.args ?? {});
+  if (args.length === 0 && spec.receipt === undefined) return { uri: spec.uri };
+  return {
+    uri: spec.uri,
+    binding: {
+      ...(args.length > 0 && {
+        resolve: async () =>
+          Object.fromEntries(
+            await Promise.all(
+              args.map(
+                async ([k, v]) =>
+                  [k, await resolveExecutionInput(v, resolver, context)] as const,
+              ),
+            ),
+          ),
+      }),
+      ...(spec.receipt !== undefined && { receipt: spec.receipt }),
+    },
+  };
+}
+
+/**
+ * Returns `resources` with each instance's `receipt` set from `receipts` —
+ * the by-name shape `ResourceLease.receipts()` produces — so the inputs
+ * recorded on a trace carry what this run's resources actually produced. An
+ * incoming receipt (a replay's) never outlives a run whose `create` didn't
+ * produce one. See `specs/resource-arguments.md` §K.
  *
- * A receipt is looked up by the same key `ResourceRegistry` records it
- * under: the reference's own `uri`, or `` `${uri}@${key}` `` where `key` is
- * {@link canonicalArgumentKey} of its (already-unresolved) `args` — so a
- * fresh run's receipt lands on the exact reference that produced it, however
- * many differently-bound references to the same resource a request has.
- * Nested references (an argument that is itself a resource, a resource
- * inside an `object` input) are stamped too. See
- * `specs/resource-arguments.md` §K.
- *
- * @param inputs - The unresolved inputs a request was sent with.
+ * @param resources - The instances a request was sent with.
  * @param receipts - What the run's resolution produced, if anything did.
  */
 export function stampReceipts(
-  inputs: {
-    functionInputs?: readonly ExecutionInput[];
-    executeInputs?: Record<string, ExecutionInput>;
-  },
+  resources: RunResources | undefined,
   receipts: Record<string, unknown> | undefined,
-): {
-  functionInputs?: readonly ExecutionInput[];
-  executeInputs?: Record<string, ExecutionInput>;
-} {
-  if (!receipts) return inputs;
-
-  const stampAll = (map: Record<string, ExecutionInput>) =>
-    Object.fromEntries(Object.entries(map).map(([k, v]) => [k, stamp(v)]));
-
-  const stamp = (input: ExecutionInput): ExecutionInput => {
-    switch (input.kind) {
-      case "resource": {
-        // Built fresh rather than spread from `input`, so a replay's incoming
-        // receipt never outlives a run whose `create` didn't produce one.
-        const stamped: ExecutionInput = { kind: "resource", uri: input.uri };
-        if (input.args) stamped.args = stampAll(input.args);
-        const receipt =
-          receipts[receiptKeyOf(input.uri, canonicalArgumentKey(input.args))];
-        if (receipt !== undefined) stamped.receipt = receipt;
-        return stamped;
-      }
-      case "object":
-        return { ...input, properties: stampAll(input.properties) };
-      default:
-        return input;
-    }
-  };
-
-  return {
-    functionInputs: inputs.functionInputs?.map(stamp),
-    executeInputs: inputs.executeInputs && stampAll(inputs.executeInputs),
-  };
+): RunResources | undefined {
+  if (!resources) return undefined;
+  return Object.fromEntries(
+    Object.entries(resources).map(([name, { receipt: _, ...spec }]) => {
+      const receipt = receipts?.[name];
+      return [name, receipt === undefined ? spec : { ...spec, receipt }];
+    }),
+  );
 }

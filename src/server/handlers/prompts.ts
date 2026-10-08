@@ -115,6 +115,7 @@ export async function handleExecutePrompt(
         {
           functionInputs: request?.functionInputs ?? [],
           executeInputs: request?.executeInputs ?? {},
+          ...(request?.resources && { resources: request.resources }),
         },
         { tracer, traceProviderId: defaultTraceProviderId },
       );

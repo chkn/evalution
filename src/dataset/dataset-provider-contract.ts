@@ -117,14 +117,21 @@ export function runDatasetProviderContractTests(
         fields: [{ def: def("ticket") }, { def: def("db", "Db") }],
       });
       const resource: ExecutionInput = {
-        kind: "resource",
-        uri: ".evalution/playground/tasks.ts#seededTask",
-        args: { title: text("Buy milk") },
+        kind: "instance",
+        name: "task",
+        output: "taskId",
+      };
+      const resources = {
+        task: {
+          uri: ".evalution/playground/tasks.ts#seededTask",
+          args: { title: text("Buy milk") },
+        },
       };
       const added = await provider.addRows(dataset.id, [
         {
           cells: { "0": text("first"), "1": resource },
           source: { kind: "playground", promptId: "p#x", providerId: "files" },
+          resources,
         },
         { cells: { "0": text("second") } },
       ]);
@@ -134,6 +141,8 @@ export function runDatasetProviderContractTests(
       const rows = await provider.listRows(dataset.id);
       expect(rows).toEqual(added);
       expect(rows[0].cells["1"]).toEqual(resource);
+      expect(rows[0].resources).toEqual(resources);
+      expect(rows[1].resources).toBeUndefined();
       expect(rows[0].source).toEqual({
         kind: "playground",
         promptId: "p#x",
@@ -232,34 +241,38 @@ export function runDatasetProviderContractTests(
           cells: {
             "0": text("a"),
             "1": {
-              kind: "resource",
-              uri: "pg.ts#seededTask",
-              args: { title: text("Milk"), owner: text("ann") },
+              kind: "value",
+              value: {
+                kind: "object",
+                properties: {
+                  title: { kind: "primitive", value: "Milk" },
+                  owner: { kind: "primitive", value: "ann" },
+                },
+              },
             },
           },
         },
         {
           cells: {
             "1": {
-              kind: "resource",
-              uri: "pg.ts#otherTask",
+              kind: "object",
               // `title` again, merged by name; `due` is new.
-              args: { due: text("today"), title: text("Eggs") },
+              properties: { due: text("today"), title: text("Eggs") },
             },
             "2": {
               kind: "object",
               properties: {
-                db: { kind: "resource", uri: "pg.ts#db" },
+                db: { kind: "instance", name: "db" },
                 userId: text("u1"),
               },
             },
           },
         },
-        // A resource without arguments adds no keys, but still marks the
-        // field as one a resource fills.
+        // A resource instance adds no keys, but marks the field as one a
+        // resource fills.
         {
           cells: {
-            "1": { kind: "resource", uri: "pg.ts#blank" },
+            "1": { kind: "instance", name: "task", output: "taskId" },
             // A typed-in object's properties are keys too.
             "3": {
               kind: "value",
@@ -313,9 +326,9 @@ export function runDatasetProviderContractTests(
           fields: [{ def: def("a") }, { def: def("b", "Task") }],
         });
         const resource: ExecutionInput = {
-          kind: "resource",
-          uri: "pg.ts#seededTask",
-          args: { title: text("Milk") },
+          kind: "instance",
+          name: "task",
+          output: "taskId",
         };
         const [first, second] = await provider.addRows(dataset.id, [
           { cells: { "0": text("one"), "1": resource } },
@@ -356,6 +369,38 @@ export function runDatasetProviderContractTests(
         expect(row.cells["1"]).toEqual(replacement);
       });
 
+      it("sets and removes resource instances by name, leaving the rest", async () => {
+        const provider = await makeProvider();
+        const { dataset, first, second } = await seeded(provider);
+        const root = { uri: "pg.ts#seededTask", args: { title: text("Root") } };
+        const child = {
+          uri: "pg.ts#seededTask",
+          args: {
+            title: text("Child"),
+            parentId: {
+              kind: "instance",
+              name: "root",
+              output: "taskId",
+            } satisfies ExecutionInput,
+          },
+        };
+        await provider.updateRows(dataset.id, [
+          { rowId: first.id, cells: {}, resources: { root, child } },
+        ]);
+        expect((await provider.listRows(dataset.id))[0].resources).toEqual({
+          root,
+          child,
+        });
+
+        await provider.updateRows(dataset.id, [
+          { rowId: first.id, cells: {}, resources: { child: null } },
+        ]);
+        const rows = await provider.listRows(dataset.id);
+        expect(rows[0].resources).toEqual({ root });
+        expect(rows[0].cells).toEqual(first.cells);
+        expect(rows[1]).toEqual(second);
+      });
+
       it("fills an empty cell, and clears one by removing its key", async () => {
         const provider = await makeProvider();
         const { dataset, first, second } = await seeded(provider);
@@ -375,7 +420,7 @@ export function runDatasetProviderContractTests(
       it.each([
         [
           "a resource cell",
-          { kind: "resource", uri: "pg.ts#db" } satisfies ExecutionInput,
+          { kind: "instance", name: "db" } satisfies ExecutionInput,
         ],
         [
           "an object cell",
@@ -705,7 +750,7 @@ export function runDatasetProviderContractTests(
         };
         await provider.addRows(dataset.id, [
           { cells: { "0": objectCell } },
-          { cells: { "0": { kind: "resource", uri: "res://db" } } },
+          { cells: { "0": { kind: "instance", name: "db" } } },
         ]);
         const result = await provider.queryRows(
           dataset.id,
@@ -722,8 +767,8 @@ export function runDatasetProviderContractTests(
           "SELECT data FROM rows",
         );
         expect(JSON.parse(all.rows[1].data as string)).toEqual({
-          kind: "resource",
-          uri: "res://db",
+          kind: "instance",
+          name: "db",
         });
       });
 

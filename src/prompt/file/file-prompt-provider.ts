@@ -16,6 +16,7 @@ import type {
   PromptInputSources,
   PromptStyle,
   PropDefinition,
+  RunResources,
 } from "../../shared/types.ts";
 import type { PromptSpanInfo } from "../../trace/prompt-tracer.ts";
 import {
@@ -1239,16 +1240,13 @@ export class FilePromptProvider
     inputs: {
       functionInputs?: readonly ExecutionInput[];
       executeInputs?: Record<string, ExecutionInput>;
+      resources?: RunResources;
     },
     context?: ResolutionContext,
   ): Promise<ResolvedPromptInputs> {
-    // One lease across both halves: a run-scoped resource named by a function
-    // input *and* an execute input must be created once, not twice.
+    // One lease for the whole run: each named instance is created once,
+    // however many slots and arguments name it.
     const lease = this.resources.lease();
-    const resolveResource = (
-      uri: string,
-      binding?: Parameters<typeof lease.acquire>[1],
-    ) => lease.acquire(uri, binding);
     // More inputs resolved later in the same lease — a check's — see the
     // same row and bindings the run's own did.
     const resolveMore = async (more: Record<string, ExecutionInput>) =>
@@ -1258,7 +1256,7 @@ export class FilePromptProvider
             async ([name, input]) =>
               [
                 name,
-                await resolveExecutionInput(input, resolveResource, context),
+                await resolveExecutionInput(input, lease, context),
               ] as const,
           ),
         ),
@@ -1266,7 +1264,7 @@ export class FilePromptProvider
     try {
       const { functionParams, executeValues } = await resolveExecutionInputs(
         inputs,
-        resolveResource,
+        lease,
         context,
       );
       return {
@@ -1417,6 +1415,7 @@ export class FilePromptProvider
         ? [...inputs.functionInputs]
         : undefined,
       executeInputs: inputs?.executeInputs,
+      resources: inputs?.resources,
       parameterDefinitions: snapshot?.functionParameters,
       executeParameterDefinitions: snapshot?.executeParameters,
       version,

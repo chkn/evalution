@@ -579,6 +579,11 @@ export class EvalRunner {
               },
           ),
           executeInputs: inputs.executeInputs,
+          // The eval's instances and the row's, in one namespace — the row's
+          // win on a name both declare (`specs/resource-instances.md` §E).
+          ...((inputs.resources || job.row.resources) && {
+            resources: { ...inputs.resources, ...job.row.resources },
+          }),
         },
         {
           tracer: this.options.tracer,

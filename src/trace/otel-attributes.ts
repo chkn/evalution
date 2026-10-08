@@ -369,6 +369,7 @@ export function readInputs(
   PromptID,
   | "functionInputs"
   | "executeInputs"
+  | "resources"
   | "parameterDefinitions"
   | "executeParameterDefinitions"
 > {
@@ -382,6 +383,11 @@ export function readInputs(
     }),
     ...(parsed.executeInputs && typeof parsed.executeInputs === "object"
       ? { executeInputs: parsed.executeInputs }
+      : {}),
+    ...(parsed.resources &&
+    typeof parsed.resources === "object" &&
+    !Array.isArray(parsed.resources)
+      ? { resources: parsed.resources }
       : {}),
     ...(Array.isArray(parsed.parameterDefinitions) && {
       parameterDefinitions: parsed.parameterDefinitions,

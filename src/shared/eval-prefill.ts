@@ -178,6 +178,7 @@ export function prefillBindings(input: PrefillInput): Prefilled {
       stored?.executeInputs,
       "exec",
     ),
+    ...(input.inputs.resources && { resources: input.inputs.resources }),
   };
 
   const checks = input.checks.map(check => {

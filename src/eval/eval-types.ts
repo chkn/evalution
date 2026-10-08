@@ -10,6 +10,7 @@
 import type {
   ExecutionInput,
   PromptRef,
+  RunResources,
   VariationConflict,
   VariationId,
   VersionId,
@@ -36,14 +37,20 @@ export interface EvalCheck {
 /**
  * One binding per prompt slot, keyed by slot name, in the shape the execute
  * panel persists. A binding may name a column (`dataset`), another slot
- * (`input`), a resource with arguments, a typed-in value, or an object
- * mixing those.
+ * (`input`), a resource instance (`instance`), a typed-in value, or an
+ * object mixing those.
  */
 export interface EvalInputs {
   /** Function parameter name → binding. */
   functionInputs: Record<string, ExecutionInput>;
   /** Execute parameter name → binding. */
   executeInputs: Record<string, ExecutionInput>;
+  /**
+   * Resource instances every row's run declares, merged with the row's own
+   * (`DatasetRow.resources`) — the row's win on a name both declare. See
+   * `specs/resource-instances.md` §E.
+   */
+  resources?: RunResources;
 }
 
 /** A saved eval: data, stored by an `EvalProvider`. See `specs/evals.md` §A. */

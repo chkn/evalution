@@ -26,6 +26,7 @@ import {
   fitsPrimitiveBase,
   InvalidCellError,
   parseCell,
+  parseResources,
   primitiveBase,
 } from "../../shared/dataset-cells.ts";
 import {
@@ -202,7 +203,16 @@ function parseRows(value: unknown): NewDatasetRow[] {
       cells[fieldId] = parseCell(cell, `rows[${i}].cells.${fieldId}`);
     }
     const source = parseSource(row.source, `rows[${i}].source`);
-    return { cells, ...(source && { source }) };
+    const resources =
+      row.resources === undefined || row.resources === null
+        ? undefined
+        : parseResources(row.resources, { path: `rows[${i}].resources` });
+    return {
+      cells,
+      ...(source && { source }),
+      ...(resources &&
+        Object.keys(resources).length > 0 && { resources }),
+    };
   });
 }
 
@@ -251,7 +261,20 @@ function parseUpdates(
       }
       cells[fieldId] = parsed;
     }
-    return { rowId: update.rowId, cells };
+    if (update.resources === undefined) return { rowId: update.rowId, cells };
+    if (!isRecord(update.resources)) {
+      throw new BadRequest(`updates[${i}].resources must be an object`);
+    }
+    // `null` removes an instance; everything else is checked as a row's
+    // resources are when it's added.
+    const set = Object.fromEntries(
+      Object.entries(update.resources).filter(([, v]) => v !== null),
+    );
+    const parsed = parseResources(set, { path: `updates[${i}].resources` });
+    const resources = Object.fromEntries(
+      Object.keys(update.resources).map(name => [name, parsed[name] ?? null]),
+    );
+    return { rowId: update.rowId, cells, resources };
   });
 }
 
@@ -410,7 +433,7 @@ export async function handleDeleteDataset(
   }
 }
 
-/** `POST /api/datasets/:providerId/:id/rows` — body `{ rows: [{ cells, source? }] }`. */
+/** `POST /api/datasets/:providerId/:id/rows` — body `{ rows: [{ cells, source?, resources? }] }`. */
 export async function handleAddRows(
   provider: DatasetProvider,
   datasetId: string,
@@ -427,7 +450,8 @@ export async function handleAddRows(
 
 /**
  * `PATCH /api/datasets/:providerId/:id/rows` — body
- * `{ updates: [{ rowId, cells }] }`, where a `null` cell clears. All or
+ * `{ updates: [{ rowId, cells, resources? }] }`, where a `null` cell or
+ * resource clears it. All or
  * nothing: one bad update rejects the batch.
  */
 export async function handleUpdateRows(

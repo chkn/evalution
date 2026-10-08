@@ -736,7 +736,8 @@ describe("FilePromptProvider resource inputs", () => {
   it("resolves a resource reference into the value execute receives", async () => {
     const provider = withResource();
     const resolved = await provider.resolveInputs("x.prompt.ts#greet", {
-      functionInputs: [{ kind: "resource", uri: "x.playground.ts#taskId" }],
+      functionInputs: [{ kind: "instance", name: "task" }],
+      resources: { task: { uri: "x.playground.ts#taskId" } },
     });
 
     // `execute` still takes plain `any[]` — the provider contract did not
@@ -744,9 +745,7 @@ describe("FilePromptProvider resource inputs", () => {
     expect(resolved.functionParams).toEqual(["tsk_seeded"]);
     // A receipt lets a trace display what the run used, even though replaying
     // it would mint a new one.
-    expect(resolved.receipts).toEqual({
-      "x.playground.ts#taskId": "tsk_seeded",
-    });
+    expect(resolved.receipts).toEqual({ task: "tsk_seeded" });
 
     (globalThis as any).__disposed = 0;
     await resolved.release?.();
@@ -775,7 +774,8 @@ describe("FilePromptProvider resource inputs", () => {
         sdk: new VercelAISDK(),
       });
       const resolved = await provider.resolveInputs("x.prompt.ts#greet", {
-        functionInputs: [{ kind: "resource", uri: ref }],
+        functionInputs: [{ kind: "instance", name: "task" }],
+        resources: { task: { uri: ref } },
       });
       expect(resolved.functionParams).toEqual(["tsk_1"]);
     }
@@ -785,7 +785,8 @@ describe("FilePromptProvider resource inputs", () => {
     const provider = withResource();
     await expect(
       provider.resolveInputs("x.prompt.ts#greet", {
-        functionInputs: [{ kind: "resource", uri: "x.playground.ts#missing" }],
+        functionInputs: [{ kind: "instance", name: "task" }],
+        resources: { task: { uri: "x.playground.ts#missing" } },
       }),
     ).rejects.toThrow(/not found/);
   });

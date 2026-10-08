@@ -103,7 +103,6 @@ export { LocalFileProvider } from "./file-provider-local.ts";
 export { MemoryFileProvider } from "./file-provider-memory.ts";
 export { OverlayFileProvider } from "./file-provider-overlay.ts";
 export {
-  canonicalArgumentKey,
   collectInputSlots,
   findInputCycle,
   type InputBindings,
@@ -114,7 +113,7 @@ export {
   matchSourcesToSlots,
   namedBindings,
   type ResolutionContext,
-  type ResourceResolver,
+  type InstanceResolver,
   resolveExecutionInput,
   resolveExecutionInputs,
   stampReceipts,
@@ -165,7 +164,9 @@ export {
   type StaticResourceDefinition,
 } from "./prompt/playground/resource.ts";
 export {
+  type DeclaredInstance,
   DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
+  isValidInstanceName,
   type PlaygroundModuleError,
   type RegisteredCheck,
   type RegisteredResource,

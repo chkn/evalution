@@ -481,7 +481,7 @@ describe("MCP server", () => {
       expect(added.id).toBe("1");
     });
 
-    it("sets resource cells with update_rows, as add_rows does", async () => {
+    it("sets resource cells and row resources with update_rows, as add_rows does", async () => {
       const { call, datasets } = await setup();
       const dataset = await call("create_dataset", {
         name: "Resources",
@@ -494,21 +494,26 @@ describe("MCP server", () => {
         datasetId: dataset.id,
         rows: [{ values: { title: "Milk" } }],
       });
-      const resource = {
-        kind: "resource",
+      const notes = {
         uri: "src/fixtures.ts#notes",
         args: {
           title: { kind: "value", value: { kind: "primitive", value: "Milk" } },
         },
       };
+      const resource = { kind: "instance", name: "notes" };
       await call("update_rows", {
         datasetId: dataset.id,
         updates: [
-          { rowId: rowIds[0], cells: { title: resource, notes: resource } },
+          {
+            rowId: rowIds[0],
+            cells: { title: resource, notes: resource },
+            resources: { notes },
+          },
         ],
       });
       const [row] = await datasets.listRows(dataset.id);
       expect(row.cells).toEqual({ "0": resource, "1": resource });
+      expect(row.resources).toEqual({ notes });
     });
 
     it("updates and deletes rows, and renames and deletes fields", async () => {

@@ -8,7 +8,12 @@
  * §B.2.
  */
 
-import type { ExecutionInput, PropDefinition, PropType } from "./types.ts";
+import type {
+  ExecutionInput,
+  PropDefinition,
+  PropType,
+  RunResources,
+} from "./types.ts";
 
 /**
  * One place an input can be plugged in: a prompt's parameter, or any slot
@@ -71,6 +76,11 @@ export interface InputBindings {
   functionInputs: Record<string, ExecutionInput>;
   /** Execute parameter name → its binding. */
   executeInputs: Record<string, ExecutionInput>;
+  /**
+   * The run's named resource instances, whose arguments may themselves hold
+   * `input` and `instance` references. See `specs/resource-instances.md`.
+   */
+  resources?: RunResources;
 }
 
 /** An `input` reference's target, as one string: `execute:` prefixed for an execute slot. */
@@ -91,6 +101,7 @@ export function namedBindings(
   inputs: {
     functionInputs?: readonly ExecutionInput[];
     executeInputs?: Record<string, ExecutionInput>;
+    resources?: RunResources;
   },
 ): InputBindings {
   const functionInputs: Record<string, ExecutionInput> = {};
@@ -98,53 +109,86 @@ export function namedBindings(
     const input = inputs.functionInputs?.[i];
     if (input) functionInputs[param.name] = input;
   });
-  return { functionInputs, executeInputs: { ...inputs.executeInputs } };
+  return {
+    functionInputs,
+    executeInputs: { ...inputs.executeInputs },
+    ...(inputs.resources && { resources: inputs.resources }),
+  };
 }
 
-/** One `input` reference found in a set of bindings, and where it sits. */
-interface FoundInputRef {
-  /** The slot the reference sits in (a resource's arguments count as its own slot). */
-  at: { half: "function" | "execute"; path: string };
-  /** The slot it names. */
-  target: { half: "function" | "execute"; path: string };
+/**
+ * Somewhere a reference can sit, or point: a slot (or a path within one), or
+ * one of the run's resource instances (whose arguments count as the
+ * instance itself).
+ */
+type RefLocation =
+  | { half: "function" | "execute"; path: string }
+  | { instance: string };
+
+/** One `input` or `instance` reference found in a set of bindings, and where it sits. */
+interface FoundRef {
+  /** Where the reference sits. */
+  at: RefLocation;
+  /** What it names. */
+  target: RefLocation;
 }
 
-/** Every `input` reference inside `bindings`, with where it sits. */
-function findInputRefs(bindings: InputBindings): FoundInputRef[] {
-  const found: FoundInputRef[] = [];
-  const walk = (
-    node: ExecutionInput,
-    half: "function" | "execute",
-    path: string,
-  ) => {
+/** How a {@link RefLocation} reads in a message: a slot as {@link inputKey}, an instance as `resource 'name'`. */
+function locationKey(loc: RefLocation): string {
+  return "instance" in loc
+    ? `resource '${loc.instance}'`
+    : inputKey(loc.half, loc.path);
+}
+
+/** Every `input` and `instance` reference inside `bindings`, with where it sits. */
+function findRefs(bindings: InputBindings): FoundRef[] {
+  const found: FoundRef[] = [];
+  const walk = (node: ExecutionInput, at: RefLocation) => {
     switch (node.kind) {
       case "object":
         for (const [k, child] of Object.entries(node.properties)) {
-          walk(child, half, `${path}.${k}`);
+          walk(
+            child,
+            "instance" in at ? at : { half: at.half, path: `${at.path}.${k}` },
+          );
         }
         break;
-      case "resource":
-        // Arguments are resolved as part of this slot's own value, so a
-        // reference among them sits here, however deep.
-        for (const arg of Object.values(node.args ?? {})) walk(arg, half, path);
-        break;
       case "input":
-        found.push({
-          at: { half, path },
-          target: { half: node.half, path: node.path },
-        });
+        found.push({ at, target: { half: node.half, path: node.path } });
+        break;
+      case "instance":
+        found.push({ at, target: { instance: node.name } });
         break;
       default:
         break;
     }
   };
   for (const [name, node] of Object.entries(bindings.functionInputs)) {
-    walk(node, "function", name);
+    walk(node, { half: "function", path: name });
   }
   for (const [name, node] of Object.entries(bindings.executeInputs)) {
-    walk(node, "execute", name);
+    walk(node, { half: "execute", path: name });
+  }
+  for (const [name, spec] of Object.entries(bindings.resources ?? {})) {
+    // Arguments are resolved as part of creating the instance, so a
+    // reference among them sits at the instance itself, however deep.
+    for (const arg of Object.values(spec.args ?? {})) {
+      walk(arg, { instance: name });
+    }
   }
   return found;
+}
+
+/** Whether resolving whatever sits at `at` means resolving `target` first. */
+function reaches(at: RefLocation, target: RefLocation): boolean {
+  if ("instance" in at || "instance" in target) {
+    return (
+      "instance" in at &&
+      "instance" in target &&
+      at.instance === target.instance
+    );
+  }
+  return at.half === target.half && overlaps(at.path, target.path);
 }
 
 /** Whether one dotted path is the other, or contains it. */
@@ -153,30 +197,28 @@ export function overlaps(a: string, b: string): boolean {
 }
 
 /**
- * A cycle among `bindings`' `input` references — `a` ← input `b` ← input
- * `a` — as the slot paths that form it, first repeated last; or `undefined`
- * when there is none. Resolving a slot means resolving every reference that
- * sits inside it or around it, which is what an edge here is. See
- * `specs/evals.md` §B.2.
+ * A cycle among `bindings`' `input` and `instance` references — `a` ← input
+ * `b` ← input `a`, or two resource instances each taking the other's output
+ * as an argument — as the places that form it, first repeated last; or
+ * `undefined` when there is none. Resolving a slot means resolving every
+ * reference that sits inside it or around it, and creating an instance means
+ * resolving every reference among its arguments, which is what an edge here
+ * is. See `specs/evals.md` §B.2 and `specs/resource-instances.md` §B.
  */
 export function findInputCycle(bindings: InputBindings): string[] | undefined {
-  const refs = findInputRefs(bindings);
+  const refs = findRefs(bindings);
   const edges = refs.map(ref =>
-    refs.filter(
-      other =>
-        other.at.half === ref.target.half &&
-        overlaps(other.at.path, ref.target.path),
-    ),
+    refs.filter(other => reaches(other.at, ref.target)),
   );
-  const state = new Map<FoundInputRef, "visiting" | "done">();
-  const stack: FoundInputRef[] = [];
+  const state = new Map<FoundRef, "visiting" | "done">();
+  const stack: FoundRef[] = [];
 
-  const visit = (ref: FoundInputRef): string[] | undefined => {
+  const visit = (ref: FoundRef): string[] | undefined => {
     const seen = state.get(ref);
     if (seen === "done") return undefined;
     if (seen === "visiting") {
       const loop = stack.slice(stack.indexOf(ref));
-      return [...loop, ref].map(r => inputKey(r.at.half, r.at.path));
+      return [...loop, ref].map(r => locationKey(r.at));
     }
     state.set(ref, "visiting");
     stack.push(ref);
@@ -217,21 +259,38 @@ export function slotPaths(
 }
 
 /**
- * What's wrong with `bindings`' `input` references against a prompt's
- * signature: a target slot that doesn't exist, and a cycle. Empty when
- * nothing is. The execute route answers a non-empty list with a 400, and an
- * eval run refuses to start. See `specs/evals.md` §B.2.1.
+ * What's wrong with `bindings`' `input` and `instance` references against a
+ * prompt's signature: a target slot that doesn't exist, a resource instance
+ * the run doesn't declare, and a cycle. Empty when nothing is. The execute
+ * route answers a non-empty list with a 400, and an eval run refuses to
+ * start. See `specs/evals.md` §B.2.1.
+ *
+ * @param options.undeclaredInstances - Allow `instance` references to names
+ *   `bindings.resources` doesn't declare — an eval's, which each dataset row
+ *   may declare instead (`specs/resource-instances.md` §E).
  */
 export function inputReferenceProblems(
   bindings: InputBindings,
   signature: InputSignature,
+  options: { undeclaredInstances?: boolean } = {},
 ): string[] {
   const slots = slotPaths(signature);
+  const instances = bindings.resources ?? {};
   const problems: string[] = [];
-  for (const ref of findInputRefs(bindings)) {
-    if (!slots[ref.target.half].has(ref.target.path)) {
+  for (const ref of findRefs(bindings)) {
+    const at = "instance" in ref.at ? locationKey(ref.at) : `'${locationKey(ref.at)}'`;
+    if ("instance" in ref.target) {
+      if (
+        !options.undeclaredInstances &&
+        !Object.hasOwn(instances, ref.target.instance)
+      ) {
+        problems.push(
+          `${at} names resource '${ref.target.instance}', which this run doesn't declare`,
+        );
+      }
+    } else if (!slots[ref.target.half].has(ref.target.path)) {
       problems.push(
-        `'${inputKey(ref.at.half, ref.at.path)}' names input '${inputKey(ref.target.half, ref.target.path)}', which the prompt doesn't have`,
+        `${at} names input '${inputKey(ref.target.half, ref.target.path)}', which the prompt doesn't have`,
       );
     }
   }

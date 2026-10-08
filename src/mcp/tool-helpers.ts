@@ -259,5 +259,23 @@ export const providerIdParam = (kind: string) =>
 export const executionInput = z
   .record(z.string(), z.unknown())
   .describe(
-    'An unresolved input: {kind: "value", value: PropValue}, {kind: "object", properties: {...}}, or {kind: "resource", uri, args?}.',
+    'An unresolved input: {kind: "value", value: PropValue}, {kind: "object", properties: {...}}, or {kind: "instance", name, output?} naming one of the run\'s resource instances (or an output of it).',
+  );
+
+/** One named resource instance, as a tool parameter. */
+export const resourceInstance = z.object({
+  uri: z
+    .string()
+    .describe("The resource's uri (`<module>#<export>`), never an output's."),
+  args: z
+    .record(z.string(), executionInput)
+    .optional()
+    .describe("The resource's argument name → unresolved input."),
+});
+
+/** A run's named resource instances, as a tool parameter. */
+export const runResources = z
+  .record(z.string(), resourceInstance)
+  .describe(
+    "Named resource instances (letters, digits, '_' and '-'), each created once per run whether or not anything names it — so one can seed data purely as a side effect. Inputs (and other instances' args) name them with {kind: \"instance\", name, output?}.",
   );

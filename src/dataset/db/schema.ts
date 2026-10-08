@@ -70,6 +70,8 @@ export const datasetRows = sqliteTable(
     cells: jsonb("cells").notNull(),
     /** JSONB `DatasetRowSource`. */
     source: jsonb("source"),
+    /** JSONB `RunResources` — the row's resource instances. Absent when it declares none. */
+    resources: jsonb("resources"),
     /** Creation timestamp (ms). */
     createdAt: real("created_at").notNull(),
   },

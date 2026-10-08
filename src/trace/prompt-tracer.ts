@@ -108,6 +108,11 @@ export interface PromptSpanInfo {
   /** The unresolved execute-parameter inputs, keyed by parameter name. */
   executeInputs?: Record<string, unknown>;
   /**
+   * The run's named resource instances, by name, each with the receipt its
+   * `create()` produced. See `specs/resource-instances.md` §F.
+   */
+  resources?: Record<string, unknown>;
+  /**
    * The prompt's parameter definitions as they stood when the run was
    * launched, recorded beside the inputs.
    *
@@ -170,6 +175,7 @@ export function getPromptSpanAttributes(
       ? JSON.stringify({
           functionInputs: prompt.functionInputs,
           executeInputs: prompt.executeInputs,
+          resources: prompt.resources,
           parameterDefinitions: prompt.parameterDefinitions,
           executeParameterDefinitions: prompt.executeParameterDefinitions,
         })

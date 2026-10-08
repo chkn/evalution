@@ -61,6 +61,7 @@ import { jsonToPropValue } from "../shared/json-prop-value.ts";
 import type {
   AnnotationSource,
   ExecuteResponse,
+  RunResources,
   ExecutionInput,
   NormalizedPrompt,
   Span,
@@ -75,6 +76,8 @@ import {
   describeField,
   describeRow,
   executionInput,
+  resourceInstance,
+  runResources,
   findField,
   findPrompt,
   findTrace,
@@ -393,6 +396,7 @@ export function createMcpServer(
           .describe(
             "Execute parameters as unresolved inputs, in place of `executeArgs`.",
           ),
+        resources: runResources.optional(),
         wait: z
           .boolean()
           .optional()
@@ -430,6 +434,9 @@ export function createMcpServer(
                   valueInputs([value])[0],
                 ]),
               ),
+            ...(args.resources && {
+              resources: args.resources as RunResources,
+            }),
           },
         );
         const response = unwrap<ExecuteResponse>(result);
@@ -942,7 +949,13 @@ export function createMcpServer(
       .record(z.string(), executionInput)
       .optional()
       .describe(
-        "Field name → an unresolved input, for a value plain JSON can't express (e.g. a resource).",
+        "Field name → an unresolved input, for a value plain JSON can't express (e.g. a resource instance).",
+      ),
+    resources: z
+      .record(z.string(), resourceInstance.nullable())
+      .optional()
+      .describe(
+        "The row's own resource instances, which its cells (and an eval's bindings) can name. On update, an instance set to null is removed and those left out are untouched.",
       ),
   };
 
@@ -966,6 +979,7 @@ export function createMcpServer(
           await handleAddRows(provider, datasetId, {
             rows: rows.map(row => ({
               cells: cellsFrom(fields, row.values, row.cells),
+              ...(row.resources && { resources: row.resources }),
             })),
           }),
         );
@@ -995,6 +1009,7 @@ export function createMcpServer(
             updates: updates.map(update => ({
               rowId: update.rowId,
               cells: cellsFrom(fields, update.values, update.cells),
+              ...(update.resources && { resources: update.resources }),
             })),
           }),
           { updated: updates.length },

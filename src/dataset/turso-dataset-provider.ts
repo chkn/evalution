@@ -12,7 +12,12 @@ import type { Database } from "@tursodatabase/sync";
 import { and, asc, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { matchKey } from "../shared/dataset-fields.ts";
-import type { ExecutionInput, PropDefinition } from "../shared/types.ts";
+import type {
+  ExecutionInput,
+  PropDefinition,
+  ResourceInstanceInput,
+  RunResources,
+} from "../shared/types.ts";
 import {
   type ReadOnlyQueryRunner,
   runReadOnlyQuery,
@@ -77,12 +82,34 @@ function rowToDataset(row: typeof datasets.$inferSelect): Dataset {
 function mergedCells(
   cells: Record<string, ExecutionInput | null>,
 ): SQL | undefined {
-  const entries = Object.entries(cells);
+  return mergedKeys(sql`${datasetRows.cells}`, cells);
+}
+
+/**
+ * {@link mergedCells} for the `resources` column, which may be NULL: a row
+ * that declared none. Instance names are `[A-Za-z0-9_-]` (checked by the
+ * caller), so they too need no escaping inside a quoted path.
+ */
+function mergedResources(
+  resources: Record<string, ResourceInstanceInput | null> | undefined,
+): SQL | undefined {
+  return mergedKeys(
+    sql`coalesce(${datasetRows.resources}, jsonb('{}'))`,
+    resources ?? {},
+  );
+}
+
+/** Sets and removes whole top-level keys of the JSONB object `column`. */
+function mergedKeys(
+  column: SQL,
+  values: Record<string, unknown>,
+): SQL | undefined {
+  const entries = Object.entries(values);
   if (entries.length === 0) return undefined;
   const set = entries.filter(([, cell]) => cell !== null);
   const cleared = entries.filter(([, cell]) => cell === null);
   const path = (fieldId: string) => `$."${fieldId}"`;
-  let expr: SQL = sql`${datasetRows.cells}`;
+  let expr: SQL = column;
   if (set.length > 0) {
     expr = sql`jsonb_set(${expr}, ${sql.join(
       set.map(
@@ -236,6 +263,7 @@ export class TursoDatasetProvider implements DatasetProvider {
         id: datasetRows.id,
         cells: jsonColumn(datasetRows.cells),
         source: jsonColumn(datasetRows.source),
+        resources: jsonColumn(datasetRows.resources),
         createdAt: datasetRows.createdAt,
       })
       .from(datasetRows)
@@ -248,12 +276,19 @@ export class TursoDatasetProvider implements DatasetProvider {
       .limit(limit ?? Number.MAX_SAFE_INTEGER)
       .offset(offset);
 
-    return rows.map(row => ({
-      id: row.id,
-      cells: parseJson<Record<string, ExecutionInput>>(row.cells) ?? {},
-      ...(row.source && { source: parseJson<DatasetRowSource>(row.source) }),
-      createdAt: row.createdAt,
-    }));
+    return rows.map(row => {
+      const resources = row.resources
+        ? parseJson<RunResources>(row.resources)
+        : undefined;
+      return {
+        id: row.id,
+        cells: parseJson<Record<string, ExecutionInput>>(row.cells) ?? {},
+        ...(row.source && { source: parseJson<DatasetRowSource>(row.source) }),
+        ...(resources &&
+          Object.keys(resources).length > 0 && { resources }),
+        createdAt: row.createdAt,
+      };
+    });
   }
 
   async describeRows(datasetId: string): Promise<DatasetRowsOverview> {
@@ -262,8 +297,8 @@ export class TursoDatasetProvider implements DatasetProvider {
       .from(datasetRows)
       .where(eq(datasetRows.datasetId, datasetId));
 
-    // One level into each cell, wherever that level lives: a resource's
-    // `args`, an object's `properties`, or those of a typed-in object value.
+    // One level into each cell, wherever that level lives: an object's
+    // `properties`, or those of a typed-in object value.
     // They share a namespace per field, since a table shows any of them as
     // columns under the field. Ordered by the first row a key appears in,
     // then its position there — near enough to declaration order.
@@ -274,7 +309,6 @@ export class TursoDatasetProvider implements DatasetProvider {
         json_each(
           field.value,
           CASE json_extract(field.value, '$.kind')
-            WHEN 'resource' THEN '$.args'
             WHEN 'object' THEN '$.properties'
             ELSE '$.value.properties'
           END
@@ -284,29 +318,9 @@ export class TursoDatasetProvider implements DatasetProvider {
       ORDER BY field.key, min(${datasetRows}.rowid), min(inner_key.id)
     `);
 
-    // Whether each field is ever filled by a resource — over every cell,
-    // including those of a resource that takes no arguments.
-    const resources = await this.db.all<{
-      field: string;
-      resource: number;
-    }>(sql`
-      SELECT
-        field.key AS field,
-        max(json_extract(field.value, '$.kind') = 'resource') AS resource
-      FROM ${datasetRows}, json_each(${datasetRows.cells}) AS field
-      WHERE ${datasetRows.datasetId} = ${datasetId}
-      GROUP BY field.key
-    `);
-    const isResource = new Set(
-      resources.filter(r => Number(r.resource) === 1).map(r => r.field),
-    );
-
     const fields: Record<string, DatasetFieldShape> = {};
     for (const { field, key } of found) {
-      fields[field] ??= {
-        keys: [],
-        ...(isResource.has(field) && { resource: true }),
-      };
+      fields[field] ??= { keys: [] };
       fields[field].keys.push(key);
     }
     return { rowCount: Number(count), fields };
@@ -404,7 +418,7 @@ export class TursoDatasetProvider implements DatasetProvider {
         );
 
         const now = Date.now();
-        const minted: DatasetRow[] = rows.map(({ cells, source }) => {
+        const minted: DatasetRow[] = rows.map(({ cells, source, resources }) => {
           // Absent cells aren't stored: a missing field is a missing key.
           const present = Object.entries(cells).filter(
             ([, cell]) => cell !== undefined && cell !== null,
@@ -420,6 +434,8 @@ export class TursoDatasetProvider implements DatasetProvider {
             id: mintRowId(),
             cells: Object.fromEntries(present),
             ...(source && { source }),
+            ...(resources &&
+              Object.keys(resources).length > 0 && { resources }),
             createdAt: now,
           };
         });
@@ -431,6 +447,7 @@ export class TursoDatasetProvider implements DatasetProvider {
               datasetId,
               cells: r.cells,
               source: r.source ?? null,
+              resources: r.resources ?? null,
               createdAt: r.createdAt,
             })),
           );
@@ -452,7 +469,11 @@ export class TursoDatasetProvider implements DatasetProvider {
   ): Promise<void> {
     // A batch that names no cells changes nothing, so it's not recorded:
     // no `updatedAt` bump, no change event.
-    const changes = updates.some(u => Object.keys(u.cells).length > 0);
+    const changes = updates.some(
+      u =>
+        Object.keys(u.cells).length > 0 ||
+        Object.keys(u.resources ?? {}).length > 0,
+    );
     await this.serializeWrite(() =>
       this.db.transaction(async tx => {
         const [row] = await tx
@@ -466,11 +487,18 @@ export class TursoDatasetProvider implements DatasetProvider {
 
         // Everything is checked before anything is written, so a bad update
         // anywhere in the batch leaves every row as it was.
-        for (const { cells } of updates) {
+        for (const { cells, resources } of updates) {
           for (const fieldId of Object.keys(cells)) {
             if (!fieldIds.has(fieldId)) {
               throw new DatasetValidationError(
                 `Dataset ${datasetId} has no field with id "${fieldId}"`,
+              );
+            }
+          }
+          for (const name of Object.keys(resources ?? {})) {
+            if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(name)) {
+              throw new DatasetValidationError(
+                `"${name}" is not a valid resource name`,
               );
             }
           }
@@ -495,12 +523,16 @@ export class TursoDatasetProvider implements DatasetProvider {
           }
         }
 
-        for (const { rowId, cells } of updates) {
+        for (const { rowId, cells, resources } of updates) {
           const merged = mergedCells(cells);
-          if (!merged) continue;
+          const mergedRes = mergedResources(resources);
+          if (!merged && !mergedRes) continue;
           await tx
             .update(datasetRows)
-            .set({ cells: merged })
+            .set({
+              ...(merged && { cells: merged }),
+              ...(mergedRes && { resources: mergedRes }),
+            })
             .where(
               and(
                 eq(datasetRows.id, rowId),

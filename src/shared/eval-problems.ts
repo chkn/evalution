@@ -36,8 +36,6 @@ function columnRefs(input: ExecutionInput): string[] {
       return [input.field];
     case "object":
       return Object.values(input.properties).flatMap(columnRefs);
-    case "resource":
-      return Object.values(input.args ?? {}).flatMap(columnRefs);
     default:
       return [];
   }
@@ -52,8 +50,6 @@ function slotRefs(
       return [input];
     case "object":
       return Object.values(input.properties).flatMap(slotRefs);
-    case "resource":
-      return Object.values(input.args ?? {}).flatMap(slotRefs);
     default:
       return [];
   }
@@ -92,6 +88,10 @@ function unboundRequired(
  * - a required prompt slot or check parameter left unbound;
  * - a binding to a slot, column, or check that no longer exists;
  * - an `input` reference to a slot the prompt doesn't have, or a cycle.
+ *
+ * An `instance` reference to a resource the eval doesn't declare isn't one:
+ * each row may declare it (`specs/resource-instances.md` §E), and a row that
+ * doesn't fails on its own when it runs.
  *
  * Empty when the eval can run. A half-bound eval is still a legitimate
  * draft: this gates Run, never Save.
@@ -135,7 +135,16 @@ export function evalProblems(
       }
     }
   }
-  if (prompt) problems.push(...inputReferenceProblems(inputs, prompt));
+  for (const [name, spec] of Object.entries(inputs.resources ?? {})) {
+    for (const [arg, binding] of Object.entries(spec.args ?? {})) {
+      missingColumns(binding, `Resource '${name}': '${arg}'`);
+    }
+  }
+  if (prompt) {
+    problems.push(
+      ...inputReferenceProblems(inputs, prompt, { undeclaredInstances: true }),
+    );
+  }
 
   const slots = prompt && slotPaths(prompt);
   for (const check of checks) {
