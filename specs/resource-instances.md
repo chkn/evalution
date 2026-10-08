@@ -1,7 +1,8 @@
 # Proposal: Named resource instances and a Resources section
 
-> **Status: PLAN, for discussion.** Nothing here is implemented. It builds on
-> `specs/execution-inputs.md`, `specs/resource-arguments.md` (whose §Q.2 anticipated "named
+> **Status: PLAN, agreed 2026-10-08.** Nothing here is implemented yet. §L's proposed answers were
+> accepted, and the inline `resource` variant is removed outright rather than kept (§A.1).
+> It builds on `specs/execution-inputs.md`, `specs/resource-arguments.md` (whose §Q.2 anticipated "named
 > instances") and `specs/evals.md` §B.2.
 
 ## Context
@@ -60,7 +61,7 @@ Slots and arguments then refer to instances by name.
 export interface ResourceInstanceInput {
   /** The resource's root `ResourceInfo.uri`. Never an output URI. */
   uri: string;
-  /** Values for its declared arguments. Same as `ExecutionInput`'s `resource.args`. */
+  /** Values for its declared arguments, by parameter name. */
   args?: Record<string, ExecutionInput>;
   /**
    * Code-wired dependency key → instance name, only where the run has more than one
@@ -72,7 +73,8 @@ export interface ResourceInstanceInput {
 }
 
 export type ExecutionInput =
-  | …                                   // value, object, resource, dataset, input: unchanged
+  | …                                   // value, object, dataset, input: unchanged
+  // `{ kind: "resource", uri, args, receipt }` is removed (§A.1)
   /** An instance declared in the run's `resources`, or one of its outputs. */
   | { kind: "instance"; name: string; output?: string };
 ```
@@ -110,16 +112,26 @@ What the change buys:
 - **`instance` is the same kind of node as `input`.** Both say "the value something else in this
   run produced", and both resolve through the lease, so the same instance comes back.
 
-### A.1 The inline `resource` variant stays, but nothing new writes it
+### A.1 The inline `resource` variant is removed
 
-`{ kind: "resource", uri, args }` keeps resolving exactly as it does now, as an anonymous instance
-keyed by recipe. Traces, dataset rows, saved evals and `localStorage` all hold it, and the
-resolver can carry both forms indefinitely at very little cost. The UI stops emitting it. When a
-surface loads inline references for editing, it **hoists** them: each distinct
-`(uri, canonicalArgumentKey)` becomes an instance named after its export, and the references are
-rewritten to `instance` nodes. Hoisting groups by the same key the lease memoizes on, so a hoisted
-run creates exactly the instances the inline one did. Stored data is never bulk-migrated. It's
-rewritten only when someone edits and saves it.
+`{ kind: "resource", uri, args, receipt }` goes away entirely. Nobody depends on stored traces,
+rows or evals yet, so there's nothing to migrate and no compatibility path to carry. Anything in
+`localStorage`, a local dataset or a saved eval that still holds the old node is treated like any
+other unparseable stored input: a slot holding it restores empty, and the server rejects it with a
+400 naming the slot.
+
+Dropping it, rather than keeping it as an anonymous instance keyed by recipe, removes a lot:
+
+- **One resolution path.** No anonymous instances, so the lease memoizes only by instance name.
+  `canonicalArgumentKey`, `ResourceBinding.key` and the `uri@key` receipt keys all go.
+- **One cycle rule.** Cycles are checked on instance names alone. The resource-object rule, and the
+  special case for keeping it on inline references, both go.
+- **No hoisting.** The client never has to turn inline references into instances on load, so
+  `hoistInlineResources` and its tests never get written.
+- **Receipts live in one place**, on the instance. `stampReceipts` no longer walks slot trees
+  looking for resource nodes.
+- **`args` exist in exactly one place.** The client's `resourceArgsFor` stamping, and the
+  last-writer-wins merge in `fromExecutionInput`, go.
 
 ### A.2 Names
 
@@ -160,24 +172,24 @@ Rules:
    `context.instances`, in parallel. References between instances order them naturally: `child1`
    awaits `root` because its `parentId` argument resolves through it. Slot resolution then hits
    the memo.
-2. **Memo key is `(resource object, "@" + name)`.** It lives in the same `InstancesByKey` map
-   as inline instances. The `@` prefix can't collide with a canonical argument key, which is
-   either `""` or a JSON object. Reset locks, disposal and server scope keep working without
-   changes.
-3. **Cycle detection runs on instance identity, not on the resource object.** The chain records
-   `(resource, key)`. `child1 → root` is two different keys of one resource, so it is allowed.
-   `root.parentId ← child1.taskId` together with `child1.parentId ← root.taskId` is a cycle and
-   fails, naming the instances. For anonymous inline instances the old resource-object rule stays
-   exactly as it is: nothing new can produce those, and relaxing it there would buy nothing.
+2. **Memo key is the instance name** for run-scoped resources. A run-scoped instance map becomes
+   `Map<name, Instance>`. Server-scoped resources keep their single per-process instance, and reset
+   locks and disposal work as they do now.
+3. **Cycle detection runs on instance names, not on the resource object.** `child1 → root` is two
+   instances of one resource, so it is allowed. `root.parentId ← child1.taskId` together with
+   `child1.parentId ← root.taskId` is a cycle and fails, naming the instances. Code-wired
+   dependencies (`inputs: { db }`) keep today's resource-object check, since an undeclared
+   dependency has no name.
 4. **Validated up front, as a 400**, together with the existing `input` checks: an `instance` node
    naming a missing instance, an invalid name, a cycle among instances, or two instances of a
    `server`-scoped resource. A server-scoped resource has exactly one instance per process, so two
    names would alias one object, which is never what someone meant. The panel doesn't offer it.
    Output keys are still checked at acquire time by the existing
    `no output at '…'` error.
-5. **Receipts are recorded per instance**, and `stampReceipts` writes them into the recorded
-   `resources` map (§F). `lease.receipts()` grows an `instances` half keyed by name. Its existing
-   `uri` / `uri@key` keys keep serving the inline form.
+5. **Receipts are recorded per instance**, keyed by name: `lease.receipts()` returns
+   `Record<name, unknown>`, and the route writes each one onto its entry in the recorded
+   `resources` map (§F). Code-wired dependency instances that were never declared (the anonymous
+   `db` fallback in §D) record under their URI, as now.
 
 Nothing about `create`, `ResourceInstance`, arguments, validation, `reset` or scope changes for
 resource authors. **This is invisible in playground modules.**
@@ -316,7 +328,7 @@ All three surfaces currently hold the same state in three slightly different way
 - **`run-resources-state.ts`** (pure, unit-tested; the client counterpart of §A):
   - `InstanceSelections = Record<name, { uri; args: Selections; deps?: Record<string,string> }>`,
     which replaces `ResourceArgs`;
-  - `toWireResources` / `fromWireResources`, plus `hoistInlineResources(inputs[])` for §A.1;
+  - `toWireResources` / `fromWireResources`;
   - `addInstance`, `renameInstance` (rewrites every reference in the given selections),
     `removeInstance`, `duplicateInstance`, `referencesTo`, `derivedDependencies`,
     `excludedFromArgs` (cycle-safe sources for a card's form).
@@ -377,7 +389,7 @@ by meaning. Rejected (§A.2). Open question §L.3 keeps it under review.
    (§D, without `deps`), per-instance receipts and recording. `ResourceInfo.dependencies`. Testable
    end to end with a hand-written request seeding odin's hierarchy.
 2. **Shared client state and `ResourcesSection`**, adopted by the playground panel: picker group,
-   hoisting `localStorage`, deleting the claims machinery.
+   deleting the claims machinery.
 3. **Evals.** `EvalInputs.resources`, the section in the Inputs panel, instance references in check
    args, and the eval runner passing instances into `ResolutionContext`.
 4. **Datasets.** `DatasetRow.resources` (Turso migration plus the local-directory provider),
@@ -388,18 +400,18 @@ by meaning. Rejected (§A.2). Open question §L.3 keeps it under review.
 Steps 1–2 are enough for the odin hierarchy in the playground. Step 4 is what makes it a dataset
 case.
 
-## L. Open questions
+## L. Questions (decided 2026-10-08)
 
-1. **Row/eval name collision: row wins, or an error?** Proposed: row wins (§E), so an eval can
+1. **Row/eval name collision: row wins, or an error?** Decided: row wins (§E), so an eval can
    carry defaults. The cost is silent shadowing.
-2. **Should instances the picker created be pruned when their last reference goes?** Proposed: no.
+2. **Should instances the picker created be pruned when their last reference goes?** Decided: no.
    Instances stay, labelled "not bound to a slot". Auto-pruning matches today's feel (choosing
    another source for a slot makes the old resource disappear), but it needs a stored `auto` flag
    and makes "why did my instance vanish" possible.
-3. **Names or ids** (§A.2, §I). Proposed: names.
-4. **Should the inline `resource` variant be deprecated from the wire eventually?** Proposed: keep
-   resolving it forever, since old traces need it, but stop emitting it from the UI (§A.1).
-5. **Does `input` (slot → slot) still earn its place?** Proposed: yes. `toolsContext.*.rootTaskId ←
+3. **Names or ids** (§A.2, §I). Decided: names.
+4. ~~**Should the inline `resource` variant be deprecated from the wire eventually?**~~ **Decided:
+   removed now** (§A.1). Nothing stored needs it.
+5. **Does `input` (slot → slot) still earn its place?** Decided: yes. `toolsContext.*.rootTaskId ←
    input taskId` says "whatever `taskId` is", which stays correct when `taskId` is bound to a
    column instead of an instance. The two overlap but do different jobs.
 
@@ -440,14 +452,13 @@ case.
   two-instance reference cycle fails with both names. An instance nobody references is still
   created and disposed. Slots referencing an instance hit the memo, so `create` runs once. A
   dependency resolves to the run's declared instance of that resource and gets its args. A
-  server-scoped resource declared twice is a 400. Inline `resource` references resolve exactly as
-  before, keeping the existing tests green unchanged.
+  server-scoped resource declared twice is a 400, and so is an old inline `resource` node. Existing
+  registry tests that use inline references are rewritten to declare instances.
 - **Receipts and replay:** recorded `resources` carry per-instance receipts. POSTing them back
   reproduces `root`'s id, and `child1.parentId` matches it.
-- **Client state:** `hoistInlineResources` groups by `(uri, argument key)` so a hoisted run creates
-  the same instances. `renameInstance` rewrites slot, argument and check references, and nothing
-  else. `removeInstance` clears references. A stored selection from before this change restores
-  with the same behaviour.
+- **Client state:** `renameInstance` rewrites slot, argument and check references, and nothing
+  else. `removeInstance` clears references. A stored selection holding an old inline node restores
+  as an empty slot rather than throwing.
 - **Evals and datasets:** row instances shadow eval instances. An eval binding to a name a row
   lacks gives that row an `error` naming it. "Add to dataset" carries instances, and "Fill from
   row" restores them.
