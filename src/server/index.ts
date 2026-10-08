@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { serve, upgradeWebSocket } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -15,7 +16,9 @@ import type { TraceProvider } from "../trace/trace-provider.ts";
 import { buildAskAgentCommand, listAgents } from "./agents.ts";
 import { createProjectContext } from "./api-context.ts";
 import { type AgentHandlers, setupRoutes } from "./api-routes.ts";
+import { DEFAULT_HOST, serverUrl } from "./listen-address.ts";
 import { mountMcp } from "./mcp-route.ts";
+import { requestGuard } from "./request-guard.ts";
 import { executeSetupStep, resolveSetupTasks } from "./setup-tasks.ts";
 import {
   registerTerminalRoute,
@@ -31,6 +34,18 @@ export interface ServerOptions {
   /** Eval stores. Defaults to none. */
   evalProviders?: EvalProvider[];
   port: number;
+  /**
+   * The address to listen on. Defaults to {@link DEFAULT_HOST}, loopback
+   * only; `0.0.0.0` (or `::`) makes the server reachable from the network.
+   */
+  hostname?: string;
+  /**
+   * Where users open the playground when a proxy in front of the server
+   * serves it under another URL, e.g. portless's `PORTLESS_URL`
+   * (`https://evalution.myapp.localhost`). Printed in place of the server's
+   * own URL, and its hostname is accepted in `Host` and `Origin`.
+   */
+  publicUrl?: string;
   rootPath: string;
   /** Whether the server was started with a project config file loaded. */
   hasConfig: boolean;
@@ -54,6 +69,8 @@ export interface ServerOptions {
 export interface ServerHandle {
   /** The URL the server is listening on, e.g. `http://localhost:3000`. */
   url: string;
+  /** The URL to open the playground at: `publicUrl` if given, else {@link url}. */
+  publicUrl: string;
   /**
    * Stops the server, force-closing any open connections (including live SSE
    * streams) so it shuts down promptly instead of waiting on them. Used by the
@@ -71,6 +88,8 @@ export async function startServer(
     datasetProviders = [],
     evalProviders = [],
     port,
+    hostname = DEFAULT_HOST,
+    publicUrl: givenPublicUrl,
     rootPath,
     hasConfig,
     terminalSessions,
@@ -101,14 +120,27 @@ export async function startServer(
   });
 
   // Launched agents connect back to this server's own MCP endpoint (below).
-  const url = `http://localhost:${port}`;
+  const url = serverUrl(hostname, port);
   const agents: AgentHandlers = {
     list: listAgents,
     command: (agentId, agentContext) =>
       buildAskAgentCommand(context, `${url}/mcp`, agentId, agentContext),
   };
 
+  const publicUrl = givenPublicUrl ?? url;
+
   const app = new Hono();
+  // Ahead of every route: other websites can send this unauthenticated server
+  // requests, and must be refused. See `./request-guard.ts`.
+  app.use(
+    requestGuard({
+      allowedHosts: [
+        new URL(publicUrl).hostname,
+        // A name `--host` was given, e.g. `devbox.local`.
+        ...(net.isIP(hostname) ? [] : [hostname]),
+      ],
+    }),
+  );
   setupRoutes({
     app,
     context,
@@ -163,25 +195,30 @@ export async function startServer(
   // isn't set under `npx evalution`.
   const isDevServer = import.meta.url.includes("/src/");
 
-  const server = await new Promise<ReturnType<typeof serve>>(resolve => {
-    const s = serve(
-      {
-        fetch: app.fetch,
-        port,
-        hostname: "0.0.0.0",
-        websocket: { server: wss },
-      },
-      () => {
-        if (isDevServer) {
-          console.log(`\n✨ Evalution API server running on ${url}`);
-          console.log(`   Frontend dev server: http://localhost:5173\n`);
-        } else {
-          console.log(`\n✨ Evalution is running at ${url}\n`);
-        }
-        resolve(s);
-      },
-    );
-  });
+  const server = await new Promise<ReturnType<typeof serve>>(
+    (resolve, reject) => {
+      const s = serve(
+        {
+          fetch: app.fetch,
+          port,
+          hostname,
+          websocket: { server: wss },
+        },
+        () => {
+          if (isDevServer) {
+            console.log(`\n✨ Evalution API server running on ${url}`);
+            console.log(`   Frontend dev server: http://localhost:5173\n`);
+          } else {
+            console.log(`\n✨ Evalution is running at ${publicUrl}\n`);
+          }
+          s.off("error", reject);
+          resolve(s);
+        },
+      );
+      // Can't listen — e.g. `--host` names no local address, or `PORT` is taken.
+      s.once("error", reject);
+    },
+  );
 
   const close = (): Promise<void> =>
     new Promise<void>((resolve, reject) => {
@@ -211,5 +248,5 @@ export async function startServer(
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  return { url, close };
+  return { url, publicUrl, close };
 }

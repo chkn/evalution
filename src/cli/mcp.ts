@@ -35,6 +35,7 @@ import {
 } from "../server/api-context.ts";
 import { mountConfigRoute } from "../server/api-routes.ts";
 import { mountMcp } from "../server/mcp-route.ts";
+import { requestGuard } from "../server/request-guard.ts";
 import type { ProjectProviders } from "./project.ts";
 import {
   claimServerInfo,
@@ -78,6 +79,7 @@ export async function serveMcpOverHttp(
   listenPort = 0,
 ): Promise<McpHttpServer> {
   const app = new Hono();
+  app.use(requestGuard());
   mountConfigRoute(app, context.rootPath, hasConfig);
   const mcp = mountMcp(app, context, version);
   const { server, port } = await new Promise<{

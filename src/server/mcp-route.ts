@@ -10,11 +10,7 @@
 
 import {
   createMcpHandler,
-  hostHeaderValidationResponse,
-  localhostAllowedHostnames,
-  localhostAllowedOrigins,
   type McpHttpHandler,
-  originValidationResponse,
 } from "@modelcontextprotocol/server";
 import type { Hono } from "hono";
 import { createMcpServer, MCP_CLIENT_HEADER } from "../mcp/server.ts";
@@ -30,10 +26,9 @@ export interface McpEndpoint extends McpHttpHandler {
  * Serves `context` over MCP at `/mcp` on `app`. Returns the handler, for the
  * host to `close()` when it stops, and to wait on until it's `idle()`.
  *
- * Only requests addressed to localhost, from no page or a localhost one, get
- * through: a site the user visits can't drive the server through their
- * browser, even by DNS rebinding, and nothing reaching the machine over the
- * network can use it either.
+ * The host must register `requestGuard` (`./request-guard.ts`) on `app`
+ * first, so a site the user visits can't drive the server through their
+ * browser, even by DNS rebinding.
  */
 export function mountMcp(
   app: Hono,
@@ -99,13 +94,7 @@ export function mountMcp(
     });
     return new Response(body, response);
   };
-  app.all(
-    "/mcp",
-    c =>
-      hostHeaderValidationResponse(c.req.raw, localhostAllowedHostnames()) ??
-      originValidationResponse(c.req.raw, localhostAllowedOrigins()) ??
-      track(c.req.raw),
-  );
+  app.all("/mcp", c => track(c.req.raw));
   return Object.assign(mcp, {
     idle: () =>
       inFlight === 0

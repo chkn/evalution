@@ -6,6 +6,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import type { EvalutionConfig } from "../config.ts";
 import { startServer } from "../server/index.ts";
 import { TerminalSessionRegistry } from "../server/terminal.ts";
+import { type CliArgs, parseCliArgs, USAGE } from "./args.ts";
 import { registerBundlerResolutionFallback } from "./bundler-resolution-hook.ts";
 import {
   registerEvalutionResolver,
@@ -62,11 +63,15 @@ async function startConfiguredServer(
   config: EvalutionConfig,
   hasConfig: boolean,
   port: number,
+  host: string | undefined,
   terminalSessions: TerminalSessionRegistry,
 ) {
   return startServer({
     ...(await setUpProject(rootDir, config)),
     port,
+    hostname: host,
+    // When run under portless, the playground is opened through its proxy, over HTTPS.
+    publicUrl: process.env.PORTLESS_URL,
     rootPath: rootDir,
     hasConfig,
     terminalSessions,
@@ -74,22 +79,19 @@ async function startConfiguredServer(
   });
 }
 
-const USAGE = "Usage: evalution [ui [path]] | evalution mcp [path]";
-
 async function main() {
-  const args = process.argv.slice(2);
-  const command = args[0] ?? "ui";
-
-  // Accept: (no args) | "ui [path]" | "mcp [path]"
-  if (command !== "ui" && command !== "mcp") {
-    console.error(`Unknown command: ${args[0]}`);
+  let args: CliArgs;
+  try {
+    args = parseCliArgs(process.argv.slice(2));
+  } catch (error) {
+    console.error((error as Error).message);
     console.error(USAGE);
     process.exit(1);
   }
+  const { command, path: pathArg, host } = args;
   // Before anything can print: over stdio, stdout is the protocol's.
   if (command === "mcp") keepStdoutForProtocol();
 
-  const pathArg = args[1];
   const startDir = pathArg ? path.resolve(pathArg) : process.cwd();
   const { rootDir, hasConfig } = await findRootDir(startDir);
 
@@ -108,7 +110,7 @@ async function main() {
     await mcp(rootDir, hasConfig);
     return;
   }
-  await ui(rootDir, hasConfig);
+  await ui(rootDir, hasConfig, host);
 }
 
 /**
@@ -143,13 +145,18 @@ async function mcp(rootDir: string, hasConfig: boolean) {
 }
 
 /** `evalution ui`: serve the playground, opening it in a browser. */
-async function ui(rootDir: string, hasConfig: boolean, attempt = 0) {
+async function ui(
+  rootDir: string,
+  hasConfig: boolean,
+  host: string | undefined,
+  attempt = 0,
+) {
   // Another process already holds the project's databases, so this one
   // couldn't open them.
   const running = await findRunningServer(rootDir);
   if (!running && !(await claimServerInfo(rootDir, "ui"))) {
     // Another process claimed the project just now: go with it.
-    if (attempt < 3) return ui(rootDir, hasConfig, attempt + 1);
+    if (attempt < 3) return ui(rootDir, hasConfig, host, attempt + 1);
     console.error(
       "Another evalution process has claimed this project but isn't serving it. Stop it, then run `evalution ui` again.",
     );
@@ -175,7 +182,7 @@ async function ui(rootDir: string, hasConfig: boolean, attempt = 0) {
   if (process.env.PORT) {
     port = parseInt(process.env.PORT, 10);
   } else {
-    port = await findAvailablePort(3000);
+    port = await findAvailablePort(3000, host);
   }
 
   // Open the browser once the first server is listening. Subsequent restarts
@@ -197,10 +204,11 @@ async function ui(rootDir: string, hasConfig: boolean, attempt = 0) {
       await loadConfig(rootDir),
       true,
       port,
+      host,
       terminalSessions,
     );
     await writeServerInfo(rootDir, handle.url, "ui");
-    await maybeOpen(handle.url);
+    await maybeOpen(handle.publicUrl);
     return;
   }
 
@@ -212,10 +220,11 @@ async function ui(rootDir: string, hasConfig: boolean, attempt = 0) {
     {},
     false,
     port,
+    host,
     terminalSessions,
   );
   await writeServerInfo(rootDir, server.url, "ui");
-  await maybeOpen(server.url);
+  await maybeOpen(server.publicUrl);
   console.log(
     `👀 No config found; watching ${path.join(rootDir, ".evalution", "config.ts")} for creation...`,
   );
@@ -233,6 +242,7 @@ async function ui(rootDir: string, hasConfig: boolean, attempt = 0) {
       config,
       true,
       port,
+      host,
       terminalSessions,
     );
   });

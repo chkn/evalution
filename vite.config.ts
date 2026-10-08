@@ -19,11 +19,11 @@ export default defineConfig({
       // Interactive-terminal WebSocket; must precede the generic /api/ rule and
       // opt into ws so the upgrade handshake is forwarded to the API server.
       "/api/terminal": {
-        target: "ws://localhost:3000",
+        target: "ws://127.0.0.1:3000",
         ws: true,
       },
       "^/api/": {
-        target: "http://localhost:3000",
+        target: "http://127.0.0.1:3000",
         changeOrigin: true,
         configure: proxy => {
           proxy.on("proxyRes", (proxyRes, _req, res) => {

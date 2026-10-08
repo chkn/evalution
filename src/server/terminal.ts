@@ -2,10 +2,6 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import * as pty from "@lydell/node-pty";
-import {
-  localhostAllowedOrigins,
-  originValidationResponse,
-} from "@modelcontextprotocol/server";
 import type { Hono } from "hono";
 import type { UpgradeWebSocket, WSContext } from "hono/ws";
 import { parseTerminalTarget, type TerminalTarget } from "../shared/agent.ts";
@@ -309,10 +305,10 @@ function sendError(ws: WSContext, message: string): void {
  * reconnecting client (same `sessionId`) re-attaches and replays the gap.
  *
  * The trust boundary mirrors the step-execute route: the client can only ask to
- * run a step or agent that already exists server-side. And since browsers let
- * any page open a WebSocket to localhost, a handshake whose `Origin` isn't a
- * localhost page is refused with a 403 — otherwise another site could start
- * an agent and type into it.
+ * run a step or agent that already exists server-side. The host must also
+ * register `requestGuard` (`./request-guard.ts`) on `app` first: browsers let
+ * any page open a WebSocket to localhost, so without it another site could
+ * start an agent and type into it.
  */
 export function registerTerminalRoute(
   app: Hono,
@@ -323,9 +319,6 @@ export function registerTerminalRoute(
 ): void {
   app.get(
     "/api/terminal",
-    async (c, next) =>
-      originValidationResponse(c.req.raw, localhostAllowedOrigins()) ??
-      (await next()),
     upgradeWebSocket(c => {
       const rawTarget = c.req.query("target");
       const target = parseTerminalTargetParam(rawTarget);

@@ -14,12 +14,12 @@ describe("findAvailablePort", () => {
     );
   });
 
-  /** Occupies `port` on 127.0.0.1 for the duration of a test. */
-  const occupy = (port: number) =>
+  /** Occupies `port` on `host` for the duration of a test. */
+  const occupy = (port: number, host = "127.0.0.1") =>
     new Promise<void>((resolve, reject) => {
       const s = net.createServer();
       servers.push(s);
-      s.once("error", reject).listen(port, "127.0.0.1", () => resolve());
+      s.once("error", reject).listen(port, host, () => resolve());
     });
 
   it("returns the preferred port when it is free", async () => {
@@ -32,6 +32,14 @@ describe("findAvailablePort", () => {
   it("falls back to the next free port when the preferred is taken", async () => {
     const base = await findAvailablePort(40000, "127.0.0.1");
     await occupy(base);
+    const next = await findAvailablePort(base, "127.0.0.1");
+    expect(next).toBeGreaterThan(base);
+  });
+
+  it("skips a port another server holds on every interface", async () => {
+    // On macOS, 127.0.0.1 can still be bound then, shadowing that server.
+    const base = await findAvailablePort(42000, "127.0.0.1");
+    await occupy(base, "0.0.0.0");
     const next = await findAvailablePort(base, "127.0.0.1");
     expect(next).toBeGreaterThan(base);
   });

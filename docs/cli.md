@@ -15,13 +15,15 @@ coding agent over [MCP](https://modelcontextprotocol.io).
 ## Usage
 
 ```sh
-npx evalution [ui [path]]
+npx evalution [ui [path]] [--host <address>]
 npx evalution mcp [path]
 ```
 
 - `evalution` — start the playground for the current directory.
 - `evalution ui` — same as above.
 - `evalution ui <path>` — start for `<path>` instead of the current directory.
+- `evalution ui --host <address>` — listen on `<address>` instead of
+  `127.0.0.1`. See [Network access](#network-access).
 - `evalution mcp` — serve the project as an MCP server over stdio. See [MCP server](#mcp-server).
 - `evalution mcp <path>` — same, for `<path>` instead of the current directory.
 
@@ -36,6 +38,63 @@ If no `.evalution/config.ts` is found anywhere up the tree, Evalution starts in
 **onboarding mode** and guides you through creating one. See [Configuration](/docs/config) for the config file format.
 
 On startup Evalution opens the playground in your default browser automatically.
+
+## Network access
+
+By default, the playground listens on `127.0.0.1` (IPv4 loopback) only, so it can't be
+reached from other machines.
+
+To use the playground on a remote machine, forward its port (3000 by default - see [`PORT`](#environment))
+over SSH rather than exposing it:
+
+```sh
+ssh -L 3000:127.0.0.1:3000 devbox
+```
+
+VS Code Remote, Codespaces, and similar tools forward ports the same way, so they should work too.
+
+`--host` changes the address the playground listens on:
+
+| Address | Reachable from |
+| --- | --- |
+| `127.0.0.1` (default) | This machine only (IPv4). |
+| `::1` | This machine only, over IPv6. |
+| `0.0.0.0` / `::` | Every network interface: the LAN, and anything else that can route to this machine. |
+| A specific address, e.g. `192.168.1.5` | That interface's network. |
+
+⚠️ **Listen beyond loopback only on a network you trust**: the server has no
+authentication (see [Security](#security)). Inside a container, `--host 0.0.0.0`
+is needed for a published port (`docker run -p 3000:3000 …`) to reach it.
+
+Whatever it listens on, the server only answers requests addressed to
+`localhost`, a `*.localhost` name, an IP address, or the name given to `--host`
+(e.g. `--host devbox.local`). So with `--host 0.0.0.0`, open it by IP address
+rather than by a name like `devbox.local` (see [Security](#security) for why).
+
+`evalution mcp` takes no `--host`: the process holding a project listens on a
+random `127.0.0.1` port, only for the `evalution mcp`s relaying to it.
+
+### HTTPS with portless
+
+For the most security and best experience, we recommend using [portless](https://portless.sh),
+which gives each project's playground a stable HTTPS URL, such as `https://evalution.myapp.localhost`.
+
+1. Install portless globally: `npm install -g portless`
+2. Run Evalution through it: `portless run --name evalution.myapp npx evalution`
+
+See the [portless docs](https://portless.sh/configuration) for how to configure it to launch
+more ergonomically.
+
+Why use portless:
+
+- **Projects stay apart.** Each project's playground has its own URL, and the browser
+  keeps each one's saved view settings separately.
+- **The URL doesn't change** when the port does.
+- **HTTP/2**, so the playground's live connections (one per open trace)
+  don't run into the browser's limit of six per HTTP/1.1 host.
+
+Note that sharing a playground through portless's `--tailscale` or `--ngrok` options isn't
+supported.
 
 ## MCP server
 
@@ -118,3 +177,69 @@ To run prompts in the playground, set the applicable API key environment variabl
 - `GOOGLE_GENERATIVE_AI_API_KEY`
 
 If an `.env` file is found in the project root, it is loaded automatically before the server starts. This is the recommended place to keep these keys. Do not commit it to version control.
+
+## Security
+
+Evalution is a local development tool. Its server has **no authentication**:
+anything that can connect to it can do what you can do in the playground.
+Bear this in mind before listening beyond loopback, or using it on a machine other
+people can log in to, since loopback addresses are shared by every user on a
+machine.
+
+### What the server exposes
+
+Anything that can reach the playground's port can:
+
+- **Read the project**: every prompt and its source, every trace (which records
+  your app's real LLM inputs and outputs), dataset, eval, and eval result.
+- **Change the project**: edit and rename prompts (which writes to their
+  source files), create and delete datasets, rows, evals, eval runs, traces,
+  and annotations, and create `.evalution/config.ts` if it doesn't exist.
+- **Spend your API keys**: run prompts and evals with the provider keys in the
+  server's environment.
+- **Add traces**: `POST /v1/traces` (and `/otel/v1/traces`) accepts OTLP
+  exports from any sender, so traces in the playground aren't necessarily
+  from your app.
+- **Run commands**: the interactive terminal (`/api/terminal`) runs
+  onboarding's commands (package installs, coding agent CLIs) and launches
+  Claude Code or Codex in the project, forwarding keystrokes to them. That
+  makes it equivalent to a shell in the project, with your account's
+  permissions.
+
+The `/mcp` endpoint offers the same reads, changes, and prompt and eval runs
+as MCP tools (listed under [MCP server](#mcp-server)). Trace queries are
+read-only SQL, stopped after 10 seconds.
+
+`evalution mcp` exposes only `/mcp` (and the `/api/config` its relays check),
+on a loopback port.
+
+### Protections
+
+- **Loopback by default.** Neither server listens beyond `127.0.0.1` unless you
+  pass `--host`.
+- **The terminal runs only commands the server defines.** The browser names
+  an onboarding step, or an agent and what you're viewing; the server
+  builds the command line itself, quoting every argument. So the client
+  can't supply an arbitrary command or inject text into an agent's initial
+  instructions, but it can subsequently send arbitrary keystrokes to it.
+- **Other websites are refused.** Both servers answer 403 to every request,
+  WebSocket handshakes included, unless:
+  - its `Host` is `localhost`, a `*.localhost` name (which only resolves to
+    loopback), an IP address, the name given to `--host`, or portless's URL;
+    and
+  - if it has an `Origin` (a browser sent it on a page's behalf), that page
+    is on a loopback host, on one of those names, or on the host the request
+    is addressed to.
+
+These checks stop other web pages in a browser, not other programs on the same
+machine. Anything that can connect to the port directly can leave `Origin` out
+and use the whole API, terminal included.
+
+### Agents and untrusted data
+
+A coding agent connected to evalution's MCP server, whether through
+`evalution mcp` or the "Ask AI" button, reads traces and dataset rows. Treat
+them as untrusted input: a trace records whatever your app's users sent, and
+text in it can try to give the agent instructions (prompt injection). Review
+what an agent proposes to do with your project as you would with any other
+input it reads.

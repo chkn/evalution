@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { Hono } from "hono";
-import type { UpgradeWebSocket } from "hono/ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type PtyLike,
-  registerTerminalRoute,
   resolveSetupStepCommand,
   type SocketLike,
   type SpawnOptions,
@@ -235,51 +232,5 @@ describe("TerminalSessionRegistry", () => {
     session.kill();
 
     expect(registry.get("sess-1")).toBeUndefined();
-  });
-});
-
-describe("registerTerminalRoute", () => {
-  /** An app whose upgrade helper answers 200 "upgraded" instead of upgrading. */
-  function terminalApp(): Hono {
-    const app = new Hono();
-    const upgradeWebSocket = (() => (c: any) =>
-      c.text("upgraded")) as unknown as UpgradeWebSocket;
-    registerTerminalRoute(
-      app,
-      upgradeWebSocket,
-      "/project",
-      new TerminalSessionRegistry(() => new FakePty(), 100),
-      async () => null,
-    );
-    return app;
-  }
-
-  const handshake = (origin?: string) =>
-    terminalApp().request("/api/terminal?sessionId=s", {
-      headers: origin ? { origin } : {},
-    });
-
-  it("refuses a handshake from another site's page", async () => {
-    const res = await handshake("https://evil.example");
-    expect(res.status).toBe(403);
-  });
-
-  it("refuses a handshake from an opaque (`null`) origin", async () => {
-    const res = await handshake("null");
-    expect(res.status).toBe(403);
-  });
-
-  it.each([
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:3000",
-  ])("upgrades a handshake from %s", async origin => {
-    const res = await handshake(origin);
-    expect(await res.text()).toBe("upgraded");
-  });
-
-  it("upgrades a handshake without an Origin, as non-browser clients send", async () => {
-    const res = await handshake();
-    expect(await res.text()).toBe("upgraded");
   });
 });
