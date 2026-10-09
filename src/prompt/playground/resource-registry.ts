@@ -609,6 +609,26 @@ interface LeaseState {
   labels: Map<string, string>;
 }
 
+/**
+ * Disposes every instance in `pending`, settled or not. A create that failed
+ * (or was refused once its lease was released) left nothing to dispose, so
+ * only a real dispose failure is worth a warning.
+ */
+async function disposeAll(
+  pending: readonly (Instance | Promise<Instance>)[],
+): Promise<void> {
+  await Promise.all(
+    pending.map(async p => {
+      const instance = await Promise.resolve(p).catch(() => undefined);
+      try {
+        await instance?.dispose?.();
+      } catch (err) {
+        console.warn("failed to dispose playground resource:", err);
+      }
+    }),
+  );
+}
+
 /** A stable id per resource object, for {@link nodeId}. */
 const resourceIds = new WeakMap<Resource<unknown>, number>();
 let nextResourceId = 0;
@@ -837,15 +857,7 @@ export class ResourceRegistry {
       ...byKey.values(),
     ]);
     this.serverInstances = new Map();
-    await Promise.all(
-      pending.map(async p => {
-        try {
-          await (await p).dispose?.();
-        } catch (err) {
-          console.warn("failed to dispose playground resource:", err);
-        }
-      }),
-    );
+    await disposeAll(pending);
   }
 
   /**
@@ -951,19 +963,7 @@ export class ResourceRegistry {
         ]);
         state.runInstances.clear();
         state.resetLocks.releaseAll();
-        await Promise.all(
-          pending.map(async p => {
-            // A create that failed (or was refused once released) left
-            // nothing to dispose; only a real dispose failure is worth a
-            // warning.
-            const instance = await Promise.resolve(p).catch(() => undefined);
-            try {
-              await instance?.dispose?.();
-            } catch (err) {
-              console.warn("failed to dispose playground resource:", err);
-            }
-          }),
-        );
+        await disposeAll(pending);
       },
     };
   }

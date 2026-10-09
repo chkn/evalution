@@ -266,6 +266,31 @@ describe("resource lifecycle", () => {
     expect((globalThis as any).__serverDisposes).toBe(1);
   });
 
+  it("doesn't call a server-scoped create that fails mid-invalidate a failed dispose", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const thing = resource({
+          scope: "server",
+          create: () => new Promise((_, reject) => {
+            globalThis.__failThing = () => reject(new Error("boom"));
+          }),
+        });`,
+    });
+    const lease = reg.lease();
+    const thing = acquireUri(lease, "x.playground.ts#thing");
+    await vi.waitFor(() =>
+      expect((globalThis as any).__failThing).toBeDefined(),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const invalidated = reg.invalidate();
+    (globalThis as any).__failThing();
+    await invalidated;
+    await expect(thing).rejects.toThrow("boom");
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    await lease.release();
+  });
+
   it("rejects a dependency cycle at resolution rather than overflowing", async () => {
     const { registry: reg } = registry({
       [p("cycle.playground.ts")]: `${importHelper}
