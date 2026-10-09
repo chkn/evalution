@@ -49,6 +49,20 @@ async function chooseNew(page: Page, trigger: Locator, label: string) {
   await page.getByRole("menuitem", { name: label, exact: true }).click();
 }
 
+/**
+ * Opens instance `instance`'s actions menu (the "⋯" on its card) and picks
+ * `item` from it. The menu is portal-rendered, so it's found via `page`.
+ */
+async function chooseInstanceAction(
+  page: Page,
+  scope: Locator,
+  instance: string,
+  item: string,
+) {
+  await scope.getByRole("button", { name: `Actions for ${instance}` }).click();
+  await page.getByRole("menu").getByRole("menuitem", { name: item }).click();
+}
+
 async function mockExecute(page: Page) {
   await page.route("**/api/**", route =>
     route.fulfill({
@@ -1269,9 +1283,7 @@ test.describe("resource instances (specs/resource-instances.md §G)", () => {
       .fill("Todo app");
 
     // A duplicate copies the arguments, under the next free name.
-    await card(resources, "seededTask")
-      .getByRole("button", { name: "Duplicate" })
-      .click();
+    await chooseInstanceAction(page, resources, "seededTask", "Duplicate");
     await expect(
       card(resources, "seededTask2").locator("textarea, input").first(),
     ).toHaveValue("Todo app");
@@ -1322,17 +1334,16 @@ test.describe("resource instances (specs/resource-instances.md §G)", () => {
       dialogs.push(dialog.message());
       return dialog.dismiss();
     });
-    const remove = component.getByRole("button", {
-      name: "Remove seededRootTask",
-    });
-    await remove.click();
+    const remove = () =>
+      chooseInstanceAction(page, component, "seededRootTask", "Remove");
+    await remove();
     expect(dialogs).toEqual([
       "Remove 'seededRootTask'? taskId will be cleared.",
     ]);
     await expect(card(component, "seededRootTask")).toHaveCount(1);
 
     page.once("dialog", dialog => dialog.accept());
-    await remove.click();
+    await remove();
     await expect(card(component, "seededRootTask")).toHaveCount(0);
     await expect(component.locator(".pg-slot-chip")).toHaveCount(0);
   });

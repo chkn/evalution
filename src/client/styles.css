@@ -2139,6 +2139,13 @@ pre {
   border-color: var(--exec-border);
 }
 
+/* The gear that opens an instance's actions menu. */
+.pg-resource-menu-trigger {
+  display: flex;
+  align-items: center;
+  padding: 2px 5px;
+}
+
 /* What references the instance (`→ taskId`), or that nothing does. */
 .pg-resource-refs {
   font-size: 10.5px;

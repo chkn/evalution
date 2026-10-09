@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import type { PromptInputSources, ResourceInfo } from "../../shared/types";
 import { ExecutionInputEditor } from "./ExecutionInputEditor";
 import { describeInstanceSource, parseInstanceUri } from "./pseudo-sources";
@@ -17,6 +18,8 @@ import {
 } from "./run-resources-state";
 import SourcePicker from "./SourcePicker";
 import type { SourceContext } from "./source-context";
+import { useAnchoredPopover } from "./use-anchored-popover";
+import { PlusIcon } from "./trace/icons";
 
 /**
  * A change to the run's instances that the host has to carry into its own
@@ -166,10 +169,11 @@ export function ResourcesSection({
                 <button
                   type="button"
                   className="pg-resource-action"
-                  title="Add it to the run, to give it arguments or a name"
+                  aria-label={`Add ${info?.label ?? dep.uri} to the run explicitly`}
+                  title="Add to the run explicitly (to set arguments or a name)"
                   onClick={() => add(dep.uri)}
                 >
-                  Configure
+                  <PlusIcon />
                 </button>
               )}
             </div>
@@ -181,7 +185,7 @@ export function ResourcesSection({
             >
               {dep.ambiguous
                 ? `⚠ ${dep.usedBy.join(", ")} can't tell which to use: ${dep.ambiguous.join(", ")}`
-                : `used by ${dep.usedBy.join(", ")}`}
+                : `implicit instance for ${dep.usedBy.join(", ")}`}
             </div>
           </div>
         );
@@ -193,6 +197,26 @@ export function ResourcesSection({
 /** "shared" for a resource created once per server, "per run" otherwise. */
 function scopeLabel(info: ResourceInfo | undefined): string {
   return info?.scope === "server" ? "shared" : "per run";
+}
+
+/** A gear — the instance's actions menu. */
+function GearIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
 }
 
 function InstanceCard({
@@ -214,6 +238,14 @@ function InstanceCard({
 }) {
   const instance = instances[name];
   const [draftName, setDraftName] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const closeMenu = () => setMenuOpen(false);
+  const { triggerRef, popoverRef, style } =
+    useAnchoredPopover<HTMLButtonElement>({
+      open: menuOpen,
+      onClose: closeMenu,
+      matchTriggerWidth: false,
+    });
   const problem =
     draftName === null
       ? undefined
@@ -292,25 +324,56 @@ function InstanceCard({
           {resource && ` · ${scopeLabel(resource)}`}
         </span>
         <span className="pg-resource-actions">
-          {resource?.scope !== "server" && (
-            <button
-              type="button"
-              className="pg-resource-action"
-              onClick={() =>
-                onChange(duplicateInstance(instances, name).instances)
-              }
-            >
-              Duplicate
-            </button>
-          )}
           <button
             type="button"
-            className="pg-resource-action"
-            aria-label={`Remove ${name}`}
-            onClick={remove}
+            ref={triggerRef}
+            className="pg-resource-action pg-resource-menu-trigger"
+            aria-label={`Actions for ${name}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            title="Actions"
+            onClick={() => setMenuOpen(o => !o)}
           >
-            Remove
+            <GearIcon />
           </button>
+          {menuOpen &&
+            createPortal(
+              <div
+                className="trace-header-menu"
+                ref={popoverRef}
+                style={style}
+                role="menu"
+              >
+                {resource?.scope !== "server" && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="trace-header-menu-item"
+                    onClick={() => {
+                      closeMenu();
+                      onChange(duplicateInstance(instances, name).instances);
+                    }}
+                  >
+                    <span className="trace-header-menu-item-label">
+                      Duplicate
+                    </span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="trace-header-menu-item"
+                  aria-label={`Remove ${name}`}
+                  onClick={() => {
+                    closeMenu();
+                    remove();
+                  }}
+                >
+                  <span className="trace-header-menu-item-label">Remove</span>
+                </button>
+              </div>,
+              document.body,
+            )}
         </span>
       </div>
       {problem && <div className="pg-resource-refs-warning">{problem}</div>}
