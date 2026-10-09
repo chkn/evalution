@@ -9,6 +9,7 @@
 
 import type { DatasetField } from "../dataset/dataset-types.ts";
 import type { EvalCheck, EvalInputs } from "../eval/eval-types.ts";
+import { instanceNames } from "./input-references.ts";
 import type {
   CheckInfo,
   ExecutionInput,
@@ -129,18 +130,6 @@ function fillSlot(
     return stored;
   }
   return current;
-}
-
-/** Every instance name `input` references, at any depth. */
-function instanceNames(input: ExecutionInput): string[] {
-  switch (input.kind) {
-    case "instance":
-      return [input.name];
-    case "object":
-      return Object.values(input.properties).flatMap(instanceNames);
-    default:
-      return [];
-  }
 }
 
 /**

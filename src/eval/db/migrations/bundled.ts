@@ -22,5 +22,14 @@ export const bundledMigrations: MigrationMeta[] = [
       "\nCREATE INDEX `idx_eval_row_results_trace` ON `eval_row_results` (`trace_provider_id`,`trace_id`);",
       "\nCREATE INDEX `idx_eval_runs_eval` ON `eval_runs` (`eval_id`,`started_at`);"
     ]
+  },
+  {
+    "name": "20261009093329_soft_pandemic",
+    "hash": "e8916ff94f63623ce05055ed9e6522a447a24dfeac99214e6ec4c2f1efc954be",
+    "folderMillis": 1791538409000,
+    "bps": true,
+    "sql": [
+      "ALTER TABLE `eval_row_results` ADD `row_resources` text;"
+    ]
   }
 ];

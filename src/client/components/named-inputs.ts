@@ -15,6 +15,7 @@ import {
   fieldsForPrompt,
   matchKey,
 } from "../../shared/dataset-fields";
+import { instanceNames } from "../../shared/input-references";
 import { jsonToPropValue } from "../../shared/json-prop-value";
 import type {
   Dataset,
@@ -215,25 +216,14 @@ export function rowResources(
     : undefined;
 }
 
-/** Every instance name an input references, at any depth. */
-function instanceNames(input: ExecutionInput): string[] {
-  switch (input.kind) {
-    case "instance":
-      return [input.name];
-    case "object":
-      return Object.values(input.properties).flatMap(instanceNames);
-    default:
-      return [];
-  }
-}
-
 /**
  * Panel inputs for `prompt`: each input fills every slot it matches — a
  * function and an execute parameter of one name and type are one value, so
  * both get it. `resources` come along, receipts stripped, except an instance
  * of a resource outside this prompt's `inputSources`: it couldn't be created
- * here, so it's dropped, and an input referencing it is skipped rather than
- * filled — it would only fail at Run.
+ * here, so it's dropped — with every instance whose arguments name it — and
+ * an input referencing a dropped one is skipped rather than filled; it would
+ * only fail at Run.
  */
 export function toPanel(
   inputs: NamedInputs,
@@ -248,6 +238,19 @@ export function toPanel(
   for (const [name, spec] of Object.entries(rowResources(resources) ?? {})) {
     if (inScope.has(spec.uri)) kept[name] = spec;
     else dropped.add(name);
+  }
+  // An instance whose arguments name a dropped one couldn't be created
+  // either: drop it too, and whatever names it in turn.
+  for (let changed = dropped.size > 0; changed; ) {
+    changed = false;
+    for (const [name, spec] of Object.entries(kept)) {
+      const args = Object.values(spec.args ?? {});
+      if (args.some(arg => instanceNames(arg).some(n => dropped.has(n)))) {
+        delete kept[name];
+        dropped.add(name);
+        changed = true;
+      }
+    }
   }
   const functionInputs: Record<string, ExecutionInput> = {};
   const executeInputs: Record<string, ExecutionInput> = {};

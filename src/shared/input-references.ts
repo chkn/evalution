@@ -140,8 +140,36 @@ function locationKey(loc: RefLocation): string {
     : inputKey(loc.half, loc.path);
 }
 
-/** Every `input` and `instance` reference inside `bindings`, with where it sits. */
-function findRefs(bindings: InputBindings): FoundRef[] {
+/** The input kinds a run can resolve; anything else is refused up front. */
+const KNOWN_KINDS: ReadonlySet<string> = new Set([
+  "value",
+  "object",
+  "input",
+  "instance",
+  "dataset",
+]);
+
+/** Every instance name `input` references, at any depth. */
+export function instanceNames(input: ExecutionInput): string[] {
+  switch (input.kind) {
+    case "instance":
+      return [input.name];
+    case "object":
+      return Object.values(input.properties).flatMap(instanceNames);
+    default:
+      return [];
+  }
+}
+
+/**
+ * Every `input` and `instance` reference inside `bindings`, with where it
+ * sits. A node of a kind no run can resolve — the removed inline `resource`
+ * — goes to `unsupported`, when given.
+ */
+function findRefs(
+  bindings: InputBindings,
+  unsupported?: { at: RefLocation; kind: string }[],
+): FoundRef[] {
   const found: FoundRef[] = [];
   const walk = (node: ExecutionInput, at: RefLocation) => {
     switch (node.kind) {
@@ -160,6 +188,9 @@ function findRefs(bindings: InputBindings): FoundRef[] {
         found.push({ at, target: { instance: node.name } });
         break;
       default:
+        if (!KNOWN_KINDS.has(node.kind)) {
+          unsupported?.push({ at, kind: (node as { kind: string }).kind });
+        }
         break;
     }
   };
@@ -277,9 +308,19 @@ export function inputReferenceProblems(
   const slots = slotPaths(signature);
   const instances = bindings.resources ?? {};
   const problems: string[] = [];
-  for (const ref of findRefs(bindings)) {
-    const at =
-      "instance" in ref.at ? locationKey(ref.at) : `'${locationKey(ref.at)}'`;
+  const unsupported: { at: RefLocation; kind: string }[] = [];
+  const refs = findRefs(bindings, unsupported);
+  const where = (loc: RefLocation) =>
+    "instance" in loc ? locationKey(loc) : `'${locationKey(loc)}'`;
+  for (const { at, kind } of unsupported) {
+    problems.push(
+      kind === "resource"
+        ? `${where(at)} uses an inline 'resource' input, which is no longer supported: declare the resource in 'resources' and reference it with { kind: "instance" }`
+        : `${where(at)} has an input of unknown kind '${kind}'`,
+    );
+  }
+  for (const ref of refs) {
+    const at = where(ref.at);
     if ("instance" in ref.target) {
       if (
         !options.undeclaredInstances &&

@@ -12,6 +12,7 @@ import type { Database } from "@tursodatabase/sync";
 import { and, asc, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { matchKey } from "../shared/dataset-fields.ts";
+import { isValidInstanceName } from "../shared/instance-names.ts";
 import type {
   ExecutionInput,
   PropDefinition,
@@ -497,7 +498,7 @@ export class TursoDatasetProvider implements DatasetProvider {
             }
           }
           for (const name of Object.keys(resources ?? {})) {
-            if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(name)) {
+            if (!isValidInstanceName(name)) {
               throw new DatasetValidationError(
                 `"${name}" is not a valid resource name`,
               );

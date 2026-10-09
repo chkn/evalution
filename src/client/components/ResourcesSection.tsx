@@ -18,8 +18,8 @@ import {
 } from "./run-resources-state";
 import SourcePicker from "./SourcePicker";
 import type { SourceContext } from "./source-context";
-import { useAnchoredPopover } from "./use-anchored-popover";
 import { PlusIcon } from "./trace/icons";
+import { useAnchoredPopover } from "./use-anchored-popover";
 
 /**
  * A change to the run's instances that the host has to carry into its own
@@ -426,21 +426,28 @@ export function instanceSourceContext({
   catalogByUri,
   adopt,
   describeOther,
+  rowsMayDeclare,
 }: {
   instances: InstanceSelections;
   catalogByUri: ReadonlyMap<string, ResourceInfo>;
   adopt: (uri: string) => string;
   describeOther?: SourceContext["describePseudo"];
+  /** An eval's: a name it doesn't declare is one each row declares. See `describeInstanceSource`. */
+  rowsMayDeclare?: boolean;
 }): SourceContext {
   return {
     adopt,
     describePseudo: (uri, slotType) => {
-      const instance = describeInstanceSource(uri, instances, catalogByUri);
+      const instance = describeInstanceSource(uri, instances, catalogByUri, {
+        rowsMayDeclare,
+      });
       if (!instance) return describeOther?.(uri, slotType);
       const ref = parseInstanceUri(uri)!;
+      // Only an instance with a card here has anywhere to scroll to.
+      const hasCard = Object.hasOwn(instances, ref.name);
       return {
         ...instance,
-        ...(!instance.missing && { onOpen: () => scrollToInstance(ref.name) }),
+        ...(hasCard && { onOpen: () => scrollToInstance(ref.name) }),
       };
     },
   };

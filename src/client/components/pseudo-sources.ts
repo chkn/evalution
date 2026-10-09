@@ -503,11 +503,16 @@ export function withInstanceSources(
 /**
  * What a chip for instance reference `uri` says: what it is, or that the run
  * no longer has it.
+ *
+ * @param options.rowsMayDeclare - In an eval, a name the eval doesn't
+ *   declare is one each dataset row declares (`specs/resource-instances.md`
+ *   §E), so it reads as that rather than as missing.
  */
 export function describeInstanceSource(
   uri: string,
   instances: InstanceUris,
   resourcesByUri: ReadonlyMap<string, ResourceInfo>,
+  options: { rowsMayDeclare?: boolean } = {},
 ): { label: string; note: string; missing?: boolean } | undefined {
   const ref = parseInstanceUri(uri);
   if (!ref) return undefined;
@@ -515,7 +520,9 @@ export function describeInstanceSource(
   const label =
     ref.output === undefined ? ref.name : `${ref.name}.${ref.output}`;
   if (!instance) {
-    return { label, note: "resource no longer in this run", missing: true };
+    return options.rowsMayDeclare
+      ? { label, note: "declared by each row" }
+      : { label, note: "resource no longer in this run", missing: true };
   }
   const resource = resourcesByUri.get(instance.uri);
   return { label, note: resource?.label ?? instance.uri };

@@ -263,6 +263,17 @@ describe("resolveExecutionInput", () => {
   });
 });
 
+describe("resolveExecutionInput: unsupported kinds", () => {
+  it("fails on a kind it can't resolve rather than passing undefined", async () => {
+    await expect(
+      resolveExecutionInput({
+        kind: "resource",
+        uri: "x#db",
+      } as unknown as ExecutionInput),
+    ).rejects.toThrow("Unsupported input kind 'resource'");
+  });
+});
+
 describe("resolveExecutionInputs", () => {
   it("resolves both halves through one resolver, so a shared instance is created once", async () => {
     const { resolver, created } = fakeResolver();
@@ -674,6 +685,22 @@ describe("inputReferenceProblems", () => {
     expect(problems).toHaveLength(2);
     expect(problems[0]).toMatch(/'missing'/);
     expect(problems[1]).toMatch(/cycle: b → c → b/);
+  });
+
+  it("refuses the removed inline `resource` input, naming its slot", () => {
+    const problems = inputReferenceProblems(
+      {
+        functionInputs: {},
+        executeInputs: {
+          db: { kind: "resource", uri: "x#db" } as unknown as ExecutionInput,
+        },
+      },
+      { functionParameters: [], executeParameters: [str("db")] },
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(
+      /^'execute:db' uses an inline 'resource' input/,
+    );
   });
 
   it("names an instance the run doesn't declare, unless rows may declare it", () => {

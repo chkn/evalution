@@ -1132,6 +1132,99 @@ describe("named instances (specs/resource-instances.md)", () => {
     );
   });
 
+  it("fails, rather than hanging, when instances acquired in parallel wait on each other", async () => {
+    const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
+    const lease = reg.lease();
+    await lease.declare({
+      a: {
+        uri: "x.playground.ts#task",
+        binding: titled("A", async () => ({
+          parentId: await lease.acquire("b", "id"),
+        })),
+      },
+      b: {
+        uri: "x.playground.ts#task",
+        binding: titled("B", async () => ({
+          parentId: await lease.acquire("a", "id"),
+        })),
+      },
+    });
+    // Each starts on its own path, so neither's chain holds the other.
+    const results = await Promise.allSettled([
+      lease.acquire("a"),
+      lease.acquire("b"),
+    ]);
+    expect(results.map(r => r.status)).toEqual(["rejected", "rejected"]);
+    expect(String((results[0] as PromiseRejectedResult).reason)).toMatch(
+      /cycle: .*→ .*→/i,
+    );
+    await lease.release();
+  });
+
+  it("fails, rather than hanging, on a cycle through a code-wired dependency", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        ${schemaHelper}
+        export const y = resource({
+          inputs: { ref: str() },
+          create: ({ ref }) => ({ value: { id: "y", ref } }),
+        });
+        export const x = resource({
+          inputs: { y },
+          create: () => ({ value: { id: "x" } }),
+        });`,
+    });
+    const lease = reg.lease();
+    await lease.declare({
+      x: { uri: "x.playground.ts#x" },
+      y: {
+        uri: "x.playground.ts#y",
+        binding: {
+          resolve: async () => ({ ref: await lease.acquire("x", "id") }),
+        },
+      },
+    });
+    const results = await Promise.allSettled([
+      lease.acquire("x"),
+      lease.acquire("y"),
+    ]);
+    expect(results.map(r => r.status)).toEqual(["rejected", "rejected"]);
+    expect(String((results[0] as PromiseRejectedResult).reason)).toMatch(
+      /cycle/i,
+    );
+    await lease.release();
+  });
+
+  it("creates nothing once released, so a creation still in flight can't make a second root", async () => {
+    const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
+    const lease = reg.lease();
+    let releaseNow!: () => void;
+    const released = new Promise<void>(resolve => {
+      releaseNow = resolve;
+    });
+    await lease.declare({
+      root: { uri: "x.playground.ts#task", binding: titled("Root") },
+      child: {
+        uri: "x.playground.ts#task",
+        binding: titled("Child", async () => {
+          // The run ends (another instance failed, say) while this one is
+          // still resolving its arguments.
+          await released;
+          return { parentId: await lease.acquire("root", "id") };
+        }),
+      },
+    });
+    await lease.acquire("root");
+    const child = lease.acquire("child");
+    await lease.release();
+    releaseNow();
+    await expect(child).rejects.toThrow(/already finished/);
+    expect((globalThis as any).__created.map((t: any) => t.title)).toEqual([
+      "Root",
+    ]);
+    expect((globalThis as any).__disposed).toHaveLength(1);
+  });
+
   it("wires a code dependency to the run's one declared instance of it, arguments and all", async () => {
     const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
     const lease = reg.lease();

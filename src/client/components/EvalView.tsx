@@ -454,6 +454,7 @@ function EvalView({
   const context = instanceSourceContext({
     instances: state.instances,
     catalogByUri: resourcesByUri,
+    rowsMayDeclare: true,
     adopt: uri => {
       const picked = adoptCatalogPick(
         stateRef.current.instances,

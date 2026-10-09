@@ -15,6 +15,7 @@ import type {
   ExecutionInput,
   NormalizedPrompt,
   PropDefinition,
+  RunResources,
 } from "../shared/types.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { runEvalMigrations } from "./db/migrate.ts";
@@ -135,6 +136,8 @@ const contains = (id: string, field: string): EvalCheck => ({
 async function setUp(
   options: {
     rows?: Record<string, ExecutionInput>[];
+    /** Each row's own resource instances, by position. */
+    rowResources?: (RunResources | undefined)[];
     checks?: EvalCheck[];
     inputs?: Record<string, ExecutionInput>;
     provider?: Parameters<typeof fakeProvider>[1];
@@ -161,7 +164,12 @@ async function setUp(
         { "0": text("cats"), "1": text("cats") },
         { "0": text("dogs"), "1": text("birds") },
       ]
-    ).map(cells => ({ cells })),
+    ).map((cells, i) => ({
+      cells,
+      ...(options.rowResources?.[i] && {
+        resources: options.rowResources[i],
+      }),
+    })),
   );
   const def = await evals.createEval({
     name: "Answers",
@@ -223,6 +231,22 @@ describe("EvalRunner", () => {
       total: 2,
       counts: { pass: 1, fail: 1 },
     });
+  });
+
+  it("snapshots each row's own resources with its result, receipts stripped", async () => {
+    const { runner, evals, def } = await setUp({
+      rowResources: [
+        { seed: { uri: "x.playground.ts#seed", receipt: { id: "t1" } } },
+      ],
+    });
+    const run = await runner.start(evals, def.id);
+    await runner.finished(run.id);
+
+    const { rows } = await evals.listResults(run.id);
+    expect(rows[0].rowResources).toEqual({
+      seed: { uri: "x.playground.ts#seed" },
+    });
+    expect(rows[1].rowResources).toBeUndefined();
   });
 
   it("is idle once every run in flight has finished", async () => {

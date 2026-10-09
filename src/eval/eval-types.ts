@@ -202,6 +202,12 @@ export interface EvalRowResult {
   rowIndex: number;
   /** The row's cells as they were run — readable after the row is deleted. */
   rowCells: Record<string, ExecutionInput>;
+  /**
+   * The row's own resource instances as they were run, receipts stripped —
+   * what `rowCells`' `instance` references named then, however the row has
+   * changed since. See `specs/resource-instances.md` §C.
+   */
+  rowResources?: RunResources;
   traceProviderId?: string;
   traceId?: string;
   /** The version the row ran against, on a clean tree. */

@@ -123,6 +123,12 @@ describe("withInstanceSources", () => {
       note: "resource no longer in this run",
       missing: true,
     });
+    // In an eval, an undeclared name is one each row declares.
+    expect(
+      describeInstanceSource(instanceUri("task"), instances, byUri, {
+        rowsMayDeclare: true,
+      }),
+    ).toEqual({ label: "task", note: "declared by each row" });
   });
 });
 

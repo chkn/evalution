@@ -596,6 +596,51 @@ interface LeaseState {
   declared: Map<string, DeclaredInstance & { registered: RegisteredResource }>;
   /** Receipts recorded so far, by instance name. */
   receipts: Map<string, unknown>;
+  /** Set by `release()`: nothing more may be created for this run. */
+  released: boolean;
+  /**
+   * Which instance creations are waiting on which, by {@link nodeId}: the
+   * wait-for graph that catches a cycle `chain` can't — two creations that
+   * started on separate async paths (declared instances are acquired in
+   * parallel) and then each await the other's pending promise.
+   */
+  waits: Map<string, string[]>;
+  /** What each {@link nodeId} is called in a cycle error. */
+  labels: Map<string, string>;
+}
+
+/** A stable id per resource object, for {@link nodeId}. */
+const resourceIds = new WeakMap<Resource<unknown>, number>();
+let nextResourceId = 0;
+
+/** Identifies one instance — (resource, memo key) — in a lease's wait-for graph. */
+function nodeId(resource: Resource<unknown>, key: string): string {
+  let id = resourceIds.get(resource);
+  if (id === undefined) {
+    id = nextResourceId++;
+    resourceIds.set(resource, id);
+  }
+  return `${id}:${key}`;
+}
+
+/** A path from `from` to `to` along `waits`, both ends included; `undefined` if none. */
+function waitPath(
+  waits: ReadonlyMap<string, readonly string[]>,
+  from: string,
+  to: string,
+): string[] | undefined {
+  const seen = new Set<string>();
+  const walk = (at: string): string[] | undefined => {
+    if (at === to) return [at];
+    if (seen.has(at)) return undefined;
+    seen.add(at);
+    for (const next of waits.get(at) ?? []) {
+      const rest = walk(next);
+      if (rest) return [at, ...rest];
+    }
+    return undefined;
+  };
+  return walk(from);
 }
 
 /**
@@ -814,8 +859,10 @@ export class ResourceRegistry {
       resetLocks: this.resetLocks.forLease(),
       declared: new Map(),
       receipts: new Map(),
+      released: false,
+      waits: new Map(),
+      labels: new Map(),
     };
-    let released = false;
 
     const declare = async (
       instances: Record<string, DeclaredInstance>,
@@ -897,8 +944,8 @@ export class ResourceRegistry {
       resolveDeclared,
       receipts: () => Object.fromEntries(state.receipts),
       release: async () => {
-        if (released) return;
-        released = true;
+        if (state.released) return;
+        state.released = true;
         const pending = [...state.runInstances.values()].flatMap(byKey => [
           ...byKey.values(),
         ]);
@@ -987,6 +1034,12 @@ export class ResourceRegistry {
           .join(" → ")}`,
       );
     }
+    // After `release()` the run's memo is gone: creating now would make a
+    // second instance of something already disposed, and nothing would
+    // dispose this one.
+    if (state.released) {
+      throw new Error(`Resource '${label}': the run has already finished`);
+    }
 
     const scope = target.scope ?? defaultScope(target);
     const cache =
@@ -998,7 +1051,25 @@ export class ResourceRegistry {
       cache.set(target, byKey);
     }
 
+    // The creation this one is needed by, if any, now waits on it.
+    const self = nodeId(target, key);
+    const waiter = chain.at(-1);
+    const waiterId = waiter && nodeId(waiter.resource, waiter.key);
+    state.labels.set(self, label);
+
     let pending = byKey.get(key);
+    if (pending && waiterId) {
+      // Joining a creation already under way: if it (transitively) waits on
+      // the one asking, neither would ever finish.
+      const loop = waitPath(state.waits, self, waiterId);
+      if (loop) {
+        throw new Error(
+          `Resource dependency cycle: ${[waiterId, ...loop]
+            .map(id => state.labels.get(id) ?? id)
+            .join(" → ")}`,
+        );
+      }
+    }
     if (!pending) {
       const nextChain = [...chain, { resource: target, key, label }];
       // Ambient for the duration of `create()` — including its `await
@@ -1033,7 +1104,19 @@ export class ResourceRegistry {
       }
     }
 
-    const instance = await pending;
+    let instance: Instance;
+    if (waiterId) {
+      const edges = state.waits.get(waiterId) ?? [];
+      edges.push(self);
+      state.waits.set(waiterId, edges);
+      try {
+        instance = await pending;
+      } finally {
+        edges.splice(edges.indexOf(self), 1);
+      }
+    } else {
+      instance = await pending;
+    }
 
     if (scope === "server" && instance.reset) {
       // Sorted by the resource's own uri, which every lease agrees on — not

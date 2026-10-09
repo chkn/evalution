@@ -1,0 +1,1 @@
+ALTER TABLE `eval_row_results` ADD `row_resources` text;

@@ -10,7 +10,7 @@
 import type { Database } from "@tursodatabase/sync";
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
-import type { ExecutionInput } from "../shared/types.ts";
+import type { ExecutionInput, RunResources } from "../shared/types.ts";
 import type { PromptID } from "../trace/trace-types.ts";
 import {
   evalCheckResults,
@@ -96,6 +96,9 @@ function rowToRowResult(row: RowResultRow): EvalRowResult {
     sample: row.sample,
     rowIndex: row.rowIndex,
     rowCells: JSON.parse(row.rowCells) as Record<string, ExecutionInput>,
+    ...(row.rowResources && {
+      rowResources: JSON.parse(row.rowResources) as RunResources,
+    }),
     ...(row.traceProviderId && { traceProviderId: row.traceProviderId }),
     ...(row.traceId && { traceId: row.traceId }),
     ...(row.version && { version: row.version }),
@@ -516,6 +519,9 @@ export class TursoEvalProvider implements EvalProvider {
           sample: result.sample,
           rowIndex: result.rowIndex,
           rowCells: JSON.stringify(result.rowCells),
+          rowResources: result.rowResources
+            ? JSON.stringify(result.rowResources)
+            : null,
           traceProviderId: result.traceProviderId ?? null,
           traceId: result.traceId ?? null,
           version: result.version ?? null,

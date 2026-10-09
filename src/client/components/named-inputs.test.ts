@@ -215,6 +215,32 @@ describe("toPanel", () => {
     expect(skipped).toEqual([{ name: "db", reason: "resource-out-of-scope" }]);
   });
 
+  it("also drops an in-scope instance whose arguments name a dropped one, and what names it", () => {
+    const { resources, skipped } = toPanel(
+      [
+        {
+          def: def("db", "Db", "opaque"),
+          input: { kind: "instance", name: "grandchild" },
+        },
+      ],
+      prompt(),
+      {
+        root: { uri: "elsewhere.playground.ts#db" },
+        child: {
+          uri: DB_URI,
+          args: { parent: { kind: "instance", name: "root", output: "id" } },
+        },
+        grandchild: {
+          uri: DB_URI,
+          args: { parent: { kind: "instance", name: "child" } },
+        },
+        near: { uri: DB_URI },
+      },
+    );
+    expect(resources).toEqual({ near: { uri: DB_URI } });
+    expect(skipped).toEqual([{ name: "db", reason: "resource-out-of-scope" }]);
+  });
+
   it("fills both a function and an execute parameter of one name and type", () => {
     const p = prompt({
       functionParameters: [def("userId")],
