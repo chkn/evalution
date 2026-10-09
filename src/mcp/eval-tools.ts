@@ -20,6 +20,7 @@ import type {
   EvalCheckResult,
   EvalDefinition,
   EvalInputs,
+  EvalRowResult,
   EvalRun,
   EvalRunSummary,
   EvalSummary,
@@ -153,6 +154,22 @@ function describeBinding(
     default:
       return input;
   }
+}
+
+/**
+ * What a stored result ran with: its row's cells, and the row's own resource
+ * instances as they were then — which its `instance` cells name.
+ */
+export function resultInputs(
+  row: Pick<EvalRowResult, "rowCells" | "rowResources">,
+  fields: readonly DatasetField[],
+): { inputs: Record<string, unknown>; resources?: Record<string, unknown> } {
+  return {
+    inputs: describeCells(row.rowCells, fields),
+    ...(row.rowResources && {
+      resources: describeResources(row.rowResources, fields),
+    }),
+  };
 }
 
 /** A stored eval's resource instances as a tool shows them, their arguments described as bindings are. */
@@ -892,7 +909,7 @@ export function registerEvalTools(
               armId: row.armId,
               status: row.status,
               ...(row.error && { error: row.error }),
-              inputs: describeCells(row.rowCells, fields ?? []),
+              ...resultInputs(row, fields ?? []),
               ...(row.traceId && {
                 traceProviderId: row.traceProviderId,
                 traceId: row.traceId,

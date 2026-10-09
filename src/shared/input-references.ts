@@ -141,13 +141,15 @@ function locationKey(loc: RefLocation): string {
 }
 
 /** The input kinds a run can resolve; anything else is refused up front. */
-const KNOWN_KINDS: ReadonlySet<string> = new Set([
-  "value",
-  "object",
-  "input",
-  "instance",
-  "dataset",
-]);
+const KNOWN_KINDS: ReadonlySet<string> = new Set(
+  Object.keys({
+    value: true,
+    object: true,
+    input: true,
+    instance: true,
+    dataset: true,
+  } satisfies Record<ExecutionInput["kind"], true>),
+);
 
 /** Every instance name `input` references, at any depth. */
 export function instanceNames(input: ExecutionInput): string[] {

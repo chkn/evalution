@@ -953,8 +953,12 @@ export class ResourceRegistry {
         state.resetLocks.releaseAll();
         await Promise.all(
           pending.map(async p => {
+            // A create that failed (or was refused once released) left
+            // nothing to dispose; only a real dispose failure is worth a
+            // warning.
+            const instance = await Promise.resolve(p).catch(() => undefined);
             try {
-              await (await p).dispose?.();
+              await instance?.dispose?.();
             } catch (err) {
               console.warn("failed to dispose playground resource:", err);
             }

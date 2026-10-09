@@ -505,8 +505,8 @@ export function withInstanceSources(
  * no longer has it.
  *
  * @param options.rowsMayDeclare - In an eval, a name the eval doesn't
- *   declare is one each dataset row declares (`specs/resource-instances.md`
- *   §E), so it reads as that rather than as missing.
+ *   declare may be one each dataset row declares (`specs/resource-instances.md`
+ *   §E), so it reads as that requirement rather than as missing.
  */
 export function describeInstanceSource(
   uri: string,
@@ -521,7 +521,7 @@ export function describeInstanceSource(
     ref.output === undefined ? ref.name : `${ref.name}.${ref.output}`;
   if (!instance) {
     return options.rowsMayDeclare
-      ? { label, note: "declared by each row" }
+      ? { label, note: "not declared here: each row must declare it" }
       : { label, note: "resource no longer in this run", missing: true };
   }
   const resource = resourcesByUri.get(instance.uri);

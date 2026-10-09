@@ -263,13 +263,16 @@ async function resolveWithin(
       return readPath(await recurse(node, [...chain, key]), rest);
     }
 
-    default:
+    default: {
       // A dataset cell isn't checked up front the way bindings are (see
       // `inputReferenceProblems`), so one holding a removed kind — the old
       // inline `resource` — fails here rather than passing `undefined`.
+      // Typed `never`: a new kind left unhandled above won't compile.
+      const unsupported: never = input;
       throw new Error(
-        `Unsupported input kind '${(input as { kind: string }).kind}'`,
+        `Unsupported input kind '${(unsupported as { kind: string }).kind}'`,
       );
+    }
   }
 }
 

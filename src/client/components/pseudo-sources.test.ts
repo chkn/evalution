@@ -128,7 +128,10 @@ describe("withInstanceSources", () => {
       describeInstanceSource(instanceUri("task"), instances, byUri, {
         rowsMayDeclare: true,
       }),
-    ).toEqual({ label: "task", note: "declared by each row" });
+    ).toEqual({
+      label: "task",
+      note: "not declared here: each row must declare it",
+    });
   });
 });
 

@@ -1216,9 +1216,13 @@ describe("named instances (specs/resource-instances.md)", () => {
     });
     await lease.acquire("root");
     const child = lease.acquire("child");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     await lease.release();
     releaseNow();
     await expect(child).rejects.toThrow(/already finished/);
+    // Refused, not a dispose that failed: nothing to warn about.
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
     expect((globalThis as any).__created.map((t: any) => t.title)).toEqual([
       "Root",
     ]);
