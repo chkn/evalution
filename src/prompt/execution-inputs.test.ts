@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { describe, expect, it, vi } from "vitest";
-import type { ExecutionInput, PropDefinition } from "../shared/types.ts";
+import { describe, expect, it } from "vitest";
+import type {
+  ExecutionInput,
+  PropDefinition,
+  RunResources,
+} from "../shared/types.ts";
 import {
-  canonicalArgumentKey,
   collectInputSlots,
   findInputCycle,
   type InputBindings,
   type InputSource,
+  type InstanceResolver,
   inputReferenceProblems,
   matchSourcesToSlots,
   namedBindings,
@@ -16,6 +20,45 @@ import {
   resolveExecutionInputs,
   stampReceipts,
 } from "./execution-inputs.ts";
+import type { DeclaredInstance } from "./playground/resource-registry.ts";
+
+/**
+ * An in-memory {@link InstanceResolver}: memoizes by name the way the lease
+ * does, creating each instance with `create` — by default, a record of what
+ * it was declared with and the arguments it resolved to.
+ */
+function fakeResolver(
+  create: (
+    name: string,
+    decl: DeclaredInstance,
+    args: Record<string, unknown> | undefined,
+  ) => unknown = (name, decl, args) => ({ name, uri: decl.uri, args }),
+) {
+  const declared = new Map<string, DeclaredInstance>();
+  const memo = new Map<string, Promise<unknown>>();
+  const created: string[] = [];
+  const resolver: InstanceResolver = {
+    declare: async instances => {
+      for (const [name, decl] of Object.entries(instances)) {
+        declared.set(name, decl);
+      }
+    },
+    acquire: async (name, output) => {
+      let pending = memo.get(name);
+      if (!pending) {
+        const decl = declared.get(name);
+        if (!decl) throw new Error(`No resource instance named '${name}'`);
+        created.push(name);
+        pending = (async () =>
+          create(name, decl, await decl.binding?.resolve?.()))();
+        memo.set(name, pending);
+      }
+      const value: any = await pending;
+      return output === undefined ? value : value?.[output];
+    },
+  };
+  return { resolver, created, declared };
+}
 
 const str = (name: string, optional = false): PropDefinition => ({
   name,
@@ -166,6 +209,8 @@ describe("resolveExecutionInput", () => {
   });
 
   it("grafts a resource into one field of an otherwise hand-edited object", async () => {
+    const { resolver } = fakeResolver(name => ({ handle: name }));
+    await resolver.declare({ db: { uri: "pg.ts#db" } });
     const resolved = await resolveExecutionInput(
       {
         kind: "object",
@@ -174,14 +219,14 @@ describe("resolveExecutionInput", () => {
             kind: "value",
             value: { kind: "primitive", value: "ws_1" },
           },
-          db: { kind: "resource", uri: "pg.ts#db" },
+          db: { kind: "instance", name: "db" },
         },
       },
-      async uri => ({ handle: uri }),
+      resolver,
     );
     expect(resolved).toEqual({
       workspaceId: "ws_1",
-      db: { handle: "pg.ts#db" },
+      db: { handle: "db" },
     });
   });
 
@@ -213,255 +258,150 @@ describe("resolveExecutionInput", () => {
 
   it("explains itself when a resource is referenced with no resolver", async () => {
     await expect(
-      resolveExecutionInput({ kind: "resource", uri: "pg.ts#db" }),
+      resolveExecutionInput({ kind: "instance", name: "db" }),
     ).rejects.toThrow(/does not offer resources/);
   });
 });
 
-describe("resolveExecutionInputs", () => {
-  it("resolves both halves through one resolver, so a shared resource is created once", async () => {
-    const created = vi.fn(async (uri: string) => ({ uri }));
-    // A memoizing resolver is the registry's lease in production; here the
-    // point is only that both halves go through the *same* one.
-    const memo = new Map<string, Promise<unknown>>();
-    const resolveResource = (uri: string) => {
-      const existing = memo.get(uri);
-      if (existing) return existing;
-      const pending = created(uri);
-      memo.set(uri, pending);
-      return pending;
-    };
+describe("resolveExecutionInput: unsupported kinds", () => {
+  it("fails on a kind it can't resolve rather than passing undefined", async () => {
+    await expect(
+      resolveExecutionInput({
+        kind: "resource",
+        uri: "x#db",
+      } as unknown as ExecutionInput),
+    ).rejects.toThrow("Unsupported input kind 'resource'");
+  });
+});
 
+describe("resolveExecutionInputs", () => {
+  it("resolves both halves through one resolver, so a shared instance is created once", async () => {
+    const { resolver, created } = fakeResolver();
     const { functionParams, executeValues } = await resolveExecutionInputs(
       {
-        functionInputs: [{ kind: "resource", uri: "pg.ts#db" }],
+        functionInputs: [{ kind: "instance", name: "db" }],
         executeInputs: {
           toolsContext: {
             kind: "object",
-            properties: { db: { kind: "resource", uri: "pg.ts#db" } },
+            properties: { db: { kind: "instance", name: "db" } },
           },
         },
+        resources: { db: { uri: "pg.ts#db" } },
       },
-      resolveResource,
+      resolver,
     );
 
-    expect(created).toHaveBeenCalledTimes(1);
+    expect(created).toEqual(["db"]);
     expect(functionParams[0]).toBe(executeValues.toolsContext.db);
   });
 
-  it("resolves a resource used both as an argument and as a prompt input to one instance per run", async () => {
-    const created = vi.fn(async (uri: string) => ({ uri }));
-    const memo = new Map<string, Promise<unknown>>();
-    const resolveResource = (uri: string) => {
-      const existing = memo.get(uri);
-      if (existing) return existing;
-      const pending = created(uri);
-      memo.set(uri, pending);
-      return pending;
-    };
-
-    const dbRef: ExecutionInput = { kind: "resource", uri: "pg.ts#db" };
-    const { functionParams, executeValues } = await resolveExecutionInputs(
+  it("creates every declared instance, even one no slot names", async () => {
+    const { resolver, created } = fakeResolver();
+    await resolveExecutionInputs(
       {
-        // `db` filling a prompt slot directly...
-        functionInputs: [dbRef],
-        // ...and filling an argument of a different resource.
-        executeInputs: {
-          seeded: {
-            kind: "resource",
-            uri: "pg.ts#seeded",
-            args: { db: dbRef },
+        functionInputs: [],
+        resources: {
+          db: { uri: "pg.ts#db" },
+          seeded: { uri: "pg.ts#seeded" },
+        },
+      },
+      resolver,
+    );
+    expect(created.sort()).toEqual(["db", "seeded"]);
+  });
+
+  it("resolves an instance's arguments, which may name another instance's output", async () => {
+    const { resolver } = fakeResolver((name, _decl, args) =>
+      name === "root" ? { id: "tsk_root" } : { id: "tsk_child", ...args },
+    );
+    const { functionParams } = await resolveExecutionInputs(
+      {
+        functionInputs: [{ kind: "instance", name: "child" }],
+        resources: {
+          root: { uri: "pg.ts#task" },
+          child: {
+            uri: "pg.ts#task",
+            args: {
+              title: {
+                kind: "value",
+                value: { kind: "primitive", value: "Child" },
+              },
+              parentId: { kind: "instance", name: "root", output: "id" },
+            },
           },
         },
       },
-      resolveResource,
+      resolver,
     );
-
-    expect(created).toHaveBeenCalledTimes(2); // db, seeded — not db twice
-    expect(functionParams[0]).toBe(await memo.get("pg.ts#db"));
-    expect(executeValues.seeded).toEqual({ uri: "pg.ts#seeded" });
-  });
-});
-
-describe("canonicalArgumentKey", () => {
-  it("encodes absent args and an empty object identically", () => {
-    expect(canonicalArgumentKey(undefined)).toBe("");
-    expect(canonicalArgumentKey({})).toBe("");
+    expect(functionParams[0]).toEqual({
+      id: "tsk_child",
+      title: "Child",
+      parentId: "tsk_root",
+    });
   });
 
-  it("is insensitive to key order", () => {
-    const a = canonicalArgumentKey({
-      title: { kind: "value", value: { kind: "primitive", value: "x" } },
-      status: { kind: "value", value: { kind: "primitive", value: "y" } },
-    });
-    const b = canonicalArgumentKey({
-      status: { kind: "value", value: { kind: "primitive", value: "y" } },
-      title: { kind: "value", value: { kind: "primitive", value: "x" } },
-    });
-    expect(a).toBe(b);
-  });
-
-  it("differs for genuinely different arguments", () => {
-    const a = canonicalArgumentKey({
-      title: { kind: "value", value: { kind: "primitive", value: "x" } },
-    });
-    const b = canonicalArgumentKey({
-      title: { kind: "value", value: { kind: "primitive", value: "y" } },
-    });
-    expect(a).not.toBe(b);
-  });
-});
-
-describe("resource arguments and receipts on resolveExecutionInput (specs/resource-arguments.md §C, §D)", () => {
-  it("builds a binding whose key matches canonicalArgumentKey and resolves nested args recursively", async () => {
-    const resolveResource = vi.fn(async (uri: string, binding?: any) => ({
-      uri,
-      args: binding ? await binding.resolve() : undefined,
-    }));
-
-    const args = {
-      title: {
-        kind: "value" as const,
-        value: { kind: "primitive" as const, value: "Todo app" },
-      },
-      owner: { kind: "resource" as const, uri: "pg.ts#owner" },
-    };
-    const result: any = await resolveExecutionInput(
-      { kind: "resource", uri: "pg.ts#seeded", args },
-      resolveResource,
+  it("declares an instance with no arguments or receipt without a binding", async () => {
+    const { resolver, declared } = fakeResolver();
+    await resolveExecutionInputs(
+      { resources: { db: { uri: "pg.ts#db" } } },
+      resolver,
     );
-
-    expect(resolveResource).toHaveBeenCalledWith(
-      "pg.ts#seeded",
-      expect.objectContaining({ key: canonicalArgumentKey(args) }),
-    );
-    expect(result.args).toEqual({
-      title: "Todo app",
-      owner: { uri: "pg.ts#owner", args: undefined },
-    });
-  });
-
-  it("calls the resolver with no binding at all for a reference with neither args nor a receipt", async () => {
-    const resolveResource = vi.fn(async (uri: string) => uri);
-    await resolveExecutionInput(
-      { kind: "resource", uri: "pg.ts#db" },
-      resolveResource,
-    );
-    expect(resolveResource).toHaveBeenCalledWith("pg.ts#db");
-    expect(resolveResource).toHaveBeenCalledTimes(1);
-    expect(resolveResource.mock.calls[0]).toHaveLength(1);
+    expect(declared.get("db")).toStrictEqual({ uri: "pg.ts#db" });
   });
 
   it("passes a recorded receipt through to the resolver on a replay", async () => {
-    const resolveResource = vi.fn(
-      async (_uri: string, binding?: any) => binding?.receipt,
+    const { resolver, declared } = fakeResolver();
+    await resolveExecutionInputs(
+      {
+        resources: {
+          seeded: { uri: "pg.ts#seeded", receipt: { taskId: "tsk_abc" } },
+        },
+      },
+      resolver,
     );
-    const result = await resolveExecutionInput(
-      { kind: "resource", uri: "pg.ts#seeded", receipt: { taskId: "tsk_abc" } },
-      resolveResource,
-    );
-    expect(result).toEqual({ taskId: "tsk_abc" });
+    expect(declared.get("seeded")?.binding?.receipt).toEqual({
+      taskId: "tsk_abc",
+    });
+    expect(declared.get("seeded")?.binding?.resolve).toBeUndefined();
+  });
+
+  it("explains itself when a run declares instances but the provider offers no resources", async () => {
+    await expect(
+      resolveExecutionInputs({ resources: { db: { uri: "pg.ts#db" } } }),
+    ).rejects.toThrow(/Cannot create resource 'db'.*does not offer resources/);
   });
 });
 
 describe("stampReceipts", () => {
-  it("sets a receipt on a resource reference by its uri when it has no arguments", () => {
-    const stamped = stampReceipts(
-      { functionInputs: [{ kind: "resource", uri: "pg.ts#db" }] },
-      { "pg.ts#db": "db-receipt" },
-    );
-    expect(stamped.functionInputs?.[0]).toMatchObject({
-      kind: "resource",
-      uri: "pg.ts#db",
-      receipt: "db-receipt",
-    });
-  });
-
-  it("sets a receipt keyed by uri@key when the reference has arguments", () => {
-    const args = {
-      title: {
-        kind: "value" as const,
-        value: { kind: "primitive" as const, value: "Todo app" },
+  it("sets each instance's receipt by name", () => {
+    const resources: RunResources = {
+      db: { uri: "pg.ts#db" },
+      seeded: {
+        uri: "pg.ts#seeded",
+        args: {
+          title: { kind: "value", value: { kind: "primitive", value: "T" } },
+        },
       },
     };
-    const key = canonicalArgumentKey(args);
-    const stamped = stampReceipts(
-      {
-        executeInputs: {
-          seeded: { kind: "resource", uri: "pg.ts#seeded", args },
-        },
-      },
-      { [`pg.ts#seeded@${key}`]: { taskId: "tsk_abc" } },
-    );
-    expect(stamped.executeInputs?.seeded).toMatchObject({
-      receipt: { taskId: "tsk_abc" },
+    expect(
+      stampReceipts(resources, {
+        db: "db-receipt",
+        seeded: { taskId: "tsk_abc" },
+      }),
+    ).toEqual({
+      db: { uri: "pg.ts#db", receipt: "db-receipt" },
+      seeded: { ...resources.seeded, receipt: { taskId: "tsk_abc" } },
     });
-  });
-
-  it("stamps a resource nested inside an object input", () => {
-    const stamped = stampReceipts(
-      {
-        executeInputs: {
-          toolsContext: {
-            kind: "object",
-            properties: { db: { kind: "resource", uri: "pg.ts#db" } },
-          },
-        },
-      },
-      { "pg.ts#db": "db-receipt" },
-    );
-    expect(stamped.executeInputs?.toolsContext).toEqual({
-      kind: "object",
-      properties: {
-        db: {
-          kind: "resource",
-          uri: "pg.ts#db",
-          args: undefined,
-          receipt: "db-receipt",
-        },
-      },
-    });
-  });
-
-  it("stamps a resource nested inside another resource's own args", () => {
-    const args = { owner: { kind: "resource" as const, uri: "pg.ts#owner" } };
-    const stamped = stampReceipts(
-      {
-        functionInputs: [{ kind: "resource", uri: "pg.ts#seeded", args }],
-      },
-      { "pg.ts#owner": "owner-receipt" },
-    );
-    const seeded = stamped.functionInputs?.[0] as Extract<
-      ExecutionInput,
-      { kind: "resource" }
-    >;
-    expect(seeded.args?.owner).toMatchObject({ receipt: "owner-receipt" });
   });
 
   it("drops a replayed receipt that this run didn't reproduce", () => {
-    const stamped = stampReceipts(
-      {
-        functionInputs: [
-          { kind: "resource", uri: "pg.ts#db", receipt: "old-receipt" },
-        ],
-      },
-      {},
-    );
-    expect(stamped.functionInputs?.[0]).toStrictEqual({
-      kind: "resource",
-      uri: "pg.ts#db",
-    });
+    expect(
+      stampReceipts({ db: { uri: "pg.ts#db", receipt: "old-receipt" } }, {}),
+    ).toStrictEqual({ db: { uri: "pg.ts#db" } });
   });
 
-  it("leaves inputs untouched when no receipts were produced", () => {
-    const inputs = {
-      functionInputs: [{ kind: "resource" as const, uri: "pg.ts#db" }],
-    };
-    expect(stampReceipts(inputs, undefined)).toBe(inputs);
-    expect(stampReceipts(inputs, {})).not.toBe(inputs);
-    expect(stampReceipts(inputs, {}).functionInputs?.[0]).toMatchObject({
-      uri: "pg.ts#db",
-    });
+  it("returns nothing for a run that declared no instances", () => {
+    expect(stampReceipts(undefined, { db: "r" })).toBeUndefined();
   });
 });
 
@@ -475,10 +415,11 @@ describe("dataset and input references", () => {
     const row = {
       cells: {
         "0": text("Set up CI"),
-        "1": { kind: "resource", uri: "pg.ts#db" } as ExecutionInput,
+        "1": { kind: "instance", name: "db" } as ExecutionInput,
       },
     };
-    const resolve = vi.fn(async (uri: string) => `created:${uri}`);
+    const { resolver: resolve } = fakeResolver(name => `created:${name}`);
+    await resolve.declare({ db: { uri: "pg.ts#db" } });
     expect(
       await resolveExecutionInput({ kind: "dataset", field: "0" }, resolve, {
         row,
@@ -488,7 +429,7 @@ describe("dataset and input references", () => {
       await resolveExecutionInput({ kind: "dataset", field: "1" }, resolve, {
         row,
       }),
-    ).toBe("created:pg.ts#db");
+    ).toBe("created:db");
   });
 
   it("resolves a column the row leaves empty to nothing", async () => {
@@ -501,16 +442,20 @@ describe("dataset and input references", () => {
 
   it("binds a resource argument to a column", async () => {
     const seen: unknown[] = [];
-    await resolveExecutionInput(
+    const { resolver } = fakeResolver((_name, _decl, args) => {
+      seen.push(args);
+      return "task";
+    });
+    await resolveExecutionInputs(
       {
-        kind: "resource",
-        uri: "pg.ts#seededTask",
-        args: { title: { kind: "dataset", field: "0" } },
+        resources: {
+          task: {
+            uri: "pg.ts#seededTask",
+            args: { title: { kind: "dataset", field: "0" } },
+          },
+        },
       },
-      async (_uri, binding) => {
-        seen.push(await binding?.resolve());
-        return "task";
-      },
+      resolver,
       { row: { cells: { "0": text("Plan it") } } },
     );
     expect(seen).toEqual([{ title: "Plan it" }]);
@@ -519,7 +464,7 @@ describe("dataset and input references", () => {
   it("resolves an input reference to the other slot's value, through the same resolver", async () => {
     const bindings: InputBindings = {
       functionInputs: {
-        taskId: { kind: "resource", uri: "pg.ts#seeded.taskId" },
+        taskId: { kind: "instance", name: "seeded", output: "taskId" },
       },
       executeInputs: {
         toolsContext: {
@@ -535,23 +480,19 @@ describe("dataset and input references", () => {
         },
       },
     };
-    // The lease memoizes; the stand-in counts how often it's asked.
-    const calls: string[] = [];
-    const resolve = async (uri: string) => {
-      calls.push(uri);
-      return "tsk_1";
-    };
+    const { resolver, created } = fakeResolver(() => ({ taskId: "tsk_1" }));
     const { functionParams, executeValues } = await resolveExecutionInputs(
       {
         functionInputs: [bindings.functionInputs.taskId],
         executeInputs: bindings.executeInputs,
+        resources: { seeded: { uri: "pg.ts#seeded" } },
       },
-      resolve,
+      resolver,
       { bindings },
     );
     expect(functionParams).toEqual(["tsk_1"]);
     expect(executeValues.toolsContext.list_tasks.rootTaskId).toBe("tsk_1");
-    expect(calls.every(uri => uri === "pg.ts#seeded.taskId")).toBe(true);
+    expect(created).toEqual(["seeded"]);
   });
 
   it("reads a nested path through a typed-in object, and off a resolved value", async () => {
@@ -564,11 +505,12 @@ describe("dataset and input references", () => {
             properties: { title: { kind: "primitive", value: "T" } },
           },
         },
-        seeded: { kind: "resource", uri: "pg.ts#seeded" },
+        seeded: { kind: "instance", name: "seeded" },
       },
       executeInputs: {},
     };
-    const resolve = async () => ({ taskId: "tsk_9" });
+    const { resolver: resolve } = fakeResolver(() => ({ taskId: "tsk_9" }));
+    await resolve.declare({ seeded: { uri: "pg.ts#seeded" } });
     expect(
       await resolveExecutionInput(
         { kind: "input", half: "function", path: "info.title" },
@@ -649,17 +591,19 @@ describe("findInputCycle", () => {
     ).toEqual(["a.x", "a.x"]);
   });
 
-  it("follows references in a resource's arguments", () => {
+  it("follows references in a resource instance's arguments", () => {
     expect(
       findInputCycle({
-        functionInputs: {
-          taskId: {
-            kind: "resource",
+        resources: {
+          seeded: {
             uri: "pg.ts#seeded",
             args: {
               root: { kind: "input", half: "execute", path: "ctx.root" },
             },
           },
+        },
+        functionInputs: {
+          taskId: { kind: "instance", name: "seeded" },
         },
         executeInputs: {
           ctx: {
@@ -671,6 +615,43 @@ describe("findInputCycle", () => {
         },
       }),
     ).toBeDefined();
+  });
+
+  it("finds two instances that each take the other's output", () => {
+    expect(
+      findInputCycle({
+        resources: {
+          a: {
+            uri: "pg.ts#task",
+            args: { parentId: { kind: "instance", name: "b", output: "id" } },
+          },
+          b: {
+            uri: "pg.ts#task",
+            args: { parentId: { kind: "instance", name: "a", output: "id" } },
+          },
+        },
+        functionInputs: {},
+        executeInputs: {},
+      }),
+    ).toEqual(["resource 'a'", "resource 'b'", "resource 'a'"]);
+  });
+
+  it("accepts one instance taking another of the same resource's output", () => {
+    expect(
+      findInputCycle({
+        resources: {
+          root: { uri: "pg.ts#task" },
+          child: {
+            uri: "pg.ts#task",
+            args: {
+              parentId: { kind: "instance", name: "root", output: "id" },
+            },
+          },
+        },
+        functionInputs: { taskId: { kind: "instance", name: "child" } },
+        executeInputs: {},
+      }),
+    ).toBeUndefined();
   });
 
   it("accepts references that don't loop", () => {
@@ -704,5 +685,66 @@ describe("inputReferenceProblems", () => {
     expect(problems).toHaveLength(2);
     expect(problems[0]).toMatch(/'missing'/);
     expect(problems[1]).toMatch(/cycle: b → c → b/);
+  });
+
+  it("refuses the removed inline `resource` input, naming its slot", () => {
+    const problems = inputReferenceProblems(
+      {
+        functionInputs: {},
+        executeInputs: {
+          db: { kind: "resource", uri: "x#db" } as unknown as ExecutionInput,
+        },
+      },
+      { functionParameters: [], executeParameters: [str("db")] },
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(
+      /^'execute:db' uses an inline 'resource' input/,
+    );
+  });
+
+  it("names an instance the run doesn't declare, unless rows may declare it", () => {
+    const bindings: InputBindings = {
+      functionInputs: { a: { kind: "instance", name: "db" } },
+      executeInputs: {},
+      resources: {
+        seeded: {
+          uri: "pg.ts#seeded",
+          args: { db: { kind: "instance", name: "other" } },
+        },
+      },
+    };
+    const signature = { functionParameters: [str("a")] };
+    expect(inputReferenceProblems(bindings, signature)).toEqual([
+      "'a' names resource 'db', which this run doesn't declare",
+      "resource 'seeded' names resource 'other', which this run doesn't declare",
+    ]);
+    expect(
+      inputReferenceProblems(bindings, signature, {
+        undeclaredInstances: true,
+      }),
+    ).toEqual([]);
+  });
+
+  it("checks an `input` reference among an instance's arguments", () => {
+    expect(
+      inputReferenceProblems(
+        {
+          functionInputs: {},
+          executeInputs: {},
+          resources: {
+            seeded: {
+              uri: "pg.ts#seeded",
+              args: {
+                title: { kind: "input", half: "function", path: "nope" },
+              },
+            },
+          },
+        },
+        { functionParameters: [str("a")] },
+      ),
+    ).toEqual([
+      "resource 'seeded' names input 'nope', which the prompt doesn't have",
+    ]);
   });
 });

@@ -665,7 +665,7 @@ export async function deleteDataset(
 export async function addDatasetRows(
   providerId: string,
   datasetId: string,
-  rows: Pick<DatasetRow, "cells" | "source">[],
+  rows: Pick<DatasetRow, "cells" | "source" | "resources">[],
 ): Promise<DatasetRow[]> {
   const res = await fetch(datasetUrl(providerId, datasetId, "/rows"), {
     method: "POST",

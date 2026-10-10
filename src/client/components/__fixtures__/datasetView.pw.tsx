@@ -88,7 +88,7 @@ async function mockDataset(
   page: Page,
   dataset: Dataset,
   rows: DatasetRow[],
-  fields: Record<string, { keys: string[]; resource?: boolean }> = {},
+  fields: Record<string, { keys: string[] }> = {},
 ) {
   const pages: [number, number][] = [];
   const base = `**/api/datasets/local/${dataset.id}`;
@@ -130,8 +130,10 @@ const SUPPORT_ROWS: DatasetRow[] = [
     id: "r1",
     cells: {
       "0": text("My order never arrived"),
-      "1": {
-        kind: "resource",
+      "1": { kind: "instance", name: "seededTask" },
+    },
+    resources: {
+      seededTask: {
         uri: ".evalution/playground/tasks.ts#seededTask",
         args: { title: text("Buy milk") },
       },
@@ -143,15 +145,16 @@ const SUPPORT_ROWS: DatasetRow[] = [
     id: "r2",
     cells: {
       "0": text("Refund please"),
-      // Takes no `title`: that column is n/a for this row.
-      "1": { kind: "resource", uri: ".evalution/playground/tasks.ts#blank" },
+      "1": { kind: "instance", name: "blank" },
     },
+    resources: { blank: { uri: ".evalution/playground/tasks.ts#blank" } },
     createdAt: 2,
   },
   { id: "r3", cells: {}, createdAt: 3 },
 ];
 
-const SUPPORT_SHAPE = { "1": { keys: ["title"], resource: true } };
+/** No field has keys: a cell naming an instance doesn't expand. */
+const SUPPORT_SHAPE = {};
 
 /**
  * Serves `POST …/:id/rows` — what the trailing row sends — appending to
@@ -203,9 +206,7 @@ test("DatasetView draws value and resource cells, sparse cells as dashes", async
   await expect(
     inGrid(component, "gridcell", "My order never arrived"),
   ).toBeAttached();
-  await expect(
-    inGrid(component, "gridcell", '◆ seededTask(title: "Buy milk")'),
-  ).toBeAttached();
+  await expect(inGrid(component, "gridcell", "◆ seededTask")).toBeAttached();
   await expect(inGrid(component, "gridcell", "trace ↗")).toBeAttached();
   // Row 3 has nothing in `task`, nor a source; row 2 has no source. (Its
   // empty `ticket` is an editor's, which reads as empty.)
@@ -223,13 +224,12 @@ test("the table ends after its last row, with nothing ruled below it", async ({
   await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
 
   // Glide rules its whole canvas, so what's below the last row is covered:
-  // group header + header + 3 rows and the trailing "New row", one past the
-  // closing rule.
+  // header + 3 rows and the trailing "New row", one past the closing rule.
   const cover = component.locator(".dataset-grid-fill");
   const box = await cover.boundingBox();
   const grid = await component.locator(".dataset-grid").boundingBox();
   if (!box || !grid) throw new Error("grid not laid out");
-  expect(box.y - grid.y).toBe(GRID.group + GRID.header + 4 * GRID.row + 1);
+  expect(box.y - grid.y).toBe(GRID.header + 4 * GRID.row + 1);
   // It reaches the bottom, so no ruled lines survive below it.
   expect(Math.round(box.y + box.height)).toBe(Math.round(grid.y + grid.height));
 
@@ -261,35 +261,11 @@ test("the table ends after its last row, with nothing ruled below it", async ({
   expect(stacking.scroller.zIndex).toBeGreaterThan(stacking.cover.zIndex);
 });
 
-test("clicking a field's group header splits it into a column per argument", async ({
-  mount,
-  page,
-}) => {
-  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
-  const component = await mount(
-    <DatasetViewHarness providerId="local" datasetId="tickets" />,
-  );
-  await expect(inGrid(component, "columnheader", "task")).toBeAttached();
-  await expect(inGrid(component, "columnheader", "title")).toHaveCount(0);
-
-  // `task` is the second column: 240px past `ticket`.
-  await clickGrid(page, GRID.marker + 240 + 60, GRID.group / 2);
-
-  await expect(inGrid(component, "columnheader", "title")).toBeAttached();
-  // The head names the resource; the argument has its own column.
-  await expect(inGrid(component, "gridcell", "◆ seededTask")).toBeAttached();
-  await expect(inGrid(component, "gridcell", '"Buy milk"')).toBeAttached();
-  await expect(inGrid(component, "gridcell", "n/a")).toHaveCount(1);
-
-  // And back.
-  await clickGrid(page, GRID.marker + 240 + 60, GRID.group / 2);
-  await expect(inGrid(component, "columnheader", "title")).toHaveCount(0);
-});
-
-test("a field of typed-in objects expands into its properties, with no column of its own", async ({
-  mount,
-  page,
-}) => {
+/**
+ * Serves `tickets` with a `taskInfo` field of typed-in objects, whose cells
+ * expand into their `title` and `description`.
+ */
+function mockTaskInfo(page: Page) {
   const info: ExecutionInput = {
     kind: "value",
     value: {
@@ -300,7 +276,7 @@ test("a field of typed-in objects expands into its properties, with no column of
       },
     },
   };
-  await mockDataset(
+  return mockDataset(
     page,
     {
       ...SUPPORT,
@@ -319,6 +295,13 @@ test("a field of typed-in objects expands into its properties, with no column of
     [{ id: "r1", cells: { "0": text("Hi"), "1": info }, createdAt: 1 }],
     { "1": { keys: ["title", "description"] } },
   );
+}
+
+test("a field of typed-in objects expands into its properties, with no column of its own", async ({
+  mount,
+  page,
+}) => {
+  await mockTaskInfo(page);
   const component = await mount(
     <DatasetViewHarness providerId="local" datasetId="tickets" />,
   );
@@ -346,10 +329,10 @@ test("expanding a field and resizing a column are remembered per dataset", async
   page,
 }) => {
   await page.evaluate(() => localStorage.clear());
-  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
+  await mockTaskInfo(page);
   const view = <DatasetViewHarness providerId="local" datasetId="tickets" />;
   const component = await mount(view);
-  // Columns start at their defaults: marker + ticket + task + source.
+  // Columns start at their defaults: marker + ticket + taskInfo + source.
   await expect(gridWidth(component)).toHaveAttribute("style", /width: 608px/);
 
   await clickGrid(page, GRID.marker + 240 + 60, GRID.group / 2);
@@ -367,9 +350,9 @@ test("expanding a field and resizing a column are remembered per dataset", async
 
   await component.unmount();
   const reopened = await mount(view);
-  // Expanded, and `ticket` still 360 wide: 32 + 360 + 140 + 160 + 96.
+  // Expanded, and `ticket` still 360 wide: 32 + 360 + 160 + 160 + 96.
   await expect(inGrid(reopened, "columnheader", "title")).toBeAttached();
-  await expect(gridWidth(reopened)).toHaveAttribute("style", /width: 788px/);
+  await expect(gridWidth(reopened)).toHaveAttribute("style", /width: 808px/);
 
   // Deleting the dataset takes its layout with it.
   await page.route("**/api/datasets/local/tickets", route =>
@@ -404,14 +387,19 @@ test("selecting a row shows it in full in the details pane", async ({
   );
   await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
 
-  await clickCell(page, 40, 0, true);
+  await clickCell(page, 40, 0, false);
   const pane = component.getByRole("region", { name: "Row details" });
   await expect(pane).toContainText("Row 1");
   await expect(pane).toContainText("r1");
   await expect(pane.getByText("My order never arrived")).toBeVisible();
-  await expect(pane.getByText("seededTask")).toBeVisible();
-  await expect(pane.getByText("title")).toBeVisible();
+  // The row's resources come first, each with its arguments; the field
+  // names the instance it's bound to.
+  await expect(pane.getByText("◆ seededTask", { exact: true })).toBeVisible();
+  await expect(pane.getByText("title", { exact: true })).toBeVisible();
   await expect(pane.getByText("Buy milk")).toBeVisible();
+  await expect(
+    pane.locator(".dataset-detail-cell").getByText("seededTask"),
+  ).toBeVisible();
   // Beside the grid when there's room.
   await expect(pane).toHaveClass(/trace-details-pane/);
 
@@ -440,7 +428,7 @@ test("double-clicking a cell to edit it in place doesn't open the details pane",
   // pause between its clicks is long enough for a pane to open in.
   const at = {
     x: box.x + GRID.marker + 40,
-    y: box.y + GRID.group + GRID.header + GRID.row / 2,
+    y: box.y + GRID.header + GRID.row / 2,
   };
   await page.mouse.click(at.x, at.y);
   await page.waitForTimeout(100);
@@ -452,10 +440,10 @@ test("double-clicking a cell to edit it in place doesn't open the details pane",
 
   // A click that doesn't go on to edit still opens it, once it has paused...
   await page.keyboard.press("Escape");
-  await clickCell(page, 240 + 40, 0, true);
+  await clickCell(page, 240 + 40, 0, false);
   await expect(pane).toContainText("Row 1");
   // ...and, open, it follows the selection at once.
-  await clickCell(page, 40, 1, true);
+  await clickCell(page, 40, 1, false);
   await expect(pane).toContainText("Row 2");
 });
 
@@ -487,7 +475,7 @@ test("the details pane opens a row in the playground and deletes it", async ({
   );
   await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
 
-  await clickCell(page, 40, 1, true);
+  await clickCell(page, 40, 1, false);
   const pane = component.getByRole("region", { name: "Row details" });
   await expect(pane).toContainText("Row 2");
   await pane.getByRole("button", { name: "Open row in playground" }).click();
@@ -599,7 +587,7 @@ test("typing into a string cell saves it, showing it at once", async ({
   await untilRowsShown(component);
 
   // Row 3's `ticket` is empty.
-  await clickCell(page, 40, 2, true);
+  await clickCell(page, 40, 2, false);
   await typeIntoCell(page, "Late delivery");
 
   await expect
@@ -610,11 +598,11 @@ test("typing into a string cell saves it, showing it at once", async ({
   await expect(inGrid(component, "gridcell", "Late delivery")).toBeAttached();
 
   // A resource cell is read-only in the grid: no editor opens there.
-  await clickCell(page, 240 + 40, 0, true);
+  await clickCell(page, 240 + 40, 0, false);
   await pressInGrid(page, "Enter");
   await expect(page.locator(".dataset-grid-portal textarea")).toHaveCount(0);
   // Delete clears an editable cell to `null`, and skips a read-only one.
-  await clickCell(page, 40, 1, true);
+  await clickCell(page, 40, 1, false);
   await pressInGrid(page, "Delete");
   await expect.poll(() => sent).toHaveLength(2);
   expect(sent[1]).toEqual({
@@ -638,10 +626,10 @@ test("a failed save reloads the row from the server and says why under the heade
   );
   await untilRowsShown(component);
 
-  await clickCell(page, 40, 1, true);
+  await clickCell(page, 40, 1, false);
   await typeIntoCell(page, "Changed");
   await expect(inGrid(component, "gridcell", "Changed")).toBeAttached();
-  await clickCell(page, 40, 1, true);
+  await clickCell(page, 40, 1, false);
   await typeIntoCell(page, "Changed again");
   await expect(inGrid(component, "gridcell", "Changed again")).toBeAttached();
 
@@ -732,7 +720,7 @@ test("the details pane edits a value cell, committing on Enter, and clears any c
   );
   await untilRowsShown(component);
 
-  await clickCell(page, 40, 1, true);
+  await clickCell(page, 40, 1, false);
   const pane = component.getByRole("region", { name: "Row details" });
   const editor = pane.locator(".dataset-detail-editor textarea");
   await expect(editor).toHaveValue("Refund please");
@@ -749,7 +737,7 @@ test("the details pane edits a value cell, committing on Enter, and clears any c
   await expect(inGrid(component, "gridcell", "Refund now")).toBeAttached();
 
   // The resource is read-only here too, but can be cleared.
-  await expect(pane.getByText("blank")).toBeVisible();
+  await expect(pane.getByText("◆ blank", { exact: true })).toBeVisible();
   await pane.getByRole("button", { name: "Clear task" }).click();
   await expect.poll(() => sent).toHaveLength(2);
   expect(sent[1]).toEqual({
@@ -773,9 +761,9 @@ test("a details-pane edit is saved when the grid is clicked, on the same row or 
   const editor = pane.locator(".dataset-detail-editor textarea");
 
   // Another cell of the same row: the pane stays, and the edit is saved.
-  await clickCell(page, 40, 1, true);
+  await clickCell(page, 40, 1, false);
   await editor.fill("Refund now");
-  await clickCell(page, 300, 1, true);
+  await clickCell(page, 300, 1, false);
   await expect
     .poll(() => sent)
     .toEqual([
@@ -784,9 +772,9 @@ test("a details-pane edit is saved when the grid is clicked, on the same row or 
 
   // Another row: the pane moves on, and the edit is saved to the row it
   // was made on.
-  await clickCell(page, 40, 1, true);
+  await clickCell(page, 40, 1, false);
   await editor.fill("Refund today");
-  await clickCell(page, 40, 0, true);
+  await clickCell(page, 40, 0, false);
   await expect(editor).toHaveValue("My order never arrived");
   await expect.poll(() => sent).toHaveLength(2);
   expect(sent[1]).toEqual({
@@ -838,47 +826,51 @@ test("the details pane offers the linked prompt's resources, with their argument
   );
   await untilRowsShown(component);
 
-  await clickCell(page, 40, 1, true);
+  await clickCell(page, 40, 1, false);
   const pane = component.getByRole("region", { name: "Row details" });
-  await expect(pane.getByText("Blank task")).toBeVisible();
+  const resources = pane.getByRole("region", { name: "Resources" });
+  await expect(resources.locator("[data-instance-card='blank']")).toBeVisible();
 
-  // Choosing a resource is saved at once.
+  // Choosing a resource from New adds an instance of it to the row and
+  // binds the field to it, saved at once.
   await pane.getByRole("button", { name: "Source for task" }).click();
+  await page.getByRole("menuitem", { name: "New" }).click();
   await page
     .getByRole("menuitem", { name: "Seeded task", exact: true })
     .click();
+  await expect(
+    resources.locator("[data-instance-card='seededTask']"),
+  ).toBeVisible();
   await expect
-    .poll(() => sent)
-    .toEqual([
-      {
-        updates: [
-          {
-            rowId: "r2",
-            cells: { "1": { kind: "resource", uri: seeded.uri } },
-          },
-        ],
-      },
-    ]);
+    .poll(() => sent.at(-1))
+    .toEqual({
+      updates: [
+        {
+          rowId: "r2",
+          cells: { "1": { kind: "instance", name: "seededTask" } },
+          // Only what changed: `blank` stays as it is.
+          resources: { seededTask: { uri: seeded.uri } },
+        },
+      ],
+    });
+  // One save, not one for the instance and another for the binding.
+  expect(sent).toHaveLength(1);
 
-  // Its argument is typed in like any value: a draft until Enter.
-  const title = pane
-    .locator(".dataset-detail-editor")
-    .nth(1)
+  // Its argument is typed into its card like any value: a draft until Enter.
+  const title = resources
+    .locator("[data-instance-card='seededTask']")
     .locator("textarea");
   await title.fill("Buy eggs");
   expect(sent).toHaveLength(1);
   await title.press("Enter");
   await expect.poll(() => sent).toHaveLength(2);
-  expect(sent[1]).toEqual({
+  expect(sent.at(-1)).toEqual({
     updates: [
       {
         rowId: "r2",
-        cells: {
-          "1": {
-            kind: "resource",
-            uri: seeded.uri,
-            args: { title: text("Buy eggs") },
-          },
+        cells: {},
+        resources: {
+          seededTask: { uri: seeded.uri, args: { title: text("Buy eggs") } },
         },
       },
     ],
@@ -1017,7 +1009,7 @@ test("clicking the trailing row appends an empty row and selects it", async ({
   );
   await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
 
-  await clickCell(page, 40, 3, true);
+  await clickCell(page, 40, 3, false);
   await expect(component.getByText("4 rows")).toBeVisible();
   await expect.poll(() => bodies).toEqual([{ rows: [{ cells: {} }] }]);
 
@@ -1104,14 +1096,14 @@ test("two rows appended at once both stay while the first one's refetch lands", 
   );
   await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
 
-  await clickCell(page, 40, 3, true);
+  await clickCell(page, 40, 3, false);
   await expect(component.getByText("4 rows")).toBeVisible();
   const refetched = page.waitForResponse(
     r =>
       r.request().method() === "GET" &&
       r.url().endsWith("/api/datasets/local/tickets"),
   );
-  await clickCell(page, 40, 4, true);
+  await clickCell(page, 40, 4, false);
   await expect(component.getByText("5 rows")).toBeVisible();
   await expect.poll(() => bodies).toHaveLength(2);
 
@@ -1134,7 +1126,7 @@ test("a row that fails to append is taken back, with the error shown", async ({
   );
   await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
 
-  await clickCell(page, 40, 3, true);
+  await clickCell(page, 40, 3, false);
   await expect(component.getByText("4 rows")).toBeVisible();
   await expect(component.getByText("disk full")).toBeVisible();
   await expect(component.getByText("3 rows")).toBeVisible();

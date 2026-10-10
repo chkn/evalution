@@ -5,12 +5,16 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalFileProvider } from "../../file-provider-local.ts";
 import { MemoryFileProvider } from "../../file-provider-memory.ts";
 import { resolveExecutionInputs } from "../execution-inputs.ts";
 import { resource } from "./resource.ts";
-import { ResourceRegistry } from "./resource-registry.ts";
+import {
+  type ResourceBinding,
+  type ResourceLease,
+  ResourceRegistry,
+} from "./resource-registry.ts";
 
 const ROOT = "/proj";
 const p = (...segments: string[]) => path.join(ROOT, ...segments);
@@ -28,6 +32,29 @@ const HELPER = pathToFileURL(
 ).href;
 
 const importHelper = `import { resource } from ${JSON.stringify(HELPER)};`;
+
+/**
+ * Declares `uri` (a resource, or one of its outputs) as an instance on
+ * `lease` and acquires it — the shape every run goes through. The instance
+ * is named after the resource's export unless `name` says otherwise.
+ */
+async function acquireUri(
+  lease: ResourceLease,
+  uri: string,
+  binding?: ResourceBinding,
+  name?: string,
+): Promise<unknown> {
+  const [file, fragment] = uri.split("#");
+  const [exported, ...output] = fragment.split(".");
+  const instanceName = name ?? exported;
+  await lease.declare({
+    [instanceName]: { uri: `${file}#${exported}`, ...(binding && { binding }) },
+  });
+  return lease.acquire(
+    instanceName,
+    output.length > 0 ? output.join(".") : undefined,
+  );
+}
 
 function registry(files: Record<string, string>) {
   const fileProvider = new MemoryFileProvider(files);
@@ -140,7 +167,7 @@ describe("resource lifecycle", () => {
     // resolves them by identity — which is what makes the dependency typed at
     // the call site and immune to key collisions across playground files.
     const lease = reg.lease();
-    expect(await lease.acquire("a/seed.playground.ts#seeded")).toBe(
+    expect(await acquireUri(lease, "a/seed.playground.ts#seeded")).toBe(
       "seeded-with-the-db",
     );
     await lease.release();
@@ -179,7 +206,7 @@ describe("resource lifecycle", () => {
 
       const lease = reg.lease();
       expect(
-        await lease.acquire("agents/odin.playground.ts#seededRootTask"),
+        await acquireUri(lease, "agents/odin.playground.ts#seededRootTask"),
       ).toBe("tsk_from_real-db");
       await lease.release();
     } finally {
@@ -201,8 +228,8 @@ describe("resource lifecycle", () => {
     });
 
     const lease = reg.lease();
-    const first = await lease.acquire("x.playground.ts#thing");
-    const second = await lease.acquire("x.playground.ts#thing");
+    const first = await acquireUri(lease, "x.playground.ts#thing");
+    const second = await acquireUri(lease, "x.playground.ts#thing");
     // One value per run, however many slots reference it — which is why
     // resolution takes every input together.
     expect(second).toBe(first);
@@ -224,11 +251,11 @@ describe("resource lifecycle", () => {
     });
 
     const first = reg.lease();
-    const a = await first.acquire("x.playground.ts#thing");
+    const a = await acquireUri(first, "x.playground.ts#thing");
     await first.release();
 
     const second = reg.lease();
-    const b = await second.acquire("x.playground.ts#thing");
+    const b = await acquireUri(second, "x.playground.ts#thing");
     await second.release();
 
     // Releasing a lease must not touch a value that outlives the run.
@@ -237,6 +264,31 @@ describe("resource lifecycle", () => {
 
     await reg.invalidate();
     expect((globalThis as any).__serverDisposes).toBe(1);
+  });
+
+  it("doesn't call a server-scoped create that fails mid-invalidate a failed dispose", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const thing = resource({
+          scope: "server",
+          create: () => new Promise((_, reject) => {
+            globalThis.__failThing = () => reject(new Error("boom"));
+          }),
+        });`,
+    });
+    const lease = reg.lease();
+    const thing = acquireUri(lease, "x.playground.ts#thing");
+    await vi.waitFor(() =>
+      expect((globalThis as any).__failThing).toBeDefined(),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const invalidated = reg.invalidate();
+    (globalThis as any).__failThing();
+    await invalidated;
+    await expect(thing).rejects.toThrow("boom");
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    await lease.release();
   });
 
   it("rejects a dependency cycle at resolution rather than overflowing", async () => {
@@ -252,7 +304,7 @@ describe("resource lifecycle", () => {
     });
 
     const lease = reg.lease();
-    await expect(lease.acquire("cycle.playground.ts#A")).rejects.toThrow(
+    await expect(acquireUri(lease, "cycle.playground.ts#A")).rejects.toThrow(
       /cycle/i,
     );
   });
@@ -270,9 +322,9 @@ describe("resource lifecycle", () => {
 
     // A value that outlives the run must not close over one that doesn't.
     const lease = reg.lease();
-    await expect(lease.acquire("x.playground.ts#longLived")).rejects.toThrow(
-      /run-scoped/,
-    );
+    await expect(
+      acquireUri(lease, "x.playground.ts#longLived"),
+    ).rejects.toThrow(/run-scoped/);
   });
 
   it("collects receipts so a trace can show what a resource produced", async () => {
@@ -284,9 +336,9 @@ describe("resource lifecycle", () => {
     });
 
     const lease = reg.lease();
-    await lease.acquire("x.playground.ts#seeded");
+    await acquireUri(lease, "x.playground.ts#seeded");
     expect(lease.receipts()).toEqual({
-      "x.playground.ts#seeded": "tsk_abc123",
+      seeded: "tsk_abc123",
     });
     await lease.release();
   });
@@ -300,7 +352,7 @@ describe("static value resources", () => {
     });
 
     const lease = reg.lease();
-    expect(await lease.acquire("x.playground.ts#apiKey")).toBe("secret");
+    expect(await acquireUri(lease, "x.playground.ts#apiKey")).toBe("secret");
     await lease.release();
   });
 
@@ -333,7 +385,9 @@ describe("static value resources", () => {
     });
 
     const lease = reg.lease();
-    expect(await lease.acquire("x.playground.ts#client")).toBe("client-secret");
+    expect(await acquireUri(lease, "x.playground.ts#client")).toBe(
+      "client-secret",
+    );
     await lease.release();
   });
 
@@ -344,7 +398,7 @@ describe("static value resources", () => {
     });
 
     const lease = reg.lease();
-    await lease.acquire("x.playground.ts#apiKey");
+    await acquireUri(lease, "x.playground.ts#apiKey");
     // A literal has no lifecycle to tear down; releasing must not throw
     // trying to call a `dispose` it never had.
     await expect(lease.release()).resolves.toBeUndefined();
@@ -380,7 +434,7 @@ describe("value previews in the panel description", () => {
     expect(beforeRun.value).toBeUndefined();
 
     const lease = reg.lease();
-    await lease.acquire("x.playground.ts#config");
+    await acquireUri(lease, "x.playground.ts#config");
     await lease.release();
 
     const [afterRun] = reg.describe(await reg.sources());
@@ -398,7 +452,7 @@ describe("value previews in the panel description", () => {
     });
 
     const lease = reg.lease();
-    await lease.acquire("x.playground.ts#seeded");
+    await acquireUri(lease, "x.playground.ts#seeded");
     await lease.release();
 
     const [described] = reg.describe(await reg.sources());
@@ -448,39 +502,37 @@ describe("combined execute inputs (specs/combined-execute-inputs.md §C.2)", () 
     });
 
     const lease = reg.lease();
-    const uri = "db.playground.ts#db";
-    // The shape combined mode expands `db` into: one `resource` node per tool
-    // member, all naming the same uri — exactly what `ResourceRegistry.lease`
-    // is supposed to memoize by identity rather than by how many times it's
-    // referenced.
-    const resourceNode = { kind: "resource" as const, uri };
+    // The shape combined mode expands `db` into: one `instance` node per tool
+    // member, all naming the same instance — created once, however many
+    // times it's referenced.
+    const instanceNode = { kind: "instance" as const, name: "db" };
     const executeInputs = {
       toolsContext: {
         kind: "object" as const,
         properties: {
           list_tasks: {
             kind: "object" as const,
-            properties: { db: resourceNode },
+            properties: { db: instanceNode },
           },
           create_task: {
             kind: "object" as const,
-            properties: { db: resourceNode },
+            properties: { db: instanceNode },
           },
           update_task: {
             kind: "object" as const,
-            properties: { db: resourceNode },
+            properties: { db: instanceNode },
           },
           post_message: {
             kind: "object" as const,
-            properties: { db: resourceNode },
+            properties: { db: instanceNode },
           },
         },
       },
     };
 
     const { executeValues } = await resolveExecutionInputs(
-      { executeInputs },
-      resourceUri => lease.acquire(resourceUri),
+      { executeInputs, resources: { db: { uri: "db.playground.ts#db" } } },
+      lease,
     );
 
     const ctx = executeValues.toolsContext as Record<string, { db: unknown }>;
@@ -582,8 +634,8 @@ describe("resource outputs (specs/resource-hierarchy.md §A, §C)", () => {
     });
 
     const lease = reg.lease();
-    const id = await lease.acquire("tasks.playground.ts#taskA.id");
-    const title = await lease.acquire("tasks.playground.ts#taskA.title");
+    const id = await acquireUri(lease, "tasks.playground.ts#taskA.id");
+    const title = await acquireUri(lease, "tasks.playground.ts#taskA.title");
     expect(id).toBe("tsk_a");
     expect(title).toBe("Fix it");
     expect((globalThis as any).__creates).toBe(1);
@@ -592,7 +644,7 @@ describe("resource outputs (specs/resource-hierarchy.md §A, §C)", () => {
     expect((globalThis as any).__disposes).toBe(1);
   });
 
-  it("fails naming the resource and the key when create() doesn't return a declared value", async () => {
+  it("fails naming the instance and the key when create() doesn't return a declared value", async () => {
     const { registry: reg } = registry({
       [p("tasks.playground.ts")]: `${importHelper}
         export const taskA = resource({
@@ -603,10 +655,8 @@ describe("resource outputs (specs/resource-hierarchy.md §A, §C)", () => {
 
     const lease = reg.lease();
     await expect(
-      lease.acquire("tasks.playground.ts#taskA.title"),
-    ).rejects.toThrow(
-      "Resource 'tasks.playground.ts#taskA': no output at 'title'",
-    );
+      acquireUri(lease, "tasks.playground.ts#taskA.title"),
+    ).rejects.toThrow("Resource instance 'taskA': no output 'title'");
   });
 
   it("records the instance's own receipt for an output reference too, not the output's bare value (specs/resource-arguments.md §E)", async () => {
@@ -630,12 +680,9 @@ describe("resource outputs (specs/resource-hierarchy.md §A, §C)", () => {
     });
 
     const lease = reg.lease();
-    await lease.acquire("tasks.playground.ts#taskA.id");
-    await lease.acquire("tasks.playground.ts#taskA.handle");
-    expect(lease.receipts()).toEqual({
-      "tasks.playground.ts#taskA.id": "taskA-receipt",
-      "tasks.playground.ts#taskA.handle": "taskA-receipt",
-    });
+    await acquireUri(lease, "tasks.playground.ts#taskA.id");
+    await acquireUri(lease, "tasks.playground.ts#taskA.handle");
+    expect(lease.receipts()).toEqual({ taskA: "taskA-receipt" });
   });
 
   it("previews each declared value of a static `value` resource through describe", async () => {
@@ -727,7 +774,7 @@ describe("resource groups (specs/resource-hierarchy.md §B, §D)", () => {
     });
 
     const lease = reg.lease();
-    expect(await lease.acquire("db.playground.ts#db")).toBe("db_1");
+    expect(await acquireUri(lease, "db.playground.ts#db")).toBe("db_1");
     await lease.release();
 
     const sources = await reg.sources();
@@ -779,7 +826,7 @@ describe("duplicate module instances", () => {
     // The dependency object came from the plain instance while the registry
     // registered the freshly-evaluated one. Resolving by identity alone would
     // fail here with "not exported from any playground module".
-    expect(await lease.acquire("odin.playground.ts#seeded")).toBe(
+    expect(await acquireUri(lease, "odin.playground.ts#seeded")).toBe(
       // …and the value has to come from the re-evaluated module: the instance
       // the dependency points at is a key, never something to create from, or
       // an edit to the resource would never take effect.
@@ -806,8 +853,8 @@ describe("duplicate module instances", () => {
     // Picked directly for one slot and pulled in as a dependency for another:
     // one `create()`, or the seeded row lands in a different database than the
     // one the tools query.
-    const direct: any = await lease.acquire("db.playground.ts#db");
-    const viaNeeds = await lease.acquire("odin.playground.ts#seeded");
+    const direct: any = await acquireUri(lease, "db.playground.ts#db");
+    const viaNeeds = await acquireUri(lease, "odin.playground.ts#seeded");
     expect(direct).toEqual({ tag: "fresh", created: 1 });
     expect(viaNeeds).toBe("tsk_fresh_1");
     await lease.release();
@@ -838,69 +885,6 @@ const schemaHelper = `
 `;
 
 describe("resource arguments (specs/resource-arguments.md)", () => {
-  it("runs create() once for two acquisitions with equal arguments, and twice for different ones", async () => {
-    const { registry: reg } = registry({
-      [p("x.playground.ts")]: `${importHelper}
-        ${schemaHelper}
-        globalThis.__creates = 0;
-        export const seeded = resource({
-          inputs: { title: str() },
-          create: ({ title }) => {
-            globalThis.__creates++;
-            return { value: title };
-          },
-        });`,
-    });
-
-    const lease = reg.lease();
-    const bindingFor = (title: string) => ({
-      key: JSON.stringify({ title }),
-      resolve: async () => ({ title }),
-    });
-
-    const a1 = await lease.acquire(
-      "x.playground.ts#seeded",
-      bindingFor("Todo app"),
-    );
-    const a2 = await lease.acquire(
-      "x.playground.ts#seeded",
-      bindingFor("Todo app"),
-    );
-    const b = await lease.acquire(
-      "x.playground.ts#seeded",
-      bindingFor("Other app"),
-    );
-
-    expect(a1).toBe("Todo app");
-    expect(a2).toBe("Todo app");
-    expect(b).toBe("Other app");
-    expect((globalThis as any).__creates).toBe(2);
-    await lease.release();
-  });
-
-  it("treats absent args and {} as the same key, and an unparameterized acquire as before this existed", async () => {
-    const { registry: reg } = registry({
-      [p("x.playground.ts")]: `${importHelper}
-        globalThis.__creates = 0;
-        export const thing = resource({
-          create: () => {
-            globalThis.__creates++;
-            return { value: globalThis.__creates };
-          },
-        });`,
-    });
-
-    const lease = reg.lease();
-    const noBinding = await lease.acquire("x.playground.ts#thing");
-    const emptyKey = await lease.acquire("x.playground.ts#thing", {
-      key: "",
-      resolve: async () => ({}),
-    });
-    expect(noBinding).toBe(emptyKey);
-    expect((globalThis as any).__creates).toBe(1);
-    await lease.release();
-  });
-
   it("passes resolved dependencies and validated arguments to create in one object", async () => {
     const { registry: reg } = registry({
       [p("x.playground.ts")]: `${importHelper}
@@ -914,15 +898,14 @@ describe("resource arguments (specs/resource-arguments.md)", () => {
     });
 
     const lease = reg.lease();
-    const result = await lease.acquire("x.playground.ts#seeded", {
-      key: JSON.stringify({ title: "hi" }),
+    const result = await acquireUri(lease, "x.playground.ts#seeded", {
       resolve: async () => ({ title: "hi" }),
     });
     expect(result).toBe("the-db:hi");
     await lease.release();
   });
 
-  it("fails naming the resource and the parameter when a value fails its schema, before create runs", async () => {
+  it("fails naming the instance and the parameter when a value fails its schema, before create runs", async () => {
     const { registry: reg } = registry({
       [p("x.playground.ts")]: `${importHelper}
         ${schemaHelper}
@@ -935,12 +918,11 @@ describe("resource arguments (specs/resource-arguments.md)", () => {
 
     const lease = reg.lease();
     await expect(
-      lease.acquire("x.playground.ts#seeded", {
-        key: JSON.stringify({ title: 42 }),
+      acquireUri(lease, "x.playground.ts#seeded", {
         resolve: async () => ({ title: 42 }),
       }),
     ).rejects.toThrow(
-      "Resource 'x.playground.ts#seeded': invalid value for 'title'",
+      "Resource 'seeded (x.playground.ts#seeded)': invalid value for 'title'",
     );
     expect((globalThis as any).__creates).toBe(0);
   });
@@ -956,15 +938,11 @@ describe("resource arguments (specs/resource-arguments.md)", () => {
     });
 
     const lease = reg.lease();
-    const value = await lease.acquire("x.playground.ts#seeded", {
-      key: "",
-      resolve: async () => ({}),
-    });
-    expect(value).toBe("triaged");
+    expect(await acquireUri(lease, "x.playground.ts#seeded")).toBe("triaged");
     await lease.release();
   });
 
-  it("does not resolve arguments at all for a binding that hits the memo", async () => {
+  it("resolves an instance's arguments once, however often it's acquired", async () => {
     const { registry: reg } = registry({
       [p("x.playground.ts")]: `${importHelper}
         ${schemaHelper}
@@ -976,35 +954,12 @@ describe("resource arguments (specs/resource-arguments.md)", () => {
 
     const lease = reg.lease();
     const resolve = vi.fn(async () => ({ title: "Todo app" }));
-    await lease.acquire("x.playground.ts#seeded", { key: "k1", resolve });
-    await lease.acquire("x.playground.ts#seeded", { key: "k1", resolve });
+    await lease.declare({
+      seeded: { uri: "x.playground.ts#seeded", binding: { resolve } },
+    });
+    await lease.acquire("seeded");
+    await lease.acquire("seeded");
     expect(resolve).toHaveBeenCalledTimes(1);
-    await lease.release();
-  });
-
-  it("keys receipts by uri with no arguments and by uri@key with them", async () => {
-    const { registry: reg } = registry({
-      [p("x.playground.ts")]: `${importHelper}
-        ${schemaHelper}
-        export const plain = resource({
-          create: () => ({ value: "p", receipt: "p-receipt" }),
-        });
-        export const seeded = resource({
-          inputs: { title: str() },
-          create: ({ title }) => ({ value: title, receipt: "tsk_" + title }),
-        });`,
-    });
-
-    const lease = reg.lease();
-    await lease.acquire("x.playground.ts#plain");
-    await lease.acquire("x.playground.ts#seeded", {
-      key: JSON.stringify({ title: "hi" }),
-      resolve: async () => ({ title: "hi" }),
-    });
-    expect(lease.receipts()).toEqual({
-      "x.playground.ts#plain": "p-receipt",
-      [`x.playground.ts#seeded@${JSON.stringify({ title: "hi" })}`]: "tsk_hi",
-    });
     await lease.release();
   });
 
@@ -1024,8 +979,7 @@ describe("resource arguments (specs/resource-arguments.md)", () => {
 
     const lease = reg.lease();
     await expect(
-      lease.acquire("x.playground.ts#bad", {
-        key: JSON.stringify({ title: "x" }),
+      acquireUri(lease, "x.playground.ts#bad", {
         resolve: async () => ({ title: "x" }),
       }),
     ).rejects.toThrow(/server-scoped.*arguments/i);
@@ -1047,7 +1001,7 @@ describe("resource arguments (specs/resource-arguments.md)", () => {
     );
 
     const lease = reg.lease();
-    await expect(lease.acquire("x.playground.ts#bad")).rejects.toThrow(
+    await expect(acquireUri(lease, "x.playground.ts#bad")).rejects.toThrow(
       /'bad': input 'title' must be a resource or a Standard Schema.*not a string/i,
     );
   });
@@ -1060,8 +1014,7 @@ describe("resource arguments (specs/resource-arguments.md)", () => {
 
     const lease = reg.lease();
     await expect(
-      lease.acquire("x.playground.ts#apiKey", {
-        key: JSON.stringify({ x: 1 }),
+      acquireUri(lease, "x.playground.ts#apiKey", {
         resolve: async () => ({ x: 1 }),
       }),
     ).rejects.toThrow(
@@ -1069,7 +1022,7 @@ describe("resource arguments (specs/resource-arguments.md)", () => {
     );
   });
 
-  it("fails with a cycle error naming both when an argument names the resource itself", async () => {
+  it("fails with a cycle error when an argument names the instance itself", async () => {
     const { registry: reg } = registry({
       [p("x.playground.ts")]: `${importHelper}
         ${schemaHelper}
@@ -1080,15 +1033,15 @@ describe("resource arguments (specs/resource-arguments.md)", () => {
     });
 
     const lease = reg.lease();
-    const selfBinding = {
-      key: "k",
-      resolve: async () => ({
-        title: await lease.acquire("x.playground.ts#self", selfBinding),
-      }),
-    };
-    await expect(
-      lease.acquire("x.playground.ts#self", selfBinding),
-    ).rejects.toThrow(/cycle/i);
+    await lease.declare({
+      self: {
+        uri: "x.playground.ts#self",
+        binding: {
+          resolve: async () => ({ title: await lease.acquire("self") }),
+        },
+      },
+    });
+    await expect(lease.acquire("self")).rejects.toThrow(/cycle/i);
   });
 
   it("fails with the lifetime error when a server-scoped resource is given a run-scoped resource as an argument", async () => {
@@ -1108,11 +1061,286 @@ describe("resource arguments (specs/resource-arguments.md)", () => {
 
     const lease = reg.lease();
     await expect(
-      lease.acquire("x.playground.ts#longLived", {
-        key: "",
-        resolve: async () => ({}),
-      }),
+      acquireUri(lease, "x.playground.ts#longLived"),
     ).rejects.toThrow(/run-scoped/);
+  });
+});
+
+describe("named instances (specs/resource-instances.md)", () => {
+  const tasksModule = `${importHelper}
+    ${schemaHelper}
+    export const db = resource({
+      inputs: { name: str({ default: "main" }) },
+      create: ({ name }) => ({ value: { name } }),
+    });
+    export const task = resource({
+      inputs: { db, title: str(), parentId: str({ default: "" }) },
+      create: ({ db, title, parentId }) => {
+        const id = "tsk_" + (globalThis.__created.length + 1);
+        globalThis.__created.push({ id, title, parentId, db: db.name });
+        return {
+          value: { id, title },
+          receipt: { id },
+          dispose: () => { globalThis.__disposed.push(id); },
+        };
+      },
+    });`;
+
+  beforeEach(() => {
+    (globalThis as any).__created = [];
+    (globalThis as any).__disposed = [];
+  });
+
+  const titled = (
+    title: string,
+    extra: () => Promise<Record<string, unknown>> = async () => ({}),
+  ) => ({ resolve: async () => ({ title, ...(await extra()) }) });
+
+  it("creates two instances of one resource even with identical arguments", async () => {
+    const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
+    const lease = reg.lease();
+    await lease.declare({
+      a: { uri: "x.playground.ts#task", binding: titled("Same") },
+      b: { uri: "x.playground.ts#task", binding: titled("Same") },
+    });
+    const a: any = await lease.acquire("a");
+    const b: any = await lease.acquire("b");
+    expect(a.id).not.toBe(b.id);
+    expect(await lease.acquire("a")).toBe(a);
+    expect((globalThis as any).__created).toHaveLength(2);
+    await lease.release();
+    expect((globalThis as any).__disposed).toEqual(
+      expect.arrayContaining([a.id, b.id]),
+    );
+  });
+
+  it("lets one instance take another instance of the same resource as an argument", async () => {
+    const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
+    const lease = reg.lease();
+    await lease.declare({
+      root: { uri: "x.playground.ts#task", binding: titled("Root") },
+      child: {
+        uri: "x.playground.ts#task",
+        binding: titled("Child", async () => ({
+          parentId: await lease.acquire("root", "id"),
+        })),
+      },
+    });
+    const child: any = await lease.acquire("child");
+    const root: any = await lease.acquire("root");
+    expect((globalThis as any).__created).toEqual([
+      { id: root.id, title: "Root", parentId: "", db: "main" },
+      { id: child.id, title: "Child", parentId: root.id, db: "main" },
+    ]);
+    await lease.release();
+  });
+
+  it("fails with a cycle error naming both when two instances take each other's output", async () => {
+    const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
+    const lease = reg.lease();
+    await lease.declare({
+      a: {
+        uri: "x.playground.ts#task",
+        binding: titled("A", async () => ({
+          parentId: await lease.acquire("b", "id"),
+        })),
+      },
+      b: {
+        uri: "x.playground.ts#task",
+        binding: titled("B", async () => ({
+          parentId: await lease.acquire("a", "id"),
+        })),
+      },
+    });
+    await expect(lease.acquire("a")).rejects.toThrow(
+      /cycle: a \(x\.playground\.ts#task\) → b \(x\.playground\.ts#task\) → a/i,
+    );
+  });
+
+  it("fails, rather than hanging, when instances acquired in parallel wait on each other", async () => {
+    const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
+    const lease = reg.lease();
+    await lease.declare({
+      a: {
+        uri: "x.playground.ts#task",
+        binding: titled("A", async () => ({
+          parentId: await lease.acquire("b", "id"),
+        })),
+      },
+      b: {
+        uri: "x.playground.ts#task",
+        binding: titled("B", async () => ({
+          parentId: await lease.acquire("a", "id"),
+        })),
+      },
+    });
+    // Each starts on its own path, so neither's chain holds the other.
+    const results = await Promise.allSettled([
+      lease.acquire("a"),
+      lease.acquire("b"),
+    ]);
+    expect(results.map(r => r.status)).toEqual(["rejected", "rejected"]);
+    expect(String((results[0] as PromiseRejectedResult).reason)).toMatch(
+      /cycle: .*→ .*→/i,
+    );
+    await lease.release();
+  });
+
+  it("fails, rather than hanging, on a cycle through a code-wired dependency", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        ${schemaHelper}
+        export const y = resource({
+          inputs: { ref: str() },
+          create: ({ ref }) => ({ value: { id: "y", ref } }),
+        });
+        export const x = resource({
+          inputs: { y },
+          create: () => ({ value: { id: "x" } }),
+        });`,
+    });
+    const lease = reg.lease();
+    await lease.declare({
+      x: { uri: "x.playground.ts#x" },
+      y: {
+        uri: "x.playground.ts#y",
+        binding: {
+          resolve: async () => ({ ref: await lease.acquire("x", "id") }),
+        },
+      },
+    });
+    const results = await Promise.allSettled([
+      lease.acquire("x"),
+      lease.acquire("y"),
+    ]);
+    expect(results.map(r => r.status)).toEqual(["rejected", "rejected"]);
+    expect(String((results[0] as PromiseRejectedResult).reason)).toMatch(
+      /cycle/i,
+    );
+    await lease.release();
+  });
+
+  it("creates nothing once released, so a creation still in flight can't make a second root", async () => {
+    const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
+    const lease = reg.lease();
+    let releaseNow!: () => void;
+    const released = new Promise<void>(resolve => {
+      releaseNow = resolve;
+    });
+    await lease.declare({
+      root: { uri: "x.playground.ts#task", binding: titled("Root") },
+      child: {
+        uri: "x.playground.ts#task",
+        binding: titled("Child", async () => {
+          // The run ends (another instance failed, say) while this one is
+          // still resolving its arguments.
+          await released;
+          return { parentId: await lease.acquire("root", "id") };
+        }),
+      },
+    });
+    await lease.acquire("root");
+    const child = lease.acquire("child");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await lease.release();
+    releaseNow();
+    await expect(child).rejects.toThrow(/already finished/);
+    // Refused, not a dispose that failed: nothing to warn about.
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    expect((globalThis as any).__created.map((t: any) => t.title)).toEqual([
+      "Root",
+    ]);
+    expect((globalThis as any).__disposed).toHaveLength(1);
+  });
+
+  it("wires a code dependency to the run's one declared instance of it, arguments and all", async () => {
+    const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
+    const lease = reg.lease();
+    await lease.declare({
+      staging: {
+        uri: "x.playground.ts#db",
+        binding: { resolve: async () => ({ name: "staging" }) },
+      },
+      t: { uri: "x.playground.ts#task", binding: titled("T") },
+    });
+    await lease.acquire("t");
+    expect((globalThis as any).__created[0].db).toBe("staging");
+    expect(await lease.acquire("staging")).toEqual({ name: "staging" });
+    await lease.release();
+  });
+
+  it("refuses a code dependency the run declares more than one instance of", async () => {
+    const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
+    const lease = reg.lease();
+    await lease.declare({
+      db1: { uri: "x.playground.ts#db" },
+      db2: { uri: "x.playground.ts#db" },
+      t: { uri: "x.playground.ts#task", binding: titled("T") },
+    });
+    await expect(lease.acquire("t")).rejects.toThrow(
+      /more than one instance of it \(db1, db2\)/,
+    );
+  });
+
+  it("refuses a server-scoped resource declared under two names", async () => {
+    const { registry: reg } = registry({
+      [p("x.playground.ts")]: `${importHelper}
+        export const shared = resource({ scope: "server", create: () => ({ value: 1 }) });`,
+    });
+    await expect(
+      reg.lease().declare({
+        one: { uri: "x.playground.ts#shared" },
+        two: { uri: "x.playground.ts#shared" },
+      }),
+    ).rejects.toThrow(/server-scoped.*'one' and 'two'/);
+  });
+
+  it("refuses an invalid name, an output uri, and a resource that doesn't exist", async () => {
+    const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
+    const lease = reg.lease();
+    await expect(
+      lease.declare({ "1st": { uri: "x.playground.ts#db" } }),
+    ).rejects.toThrow(/Invalid resource instance name '1st'/);
+    await expect(
+      lease.declare({ t: { uri: "x.playground.ts#task.id" } }),
+    ).rejects.toThrow(/names an output, not a resource/);
+    await expect(
+      lease.declare({ t: { uri: "x.playground.ts#nope" } }),
+    ).rejects.toThrow(/'x\.playground\.ts#nope' not found/);
+    await expect(lease.acquire("never")).rejects.toThrow(
+      "No resource instance named 'never'",
+    );
+  });
+
+  it("fails naming the instance when an output it doesn't have is read", async () => {
+    const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
+    const lease = reg.lease();
+    await lease.declare({
+      t: { uri: "x.playground.ts#task", binding: titled("T") },
+    });
+    await expect(lease.acquire("t", "nope")).rejects.toThrow(
+      "Resource instance 't': no output 'nope'",
+    );
+    await lease.release();
+  });
+
+  it("keys receipts by instance name", async () => {
+    const { registry: reg } = registry({ [p("x.playground.ts")]: tasksModule });
+    const lease = reg.lease();
+    await lease.declare({
+      first: { uri: "x.playground.ts#task", binding: titled("1") },
+      second: { uri: "x.playground.ts#task", binding: titled("2") },
+      main: { uri: "x.playground.ts#db" },
+    });
+    await lease.acquire("first");
+    await lease.acquire("second");
+    await lease.acquire("main");
+    expect(lease.receipts()).toEqual({
+      first: { id: "tsk_1" },
+      second: { id: "tsk_2" },
+    });
+    await lease.release();
   });
 });
 
@@ -1130,14 +1358,12 @@ describe("receipt round trip (specs/resource-arguments.md §E)", () => {
     });
 
     const fresh = reg.lease();
-    const freshValue = await fresh.acquire("x.playground.ts#seeded");
+    const freshValue = await acquireUri(fresh, "x.playground.ts#seeded");
     await fresh.release();
     expect(freshValue).toBe("tsk_new");
 
     const replay = reg.lease();
-    const replayValue = await replay.acquire("x.playground.ts#seeded", {
-      key: "",
-      resolve: async () => ({}),
+    const replayValue = await acquireUri(replay, "x.playground.ts#seeded", {
       receipt: { taskId: "tsk_abc123" },
     });
     await replay.release();
@@ -1146,26 +1372,6 @@ describe("receipt round trip (specs/resource-arguments.md §E)", () => {
       undefined,
       { taskId: "tsk_abc123" },
     ]);
-  });
-
-  it("does not widen the memo key — two references with equal receipts still resolve to one instance", async () => {
-    const { registry: reg } = registry({
-      [p("x.playground.ts")]: `${importHelper}
-        globalThis.__creates = 0;
-        export const seeded = resource({
-          create: (_inputs, receipt) => {
-            globalThis.__creates++;
-            return { value: "v", receipt: receipt ?? "r" };
-          },
-        });`,
-    });
-
-    const lease = reg.lease();
-    const binding = { key: "", resolve: async () => ({}), receipt: "r" };
-    await lease.acquire("x.playground.ts#seeded", binding);
-    await lease.acquire("x.playground.ts#seeded", binding);
-    expect((globalThis as any).__creates).toBe(1);
-    await lease.release();
   });
 
   it("still runs, mints, and records a new receipt when create ignores the one it was handed", async () => {
@@ -1178,13 +1384,11 @@ describe("receipt round trip (specs/resource-arguments.md §E)", () => {
     });
 
     const lease = reg.lease();
-    const value = await lease.acquire("x.playground.ts#seeded", {
-      key: "",
-      resolve: async () => ({}),
+    const value = await acquireUri(lease, "x.playground.ts#seeded", {
       receipt: "ignored",
     });
     expect(value).toBe(1);
-    expect(lease.receipts()).toEqual({ "x.playground.ts#seeded": "receipt-1" });
+    expect(lease.receipts()).toEqual({ seeded: "receipt-1" });
     await lease.release();
   });
 });
@@ -1198,12 +1402,12 @@ describe("failures in author-written resource code", () => {
         });`,
     });
 
-    const error = (await reg
-      .lease()
-      .acquire("x.playground.ts#broken")
-      .catch(e => e)) as Error;
+    const error = (await acquireUri(
+      reg.lease(),
+      "x.playground.ts#broken",
+    ).catch(e => e)) as Error;
     expect(error.message).toBe(
-      "Resource 'x.playground.ts#broken': create() failed — boom",
+      "Resource 'broken (x.playground.ts#broken)': create() failed — boom",
     );
     expect(error.cause).toBeInstanceOf(TypeError);
     expect((error.cause as Error).message).toBe("boom");
@@ -1221,12 +1425,11 @@ describe("failures in author-written resource code", () => {
         });`,
     });
 
-    const error = (await reg
-      .lease()
-      .acquire("x.playground.ts#db")
-      .catch(e => e)) as Error;
+    const error = (await acquireUri(reg.lease(), "x.playground.ts#db").catch(
+      e => e,
+    )) as Error;
     expect(error.message).toMatch(
-      /^Resource 'x\.playground\.ts#db': reset\(\) failed — /,
+      /^Resource 'db \(x\.playground\.ts#db\)': reset\(\) failed — /,
     );
     expect(error.cause).toBeInstanceOf(TypeError);
   });
@@ -1238,9 +1441,9 @@ describe("failures in author-written resource code", () => {
         export const top = resource({ inputs: { dep }, create: () => ({ value: 1 }) });`,
     });
 
-    await expect(reg.lease().acquire("x.playground.ts#top")).rejects.toThrow(
-      "Resource 'x.playground.ts#dep': create() failed — nope",
-    );
+    await expect(
+      acquireUri(reg.lease(), "x.playground.ts#top"),
+    ).rejects.toThrow("Resource 'x.playground.ts#dep': create() failed — nope");
   });
 });
 
@@ -1260,14 +1463,14 @@ describe("resource reset (specs/resource-arguments.md §F)", () => {
     });
 
     const first = reg.lease();
-    await first.acquire("x.playground.ts#db");
-    await first.acquire("x.playground.ts#db"); // same lease, same instance: no extra reset
+    await acquireUri(first, "x.playground.ts#db");
+    await acquireUri(first, "x.playground.ts#db"); // same lease, same instance: no extra reset
     await first.release();
     expect((globalThis as any).__creates).toBe(1);
     expect((globalThis as any).__resets).toBe(1);
 
     const second = reg.lease();
-    await second.acquire("x.playground.ts#db");
+    await acquireUri(second, "x.playground.ts#db");
     await second.release();
     expect((globalThis as any).__creates).toBe(1); // memoized: still one create()
     expect((globalThis as any).__resets).toBe(2); // reset again for the new lease
@@ -1283,7 +1486,7 @@ describe("resource reset (specs/resource-arguments.md §F)", () => {
     });
 
     const lease = reg.lease();
-    await lease.acquire("x.playground.ts#thing");
+    await acquireUri(lease, "x.playground.ts#thing");
     await lease.release();
     expect((globalThis as any).__resets).toBe(0);
   });
@@ -1302,12 +1505,12 @@ describe("resource reset (specs/resource-arguments.md §F)", () => {
     });
 
     const first = reg.lease();
-    await first.acquire("x.playground.ts#db");
+    await acquireUri(first, "x.playground.ts#db");
     (globalThis as any).__order.push("first-acquired");
 
     let secondAcquired = false;
     const second = reg.lease();
-    const secondAcquire = second.acquire("x.playground.ts#db").then(() => {
+    const secondAcquire = acquireUri(second, "x.playground.ts#db").then(() => {
       secondAcquired = true;
       (globalThis as any).__order.push("second-acquired");
     });
@@ -1344,13 +1547,13 @@ describe("resource reset (specs/resource-arguments.md §F)", () => {
     const leaseTwo = reg.lease();
 
     const oneDone = (async () => {
-      await leaseOne.acquire("a.playground.ts#res");
-      await leaseOne.acquire("b.playground.ts#res");
+      await acquireUri(leaseOne, "a.playground.ts#res");
+      await acquireUri(leaseOne, "b.playground.ts#res");
       await leaseOne.release();
     })();
     const twoDone = (async () => {
-      await leaseTwo.acquire("b.playground.ts#res");
-      await leaseTwo.acquire("a.playground.ts#res");
+      await acquireUri(leaseTwo, "b.playground.ts#res");
+      await acquireUri(leaseTwo, "a.playground.ts#res");
       await leaseTwo.release();
     })();
 
@@ -1393,7 +1596,7 @@ describe("resource reset (specs/resource-arguments.md §F)", () => {
         "x.playground.ts#task",
         "x.playground.ts#db",
       ].map(uri =>
-        lease.acquire(uri).then(value => {
+        acquireUri(lease, uri).then(value => {
           (globalThis as any).__order.push(uri);
           return value;
         }),
@@ -1426,16 +1629,16 @@ describe("resource reset (specs/resource-arguments.md §F)", () => {
     const leaseTwo = reg.lease();
     const oneDone = (async () => {
       await Promise.all([
-        leaseOne.acquire("b.playground.ts#res"),
-        leaseOne.acquire("a.playground.ts#res"),
-        leaseOne.acquire("b.playground.ts#res"),
+        acquireUri(leaseOne, "b.playground.ts#res"),
+        acquireUri(leaseOne, "a.playground.ts#res"),
+        acquireUri(leaseOne, "b.playground.ts#res"),
       ]);
       await leaseOne.release();
     })();
     const twoDone = (async () => {
       await Promise.all([
-        leaseTwo.acquire("a.playground.ts#res"),
-        leaseTwo.acquire("b.playground.ts#res"),
+        acquireUri(leaseTwo, "a.playground.ts#res"),
+        acquireUri(leaseTwo, "b.playground.ts#res"),
       ]);
       await leaseTwo.release();
     })();
@@ -1456,7 +1659,7 @@ describe("resource reset (specs/resource-arguments.md §F)", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const lease = reg.lease();
-      await lease.acquire("x.playground.ts#thing");
+      await acquireUri(lease, "x.playground.ts#thing");
       await lease.release();
       expect(warn).toHaveBeenCalledWith(expect.stringMatching(/run-scoped/i));
     } finally {

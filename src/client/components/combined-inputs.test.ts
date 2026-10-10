@@ -253,7 +253,7 @@ function odinInput(): ExecutionInput {
   ): ExecutionInput => ({
     kind: "object",
     properties: {
-      db: { kind: "resource", uri: ".evalution/playground/db.ts#db" },
+      db: { kind: "instance", name: "db" },
       workspaceId: {
         kind: "value",
         value: { kind: "primitive", value: "ws_internal_default" },

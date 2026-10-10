@@ -29,6 +29,7 @@ import type {
   ExecutionInput,
   NormalizedPrompt,
   PromptRef,
+  RunResources,
 } from "../shared/types.ts";
 
 /**
@@ -89,14 +90,17 @@ export async function runPrompt(
   const inputs: {
     functionInputs: ExecutionInput[];
     executeInputs: Record<string, ExecutionInput>;
+    resources?: RunResources;
   } = {
     functionInputs: [...(request.functionInputs ?? [])],
     executeInputs: { ...request.executeInputs },
+    ...(request.resources && { resources: { ...request.resources } }),
   };
 
   // The request is itself a complete set of bindings, so `input` references
-  // resolve against it (`specs/evals.md` §B.2.1). Unknown targets and cycles
-  // are refused before anything is created.
+  // resolve against it (`specs/evals.md` §B.2.1). Unknown targets — a slot
+  // the prompt lacks, an instance the run doesn't declare — and cycles are
+  // refused before anything is created.
   const bindings = namedBindings(prompt.functionParameters, inputs);
   const problems = inputReferenceProblems(bindings, prompt);
   if (problems.length > 0) {
@@ -133,9 +137,14 @@ export async function runPrompt(
   }
   const { functionParams, executeValues } = resolved;
   // What actually gets recorded on the trace: the request as sent, with each
-  // resource reference's receipt filled in from what this run's resolution
+  // resource instance's receipt filled in from what this run's resolution
   // produced — see `specs/resource-arguments.md` §K.
-  const recordedInputs = stampReceipts(inputs, resolved.receipts);
+  const recordedResources = stampReceipts(inputs.resources, resolved.receipts);
+  const recordedInputs = {
+    functionInputs: inputs.functionInputs,
+    executeInputs: inputs.executeInputs,
+    ...(recordedResources && { resources: recordedResources }),
+  };
 
   let settle!: () => void;
   const settled = new Promise<void>(resolve => {

@@ -103,18 +103,17 @@ export { LocalFileProvider } from "./file-provider-local.ts";
 export { MemoryFileProvider } from "./file-provider-memory.ts";
 export { OverlayFileProvider } from "./file-provider-overlay.ts";
 export {
-  canonicalArgumentKey,
   collectInputSlots,
   findInputCycle,
   type InputBindings,
   type InputSignature,
   type InputSlot,
   type InputSource,
+  type InstanceResolver,
   inputReferenceProblems,
   matchSourcesToSlots,
   namedBindings,
   type ResolutionContext,
-  type ResourceResolver,
   resolveExecutionInput,
   resolveExecutionInputs,
   stampReceipts,
@@ -166,6 +165,7 @@ export {
 } from "./prompt/playground/resource.ts";
 export {
   DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
+  type DeclaredInstance,
   type PlaygroundModuleError,
   type RegisteredCheck,
   type RegisteredResource,
@@ -249,6 +249,7 @@ export {
   VercelAISDKTelemetry,
   type VercelAISDKTelemetryOptions,
 } from "./sdk/vercel-ai-sdk/telemetry.ts";
+export { isValidInstanceName } from "./shared/instance-names.ts";
 export type {
   AddPromptContext,
   AddPromptField,
@@ -292,7 +293,9 @@ export type {
   QuestionsPromptUpdates,
   RebaseResult,
   ResourceInfo,
+  ResourceInstanceInput,
   ResourceScope,
+  RunResources,
   SourceSpan,
   Span,
   SpanContentPart,

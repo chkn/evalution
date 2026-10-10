@@ -22,5 +22,14 @@ export const bundledMigrations: MigrationMeta[] = [
       "\nCREATE INDEX `idx_eval_row_results_trace` ON `eval_row_results` (`trace_provider_id`,`trace_id`);",
       "\nCREATE INDEX `idx_eval_runs_eval` ON `eval_runs` (`eval_id`,`started_at`);"
     ]
+  },
+  {
+    "name": "20261009093329_soft_pandemic",
+    "hash": "6f73eb4f63048e9178c61e72d82312f4130f10129875644305d7b4185d018465",
+    "folderMillis": 1791538409000,
+    "bps": true,
+    "sql": [
+      "-- SPDX\u002DLicense-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nALTER TABLE `eval_row_results` ADD `row_resources` text;"
+    ]
   }
 ];

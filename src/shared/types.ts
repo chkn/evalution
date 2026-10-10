@@ -471,6 +471,14 @@ export interface ResourceInfo {
    * `specs/resource-arguments.md` §G.
    */
   parameters?: PropDefinition[];
+  /**
+   * The resource's code-wired dependencies — its resource-valued `inputs`
+   * entries — as input name → the dependency's {@link uri}. Only the
+   * resource itself carries this, and only for dependencies discovery
+   * registered. The panel lists them in its Resources section. See
+   * `specs/resource-instances.md` §D.
+   */
+  dependencies?: Record<string, string>;
 }
 
 /**
@@ -524,27 +532,17 @@ export type ExecutionInput =
    * any slot has yet.
    */
   | { kind: "object"; properties: Record<string, ExecutionInput> }
-  /** A code-defined resource, created by the provider at run time. */
+  /**
+   * One of the run's named resource instances ({@link RunResources}), or one
+   * of its outputs — created by the provider at run time, once per run
+   * however many places name it. See `specs/resource-instances.md` §A.
+   */
   | {
-      kind: "resource";
-      /** The resource's {@link ResourceInfo.uri}. */
-      uri: string;
-      /**
-       * Values for the resource's declared arguments, by parameter name.
-       * Absent when the resource takes none. Recursive — an argument may
-       * itself be a typed-in value, an object, another resource, or (later)
-       * a dataset cell — because those are exactly the variants this union
-       * already has. Never folded into `uri`: identity and binding change on
-       * different schedules. See `specs/resource-arguments.md` §C.
-       */
-      args?: Record<string, ExecutionInput>;
-      /**
-       * What this resource's `create()` produced. Recorded on every run
-       * (never sent by the panel); sent back only by a replay, so `create`
-       * can reconstruct rather than re-mint. See
-       * `specs/resource-arguments.md` §E.
-       */
-      receipt?: unknown;
+      kind: "instance";
+      /** The instance's name in the run's {@link RunResources}. */
+      name: string;
+      /** A top-level output of its value (`taskId`). Absent for the value itself. */
+      output?: string;
     }
   /**
    * A cell of the dataset row being run, by `DatasetField.id`. Only
@@ -567,6 +565,35 @@ export type ExecutionInput =
       /** The dotted slot path (`taskId`, `toolsContext.list_tasks.db`). */
       path: string;
     };
+
+/**
+ * One code-defined resource instance a run creates, whether or not any slot
+ * reads it — the run's resources are the instances it declares, by name. See
+ * `specs/resource-instances.md` §A.
+ */
+export interface ResourceInstanceInput {
+  /** The resource's root {@link ResourceInfo.uri} — never an output's. */
+  uri: string;
+  /**
+   * Values for the resource's declared arguments, by parameter name. Absent
+   * when it takes none. Recursive — an argument may be a typed-in value, an
+   * object, another instance's output, a dataset cell, or another slot.
+   */
+  args?: Record<string, ExecutionInput>;
+  /**
+   * What this instance's `create()` produced. Recorded on every run (never
+   * sent by the panel); sent back only by a replay, so `create` can
+   * reconstruct rather than re-mint. See `specs/resource-arguments.md` §E.
+   */
+  receipt?: unknown;
+}
+
+/**
+ * A run's named resource instances, by name — `[A-Za-z_][A-Za-z0-9_-]*`.
+ * Every one is created when the run starts, and {@link ExecutionInput}s of
+ * kind `instance` refer to them by name.
+ */
+export type RunResources = Record<string, ResourceInstanceInput>;
 
 /**
  * What the client knows about a check — a playground export made with
@@ -692,6 +719,8 @@ export interface ExecuteRequest {
   functionInputs?: ExecutionInput[];
   /** By name, keyed on {@link NormalizedPrompt.executeParameters} entries. */
   executeInputs?: Record<string, ExecutionInput>;
+  /** The run's named resource instances. See {@link RunResources}. */
+  resources?: RunResources;
 }
 
 /**

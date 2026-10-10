@@ -58,17 +58,12 @@ export function resourceName(uri: string): string {
   return hash >= 0 ? uri.slice(hash + 1) : uri;
 }
 
-/** A one-line summary of a resource's arguments: `title: "Milk", owner: db`. */
-export function previewArgs(
-  args: Record<string, ExecutionInput> | undefined,
-): string {
-  if (!args) return "";
-  return truncate(
-    Object.entries(args)
-      .map(([name, input]) => `${name}: ${previewCell(input)}`)
-      .join(", "),
-  );
-}
+/**
+ * How a cell of a kind this client doesn't know is shown — say, an inline
+ * `resource` node stored before named instances replaced it
+ * (`specs/resource-instances.md` §A.1).
+ */
+export const UNSUPPORTED_PREVIEW = "(unsupported)";
 
 /** A one-line preview of any cell. */
 export function previewCell(input: ExecutionInput): string {
@@ -77,16 +72,16 @@ export function previewCell(input: ExecutionInput): string {
       return truncate(previewPropValue(input.value));
     case "object":
       return "{…}";
-    case "resource": {
-      const args = previewArgs(input.args);
-      return args
-        ? `${resourceName(input.uri)}(${args})`
-        : resourceName(input.uri);
-    }
+    case "instance":
+      return input.output === undefined
+        ? input.name
+        : `${input.name}.${input.output}`;
     case "dataset":
       return `= column ${input.field}`;
     case "input":
       return `= ${input.half === "execute" ? "execute." : ""}${input.path}`;
+    default:
+      return UNSUPPORTED_PREVIEW;
   }
 }
 

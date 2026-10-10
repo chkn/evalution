@@ -11,41 +11,28 @@ import {
   isPrimitiveFieldType,
   type PrimitiveFieldType,
 } from "./dataset-fields.ts";
-import type { ExecutionInput, PropType, PropValue } from "./types.ts";
+import { isValidInstanceName } from "./instance-names.ts";
+import type {
+  ExecutionInput,
+  PropType,
+  PropValue,
+  RunResources,
+} from "./types.ts";
 
 /**
- * `input` without any resource receipt, at any depth.
+ * `resources` without any receipt.
  *
  * A receipt makes `create` reconstruct a *past* run's identity; a dataset row
  * is a recipe for new runs, so two rows keeping the same receipt would
  * collide on the id it names the moment the dataset is run.
  */
-export function stripReceipts(input: ExecutionInput): ExecutionInput {
-  switch (input.kind) {
-    case "resource": {
-      const { receipt: _receipt, args, ...rest } = input;
-      return args
-        ? {
-            ...rest,
-            args: Object.fromEntries(
-              Object.entries(args).map(([k, v]) => [k, stripReceipts(v)]),
-            ),
-          }
-        : rest;
-    }
-    case "object":
-      return {
-        kind: "object",
-        properties: Object.fromEntries(
-          Object.entries(input.properties).map(([k, v]) => [
-            k,
-            stripReceipts(v),
-          ]),
-        ),
-      };
-    default:
-      return input;
-  }
+export function stripReceipts(resources: RunResources): RunResources {
+  return Object.fromEntries(
+    Object.entries(resources).map(([name, { receipt: _receipt, ...spec }]) => [
+      name,
+      spec,
+    ]),
+  );
 }
 
 /** Thrown by {@link parseCell} for anything that isn't a storable cell. */
@@ -59,10 +46,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Checks that `value` is a well-formed {@link ExecutionInput} a dataset cell
- * may hold, and returns it with receipts removed.
+ * may hold, and returns it.
  *
- * The check is structural: `value` must be one of the `value`, `object`, or
- * `resource` variants, recursively. The `dataset` variant is refused — a row
+ * The check is structural: `value` must be one of the `value`, `object`,
+ * `instance` or `input` variants, recursively. The `dataset` variant is refused — a row
  * holds copies, not references to other rows. A `value`'s `PropValue` is only
  * checked for being an object with a `kind`; its full shape is the editor's
  * business, and it round-trips as JSON either way.
@@ -115,25 +102,17 @@ function parseInput(
         ),
       };
     }
-    case "resource": {
-      if (typeof value.uri !== "string" || value.uri === "") {
-        throw new InvalidCellError(`${path}.uri must be a non-empty string`);
+    case "instance": {
+      if (typeof value.name !== "string" || value.name === "") {
+        throw new InvalidCellError(`${path}.name must be a non-empty string`);
       }
-      if (value.args !== undefined && !isRecord(value.args)) {
-        throw new InvalidCellError(`${path}.args must be an object`);
+      if (value.output !== undefined && typeof value.output !== "string") {
+        throw new InvalidCellError(`${path}.output must be a string`);
       }
-      const args = value.args as Record<string, unknown> | undefined;
       return {
-        kind: "resource",
-        uri: value.uri,
-        ...(args && {
-          args: Object.fromEntries(
-            Object.entries(args).map(([k, v]) => [
-              k,
-              recurse(v, `${path}.args.${k}`),
-            ]),
-          ),
-        }),
+        kind: "instance",
+        name: value.name,
+        ...(value.output !== undefined && { output: value.output }),
       };
     }
     case "input": {
@@ -164,9 +143,62 @@ function parseInput(
       );
     default:
       throw new InvalidCellError(
-        `${path}.kind must be "value", "object", "resource", or "input"`,
+        `${path}.kind must be "value", "object", "instance", or "input"`,
       );
   }
+}
+
+/**
+ * Checks that `value` is a well-formed {@link RunResources} map — a dataset
+ * row's, or an eval's — and returns it with receipts removed. Each
+ * instance's `args` are checked as {@link parseCell} checks a cell, or, with
+ * `columns`, as {@link parseBinding} does. Names are checked for shape only;
+ * whether the `uri` names a real resource is the provider's business at run
+ * time. See `specs/resource-instances.md` §C.
+ *
+ * @param columns - Whether arguments may name a column of the row being run.
+ * @param path - Where `value` sits, for the error message.
+ * @throws {InvalidCellError} naming the first problem found.
+ */
+export function parseResources(
+  value: unknown,
+  {
+    columns = false,
+    path = "resources",
+  }: { columns?: boolean; path?: string } = {},
+): RunResources {
+  if (!isRecord(value)) {
+    throw new InvalidCellError(`${path} must be an object`);
+  }
+  const out: RunResources = {};
+  for (const [name, spec] of Object.entries(value)) {
+    const at = `${path}.${name}`;
+    if (!isValidInstanceName(name)) {
+      throw new InvalidCellError(
+        `${at}: a resource name uses letters, digits, '_' and '-', not starting with a digit or '-'`,
+      );
+    }
+    if (!isRecord(spec)) throw new InvalidCellError(`${at} must be an object`);
+    if (typeof spec.uri !== "string" || spec.uri === "") {
+      throw new InvalidCellError(`${at}.uri must be a non-empty string`);
+    }
+    if (spec.args !== undefined && !isRecord(spec.args)) {
+      throw new InvalidCellError(`${at}.args must be an object`);
+    }
+    const args = spec.args as Record<string, unknown> | undefined;
+    out[name] = {
+      uri: spec.uri,
+      ...(args && {
+        args: Object.fromEntries(
+          Object.entries(args).map(([k, v]) => [
+            k,
+            parseInput(v, `${at}.args.${k}`, columns),
+          ]),
+        ),
+      }),
+    };
+  }
+  return out;
 }
 
 /**

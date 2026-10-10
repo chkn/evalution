@@ -43,7 +43,7 @@ import type {
   DatasetField,
   DatasetRow,
   DatasetRowsOverview,
-  ExecutionInput,
+  DatasetRowUpdate,
   NormalizedPrompt,
   PromptID,
 } from "../../shared/types";
@@ -596,13 +596,18 @@ function DatasetView({
     if (!dataset || !linkedPrompt || !row) return;
     onOpenInPlayground(
       linkedPrompt,
-      panelFill(fromRow(dataset, row), linkedPrompt, {
-        type: "dataset",
-        description: `${dataset.name}, row ${index + 1}`,
-        providerId,
-        datasetId,
-        name: dataset.name,
-      }),
+      panelFill(
+        fromRow(dataset, row),
+        linkedPrompt,
+        {
+          type: "dataset",
+          description: `${dataset.name}, row ${index + 1}`,
+          providerId,
+          datasetId,
+          name: dataset.name,
+        },
+        row.resources,
+      ),
     );
   };
 
@@ -675,9 +680,8 @@ function DatasetView({
    * reloads the visible rows from the server, dropping whatever optimistic
    * edits are on them — any still saving refetch again when they land.
    */
-  const saveEdits = useCallback(
-    (edits: CellEdit[]) => {
-      const updates = groupEdits(edits);
+  const saveUpdates = useCallback(
+    (updates: DatasetRowUpdate[]) => {
       if (updates.length === 0) return;
       pager.patch(updates);
       setLoaded(n => n + 1);
@@ -690,18 +694,9 @@ function DatasetView({
     },
     [pager, providerId, datasetId, overview.rowCount],
   );
-
-  /** Sets or clears cells of one row, by field id — the details pane's edits. */
-  const saveCells = useCallback(
-    (rowId: string, cells: Record<string, ExecutionInput | null>) =>
-      saveEdits(
-        Object.entries(cells).map(([fieldId, cell]) => ({
-          rowId,
-          fieldId,
-          cell,
-        })),
-      ),
-    [saveEdits],
+  const saveEdits = useCallback(
+    (edits: CellEdit[]) => saveUpdates(groupEdits(edits)),
+    [saveUpdates],
   );
 
   /** A single edit, a paste over a range, or a fill — one batch either way. */
@@ -968,7 +963,9 @@ function DatasetView({
         dataset={dataset}
         row={selectedRow}
         onOpenTrace={onOpenTrace}
-        onChangeCells={cells => saveCells(selectedRow.id, cells)}
+        onChangeRow={update =>
+          saveUpdates([{ rowId: selectedRow.id, ...update }])
+        }
         sources={rowSources}
       />
     </>

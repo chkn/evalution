@@ -72,6 +72,8 @@ export const evalRowResults = sqliteTable(
     rowIndex: integer("row_index").notNull(),
     /** JSON: the row's cells as run. */
     rowCells: text("row_cells").notNull(),
+    /** JSON: the row's own resource instances as run, if it declared any. */
+    rowResources: text("row_resources"),
     traceProviderId: text("trace_provider_id"),
     traceId: text("trace_id"),
     version: text("version"),

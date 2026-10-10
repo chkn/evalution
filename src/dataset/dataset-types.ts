@@ -6,7 +6,12 @@
  * to exercise prompts. See `specs/datasets.md`.
  */
 
-import type { ExecutionInput, PropDefinition } from "../shared/types.ts";
+import type {
+  ExecutionInput,
+  PropDefinition,
+  ResourceInstanceInput,
+  RunResources,
+} from "../shared/types.ts";
 import type { PromptID } from "../trace/trace-types.ts";
 
 /**
@@ -76,8 +81,14 @@ export type DatasetRowSource =
  */
 export interface DatasetRow {
   id: string;
-  /** Field id → the input for that field. Never carries a receipt. */
+  /** Field id → the input for that field. */
   cells: Record<string, ExecutionInput>;
+  /**
+   * Resource instances this row's runs declare, by name — its cells (and an
+   * eval's bindings) may name them with `instance` references. Never carries
+   * a receipt. See `specs/resource-instances.md` §E.
+   */
+  resources?: RunResources;
   /** Where the row came from. */
   source?: DatasetRowSource;
   /** Creation timestamp (ms). */
@@ -91,29 +102,25 @@ export interface DatasetRow {
 export interface DatasetRowUpdate {
   rowId: string;
   cells: Record<string, ExecutionInput | null>;
+  /**
+   * The row's resource instances to set, by name, or `null` to remove one.
+   * Instances not named are left as they are.
+   */
+  resources?: Record<string, ResourceInstanceInput | null>;
 }
 
 /**
  * What one field's cells hold, beyond a single value — found in the rows,
- * not the schema: a field's `def` is the slot's type (`Db`), which says
- * nothing about which resource a row picked to fill it or what arguments
- * that resource took.
+ * not the schema: a field's `def` is the slot's type, which says nothing
+ * about the shape of the object a row typed in for it.
  */
 export interface DatasetFieldShape {
   /**
-   * The keys one level inside the field's cells: a `resource` cell's
-   * argument names, an `object` cell's property names, and the property
-   * names of a typed-in object value. Merged by name across rows, roughly in
-   * the order they first appear.
+   * The keys one level inside the field's cells: an `object` cell's property
+   * names, and the property names of a typed-in object value. Merged by name
+   * across rows, roughly in the order they first appear.
    */
   keys: string[];
-  /**
-   * Whether any of the field's cells is a resource. A table that splits the
-   * field into its keys still needs a column naming the resource, since
-   * different rows may name different ones; a field of plain objects needs
-   * no such column.
-   */
-  resource?: boolean;
 }
 
 /**

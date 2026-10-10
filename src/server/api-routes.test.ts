@@ -883,9 +883,9 @@ describe("dataset routes", () => {
       json("POST", {
         rows: [
           {
-            cells: {
-              "0": {
-                kind: "resource",
+            cells: { "0": { kind: "instance", name: "task" } },
+            resources: {
+              task: {
                 uri: "pg.ts#seededTask",
                 args: { title: text("Milk") },
                 // Stripped by the server: a row is a recipe, not a replay.
@@ -912,7 +912,8 @@ describe("dataset routes", () => {
     expect(got.dataset.name).toBe("Tickets");
     // An overview, not the rows: they're paged in separately.
     expect(got.rowCount).toBe(1);
-    expect(got.fields).toEqual({ "0": { keys: ["title"], resource: true } });
+    // A resource instance is named, not spelled out, so it has no keys.
+    expect(got.fields).toEqual({});
     expect(got.rows).toBeUndefined();
 
     const rows = (await (
@@ -920,10 +921,9 @@ describe("dataset routes", () => {
         `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/rows?offset=0&limit=10`,
       )
     ).json()) as any[];
-    expect(rows[0].cells["0"]).toEqual({
-      kind: "resource",
-      uri: "pg.ts#seededTask",
-      args: { title: text("Milk") },
+    expect(rows[0].cells["0"]).toEqual({ kind: "instance", name: "task" });
+    expect(rows[0].resources).toEqual({
+      task: { uri: "pg.ts#seededTask", args: { title: text("Milk") } },
     });
     expect(rows[0].source).toEqual({
       kind: "trace",

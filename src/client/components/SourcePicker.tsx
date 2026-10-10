@@ -37,6 +37,7 @@ export default function SourcePicker({
   editable,
   label,
   onChoose,
+  triggerLabel,
 }: {
   /** Every source offered to the prompt, unfiltered — for the tree's group/value context. */
   resources: readonly ResourceInfo[];
@@ -52,6 +53,12 @@ export default function SourcePicker({
   label: string;
   /** Called with the chosen uri, or `null` for "Custom" / no resource. */
   onChoose: (uri: string | null) => void;
+  /**
+   * Text for a labelled trigger button ("＋ Add resource") in place of the
+   * slot's `⋯` icon — a picker that adds something rather than filling a
+   * slot, so it has no "Custom" or placeholder row either.
+   */
+  triggerLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -94,23 +101,31 @@ export default function SourcePicker({
         )
       : undefined;
 
-  const headerKind = editable ? "custom" : !chosen ? "placeholder" : undefined;
+  const headerKind = triggerLabel
+    ? undefined
+    : editable
+      ? "custom"
+      : !chosen
+        ? "placeholder"
+        : undefined;
 
   return (
     <div className="pg-source-picker">
       <button
         ref={triggerRef}
         type="button"
-        className="pg-slot-source-wrap"
+        className={triggerLabel ? "pg-resources-add" : "pg-slot-source-wrap"}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Source for ${label}`}
-        title="Pick a resource"
+        aria-label={triggerLabel ? undefined : `Source for ${label}`}
+        title={triggerLabel ? undefined : "Pick a resource"}
         onClick={() => setOpen(o => !o)}
       >
-        <span className="pg-slot-source-icon" aria-hidden="true">
-          ⋯
-        </span>
+        {triggerLabel ?? (
+          <span className="pg-slot-source-icon" aria-hidden="true">
+            ⋯
+          </span>
+        )}
       </button>
 
       {open &&

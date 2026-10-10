@@ -3,26 +3,33 @@
 
 /**
  * Editing a dataset row in the details pane the way the execute panel edits
- * its slots: a field's cell becomes a {@link SlotSelection}, resources and
- * their arguments included, and folds back into a cell on commit. Pure. See
- * `specs/datasets.md` §P.2.
+ * its slots: a field's cell becomes a {@link SlotSelection}, the row's
+ * resource instances become the Resources section's state, and both fold back
+ * into a row update on commit. Pure. See `specs/datasets.md` §P.2 and
+ * `specs/resource-instances.md` §G.
  */
 
 import { committedCell } from "../../shared/dataset-cells";
 import { matchKey } from "../../shared/dataset-fields";
 import type {
   DatasetField,
+  DatasetRow,
+  DatasetRowUpdate,
   ExecutionInput,
   NormalizedPrompt,
   ResourceInfo,
 } from "../../shared/types";
 import {
   fromExecutionInput,
-  type ResourceArgs,
-  resourceArgsFor,
   type Selections,
+  type SlotSelection,
   toExecutionInput,
 } from "./execution-input-state";
+import {
+  fromWireResources,
+  type InstanceSelections,
+  toWireResources,
+} from "./run-resources-state";
 
 /** The resources a dataset's fields can be filled from, borrowed from a prompt. */
 export interface DatasetInputSources {
@@ -76,66 +83,92 @@ export function datasetInputSources(
   };
 }
 
-/** A row's editor state: one selection per field id, and the shared arguments. */
+/** A row's editor state: one selection per field id, and the row's resource instances. */
 export interface RowEditorState {
   selections: Selections;
-  resourceArgs: ResourceArgs;
+  instances: InstanceSelections;
 }
 
-/** The editor state for a row's `cells`, as the panel restores its own. */
+/** The editor state for `row`, as the panel restores its own. */
 export function rowEditorState(
-  cells: Record<string, ExecutionInput>,
-  resourcesByUri: ReadonlyMap<string, ResourceInfo>,
+  row: Pick<DatasetRow, "cells" | "resources">,
 ): RowEditorState {
   const selections: Selections = {};
-  const resourceArgs: ResourceArgs = {};
-  for (const [fieldId, cell] of Object.entries(cells)) {
-    const recovered = fromExecutionInput(cell, resourcesByUri);
-    selections[fieldId] = recovered.selection;
-    Object.assign(resourceArgs, recovered.resourceArgs);
+  for (const [fieldId, cell] of Object.entries(row.cells)) {
+    selections[fieldId] = fromExecutionInput(cell);
   }
-  return { selections, resourceArgs };
+  return { selections, instances: fromWireResources(row.resources) };
 }
 
 /**
- * The cells `state` would change, of the fields in `fieldIds`: field id →
- * the new cell, or `null` to clear it. A field whose cell is unchanged has
- * no entry, so an untouched row commits nothing.
+ * What `state` would change about `row`, of the fields in `fieldIds` and its
+ * resource instances: field id → the new cell, or `null` to clear it, and
+ * instance name → its new spec, or `null` to remove it. Anything unchanged
+ * has no entry, so an untouched row commits nothing.
  */
-export function rowCellChanges(
+export function rowChanges(
   fieldIds: readonly string[],
   state: RowEditorState,
-  cells: Record<string, ExecutionInput>,
-  resourcesByUri: ReadonlyMap<string, ResourceInfo>,
-): Record<string, ExecutionInput | null> {
-  const resolveArgs = (uri: string) =>
-    resourceArgsFor(uri, state.resourceArgs, resourcesByUri);
-  const changes: Record<string, ExecutionInput | null> = {};
+  row: Pick<DatasetRow, "cells" | "resources">,
+): Omit<DatasetRowUpdate, "rowId"> {
+  const cells: Record<string, ExecutionInput | null> = {};
   for (const fieldId of fieldIds) {
-    const input = toExecutionInput(state.selections[fieldId], resolveArgs);
+    const input = toExecutionInput(state.selections[fieldId]);
     const next =
       input?.kind === "value" ? committedCell(input.value) : (input ?? null);
-    if (canonical(next) !== canonical(cells[fieldId] ?? null)) {
-      changes[fieldId] = next;
+    if (canonical(next) !== canonical(row.cells[fieldId] ?? null)) {
+      cells[fieldId] = next;
     }
   }
-  return changes;
+
+  const before = row.resources ?? {};
+  const after = toWireResources(state.instances) ?? {};
+  const resources: NonNullable<DatasetRowUpdate["resources"]> = {};
+  for (const name of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const next = after[name] ?? null;
+    const { receipt: _, ...prev } = before[name] ?? { uri: "" };
+    if (canonical(next) !== canonical(before[name] ? prev : null)) {
+      resources[name] = next;
+    }
+  }
+  return {
+    cells,
+    ...(Object.keys(resources).length > 0 && { resources }),
+  };
 }
 
-/** Every resource chosen anywhere in `state`, as one comparable string. */
+/** Whether `changes` changes anything at all. */
+export function changesAnything(
+  changes: Omit<DatasetRowUpdate, "rowId">,
+): boolean {
+  return (
+    Object.keys(changes.cells).length > 0 ||
+    Object.keys(changes.resources ?? {}).length > 0
+  );
+}
+
+/**
+ * Everything in `state` that isn't typed — every source chosen in a slot or
+ * an argument, and which instances exist under which names — as one
+ * comparable string. A change to it commits at once, since there's nothing
+ * more to type; anything else is a draft until blur.
+ */
 export function chosenResources(state: RowEditorState): string {
   const resourcesOf = (selections: Selections) =>
     Object.fromEntries(
-      Object.entries(selections).map(([k, s]) => [k, s.resources ?? {}]),
+      Object.entries(selections).flatMap(([k, s]: [string, SlotSelection]) =>
+        s.resources && Object.keys(s.resources).length > 0
+          ? [[k, s.resources]]
+          : [],
+      ),
     );
   return canonical([
     resourcesOf(state.selections),
-    Object.fromEntries(
-      Object.entries(state.resourceArgs).map(([uri, args]) => [
-        uri,
-        resourcesOf(args),
-      ]),
-    ),
+    Object.entries(state.instances).map(([name, instance]) => [
+      name,
+      instance.uri,
+      resourcesOf(instance.args),
+    ]),
   ]);
 }
 

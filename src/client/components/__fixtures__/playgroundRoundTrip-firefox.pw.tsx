@@ -12,12 +12,20 @@ import { PlaygroundRoundTripHarness } from "./PlaygroundRoundTripHarness";
 // caret-position regressions only reproduce here, so the test is scoped to it.
 test.use({ browserName: "firefox" });
 
-async function mockApi(page: Page, updateLatencyMs = 80) {
+async function mockApi(
+  page: Page,
+  updateLatencyMs: number | ((call: number) => number) = 80,
+) {
+  let updateCalls = 0;
   await page.route("**/api/**", async route => {
     const url = route.request().url();
     if (url.includes("/update")) {
       const updates = route.request().postDataJSON();
-      await new Promise(r => setTimeout(r, updateLatencyMs));
+      const latency =
+        typeof updateLatencyMs === "number"
+          ? updateLatencyMs
+          : updateLatencyMs(updateCalls++);
+      await new Promise(r => setTimeout(r, latency));
       const messages = (updates.messages ?? []).map((m: any) => ({
         role: m.role,
         content: { kind: m.content.kind, value: m.content.value },
@@ -72,6 +80,32 @@ test("caret stays at the end while typing into a freshly added message (firefox)
   await page.waitForTimeout(300);
   await editor.press("i");
 
+  await expect(editor).toHaveText("Hi");
+  expect(await getCursorOffset(editor)).toBe(2);
+});
+
+test("a stale echo landing between keystrokes doesn't drop typed text (firefox)", async ({
+  mount,
+  page,
+}) => {
+  // Pins the race the timing-based test above only hits under load: the
+  // "Add message" echo (empty) lands after "H" is typed, while the "H" echo is
+  // still in flight when "i" is typed. Applying that stale echo would wipe "H".
+  await mockApi(page, call => (call === 0 ? 250 : 1000));
+
+  const component = await mount(<PlaygroundRoundTripHarness />);
+
+  await component.getByText("Add message").click();
+
+  const editor = component.locator(".token-editor").last();
+  await editor.click();
+  await editor.press("H");
+  await page.waitForTimeout(400);
+  await editor.press("i");
+
+  await expect(editor).toHaveText("Hi");
+  // Outlast the slow echoes, so none of them can still overwrite the text.
+  await page.waitForTimeout(1200);
   await expect(editor).toHaveText("Hi");
   expect(await getCursorOffset(editor)).toBe(2);
 });

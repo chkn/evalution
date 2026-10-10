@@ -40,7 +40,7 @@ export interface ListRowsOptions {
 }
 
 /** A row as {@link DatasetProvider.addRows} takes it: id and timestamp are minted. */
-export type NewDatasetRow = Pick<DatasetRow, "cells" | "source">;
+export type NewDatasetRow = Pick<DatasetRow, "cells" | "source" | "resources">;
 
 /** Thrown by a {@link DatasetProvider} when the dataset named doesn't exist. */
 export class DatasetNotFoundError extends Error {

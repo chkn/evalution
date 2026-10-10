@@ -395,9 +395,33 @@ describe("handleUpdateRows", () => {
 
   it("sets a resource in any field, as adding a row does", async () => {
     const { update, cells } = await seeded();
-    const resource: ExecutionInput = { kind: "resource", uri: "pg.ts#task" };
+    const resource: ExecutionInput = { kind: "instance", name: "task" };
     expect((await update({ "0": resource, "3": resource })).status).toBe(204);
     expect(await cells()).toMatchObject({ "0": resource, "3": resource });
+  });
+
+  it("sets and removes a row's resource instances by name, stripping receipts", async () => {
+    const { provider, dataset, row } = await seeded();
+    const updateResources = (resources: Record<string, unknown>) =>
+      handleUpdateRows(provider, dataset.id, {
+        updates: [{ rowId: row.id, cells: {}, resources }],
+      });
+    expect(
+      (
+        await updateResources({
+          db: { uri: "pg.ts#db" },
+          task: { uri: "pg.ts#task", receipt: "tsk_1" },
+        })
+      ).status,
+    ).toBe(204);
+    expect((await updateResources({ db: null })).status).toBe(204);
+    const [stored] = await provider.listRows(dataset.id);
+    expect(stored.resources).toEqual({ task: { uri: "pg.ts#task" } });
+
+    expect(
+      (await updateResources({ "1bad": { uri: "pg.ts#db" } })).status,
+    ).toBe(400);
+    expect((await updateResources({ db: { uri: "" } })).status).toBe(400);
   });
 
   it("rejects an unknown field or row, and a malformed body", async () => {

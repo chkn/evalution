@@ -56,9 +56,7 @@ import { evalProblems, prefillBindings } from "./eval-bindings";
 import { deleteRunQuestion, formatRate, passRate } from "./eval-summary";
 import {
   fromExecutionInput,
-  type ResourceArgs,
   readStoredInputs,
-  resourceArgsFor,
   type Selections,
   type SlotSelection,
   toExecutionInput,
@@ -69,12 +67,22 @@ import {
   columnUri,
   describePseudoSource,
   NEW_COLUMN_URI,
+  withInstanceSources,
   withPseudoSources,
 } from "./pseudo-sources";
 import {
-  computeClaims,
-  type ResourceArgsContext,
-} from "./resource-args-context";
+  type InstanceEdit,
+  instanceSourceContext,
+  ResourcesSection,
+} from "./ResourcesSection";
+import {
+  adoptCatalogPick,
+  fromWireResources,
+  type InstanceSelections,
+  referencesTo,
+  retargetSelections,
+  toWireResources,
+} from "./run-resources-state";
 import { formatTimestampCompact } from "./trace/format.ts";
 import {
   PromptLinkIcon,
@@ -124,30 +132,42 @@ interface EditorState {
   exec: Selections;
   /** Check id → its parameters' selections. */
   checks: Record<string, Selections>;
-  /** Shared by every slot and check parameter, as in the panel. */
-  args: ResourceArgs;
+  /**
+   * The eval's own resource instances, which every row gets — a row's own
+   * instance of the same name wins (`specs/resource-instances.md` §E).
+   */
+  instances: InstanceSelections;
 }
 
 /** Editor state recovered from saved bindings. */
 function editorStateOf(
   def: Pick<EvalDefinition, "inputs" | "checks">,
-  resourcesByUri: ReadonlyMap<string, ResourceInfo>,
 ): EditorState {
-  const args: ResourceArgs = {};
   const restore = (inputs: Record<string, ExecutionInput>) =>
     Object.fromEntries(
-      Object.entries(inputs).map(([name, input]) => {
-        const recovered = fromExecutionInput(input, resourcesByUri);
-        Object.assign(args, recovered.resourceArgs);
-        return [name, recovered.selection];
-      }),
+      Object.entries(inputs).map(([name, input]) => [
+        name,
+        fromExecutionInput(input),
+      ]),
     );
   return {
     fn: restore(def.inputs.functionInputs),
     exec: restore(def.inputs.executeInputs),
     checks: Object.fromEntries(def.checks.map(c => [c.id, restore(c.args)])),
-    args,
+    instances: fromWireResources(def.inputs.resources),
   };
+}
+
+/** `selections` as inputs by name, empty ones left out. */
+function foldSelections(
+  selections: Selections,
+): Record<string, ExecutionInput> {
+  return Object.fromEntries(
+    Object.entries(selections).flatMap(([k, s]) => {
+      const input = toExecutionInput(s);
+      return input ? [[k, input] as const] : [];
+    }),
+  );
 }
 
 /** A new check's id: short, and unique within the eval. */
@@ -194,7 +214,7 @@ function EvalView({
     fn: {},
     exec: {},
     checks: {},
-    args: {},
+    instances: {},
   });
   /** Bindings made for the user and not yet touched — see `Prefilled.matched`. */
   const [matched, setMatched] = useState<Set<string>>(new Set());
@@ -232,7 +252,9 @@ function EvalView({
         if (loadedId.current !== evalId) {
           loadedId.current = evalId;
           setName(loaded.name);
-          setState(editorStateOf(loaded, resourcesByUri));
+          const loadedState = editorStateOf(loaded);
+          stateRef.current = loadedState;
+          setState(loadedState);
         }
       })
       .catch(err => !cancelled && setLoadError(err.message));
@@ -306,35 +328,19 @@ function EvalView({
 
   /** The bindings `next` folds to. */
   const foldInputs = (next: EditorState): EvalInputs => {
-    const resolve = (uri: string) =>
-      resourceArgsFor(uri, next.args, resourcesByUri);
-    const fold = (sel: Selections) =>
-      Object.fromEntries(
-        Object.entries(sel).flatMap(([k, s]) => {
-          const input = toExecutionInput(s, resolve);
-          return input ? [[k, input] as const] : [];
-        }),
-      );
-    return { functionInputs: fold(next.fn), executeInputs: fold(next.exec) };
+    const resources = toWireResources(next.instances);
+    return {
+      functionInputs: foldSelections(next.fn),
+      executeInputs: foldSelections(next.exec),
+      ...(resources && { resources }),
+    };
   };
-  const foldChecks = (next: EditorState, checks: EvalCheck[]): EvalCheck[] => {
-    const resolve = (uri: string) =>
-      resourceArgsFor(uri, next.args, resourcesByUri);
-    return checks.map(c => ({
-      ...c,
-      args: Object.fromEntries(
-        Object.entries(next.checks[c.id] ?? {}).flatMap(([k, s]) => {
-          const input = toExecutionInput(s, resolve);
-          return input ? [[k, input] as const] : [];
-        }),
-      ),
-    }));
-  };
+  const foldChecks = (next: EditorState, checks: EvalCheck[]): EvalCheck[] =>
+    checks.map(c => ({ ...c, args: foldSelections(next.checks[c.id] ?? {}) }));
 
   // The latest state and definition, for a change that lands after an
   // `await` (a new column), when the render's own `state` may be stale.
   const stateRef = useRef(state);
-  stateRef.current = state;
   const defRef = useRef(def);
   defRef.current = def;
 
@@ -363,11 +369,12 @@ function EvalView({
       stored: readStoredInputs(prompt),
     });
     if (proposed.matched.length === 0) return;
-    const next = editorStateOf(
-      { inputs: proposed.inputs, checks: proposed.checks },
-      resourcesByUri,
-    );
+    const next = editorStateOf({
+      inputs: proposed.inputs,
+      checks: proposed.checks,
+    });
     setMatched(prev => new Set([...prev, ...proposed.matched]));
+    stateRef.current = next;
     setState(next);
     save({ inputs: proposed.inputs, checks: proposed.checks });
   }, [def?.id, prompt?.id, fields, checkInfos, checkIdsKey]);
@@ -396,14 +403,17 @@ function EvalView({
 
   // Stable while only values change, so typing doesn't remount editors.
   const sources = useStructurallyStable(
-    withPseudoSources(prompt?.inputSources, {
-      functionParameters,
-      executeParameters,
-      bindings: inputs,
-      fields: fields ?? [],
-      offerMismatches: true,
-      newColumn: true,
-    }),
+    withPseudoSources(
+      withInstanceSources(prompt?.inputSources, state.instances),
+      {
+        functionParameters,
+        executeParameters,
+        bindings: inputs,
+        fields: fields ?? [],
+        offerMismatches: true,
+        newColumn: true,
+      },
+    ),
   );
   const pseudoOptions = { functionParameters, executeParameters, fields };
   const checkSources = useStructurallyStable(
@@ -418,31 +428,43 @@ function EvalView({
     ),
   );
 
-  const claimed = computeClaims(
-    [
-      ...functionParameters.map(p => ({
-        path: `fn.${p.name}`,
-        label: p.name,
-        selection: state.fn[p.name],
-      })),
-      ...executeParameters.map(p => ({
-        path: `exec.${p.name}`,
-        label: p.name,
-        selection: state.exec[p.name],
-      })),
-    ],
-    state.args,
-    resourcesByUri,
-  );
-  const argsContextFor = (path: string): ResourceArgsContext => ({
-    resourceArgs: state.args,
-    onResourceArgsChange: (uri, next) =>
-      commit({ ...state, args: { ...state.args, [uri]: next } }),
-    resourceSlots: sources.resourceSlots ?? {},
-    claimed,
-    path,
-    depth: 0,
-    describePseudo: (uri, type) =>
+  const changeInstances = (
+    next:
+      | InstanceSelections
+      | ((latest: InstanceSelections) => InstanceSelections),
+    edit?: InstanceEdit,
+  ) => {
+    const prev = stateRef.current;
+    const instances = typeof next === "function" ? next(prev.instances) : next;
+    if (!edit) return commit({ ...prev, instances });
+    const [from, to] =
+      edit.kind === "rename" ? [edit.from, edit.to] : [edit.name, null];
+    commit({
+      fn: retargetSelections(prev.fn, from, to),
+      exec: retargetSelections(prev.exec, from, to),
+      checks: Object.fromEntries(
+        Object.entries(prev.checks).map(([id, sel]) => [
+          id,
+          retargetSelections(sel, from, to),
+        ]),
+      ),
+      instances,
+    });
+  };
+  const context = instanceSourceContext({
+    instances: state.instances,
+    catalogByUri: resourcesByUri,
+    rowsMayDeclare: true,
+    adopt: uri => {
+      const picked = adoptCatalogPick(
+        stateRef.current.instances,
+        uri,
+        resourcesByUri,
+      );
+      changeInstances(picked.instances);
+      return picked.uri;
+    },
+    describeOther: (uri, type) =>
       describePseudoSource(uri, type, pseudoOptions),
   });
 
@@ -498,7 +520,8 @@ function EvalView({
         });
       };
       if (relPath === undefined) {
-        commit({ ...state, [which]: { ...state[which], [name]: selection } });
+        const prev = stateRef.current;
+        commit({ ...prev, [which]: { ...prev[which], [name]: selection } });
         return;
       }
       void addColumn(
@@ -562,6 +585,7 @@ function EvalView({
     if (!def) return;
     const { [id]: _, ...rest } = state.checks;
     const nextState = { ...state, checks: rest };
+    stateRef.current = nextState;
     setState(nextState);
     save(
       {
@@ -622,7 +646,6 @@ function EvalView({
       onChange,
       sources: from,
       slots,
-      path,
     }: {
       key: string;
       label: string;
@@ -631,7 +654,6 @@ function EvalView({
       onChange: (selection: SlotSelection) => void;
       sources: PromptInputSources;
       slots: PromptInputSources["functionSlots"];
-      path: string;
     },
   ) => (
     <div className="pg-exec-param" key={key}>
@@ -658,7 +680,7 @@ function EvalView({
         onChange={onChange}
         resources={from.resources}
         slots={slots}
-        argsContext={argsContextFor(path)}
+        context={context}
       />
     </div>
   );
@@ -673,7 +695,6 @@ function EvalView({
         onChange: selection => changeSlot(which)(param.name, selection),
         sources,
         slots: which === "fn" ? sources.functionSlots : sources.executeSlots,
-        path: `${which}.${param.name}`,
       }),
     );
 
@@ -872,7 +893,6 @@ function EvalView({
                     changeCheckParam(check)(param.name, selection),
                   sources: checkSources[check.id] ?? EMPTY_SOURCES,
                   slots: checkSources[check.id]?.functionSlots ?? {},
-                  path: `check.${check.id}.${param.name}`,
                 }),
               )}
           </CheckEditor>
@@ -948,6 +968,26 @@ function EvalView({
         </>
       ) : (
         <p className="eval-empty">Choose a prompt.</p>
+      )}
+      <div className="pg-exec-section" />
+      {((prompt?.inputSources?.resources.length ?? 0) > 0 ||
+        Object.keys(state.instances).length > 0) && (
+        <ResourcesSection
+          instances={state.instances}
+          onChange={changeInstances}
+          sources={sources}
+          catalog={prompt?.inputSources?.resources ?? []}
+          referencedBy={instance =>
+            referencesTo(instance, state.instances, [
+              { selections: state.fn },
+              { selections: state.exec },
+              ...Object.values(state.checks).map(selections => ({
+                selections,
+              })),
+            ])
+          }
+          context={context}
+        />
       )}
       <div className="pg-exec-section" />
       <RunOptions choices={runChoices} />

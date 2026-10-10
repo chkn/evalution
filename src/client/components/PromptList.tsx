@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { NormalizedPrompt } from "../../shared/types";
 import { requireProviderId } from "../utils";
+import { PlusIcon } from "./trace/icons.tsx";
 
 interface PromptListProps {
   prompts: NormalizedPrompt[];
@@ -189,23 +190,6 @@ function SearchIcon() {
     >
       <circle cx="4.5" cy="4.5" r="3" />
       <line x1="7" y1="7" x2="9.5" y2="9.5" />
-    </svg>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 11 11"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-    >
-      <line x1="5.5" y1="1.5" x2="5.5" y2="9.5" />
-      <line x1="1.5" y1="5.5" x2="9.5" y2="5.5" />
     </svg>
   );
 }

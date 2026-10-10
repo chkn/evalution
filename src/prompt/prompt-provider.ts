@@ -13,6 +13,7 @@ import type {
   PromptStyle,
   PropDefinition,
   RebaseResult,
+  RunResources,
   VariationConflict,
   VariationId,
   VariationInfo,
@@ -50,6 +51,8 @@ export interface ExecuteOptions {
   inputs?: {
     functionInputs?: readonly ExecutionInput[];
     executeInputs?: Record<string, ExecutionInput>;
+    /** The run's named resource instances, receipts stamped. */
+    resources?: RunResources;
   };
   /**
    * Called once the run is over, successfully or not.
@@ -223,9 +226,9 @@ export interface ResolvedPromptInputs {
   /** Named values for {@link ExecuteOptions.executeValues}. */
   executeValues: Record<string, any>;
   /**
-   * Serializable summaries of what any resources produced, keyed by `uri`, so
-   * a trace can show the value a run used even though replaying it would mint
-   * a new one.
+   * Serializable summaries of what the run's resource instances produced,
+   * keyed by instance name, so a trace can show the value a run used and a
+   * replay can hand it back to `create`.
    */
   receipts?: Record<string, unknown>;
   /**
@@ -374,6 +377,7 @@ export interface PromptProvider<
     inputs: {
       functionInputs?: readonly ExecutionInput[];
       executeInputs?: Record<string, ExecutionInput>;
+      resources?: RunResources;
     },
     context?: ResolutionContext,
   ): Promise<ResolvedPromptInputs>;

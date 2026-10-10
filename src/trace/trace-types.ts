@@ -34,6 +34,11 @@ export interface PromptID {
   /** The unresolved execute-parameter inputs, keyed by parameter name. */
   executeInputs?: Record<string, unknown>;
   /**
+   * The run's named resource instances, by name, with the receipt each
+   * `create()` produced. See `specs/resource-instances.md` §F.
+   */
+  resources?: Record<string, unknown>;
+  /**
    * The prompt's parameter definitions as they stood when the run was
    * launched, so a replay can diff them against today's signature rather than
    * guess whether the recorded inputs still fit.

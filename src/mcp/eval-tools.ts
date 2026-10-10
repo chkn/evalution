@@ -20,6 +20,7 @@ import type {
   EvalCheckResult,
   EvalDefinition,
   EvalInputs,
+  EvalRowResult,
   EvalRun,
   EvalRunSummary,
   EvalSummary,
@@ -49,6 +50,7 @@ import type {
   ExecutionInput,
   NormalizedPrompt,
   PromptID,
+  RunResources,
 } from "../shared/types.ts";
 import {
   columnNames,
@@ -123,22 +125,9 @@ function bindingFrom(
         ),
       };
     }
-    case "resource": {
-      const args = binding.args as Record<string, unknown> | undefined;
-      return {
-        ...(binding as ExecutionInput & { kind: "resource" }),
-        ...(args && {
-          args: Object.fromEntries(
-            Object.entries(args).map(([k, v]) => [
-              k,
-              bindingFrom(v, fields, `${path}.args.${k}`),
-            ]),
-          ),
-        }),
-      };
-    }
     default:
-      // A typed-in value or a slot reference: checked when it's saved.
+      // A typed-in value, a slot reference or a resource instance: checked
+      // when it's saved.
       return binding as ExecutionInput;
   }
 }
@@ -162,13 +151,38 @@ function describeBinding(
         kind: "object",
         properties: describeBindings(input.properties, fields),
       };
-    case "resource":
-      return input.args
-        ? { ...input, args: describeBindings(input.args, fields) }
-        : input;
     default:
       return input;
   }
+}
+
+/**
+ * What a stored result ran with: its row's cells, and the row's own resource
+ * instances as they were then — which its `instance` cells name.
+ */
+export function resultInputs(
+  row: Pick<EvalRowResult, "rowCells" | "rowResources">,
+  fields: readonly DatasetField[],
+): { inputs: Record<string, unknown>; resources?: Record<string, unknown> } {
+  return {
+    inputs: describeCells(row.rowCells, fields),
+    ...(row.rowResources && {
+      resources: describeResources(row.rowResources, fields),
+    }),
+  };
+}
+
+/** A stored eval's resource instances as a tool shows them, their arguments described as bindings are. */
+function describeResources(
+  resources: RunResources,
+  fields: readonly DatasetField[] | undefined,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(resources).map(([name, spec]) => [
+      name,
+      spec.args ? { ...spec, args: describeBindings(spec.args, fields) } : spec,
+    ]),
+  );
 }
 
 function describeBindings(
@@ -195,12 +209,25 @@ function checkIdFor(uri: string, taken: Set<string>): string {
 const binding = z
   .record(z.string(), z.unknown())
   .describe(
-    'How to fill a slot: {column: "<dataset field name>"} for the row\'s value (a field sharing its name with an earlier one goes by its query column, e.g. "city#3"), {json: <plain JSON>} for a fixed value, {kind: "input", half: "function" | "execute", path} for what the run bound to one of the prompt\'s own slots, {kind: "object", properties: {name: binding}} to fill an object property by property, or {kind: "resource", uri, args?: {name: binding}}.',
+    'How to fill a slot: {column: "<dataset field name>"} for the row\'s value (a field sharing its name with an earlier one goes by its query column, e.g. "city#3"), {json: <plain JSON>} for a fixed value, {kind: "input", half: "function" | "execute", path} for what the run bound to one of the prompt\'s own slots, {kind: "object", properties: {name: binding}} to fill an object property by property, or {kind: "instance", name, output?} for one of the eval\'s (or each row\'s) named resource instances, or an output of it.',
   );
 
 const bindings = z
   .record(z.string(), binding)
   .describe("Parameter name → binding.");
+
+const resourceSpec = z
+  .object({
+    uri: z
+      .string()
+      .describe("The resource's uri (`<module>#<export>`), never an output's."),
+    args: bindings
+      .optional()
+      .describe("The resource's argument name → binding."),
+  })
+  .describe(
+    "A resource instance every row's run creates, whether or not a slot names it. A row's own instance of the same name replaces it.",
+  );
 
 const checkSpec = z.object({
   id: z
@@ -317,6 +344,9 @@ export function registerEvalTools(
       inputs: {
         functionInputs: describeBindings(def.inputs.functionInputs, fields),
         executeInputs: describeBindings(def.inputs.executeInputs, fields),
+        ...(def.inputs.resources && {
+          resources: describeResources(def.inputs.resources, fields),
+        }),
       },
       checks: def.checks.map(check => ({
         id: check.id,
@@ -344,6 +374,28 @@ export function registerEvalTools(
       else out[name] = bindingFrom(value, fields, `${path}.${name}`);
     }
     return out;
+  };
+
+  const resourcesFrom = (
+    given: Record<string, z.infer<typeof resourceSpec> | null> | undefined,
+    current: RunResources | undefined,
+    fields: readonly DatasetField[] | undefined,
+  ): RunResources | undefined => {
+    if (!given) return current;
+    const out: RunResources = { ...current };
+    for (const [name, spec] of Object.entries(given)) {
+      if (spec === null) {
+        delete out[name];
+        continue;
+      }
+      out[name] = {
+        uri: spec.uri,
+        ...(spec.args && {
+          args: bindingsFrom(spec.args, {}, fields, `resources.${name}.args`),
+        }),
+      };
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
   };
 
   const checksFrom = (
@@ -487,6 +539,12 @@ export function registerEvalTools(
         executeInputs: bindings
           .optional()
           .describe("Execute parameter name → binding."),
+        resources: z
+          .record(z.string(), resourceSpec)
+          .optional()
+          .describe(
+            "Named resource instances (letters, digits, '_' and '-') every row's run creates. Bindings name them with {kind: \"instance\", name, output?}.",
+          ),
         checks: z.array(checkSpec).optional(),
         autoBind: autoBindParam,
         providerId: providerIdParam("eval"),
@@ -515,6 +573,12 @@ export function registerEvalTools(
             "executeInputs",
           ),
         };
+        const resources = resourcesFrom(
+          args.resources,
+          undefined,
+          setting.fields,
+        );
+        if (resources) inputs.resources = resources;
         let checks = checksFrom(args.checks ?? [], setting.fields);
         if (args.autoBind !== false) {
           ({ inputs, checks } = autoBound(setting, inputs, checks));
@@ -553,6 +617,12 @@ export function registerEvalTools(
           .record(z.string(), binding.nullable())
           .optional()
           .describe("Execute parameter name → binding, or null to unbind."),
+        resources: z
+          .record(z.string(), resourceSpec.nullable())
+          .optional()
+          .describe(
+            "Resource instances to add or replace by name, or null to remove one; the rest are left.",
+          ),
         checks: z.array(checkSpec).optional(),
         autoBind: z
           .boolean()
@@ -593,6 +663,12 @@ export function registerEvalTools(
             "executeInputs",
           ),
         };
+        const resources = resourcesFrom(
+          args.resources,
+          current.inputs.resources,
+          setting.fields,
+        );
+        if (resources) inputs.resources = resources;
         let checks = args.checks
           ? checksFrom(args.checks, setting.fields)
           : current.checks;
@@ -619,6 +695,9 @@ export function registerEvalTools(
                 proposed.inputs.executeInputs,
                 args.executeInputs,
               ),
+              ...(proposed.inputs.resources && {
+                resources: proposed.inputs.resources,
+              }),
             };
           }
           if (args.checks) checks = proposed.checks;
@@ -830,7 +909,7 @@ export function registerEvalTools(
               armId: row.armId,
               status: row.status,
               ...(row.error && { error: row.error }),
-              inputs: describeCells(row.rowCells, fields ?? []),
+              ...resultInputs(row, fields ?? []),
               ...(row.traceId && {
                 traceProviderId: row.traceProviderId,
                 traceId: row.traceId,

@@ -12,8 +12,9 @@ import type {
   ResourceInfo,
 } from "../../shared/types";
 import { SELF, type SlotSelection } from "./execution-input-state";
-import { nestedField, type ResourceArgsContext } from "./resource-args-context";
+import { isPseudoUri } from "./pseudo-sources";
 import { SourceRow } from "./SourceRow";
+import type { SourceContext } from "./source-context";
 
 interface Props {
   /** The slot being edited. */
@@ -29,14 +30,8 @@ interface Props {
    * name, as computed provider-side.
    */
   slots: Record<string, string[]>;
-  /**
-   * Argument-editor state and how to change it, threaded down so a chosen
-   * resource with declared `parameters` can render its own argument form
-   * beneath the chip — see `SourceRow` and `specs/resource-arguments.md` §I.
-   * Absent (e.g. in a host that doesn't wire it up) simply means no resource
-   * here ever shows an argument form, whether or not it has parameters.
-   */
-  argsContext?: ResourceArgsContext;
+  /** How chips read, and how a catalog pick becomes an instance — see {@link SourceContext}. */
+  context?: SourceContext;
 }
 
 /**
@@ -60,7 +55,7 @@ export function ExecutionInputEditor({
   onChange,
   resources,
   slots,
-  argsContext,
+  context,
 }: Props) {
   const byUri = useMemo(
     () => new Map(resources.map(r => [r.uri, r])),
@@ -73,20 +68,23 @@ export function ExecutionInputEditor({
   // dropping focus after every character. `selection` changes on every
   // keystroke (it carries the typed value), so neither `chooseResource` nor
   // the plugin below may depend on it directly; a ref keeps both reading the
-  // latest `selection` anyway, just not as a dependency. `argsContext` is the
-  // same story and then some — its `resourceArgs` changes on every keystroke
-  // of *any* argument form anywhere in the panel, not just this slot's.
+  // latest `selection` anyway, just not as a dependency. `context` is the
+  // same story: hosts build it inline, so it's new on every render.
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
-  const argsContextRef = useRef(argsContext);
-  argsContextRef.current = argsContext;
+  const contextRef = useRef(context);
+  contextRef.current = context;
 
   const chooseResource = useCallback((path: string, uri: string | null) => {
     const current = selectionRef.current;
     const next = { ...(current.resources ?? {}) };
-    if (uri) next[path] = uri;
+    // A pick from the catalog adds an instance to the run; the slot holds a
+    // reference to it, like any other pick from "Resources in this run".
+    const adopt = contextRef.current?.adopt;
+    const chosen = uri && !isPseudoUri(uri) && adopt ? adopt(uri) : uri;
+    if (chosen) next[path] = chosen;
     else delete next[path];
     onChangeRef.current({ ...current, resources: next });
   }, []);
@@ -112,16 +110,6 @@ export function ExecutionInputEditor({
         match: matches,
         component: (props: ItemEditorProps) => {
           const path = relativePath(props.path);
-          const current = argsContextRef.current;
-          // `path` is this field's own position relative to the top-level
-          // slot (e.g. "list_tasks.db") — folded into the row's identity so
-          // it can't collide with an unrelated row that happens to share a
-          // name (see `ResourceArgsContext.path`). Empty only if the plugin
-          // ever matched the slot's own root item rather than a nested
-          // field, which isn't a case ts-proppy produces today; guarded
-          // rather than assumed.
-          const nestedContext =
-            current && path ? nestedField(current, path) : current;
           // A matched node that is itself an object (not opaque — an opaque
           // leaf never reaches this recursive call at all, since `SourceRow`
           // only renders `children` for an editable, i.e. non-opaque, type)
@@ -143,7 +131,7 @@ export function ExecutionInputEditor({
               matching={matchingFor(slots, propDef.name, props.path, byUri)}
               chosen={selectionRef.current.resources?.[path]}
               onChoose={uri => chooseResource(path, uri)}
-              argsContext={nestedContext}
+              context={contextRef.current}
             >
               <ItemEditor
                 propDef={props.propDef}
@@ -168,7 +156,7 @@ export function ExecutionInputEditor({
       matching={ownMatches}
       chosen={selection.resources?.[SELF]}
       onChoose={uri => chooseResource(SELF, uri)}
-      argsContext={argsContext}
+      context={context}
     >
       <ItemEditor
         propDef={propDef}

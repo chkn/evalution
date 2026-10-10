@@ -9,7 +9,6 @@ import {
   OPAQUE_DB,
   odinDbSlots,
   PARAMETERIZED_SEEDED_TASK,
-  SEEDED_RUN,
   SEEDED_TASK,
   sourcesFor,
   TASK_A,
@@ -21,6 +20,7 @@ import {
   TASKS_LIBRARY,
   TITLE_GENERATOR,
   TOOLS_CONTEXT_WITH_NESTED_DB,
+  TREE_TASK,
   WORKSPACE_RESOURCE,
 } from "./executionFixtures";
 import { PlaygroundExecutionHarness } from "./PlaygroundExecutionHarness";
@@ -36,6 +36,31 @@ import { PlaygroundExecutionHarness } from "./PlaygroundExecutionHarness";
 async function chooseSource(page: Page, trigger: Locator, label: string) {
   await trigger.click();
   await page.getByRole("menuitem", { name: label, exact: true }).click();
+}
+
+/**
+ * Like {@link chooseSource}, for a catalog entry filed under **New**: where
+ * the menu offers more than the catalog (the run's instances, another
+ * slot), the catalog sits one submenu down.
+ */
+async function chooseNew(page: Page, trigger: Locator, label: string) {
+  await trigger.click();
+  await page.getByRole("menuitem", { name: "New" }).click();
+  await page.getByRole("menuitem", { name: label, exact: true }).click();
+}
+
+/**
+ * Opens instance `instance`'s actions menu (the "⋯" on its card) and picks
+ * `item` from it. The menu is portal-rendered, so it's found via `page`.
+ */
+async function chooseInstanceAction(
+  page: Page,
+  scope: Locator,
+  instance: string,
+  item: string,
+) {
+  await scope.getByRole("button", { name: `Actions for ${instance}` }).click();
+  await page.getByRole("menu").getByRole("menuitem", { name: item }).click();
 }
 
 async function mockExecute(page: Page) {
@@ -328,131 +353,21 @@ test("picking a resource replaces the editor with a labelled chip, and it surviv
   );
 
   // A resource's value doesn't exist until the run creates it, so there is
-  // nothing to seed an editor with — the chip says what will happen instead.
+  // nothing to seed an editor with. The pick added an instance of it to the
+  // run, and the chip names that instance and what it is.
   const chip = component.locator(".pg-slot-chip");
+  await expect(chip).toContainText("◆ seededRootTask");
   await expect(chip).toContainText(SEEDED_TASK.label);
-  await expect(chip).toContainText("created for each run");
   await expect(component.locator("textarea, input")).toHaveCount(0);
+  await expect(
+    component.locator("[data-instance-card='seededRootTask']"),
+  ).toContainText("per run");
 
   await component.unmount();
   const remounted = await mount(<PlaygroundExecutionHarness {...props} />);
   await expect(remounted.locator(".pg-slot-chip")).toContainText(
     SEEDED_TASK.label,
   );
-});
-
-test("choosing the same resource for a second slot says 'same instance as' on its chip, even with no arguments to share", async ({
-  mount,
-  page,
-}) => {
-  // Regression: the "one binding per resource" note used to only exist for
-  // a resource with declared arguments — a plain resource (no `parameters`)
-  // picked twice showed two identical, unrelated-looking chips with no hint
-  // that a run creates it once and reuses it, not twice.
-  const component = await mount(
-    <PlaygroundExecutionHarness
-      functionParameters={[
-        {
-          name: "taskId",
-          type: { kind: "primitive", syntax: "TaskId", base: "string" },
-          optional: false,
-        },
-        {
-          name: "parentTaskId",
-          type: { kind: "primitive", syntax: "TaskId", base: "string" },
-          optional: false,
-        },
-      ]}
-      inputSources={sourcesFor(
-        { taskId: [SEEDED_TASK.uri], parentTaskId: [SEEDED_TASK.uri] },
-        [SEEDED_TASK],
-      )}
-    />,
-  );
-
-  const rows = component.locator(".pg-exec-param");
-  await chooseSource(
-    page,
-    rows.nth(0).locator(".pg-slot-source-wrap"),
-    SEEDED_TASK.label,
-  );
-  await chooseSource(
-    page,
-    rows.nth(1).locator(".pg-slot-source-wrap"),
-    SEEDED_TASK.label,
-  );
-
-  // The first (owning) selection keeps its normal scope note.
-  await expect(rows.nth(0).locator(".pg-slot-chip-note")).toContainText(
-    "created for each run",
-  );
-  // The second names the row it's the same instance as, instead — as a link
-  // (a chevron pointing up at it, not the word "above") rather than plain text.
-  const note = rows.nth(1).locator(".pg-slot-chip-note");
-  await expect(note).toContainText("same instance as");
-  await expect(note).not.toContainText("above");
-  const link = note.getByRole("button", { name: /taskId/ });
-  await expect(link).toContainText("▲");
-  await expect(link).toContainText("taskId");
-  // Neither row wastes space on an args form — this resource has none.
-  await expect(component.locator(".pg-args-form")).toHaveCount(0);
-});
-
-test("clicking a 'same instance as' link scrolls to and briefly highlights the row it points at", async ({
-  mount,
-  page,
-}) => {
-  const component = await mount(
-    <PlaygroundExecutionHarness
-      functionParameters={[
-        {
-          name: "taskId",
-          type: { kind: "primitive", syntax: "TaskId", base: "string" },
-          optional: false,
-        },
-        {
-          name: "parentTaskId",
-          type: { kind: "primitive", syntax: "TaskId", base: "string" },
-          optional: false,
-        },
-      ]}
-      inputSources={sourcesFor(
-        { taskId: [SEEDED_TASK.uri], parentTaskId: [SEEDED_TASK.uri] },
-        [SEEDED_TASK],
-      )}
-    />,
-  );
-
-  const rows = component.locator(".pg-exec-param");
-  await chooseSource(
-    page,
-    rows.nth(0).locator(".pg-slot-source-wrap"),
-    SEEDED_TASK.label,
-  );
-  await chooseSource(
-    page,
-    rows.nth(1).locator(".pg-slot-source-wrap"),
-    SEEDED_TASK.label,
-  );
-
-  const ownerSlot = rows.nth(0).locator(".pg-slot");
-  await expect(ownerSlot).not.toHaveClass(/pg-row-highlight/);
-
-  await rows
-    .nth(1)
-    .locator(".pg-slot-chip-note")
-    .getByRole("button", { name: /taskId/ })
-    .click();
-
-  // The owning row (not the one clicked) is the one that flashes.
-  await expect(ownerSlot).toHaveClass(/pg-row-highlight/);
-  await expect(rows.nth(1).locator(".pg-slot")).not.toHaveClass(
-    /pg-row-highlight/,
-  );
-  // And the flash is temporary, not a lasting state change.
-  await expect(ownerSlot).not.toHaveClass(/pg-row-highlight/, {
-    timeout: 2000,
-  });
 });
 
 test("a resource the server already has a value for previews it, read-only, through the slot's own editor", async ({
@@ -541,8 +456,9 @@ test("an opaque slot with a matching resource makes the picker its only control"
   await expect(page.getByRole("menuitem")).toHaveText([DB_RESOURCE.label]);
 
   await page.getByRole("menuitem", { name: DB_RESOURCE.label }).click();
-  await expect(component.locator(".pg-slot-chip")).toContainText(
-    "created once per server",
+  await expect(component.locator(".pg-slot-chip")).toContainText("◆ db");
+  await expect(component.locator("[data-instance-card='db']")).toContainText(
+    "shared",
   );
 });
 
@@ -954,20 +870,16 @@ test.describe("SourcePicker (specs/resource-hierarchy.md §E)", () => {
       .getByRole("menuitem", { name: TASK_A_ID.label, exact: true })
       .click();
 
-    // Task A has three matching outputs, so the dropdown row that chose this
-    // one was itself labelled `"${TASK_A.label} → ${TASK_A_ID.label}"` — the
-    // chip repeats that same composite, arrow and all, now that the tree
-    // (and its breadcrumb) is no longer on screen to say which task this is.
+    // The pick added an instance of Task A, and the chip names its output
+    // as `instance.output`, with the resource it's an instance of.
     const chip = component.locator(".pg-slot-chip");
-    await expect(chip).toHaveText(
-      `${TASK_A.label} → ${TASK_A_ID.label}created for each run`,
-    );
+    await expect(chip).toHaveText(`◆ taskA.id${TASK_A.label}`);
     await expect(component.locator("textarea, input")).toHaveCount(0);
 
     await component.unmount();
     const remounted = await mount(taskRefHarness("task-picker-prompt"));
-    await expect(remounted.locator(".pg-slot-chip")).toContainText(
-      `${TASK_A.label} → ${TASK_A_ID.label}`,
+    await expect(remounted.locator(".pg-slot-chip")).toHaveText(
+      `◆ taskA.id${TASK_A.label}`,
     );
   });
 
@@ -982,7 +894,7 @@ test.describe("SourcePicker (specs/resource-hierarchy.md §E)", () => {
     // The row itself is labelled "Resource → Value" (its one declared value
     // collapsed the submenu away, same as Task A's narrowed-down one did) —
     // and it's still that value being chosen underneath, so the chip
-    // afterward names the same pair.
+    // afterward names that output of the new instance.
     const taskBRow = page.getByRole("menuitem", {
       name: `${TASK_B.label} → ${TASK_B_ID.label}`,
       exact: true,
@@ -991,7 +903,7 @@ test.describe("SourcePicker (specs/resource-hierarchy.md §E)", () => {
     await taskBRow.click();
 
     await expect(component.locator(".pg-slot-chip")).toHaveText(
-      `${TASK_B.label} → ${TASK_B_ID.label}created for each run`,
+      `◆ taskB.id${TASK_B.label}`,
     );
   });
 
@@ -1169,62 +1081,6 @@ test.describe("resource arguments (specs/resource-arguments.md §I, §J)", () =>
     await expect(remountedForm.locator("select")).toHaveValue("open");
   });
 
-  test("choosing the same resource for a second slot marks its chip 'same instance as' instead of repeating the form", async ({
-    mount,
-    page,
-  }) => {
-    const component = await mount(
-      <PlaygroundExecutionHarness
-        functionParameters={[
-          {
-            name: "taskId",
-            type: { kind: "primitive", syntax: "TaskId", base: "string" },
-            optional: false,
-          },
-          {
-            name: "taskTitle",
-            type: { kind: "primitive", syntax: "string", base: "string" },
-            optional: false,
-          },
-        ]}
-        inputSources={sourcesFor(
-          {
-            taskId: [PARAMETERIZED_SEEDED_TASK.uri],
-            taskTitle: [PARAMETERIZED_SEEDED_TASK.uri],
-          },
-          [PARAMETERIZED_SEEDED_TASK, TITLE_GENERATOR],
-        )}
-      />,
-    );
-
-    const rows = component.locator(".pg-exec-param");
-    await chooseSource(
-      page,
-      rows.nth(0).locator(".pg-slot-source-wrap"),
-      PARAMETERIZED_SEEDED_TASK.label,
-    );
-    const firstForm = rows.nth(0).locator(".pg-args-form").first();
-    await firstForm.locator("textarea, input").first().fill("Shared title");
-
-    await chooseSource(
-      page,
-      rows.nth(1).locator(".pg-slot-source-wrap"),
-      PARAMETERIZED_SEEDED_TASK.label,
-    );
-
-    // The second selection doesn't get its own editable form — its chip
-    // says it's the same instance as the row that owns it, and that's it:
-    // no form, no extra vertical space for one.
-    const note = rows.nth(1).locator(".pg-slot-chip-note");
-    await expect(note).toContainText("same instance as");
-    await expect(note.getByRole("button", { name: /taskId/ })).toBeVisible();
-    await expect(rows.nth(1).locator(".pg-args-form")).toHaveCount(0);
-    // The first row's own value is untouched by the second selection.
-    await expect(firstForm.locator("textarea, input").first()).toHaveValue(
-      "Shared title",
-    );
-  });
-
   test("the nested title argument offers Title generator as a source, and picking it shows a chip", async ({
     mount,
     page,
@@ -1255,83 +1111,282 @@ test.describe("resource arguments (specs/resource-arguments.md §I, §J)", () =>
     const form = component.locator(".pg-args-form").first();
     const titleTrigger = form.locator(".pg-slot-source-wrap").first();
     await expect(titleTrigger).toBeVisible();
-    await chooseSource(page, titleTrigger, TITLE_GENERATOR.label);
+    // Beside the prompt's own `taskId` slot, which fits a string too.
+    await chooseNew(page, titleTrigger, TITLE_GENERATOR.label);
     await expect(form.locator(".pg-slot-chip").first()).toContainText(
       TITLE_GENERATOR.label,
     );
   });
+});
 
-  test("a prompt's own taskId slot and a different resource's own taskId argument don't collide just because they share a name", async ({
+test.describe("resource instances (specs/resource-instances.md §G)", () => {
+  const TASK_ID = {
+    name: "taskId",
+    type: {
+      kind: "primitive" as const,
+      syntax: "TaskId",
+      base: "string" as const,
+    },
+    optional: false,
+  };
+  const PARENT_TASK_ID = { ...TASK_ID, name: "parentTaskId" };
+
+  /** The section's card for instance `name`. */
+  const card = (scope: Locator, name: string) =>
+    scope.locator(`[data-instance-card="${name}"]`);
+
+  /** Adds an instance of the resource labelled `label` from the section's own picker. */
+  async function addResource(page: Page, scope: Locator, label: string) {
+    await scope.getByRole("button", { name: "＋ Add resource" }).click();
+    await page.getByRole("menuitem", { name: label, exact: true }).click();
+  }
+
+  test("a resource added with no slot shows as unbound, and is sent with the run", async ({
     mount,
     page,
   }) => {
-    // Regression: `SEEDED_RUN`'s own argument happens to be named `taskId`,
-    // the same as the prompt's own top-level parameter — the bare-name
-    // ownership check this replaced treated those as the same row, showing
-    // the form under *both* instead of one owning it and the other pointing
-    // back. See `ResourceArgsContext.path`.
+    const bodies: unknown[] = [];
+    await page.route("**/api/**", route => {
+      if (route.request().method() === "POST") {
+        bodies.push(route.request().postDataJSON());
+      }
+      return route.fulfill({
+        json: { traceId: "t1", tracerProviderId: "p1", rootSpanId: "s1" },
+      });
+    });
     const component = await mount(
       <PlaygroundExecutionHarness
-        functionParameters={[
-          {
-            name: "taskId",
-            type: { kind: "primitive", syntax: "TaskId", base: "string" },
-            optional: false,
-          },
-          {
-            name: "run",
-            type: { kind: "opaque", syntax: "SeededRun" },
-            optional: false,
-          },
-        ]}
+        functionParameters={[]}
+        inputSources={sourcesFor({}, [SEEDED_TASK])}
+      />,
+    );
+    const resources = component.getByRole("region", { name: "Resources" });
+    await addResource(page, resources, SEEDED_TASK.label);
+
+    await expect(card(resources, "seededRootTask")).toContainText(
+      "not bound to a slot: runs for its side effects",
+    );
+
+    await component.getByRole("button", { name: "▶ Run" }).click();
+    await expect
+      .poll(() => bodies.at(-1))
+      .toMatchObject({
+        resources: { seededRootTask: { uri: SEEDED_TASK.uri } },
+      });
+  });
+
+  test("picking from New adds an instance and binds it; a second slot can reuse it", async ({
+    mount,
+    page,
+  }) => {
+    const component = await mount(
+      <PlaygroundExecutionHarness
+        functionParameters={[TASK_ID, PARENT_TASK_ID]}
         inputSources={sourcesFor(
-          {
-            taskId: [PARAMETERIZED_SEEDED_TASK.uri],
-            run: [SEEDED_RUN.uri],
-          },
-          [PARAMETERIZED_SEEDED_TASK, SEEDED_RUN],
-          "functionSlots",
-          {
-            [SEEDED_RUN.uri]: { taskId: [PARAMETERIZED_SEEDED_TASK.uri] },
-          },
+          { taskId: [SEEDED_TASK.uri], parentTaskId: [SEEDED_TASK.uri] },
+          [SEEDED_TASK],
         )}
       />,
     );
-
     const rows = component.locator(".pg-exec-param");
-    // Select seededTask for the prompt's own taskId slot first.
+    const resources = component.getByRole("region", { name: "Resources" });
+
+    // With no instances yet, the catalog is all there is: no New to open.
     await chooseSource(
       page,
       rows.nth(0).locator(".pg-slot-source-wrap"),
-      PARAMETERIZED_SEEDED_TASK.label,
+      SEEDED_TASK.label,
     );
-    // Then select seededRun for `run`, and seededTask again for *its* own
-    // `taskId` argument.
-    await chooseSource(
-      page,
-      rows.nth(1).locator(".pg-slot-source-wrap"),
-      SEEDED_RUN.label,
+    await expect(card(resources, "seededRootTask")).toContainText("→ taskId");
+
+    // Now the run's instance comes first, and the catalog sits under New.
+    await rows.nth(1).locator(".pg-slot-source-wrap").click();
+    await expect(page.getByRole("menuitem")).toHaveText([
+      "✓Custom",
+      "seededRootTask",
+      "New▸",
+      "= taskId",
+    ]);
+    await page.getByRole("menuitem", { name: "seededRootTask" }).click();
+
+    await expect(rows.nth(1).locator(".pg-slot-chip")).toContainText(
+      "◆ seededRootTask",
     );
-    const runForm = rows.nth(1).locator(".pg-args-form").first();
-    await chooseSource(
-      page,
-      runForm.locator(".pg-slot-source-wrap").first(),
-      PARAMETERIZED_SEEDED_TASK.label,
+    // Still one instance, which both slots name.
+    await expect(resources.locator("[data-instance-card]")).toHaveCount(1);
+    await expect(card(resources, "seededRootTask")).toContainText(
+      "→ taskId, parentTaskId",
     );
 
-    // Exactly one editable seededTask form exists (title + status) — the
-    // prompt's own taskId slot owns it.
-    await expect(rows.nth(0).locator(".pg-args-form .pg-args-name")).toHaveText(
-      ["title", "status"],
+    // Picking from New again is a second, separate instance.
+    await rows.nth(1).locator(".pg-slot-source-wrap").click();
+    await page.getByRole("menuitem", { name: "New" }).click();
+    await page
+      .getByRole("menuitem", { name: SEEDED_TASK.label, exact: true })
+      .click();
+    await expect(rows.nth(1).locator(".pg-slot-chip")).toContainText(
+      "◆ seededRootTask2",
     );
-    // seededRun's own row shows only its own argument ("taskId"), whose chip
-    // says it's the same instance as the prompt's own taskId row — not a
-    // second title/status form nested inside it.
-    await expect(rows.nth(1).locator(".pg-args-name")).toHaveText(["taskId"]);
-    const nestedNote = runForm.locator(".pg-slot-chip-note");
-    await expect(nestedNote).toContainText("same instance as");
+    await expect(card(resources, "seededRootTask")).toContainText("→ taskId");
+  });
+
+  test("clicking an instance's chip scrolls to and briefly highlights its card", async ({
+    mount,
+    page,
+  }) => {
+    const component = await mount(
+      <PlaygroundExecutionHarness
+        functionParameters={[TASK_ID]}
+        inputSources={sourcesFor({ taskId: [SEEDED_TASK.uri] }, [SEEDED_TASK])}
+      />,
+    );
+    await chooseSource(
+      page,
+      component.locator(".pg-slot-source-wrap"),
+      SEEDED_TASK.label,
+    );
+    const target = card(component, "seededRootTask");
+    await expect(target).not.toHaveClass(/pg-row-highlight/);
+
+    await component
+      .locator(".pg-slot-chip")
+      .getByRole("button", { name: /seededRootTask/ })
+      .click();
+    await expect(target).toHaveClass(/pg-row-highlight/);
+    // The flash is temporary, not a lasting state change.
+    await expect(target).not.toHaveClass(/pg-row-highlight/, {
+      timeout: 2000,
+    });
+  });
+
+  test("duplicating and then renaming an instance updates every chip that names it", async ({
+    mount,
+    page,
+  }) => {
+    const props = {
+      functionParameters: [TASK_ID],
+      inputSources: sourcesFor({ taskId: [PARAMETERIZED_SEEDED_TASK.uri] }, [
+        PARAMETERIZED_SEEDED_TASK,
+      ]),
+      promptId: "instances-rename-prompt",
+    };
+    const component = await mount(<PlaygroundExecutionHarness {...props} />);
+    const resources = component.getByRole("region", { name: "Resources" });
+    await chooseSource(
+      page,
+      component.locator(".pg-slot-source-wrap"),
+      PARAMETERIZED_SEEDED_TASK.label,
+    );
+    await card(resources, "seededTask")
+      .locator("textarea, input")
+      .first()
+      .fill("Todo app");
+
+    // A duplicate copies the arguments, under the next free name.
+    await chooseInstanceAction(page, resources, "seededTask", "Duplicate");
     await expect(
-      nestedNote.getByRole("button", { name: /taskId/ }),
-    ).toBeVisible();
+      card(resources, "seededTask2").locator("textarea, input").first(),
+    ).toHaveValue("Todo app");
+    await expect(card(resources, "seededTask2")).toContainText(
+      "not bound to a slot",
+    );
+
+    // Renaming carries the slot's reference along with it.
+    await card(resources, "seededTask")
+      .getByRole("button", { name: /seededTask/ })
+      .first()
+      .click();
+    const nameInput = resources.getByLabel("Name for seededTask");
+    await nameInput.fill("seededTask2");
+    // A name that's taken is refused.
+    await expect(nameInput).toHaveAttribute("aria-invalid", "true");
+    await nameInput.fill("root");
+    await nameInput.press("Enter");
+    await expect(component.locator(".pg-slot-chip")).toContainText("◆ root");
+    await expect(card(resources, "root")).toContainText("→ taskId");
+
+    // And it all survives a remount.
+    await component.unmount();
+    const remounted = await mount(<PlaygroundExecutionHarness {...props} />);
+    await expect(remounted.locator(".pg-slot-chip")).toContainText("◆ root");
+    await expect(
+      card(remounted, "seededTask2").locator("textarea, input").first(),
+    ).toHaveValue("Todo app");
+  });
+
+  test("removing a referenced instance asks first, then clears the slot", async ({
+    mount,
+    page,
+  }) => {
+    const component = await mount(
+      <PlaygroundExecutionHarness
+        functionParameters={[TASK_ID]}
+        inputSources={sourcesFor({ taskId: [SEEDED_TASK.uri] }, [SEEDED_TASK])}
+      />,
+    );
+    await chooseSource(
+      page,
+      component.locator(".pg-slot-source-wrap"),
+      SEEDED_TASK.label,
+    );
+    const dialogs: string[] = [];
+    page.once("dialog", dialog => {
+      dialogs.push(dialog.message());
+      return dialog.dismiss();
+    });
+    const remove = () =>
+      chooseInstanceAction(page, component, "seededRootTask", "Remove");
+    await remove();
+    expect(dialogs).toEqual([
+      "Remove 'seededRootTask'? taskId will be cleared.",
+    ]);
+    await expect(card(component, "seededRootTask")).toHaveCount(1);
+
+    page.once("dialog", dialog => dialog.accept());
+    await remove();
+    await expect(card(component, "seededRootTask")).toHaveCount(0);
+    await expect(component.locator(".pg-slot-chip")).toHaveCount(0);
+  });
+
+  test("a task seeded under another names it in its argument, and a cycle isn't offered", async ({
+    mount,
+    page,
+  }) => {
+    const component = await mount(
+      <PlaygroundExecutionHarness
+        functionParameters={[TASK_ID]}
+        inputSources={sourcesFor(
+          { taskId: [TREE_TASK.uri] },
+          [TREE_TASK],
+          "functionSlots",
+          { [TREE_TASK.uri]: { parentId: [TREE_TASK.uri] } },
+        )}
+      />,
+    );
+    const resources = component.getByRole("region", { name: "Resources" });
+    await addResource(page, resources, TREE_TASK.label);
+    await addResource(page, resources, TREE_TASK.label);
+    await expect(resources.locator("[data-instance-card]")).toHaveCount(2);
+
+    // `task2`'s parent is `task`: another instance of the same resource.
+    const parentOf = (name: string) =>
+      card(resources, name)
+        .locator(".pg-args-row")
+        .filter({ hasText: "parentId" })
+        .locator(".pg-slot-source-wrap");
+    await parentOf("task2").click();
+    await page.getByRole("menuitem", { name: "task", exact: true }).click();
+    await expect(
+      card(resources, "task2").locator(".pg-slot-chip"),
+    ).toContainText("◆ task");
+    await expect(card(resources, "task")).toContainText("→ task2.parentId");
+
+    // So `task` can't take `task2` as its own parent, nor itself: only a
+    // new instance is offered.
+    await parentOf("task").click();
+    await expect(page.getByRole("menuitem")).not.toContainText(["task2"]);
+    await expect(
+      page.getByRole("menuitem", { name: "task", exact: true }),
+    ).toHaveCount(0);
   });
 });

@@ -5,15 +5,9 @@ import { useMemo } from "react";
 import { ItemEditor } from "ts-proppy/react";
 import { jsonToPropValue } from "../../shared/json-prop-value";
 import type { PropDefinition, ResourceInfo } from "../../shared/types";
-import { ExecutionInputEditor } from "./ExecutionInputEditor";
-import { rootResourceUri, type Selections } from "./execution-input-state";
 import { isPseudoUri } from "./pseudo-sources";
-import {
-  MAX_RESOURCE_ARG_DEPTH,
-  nested,
-  type ResourceArgsContext,
-} from "./resource-args-context";
 import SourcePicker from "./SourcePicker";
+import type { SourceContext } from "./source-context";
 import { combinedLabel } from "./source-tree";
 
 /**
@@ -36,46 +30,15 @@ function chipLabel(
 /** `ItemEditor` needs an `onChange` even for the read-only preview — `disabled` already keeps it from ever firing. */
 function noop() {}
 
-/** How long a row stays flagged `.pg-row-highlight` after `scrollToRow` lands on it. */
-const HIGHLIGHT_MS = 1200;
-
-/**
- * Scrolls the row identified by `path` (the same string `SourceRow` tags its
- * own `.pg-slot` with, via `data-row-path`) into view and briefly flashes it
- * — what the chip's "same instance as ▲ X" link does, so picking the same
- * resource twice reads as "here's the other one", not just a name.
- */
-function scrollToRow(path: string) {
-  const el = document.querySelector<HTMLElement>(
-    `[data-row-path="${CSS.escape(path)}"]`,
-  );
-  if (!el) return;
-  el.scrollIntoView({ behavior: "smooth", block: "center" });
-  // Restarts the animation even if this row was just highlighted and hasn't
-  // finished fading — removing the class and forcing a reflow before adding
-  // it back is what makes a repeat click flash again instead of no-op-ing.
-  el.classList.remove("pg-row-highlight");
-  void el.offsetWidth;
-  el.classList.add("pg-row-highlight");
-  window.setTimeout(
-    () => el.classList.remove("pg-row-highlight"),
-    HIGHLIGHT_MS,
-  );
-}
-
 /**
  * A slot's source dropdown and the control beneath it.
  *
- * With a resource chosen the editor is replaced — by a read-only preview of
- * the resource's value where the server already has one to show (see
- * `ResourceInfo.value`), or otherwise by a chip naming the resource. Most
- * resources' values don't exist until the run creates them, which is when a
- * chip is all there is to show. (Seeding an editor from a stored value is
- * what a dataset row is for.)
- *
- * When the chosen resource declares `parameters` (`specs/resource-arguments.md`
- * §B), its argument form renders as a block beneath the chip — see
- * {@link ResourceArgumentsForm}.
+ * With a source chosen the editor is replaced — by a read-only preview of a
+ * catalog resource's value where the server already has one to show (see
+ * `ResourceInfo.value`), or otherwise by a chip naming it: one of the run's
+ * resource instances (`◆ root.taskId`), a column, or another slot. A chip is
+ * only a reference: an instance's arguments live on its card in the
+ * Resources section, which the chip opens.
  *
  * Shared by {@link ExecutionInputEditor} (a slot's own row and every nested
  * one) and {@link CombinedInputEditor} (one row per deduped group) so both
@@ -87,7 +50,7 @@ export function SourceRow({
   matching,
   chosen,
   onChoose,
-  argsContext,
+  context,
   children,
 }: {
   propDef: PropDefinition;
@@ -96,57 +59,74 @@ export function SourceRow({
   matching: ResourceInfo[];
   chosen: string | undefined;
   onChoose: (uri: string | null) => void;
-  /** See {@link ResourceArgsContext}. Absent means no argument form is ever rendered. */
-  argsContext?: ResourceArgsContext;
+  /** See {@link SourceContext}. */
+  context?: SourceContext;
   children: React.ReactNode;
 }) {
   const editable = propDef.type.kind !== "opaque";
   const selected = chosen ? matching.find(r => r.uri === chosen) : undefined;
-  // A stored choice whose resource is gone — renamed, deleted, or in a module
+  const pseudo =
+    chosen && isPseudoUri(chosen)
+      ? (context?.describePseudo?.(chosen, propDef.type) ?? { note: "" })
+      : undefined;
+  // A stored choice whose source is gone — renamed, deleted, or in a module
   // that now fails to load. It stays listed, and selected, because it is still
   // what a run would send: dropping it silently would show an editor while
-  // submitting the resource behind it.
-  const stale = chosen && !selected ? chosen : undefined;
+  // submitting the source behind it.
+  const stale = chosen && !selected && !pseudo?.label ? chosen : undefined;
 
-  // A resource already selected by an earlier row is the *same instance*
-  // here too (§I), whether or not it takes arguments — the chip says so
-  // instead of repeating "created once per server"/"created for each run",
-  // which would otherwise wrongly imply a second one gets made.
   const resourcesByUri = useMemo(
     () => new Map(resources.map(r => [r.uri, r])),
     [resources],
   );
-  const pseudo =
-    selected && isPseudoUri(selected.uri)
-      ? (argsContext?.describePseudo?.(selected.uri, propDef.type) ?? {
-          note: "",
-        })
-      : undefined;
-  const sharedWith =
-    selected && !pseudo && argsContext
-      ? argsContext.claimed.get(rootResourceUri(selected.uri, resourcesByUri))
-      : undefined;
-  const sameInstanceAs =
-    sharedWith && sharedWith.path !== argsContext?.path
-      ? sharedWith
-      : undefined;
 
-  if (matching.length === 0 && !stale && editable) return <>{children}</>;
+  if (matching.length === 0 && !stale && !pseudo && editable) {
+    return <>{children}</>;
+  }
 
-  const row = (
-    <div className="pg-slot" data-row-path={argsContext?.path}>
+  const pseudoLabel = pseudo
+    ? (pseudo.label ??
+      (selected ? chipLabel(selected, resourcesByUri) : undefined))
+    : undefined;
+
+  return (
+    <div className="pg-slot">
       <div className="pg-slot-body">
-        {selected && pseudo ? (
+        {editable && selected?.value !== undefined ? (
+          // The real value beats naming it: only a live handle or a run-only
+          // resource (no `ResourceInfo.value` — see `ResourceRegistry.describe`)
+          // falls back to a chip. An instance of a static resource is that
+          // value, so it's previewed too.
+          <div className="pg-slot-preview" title={selected.uri}>
+            <ItemEditor
+              propDef={propDef}
+              value={jsonToPropValue(selected.value)}
+              onChange={noop}
+              disabled
+            />
+          </div>
+        ) : pseudo && pseudoLabel !== undefined ? (
           <span
             className={
               "pg-slot-chip pg-slot-chip-pseudo" +
-              (pseudo.warning ? " pg-slot-chip-warning" : "")
+              (pseudo.warning || pseudo.missing ? " pg-slot-chip-warning" : "")
             }
             title={
               pseudo.warning ? `Type mismatch: ${pseudo.warning}` : undefined
             }
           >
-            {selected.label}
+            {pseudo.onOpen ? (
+              <button
+                type="button"
+                className="pg-slot-instance-link"
+                title="Show this resource"
+                onClick={pseudo.onOpen}
+              >
+                ◆ {pseudoLabel}
+              </button>
+            ) : (
+              pseudoLabel
+            )}
             {(pseudo.warning || pseudo.note) && (
               <em className="pg-slot-chip-note">
                 {pseudo.warning ? `⚠ ${pseudo.warning}` : pseudo.note}
@@ -154,43 +134,14 @@ export function SourceRow({
             )}
           </span>
         ) : selected ? (
-          // The real value beats naming it: only a live handle or a run-only
-          // resource (no `ResourceInfo.value` — see `ResourceRegistry.describe`)
-          // falls back to the chip.
-          editable && selected.value !== undefined ? (
-            <div className="pg-slot-preview" title={selected.uri}>
-              <ItemEditor
-                propDef={propDef}
-                value={jsonToPropValue(selected.value)}
-                onChange={noop}
-                disabled
-              />
-            </div>
-          ) : (
-            <span className="pg-slot-chip" title={selected.uri}>
-              {chipLabel(selected, resourcesByUri)}
-              <em className="pg-slot-chip-note">
-                {sameInstanceAs ? (
-                  <>
-                    same instance as{" "}
-                    <button
-                      type="button"
-                      className="pg-slot-instance-link"
-                      title={`Scroll to ${sameInstanceAs.label} above`}
-                      aria-label={`Scroll to ${sameInstanceAs.label} above`}
-                      onClick={() => scrollToRow(sameInstanceAs.path)}
-                    >
-                      {sameInstanceAs.label} <span aria-hidden="true">▲</span>
-                    </button>
-                  </>
-                ) : selected.scope === "server" ? (
-                  "created once per server"
-                ) : (
-                  "created for each run"
-                )}
-              </em>
-            </span>
-          )
+          <span className="pg-slot-chip" title={selected.uri}>
+            {chipLabel(selected, resourcesByUri)}
+            <em className="pg-slot-chip-note">
+              {selected.scope === "server"
+                ? "created once per server"
+                : "created for each run"}
+            </em>
+          </span>
         ) : stale ? (
           <div className="pg-slot-hint">
             <span>Resource no longer available</span>
@@ -218,7 +169,7 @@ export function SourceRow({
 
       {/* An opaque slot has no editor to fall back to, so its picker offers
           no "Custom" — picking a source is the only way to fill it. */}
-      {(matching.length > 0 || stale) && (
+      {(matching.length > 0 || stale || pseudo) && (
         <SourcePicker
           resources={resources}
           matching={matching}
@@ -229,96 +180,6 @@ export function SourceRow({
           onChoose={onChoose}
         />
       )}
-    </div>
-  );
-
-  const argsForm =
-    selected && !pseudo && argsContext ? (
-      <ResourceArgumentsForm
-        selected={selected}
-        resources={resources}
-        resourcesByUri={resourcesByUri}
-        argsContext={argsContext}
-      />
-    ) : null;
-
-  if (!argsForm) return row;
-  return (
-    <div className="pg-slot-stack">
-      {row}
-      {argsForm}
-    </div>
-  );
-}
-
-/**
- * The block beneath a chosen resource's chip: its own argument editors, only
- * for the row that owns its first selection (`specs/resource-arguments.md`
- * §I's "one binding per resource per prompt" rule) — every other selection
- * of the same resource already says so on its chip (see `sameInstanceAs` in
- * {@link SourceRow}), so it takes no space here at all. Ownership itself is
- * decided elsewhere, purely, by `computeClaims` — this only reads the answer
- * (by comparing full paths, not bare names — two rows can easily share a
- * name, like a prompt's own `taskId` and some other resource's own `taskId`
- * argument), which is what keeps it safe to call twice (React StrictMode)
- * without the two calls disagreeing.
- */
-function ResourceArgumentsForm({
-  selected,
-  resources,
-  resourcesByUri,
-  argsContext,
-}: {
-  selected: ResourceInfo;
-  resources: readonly ResourceInfo[];
-  /** `resources`, by `uri`. */
-  resourcesByUri: ReadonlyMap<string, ResourceInfo>;
-  argsContext: ResourceArgsContext;
-}) {
-  // `selected` may be one of the resource's own output values
-  // (`seededTask.taskId`) rather than the resource itself — only the root
-  // carries `parameters`, and the args form (and its state) belongs to the
-  // root regardless of which value was actually picked for this slot, so
-  // that `seededTask.taskId` here and `seededTask.title` on another slot
-  // share one set of arguments (§I).
-  const root =
-    resourcesByUri.get(rootResourceUri(selected.uri, resourcesByUri)) ??
-    selected;
-
-  const params = root.parameters;
-  if (!params || params.length === 0) return null;
-  if (argsContext.depth >= MAX_RESOURCE_ARG_DEPTH) return null;
-
-  const claimedBy = argsContext.claimed.get(root.uri);
-  // No owner found is defensive only (computeClaims should always have
-  // visited whatever's actually selected) — default to rendering rather than
-  // hiding, so a gap in that computation never silently loses editability.
-  if (claimedBy && claimedBy.path !== argsContext.path) {
-    return null;
-  }
-
-  const slots = argsContext.resourceSlots[root.uri] ?? {};
-  const selections = argsContext.resourceArgs[root.uri] ?? {};
-  const setSelections = (next: Selections) =>
-    argsContext.onResourceArgsChange(root.uri, next);
-
-  return (
-    <div className="pg-args-form">
-      {params.map(param => (
-        <div className="pg-args-row" key={param.name}>
-          <span className="pg-args-name">{param.name}</span>
-          <ExecutionInputEditor
-            propDef={param}
-            selection={selections[param.name] ?? {}}
-            onChange={next =>
-              setSelections({ ...selections, [param.name]: next })
-            }
-            resources={resources}
-            slots={slots}
-            argsContext={nested(argsContext, `args.${param.name}`)}
-          />
-        </div>
-      ))}
     </div>
   );
 }

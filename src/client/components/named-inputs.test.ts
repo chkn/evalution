@@ -88,30 +88,6 @@ describe("toCells", () => {
     expect(skipped).toEqual([{ name: "verbose", reason: "no-match" }]);
   });
 
-  it("strips receipts, at any depth", () => {
-    const { cells } = toCells(
-      [
-        {
-          def: def("taskId"),
-          input: {
-            kind: "resource",
-            uri: TASK_URI,
-            receipt: { id: "tsk_abc123" },
-            args: {
-              owner: { kind: "resource", uri: DB_URI, receipt: "r2" },
-            },
-          },
-        },
-      ],
-      fields(def("taskId")),
-    );
-    expect(cells["0"]).toEqual({
-      kind: "resource",
-      uri: TASK_URI,
-      args: { owner: { kind: "resource", uri: DB_URI } },
-    });
-  });
-
   it("treats a second input for an already-filled field as the same value", () => {
     const { cells, matched, skipped } = toCells(
       [
@@ -149,7 +125,7 @@ describe("fromTrace", () => {
   it("types execute inputs from the recorded execute definitions", () => {
     const ctx: ExecutionInput = {
       kind: "object",
-      properties: { db: { kind: "resource", uri: DB_URI }, userId: text("u") },
+      properties: { db: { kind: "instance", name: "db" }, userId: text("u") },
     };
     const inputs = fromTrace({
       id: "x",
@@ -218,19 +194,50 @@ describe("fromTrace", () => {
 });
 
 describe("toPanel", () => {
-  it("skips a resource cell whose uri isn't in the prompt's scope", () => {
+  it("drops an instance whose resource isn't in the prompt's scope, and skips what references it", () => {
     const p = prompt();
-    const { functionInputs, skipped } = toPanel(
+    const { functionInputs, resources, skipped } = toPanel(
       [
         { def: def("ticket"), input: text("hi") },
         {
           def: def("db", "Db", "opaque"),
-          input: { kind: "resource", uri: "elsewhere.playground.ts#db" },
+          input: { kind: "instance", name: "far" },
         },
       ],
       p,
+      {
+        far: { uri: "elsewhere.playground.ts#db" },
+        near: { uri: DB_URI, receipt: "stripped" },
+      },
     );
     expect(functionInputs).toEqual({ ticket: text("hi") });
+    expect(resources).toEqual({ near: { uri: DB_URI } });
+    expect(skipped).toEqual([{ name: "db", reason: "resource-out-of-scope" }]);
+  });
+
+  it("also drops an in-scope instance whose arguments name a dropped one, and what names it", () => {
+    const { resources, skipped } = toPanel(
+      [
+        {
+          def: def("db", "Db", "opaque"),
+          input: { kind: "instance", name: "grandchild" },
+        },
+      ],
+      prompt(),
+      {
+        root: { uri: "elsewhere.playground.ts#db" },
+        child: {
+          uri: DB_URI,
+          args: { parent: { kind: "instance", name: "root", output: "id" } },
+        },
+        grandchild: {
+          uri: DB_URI,
+          args: { parent: { kind: "instance", name: "child" } },
+        },
+        near: { uri: DB_URI },
+      },
+    );
+    expect(resources).toEqual({ near: { uri: DB_URI } });
     expect(skipped).toEqual([{ name: "db", reason: "resource-out-of-scope" }]);
   });
 
@@ -257,17 +264,13 @@ describe("round trip", () => {
           kind: "value",
           value: { kind: "template", value: ["Order ", { expr: "id" }] },
         } as ExecutionInput,
-        db: {
-          kind: "resource",
-          uri: TASK_URI,
-          args: { title: text("Buy milk") },
-        } as ExecutionInput,
+        db: { kind: "instance", name: "task" } as ExecutionInput,
       },
       executeInputs: {
         toolsContext: {
           kind: "object",
           properties: {
-            db: { kind: "resource", uri: DB_URI },
+            db: { kind: "instance", name: "db" },
             userId: text("u1"),
           },
         } as ExecutionInput,
@@ -278,12 +281,16 @@ describe("round trip", () => {
       id: i.toString(36),
       ...f,
     }));
+    const resources = {
+      task: { uri: TASK_URI, args: { title: text("Buy milk") } },
+      db: { uri: DB_URI },
+    };
     const { cells, skipped } = toCells(fromPanel(p, request), schema);
     expect(skipped).toEqual([]);
 
-    const row = { id: "r", cells, createdAt: 0 };
-    const back = toPanel(fromRow(dataset(schema), row), p);
-    expect(back).toEqual({ ...request, skipped: [] });
+    const row = { id: "r", cells, resources, createdAt: 0 };
+    const back = toPanel(fromRow(dataset(schema), row), p, row.resources);
+    expect(back).toEqual({ ...request, resources, skipped: [] });
   });
 });
 

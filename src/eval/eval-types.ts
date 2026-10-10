@@ -10,6 +10,7 @@
 import type {
   ExecutionInput,
   PromptRef,
+  RunResources,
   VariationConflict,
   VariationId,
   VersionId,
@@ -36,14 +37,20 @@ export interface EvalCheck {
 /**
  * One binding per prompt slot, keyed by slot name, in the shape the execute
  * panel persists. A binding may name a column (`dataset`), another slot
- * (`input`), a resource with arguments, a typed-in value, or an object
- * mixing those.
+ * (`input`), a resource instance (`instance`), a typed-in value, or an
+ * object mixing those.
  */
 export interface EvalInputs {
   /** Function parameter name → binding. */
   functionInputs: Record<string, ExecutionInput>;
   /** Execute parameter name → binding. */
   executeInputs: Record<string, ExecutionInput>;
+  /**
+   * Resource instances every row's run declares, merged with the row's own
+   * (`DatasetRow.resources`) — the row's win on a name both declare. See
+   * `specs/resource-instances.md` §E.
+   */
+  resources?: RunResources;
 }
 
 /** A saved eval: data, stored by an `EvalProvider`. See `specs/evals.md` §A. */
@@ -195,6 +202,12 @@ export interface EvalRowResult {
   rowIndex: number;
   /** The row's cells as they were run — readable after the row is deleted. */
   rowCells: Record<string, ExecutionInput>;
+  /**
+   * The row's own resource instances as they were run, receipts stripped —
+   * what `rowCells`' `instance` references named then, however the row has
+   * changed since. See `specs/resource-instances.md` §C.
+   */
+  rowResources?: RunResources;
   traceProviderId?: string;
   traceId?: string;
   /** The version the row ran against, on a clean tree. */

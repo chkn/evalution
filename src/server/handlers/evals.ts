@@ -26,7 +26,11 @@ import type {
   NewEvalDefinition,
   TraceCheckResult,
 } from "../../eval/eval-types.ts";
-import { InvalidCellError, parseBinding } from "../../shared/dataset-cells.ts";
+import {
+  InvalidCellError,
+  parseBinding,
+  parseResources,
+} from "../../shared/dataset-cells.ts";
 import type { ExecutionInput, PromptID } from "../../shared/types.ts";
 import { errorResult, type HandlerResult } from "./result.ts";
 
@@ -113,7 +117,9 @@ function parseBindings(
 function parseInputs(value: unknown): EvalInputs {
   if (value === undefined) return { functionInputs: {}, executeInputs: {} };
   if (!isRecord(value)) {
-    throw new BadRequest("inputs must be { functionInputs, executeInputs }");
+    throw new BadRequest(
+      "inputs must be { functionInputs, executeInputs, resources? }",
+    );
   }
   return {
     functionInputs: parseBindings(
@@ -121,6 +127,12 @@ function parseInputs(value: unknown): EvalInputs {
       "inputs.functionInputs",
     ),
     executeInputs: parseBindings(value.executeInputs, "inputs.executeInputs"),
+    ...(value.resources !== undefined && {
+      resources: parseResources(value.resources, {
+        columns: true,
+        path: "inputs.resources",
+      }),
+    }),
   };
 }
 

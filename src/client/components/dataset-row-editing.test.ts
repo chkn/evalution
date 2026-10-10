@@ -10,11 +10,13 @@ import type {
   ResourceInfo,
 } from "../../shared/types";
 import {
+  changesAnything,
   chosenResources,
   datasetInputSources,
-  rowCellChanges,
+  rowChanges,
   rowEditorState,
 } from "./dataset-row-editing";
+import { instanceUri } from "./pseudo-sources";
 
 const def = (name: string, syntax: string): PropDefinition => ({
   name,
@@ -36,7 +38,6 @@ const SEEDED_ID: ResourceInfo = {
   scope: "run",
   parent: SEEDED.uri,
 };
-const BY_URI = new Map([SEEDED, SEEDED_ID].map(r => [r.uri, r]));
 
 const prompt = (overrides: Partial<NormalizedPrompt> = {}): NormalizedPrompt =>
   ({
@@ -85,62 +86,85 @@ describe("datasetInputSources", () => {
   });
 });
 
-describe("rowCellChanges", () => {
-  const seededCell: ExecutionInput = {
-    kind: "resource",
-    uri: SEEDED_ID.uri,
-    args: { title: text("Buy milk") },
+describe("rowChanges", () => {
+  const taskCell: ExecutionInput = {
+    kind: "instance",
+    name: "task",
+    output: "id",
   };
+  const task = { uri: SEEDED.uri, args: { title: text("Buy milk") } };
 
-  it("commits nothing for an untouched row, however its cells were built", () => {
+  it("commits nothing for an untouched row, however it was built", () => {
     // Keys in another order than the editor would write them.
-    const cells: Record<string, ExecutionInput> = {
-      "0": {
-        args: { title: text("Buy milk") },
-        uri: SEEDED_ID.uri,
-        kind: "resource",
-      } as ExecutionInput,
-      "1": text("hello"),
+    const row = {
+      cells: {
+        "0": { output: "id", name: "task", kind: "instance" } as ExecutionInput,
+        "1": text("hello"),
+      },
+      resources: { task: { args: task.args, uri: task.uri, receipt: "r" } },
     };
-    const state = rowEditorState(cells, BY_URI);
-    expect(rowCellChanges(["0", "1", "2"], state, cells, BY_URI)).toEqual({});
+    const changes = rowChanges(["0", "1", "2"], rowEditorState(row), row);
+    expect(changes).toEqual({ cells: {} });
+    expect(changesAnything(changes)).toBe(false);
   });
 
-  it("folds a chosen resource and its arguments back into a cell", () => {
-    const cells = { "1": text("hello") };
-    const state = rowEditorState(cells, BY_URI);
-    state.selections["0"] = { resources: { "": SEEDED_ID.uri } };
-    // Arguments live under the root resource, as in the panel.
-    state.resourceArgs[SEEDED.uri] = {
-      title: { value: { kind: "primitive", value: "Buy milk" } },
+  it("folds a chosen instance into a cell, and a new instance into resources", () => {
+    const row = { cells: { "1": text("hello") } };
+    const state = rowEditorState(row);
+    state.selections["0"] = { resources: { "": instanceUri("task", "id") } };
+    state.instances.task = {
+      uri: SEEDED.uri,
+      args: { title: { value: { kind: "primitive", value: "Buy milk" } } },
     };
-    expect(rowCellChanges(["0", "1"], state, cells, BY_URI)).toEqual({
-      "0": seededCell,
+    expect(rowChanges(["0", "1"], state, row)).toEqual({
+      cells: { "0": taskCell },
+      resources: { task },
     });
   });
 
-  it("clears a field emptied in its editor, and leaves other fields alone", () => {
-    const cells = { "0": seededCell, "1": text("hello") };
-    const state = rowEditorState(cells, BY_URI);
+  it("clears a field emptied in its editor and removes a dropped instance, leaving the rest", () => {
+    const row = {
+      cells: { "0": taskCell, "1": text("hello") },
+      resources: { task, other: { uri: SEEDED.uri } },
+    };
+    const state = rowEditorState(row);
     state.selections["1"] = { value: { kind: "primitive", value: "" } };
     state.selections["0"] = {};
-    expect(rowCellChanges(["1"], state, cells, BY_URI)).toEqual({ "1": null });
+    delete state.instances.other;
+    expect(rowChanges(["1"], state, row)).toEqual({
+      cells: { "1": null },
+      resources: { other: null },
+    });
   });
 });
 
 describe("chosenResources", () => {
-  it("changes when a resource is chosen, not when a value is typed", () => {
-    const state = rowEditorState({ "0": text("a") }, BY_URI);
+  it("changes when a source is chosen or an instance renamed, not when a value is typed", () => {
+    const state = rowEditorState({
+      cells: { "0": text("a") },
+      resources: { task: { uri: SEEDED.uri } },
+    });
     const before = chosenResources(state);
     const typed = {
       ...state,
       selections: { "0": { value: { kind: "primitive", value: "ab" } } },
+      instances: {
+        task: {
+          uri: SEEDED.uri,
+          args: { title: { value: { kind: "primitive", value: "x" } } },
+        },
+      },
     } as typeof state;
     expect(chosenResources(typed)).toBe(before);
     const chosen = {
       ...state,
-      selections: { "0": { resources: { "": SEEDED.uri } } },
+      selections: { "0": { resources: { "": instanceUri("task") } } },
     };
     expect(chosenResources(chosen)).not.toBe(before);
+    const renamed = {
+      ...state,
+      instances: { renamed: { uri: SEEDED.uri, args: {} } },
+    };
+    expect(chosenResources(renamed)).not.toBe(before);
   });
 });

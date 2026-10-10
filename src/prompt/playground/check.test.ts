@@ -71,7 +71,8 @@ describe("lease.resolveDeclared", () => {
     });
     const [{ check: c }] = await reg.checks();
     const lease = reg.lease();
-    const runValue = await lease.acquire(".evalution/playground/checks.ts#db");
+    await lease.declare({ db: { uri: ".evalution/playground/checks.ts#db" } });
+    const runValue = await lease.acquire("db");
     const inputs = await lease.resolveDeclared(c.inputs, "c", async () => ({
       title: "Set up CI",
     }));

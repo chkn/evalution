@@ -30,6 +30,7 @@ import type {
   ResolvedPromptInputs,
 } from "../prompt/prompt-provider.ts";
 import { runPrompt } from "../server/run-prompt.ts";
+import { stripReceipts } from "../shared/dataset-cells.ts";
 import { evalProblems } from "../shared/eval-problems.ts";
 import type { NormalizedPrompt, PromptRef } from "../shared/types.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
@@ -501,6 +502,7 @@ export class EvalRunner {
         ...key,
         rowIndex: job.rowIndex,
         rowCells: job.row.cells,
+        ...rowResourcesOf(job.row),
         ...(traceId && {
           traceProviderId: this.options.traceProviderId,
           traceId,
@@ -579,6 +581,11 @@ export class EvalRunner {
               },
           ),
           executeInputs: inputs.executeInputs,
+          // The eval's instances and the row's, in one namespace — the row's
+          // win on a name both declare (`specs/resource-instances.md` §E).
+          ...((inputs.resources || job.row.resources) && {
+            resources: { ...inputs.resources, ...job.row.resources },
+          }),
         },
         {
           tracer: this.options.tracer,
@@ -666,6 +673,7 @@ export class EvalRunner {
           ...key,
           rowIndex: job.rowIndex,
           rowCells: job.row.cells,
+          ...rowResourcesOf(job.row),
           traceProviderId: this.options.traceProviderId,
           traceId,
           ...(version && { version }),
@@ -794,4 +802,14 @@ interface RowContext {
 interface RowResults {
   row: EvalRowResult;
   checks: EvalCheckResult[];
+}
+
+/**
+ * A result's snapshot of `row`'s own resource instances, receipts stripped —
+ * so its `instance` cells still say what they named once the row changes.
+ */
+function rowResourcesOf(row: DatasetRow): Pick<EvalRowResult, "rowResources"> {
+  return row.resources && Object.keys(row.resources).length > 0
+    ? { rowResources: stripReceipts(row.resources) }
+    : {};
 }
