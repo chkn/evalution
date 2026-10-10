@@ -535,6 +535,34 @@ describe("FilePromptProvider WIP variations", () => {
     ).toEqual(str("Keep this"));
   });
 
+  it("renames a variation, and deleting its name drops it from the list but not from traces", async () => {
+    const { provider, edit } = await setup();
+    const { ref } = await edit(ID, "Keep this");
+    const named = await provider.variations!.name(ref.variation!, "keeper");
+    const other = await provider.variations!.name(ref.variation!, "other");
+    expect(other.id).toBe(named.id);
+    await provider.variations!.unname(ID, "other");
+
+    const changes: string[] = [];
+    provider.watch?.(e => {
+      if (e.type === "change") changes.push(e.promptId);
+    });
+    const renamed = await provider.variations!.rename(ID, "keeper", " kept ");
+    expect(renamed).toMatchObject({ id: named.id, names: ["kept"] });
+    expect(changes).toContain(ID);
+    await expect(provider.variations!.rename(ID, "kept", "  ")).rejects.toThrow(
+      /empty/,
+    );
+
+    await provider.variations!.unname(ID, "kept");
+    const listed = await provider.variations!.list(ID);
+    expect(listed.map(v => v.id)).toEqual([ref.variation]);
+    // Still openable by id, as a trace that ran it would.
+    expect(
+      systemOf(await provider.getPrompt({ promptId: ID, variation: named.id })),
+    ).toEqual(str("Keep this"));
+  });
+
   it("a named variation is read-only: editing it leaves it and the unsaved edits alone", async () => {
     const { provider, edit } = await setup();
     const { ref } = await edit(ID, "Named");

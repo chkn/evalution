@@ -1149,6 +1149,15 @@ export class FileVariations {
       this.host.emit({ type: "change", promptId });
     },
 
+    rename: async (promptId, from, to) => {
+      const store = this.requireStore();
+      const name = to.trim();
+      if (!name) throw new Error("A variation's name can't be empty");
+      const id = await store.rename(promptId, from, name);
+      this.host.emit({ type: "change", promptId });
+      return toInfo((await store.get(id))!);
+    },
+
     rebase: async (id, onto) => {
       const store = this.requireStore();
       const v = await store.get(id);

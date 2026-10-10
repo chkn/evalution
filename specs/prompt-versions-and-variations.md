@@ -170,6 +170,8 @@ export interface PromptVariations {
   /** Names a variation. A name is unique per prompt, and naming again moves it. */
   name(id: VariationId, name: string): Promise<VariationInfo>;
   unname(promptId: string, name: string): Promise<void>;
+  /** Moves the name `from` to `to`; unlike `name`, refuses a name that's taken. */
+  rename(promptId: string, from: string, to: string): Promise<VariationInfo>;
   /** Re-expresses `id` against `onto` (default: head) as a new frozen variation. See §F. */
   rebase(id: VariationId, onto?: VersionId): Promise<RebaseResult>;
   /**
@@ -493,6 +495,8 @@ and returns the conflicts.
   a conflict bar. Each conflicted field shows base, head, and yours, and offers "keep head" or
   "keep mine" per field.
 - **"Save as variation…"** names the current WIP (it interns it, then names the frozen row).
+- **Rename / Delete** on each saved variation in the ref menu. Delete removes its names, so it
+  leaves the list; the frozen row stays, and traces that ran it still open it (§E).
 - **Opening an old version, or a frozen variation,** shows a banner: "Viewing <name> on <short
   sha> · <message>", then why it can't be edited or run from here ("Saved variations are
   read-only.", "Running is only available on the working tree."). One action: **Open on working
@@ -512,6 +516,7 @@ and returns the conflicts.
 | `GET /api/prompts/:p/:id/variations` | `variations.list` |
 | `POST /api/variations/:p/:vid/{open-on-head,save,discard,rebase}` | the matching method |
 | `PUT /api/variations/:p/:vid/name` / `DELETE …/name/:name` | name / unname |
+| `POST /api/variations/:p/:vid/rename` | rename (`{ from, to }`) |
 
 `POST /update` responds with `{ prompt, ref }`, and the client adopts `ref`. Prompt change events
 gain `ref?`, so a WIP change or a rebase-on-external-edit reaches other open tabs.

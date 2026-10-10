@@ -1324,6 +1324,73 @@ pre {
   color: var(--unsaved-dot);
 }
 
+.pg-ref-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.pg-ref-row-actions {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  display: none;
+  gap: 2px;
+  padding-left: 8px;
+  /* Opaque, over the meta text it covers; the hover tint may be translucent. */
+  background:
+    linear-gradient(var(--dropdown-option-hover), var(--dropdown-option-hover)),
+    var(--dropdown-bg);
+}
+
+.pg-ref-row:hover .pg-ref-row-actions,
+.pg-ref-row:focus-within .pg-ref-row-actions {
+  display: flex;
+}
+
+.pg-ref-row:has(.pg-ref-item[aria-current="true"]) .pg-ref-row-actions {
+  background:
+    linear-gradient(
+      var(--dropdown-option-selected),
+      var(--dropdown-option-selected)
+    ),
+    var(--dropdown-bg);
+}
+
+.pg-ref-row-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--dropdown-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.pg-ref-row-btn:hover {
+  background: var(--dropdown-border);
+  color: var(--dropdown-text);
+}
+
+.pg-ref-rename {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+}
+
+.pg-ref-rename .pg-ref-name-input {
+  flex: 1;
+}
+
+.pg-ref-rename .pg-ref-error {
+  flex-basis: 100%;
+  padding: 0 4px;
+}
+
 .pg-ref-empty,
 .pg-ref-error {
   padding: 6px 10px;

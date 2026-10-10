@@ -89,4 +89,10 @@ export interface VariationStore {
   name(id: VariationId, promptId: string, name: string): Promise<void>;
   /** Removes a name. */
   unname(promptId: string, name: string): Promise<void>;
+  /**
+   * Renames `from` to `to`, keeping the variation it points at, and returns
+   * that variation's id. Throws if `from` doesn't exist, or `to` is already
+   * taken.
+   */
+  rename(promptId: string, from: string, to: string): Promise<VariationId>;
 }

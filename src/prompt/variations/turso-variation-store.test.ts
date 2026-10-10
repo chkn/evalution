@@ -183,6 +183,38 @@ describe("TursoVariationStore", () => {
     expect((await store.list("p#a")).map(v => v.id)).toEqual([wip.id]);
   });
 
+  it("renames a name in place, and refuses a name that's taken or missing", async () => {
+    const store = await makeStore();
+    const a = await store.intern({
+      promptId: "p#a",
+      updates: system("a"),
+      baseValues: WAS,
+    });
+    const b = await store.intern({
+      promptId: "p#a",
+      updates: system("b"),
+      baseValues: WAS,
+    });
+    await store.name(a.id, "p#a", "terse");
+    await store.name(b.id, "p#a", "chatty");
+    // The same name on another prompt doesn't count as taken.
+    await store.name(a.id, "p#b", "short");
+
+    await store.rename("p#a", "terse", "short");
+    expect((await store.get(a.id))?.names.sort()).toEqual(["short", "short"]);
+    expect((await store.list("p#a")).map(v => v.id).sort()).toEqual(
+      [a.id, b.id].sort(),
+    );
+
+    await expect(store.rename("p#a", "short", "chatty")).rejects.toThrow(
+      /already exists/,
+    );
+    expect((await store.get(b.id))?.names).toEqual(["chatty"]);
+    await expect(store.rename("p#a", "terse", "other")).rejects.toThrow(
+      /No variation named/,
+    );
+  });
+
   it("dedupes variations without a base, and tells apart ones that overwrote different values", async () => {
     const store = await makeStore();
     const content = { promptId: "p#a", updates: system("hi"), baseValues: WAS };

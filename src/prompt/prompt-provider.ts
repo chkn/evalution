@@ -165,6 +165,11 @@ export interface PromptVariations {
   /** Removes a name. */
   unname(promptId: string, name: string): Promise<void>;
   /**
+   * Renames a variation: moves the name `from` to `to`. Unlike {@link name},
+   * it refuses to take a name another variation already has.
+   */
+  rename(promptId: string, from: string, to: string): Promise<VariationInfo>;
+  /**
    * Re-expresses `id` against `onto` (default: the working tree), as a new
    * saved variation. `id` itself — even a WIP — is left as it is.
    */

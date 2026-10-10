@@ -12,7 +12,12 @@ import type {
   VariationInfo,
   VersionInfo,
 } from "../../shared/types";
-import { getPromptVariations, getPromptVersions } from "../api";
+import {
+  deleteVariation,
+  getPromptVariations,
+  getPromptVersions,
+  renameVariation,
+} from "../api";
 import {
   fieldText,
   refBannerNote,
@@ -92,6 +97,7 @@ export function PromptRefChip({ head, shown, onSelect }: ChipProps) {
     (ref.variation ?? undefined) === (current?.variation ?? undefined) &&
     (ref.version ?? undefined) === (current?.version ?? undefined);
 
+  const providerId = head.providerId ?? "";
   const named = (variations ?? []).filter(v => !v.wip);
   const otherWips = (variations ?? []).filter(v => v.wip && !v.onHead);
 
@@ -122,19 +128,28 @@ export function PromptRefChip({ head, shown, onSelect }: ChipProps) {
 
         {named.length > 0 && <div className="pg-ref-heading">Variations</div>}
         {named.map(v => (
-          <button
+          <NamedVariationRow
             key={v.id}
-            type="button"
-            role="menuitem"
-            className="pg-ref-item"
-            aria-current={isCurrent({ variation: v.id })}
-            onClick={() => pick({ promptId: head.id, variation: v.id })}
-          >
-            <span className="pg-ref-item-name">{variationLabel(v)}</span>
-            <span className="pg-ref-item-meta">
-              {v.base ? `on ${shortId(v.base)}` : "on uncommitted changes"}
-            </span>
-          </button>
+            variation={v}
+            current={isCurrent({ variation: v.id })}
+            onPick={() => pick({ promptId: head.id, variation: v.id })}
+            onRename={async to => {
+              const renamed = await renameVariation(
+                providerId,
+                v.id,
+                v.names[0],
+                to,
+              );
+              setVariations(prev =>
+                (prev ?? []).map(x => (x.id === v.id ? renamed : x)),
+              );
+            }}
+            onDelete={async () => {
+              await deleteVariation(providerId, v);
+              setVariations(prev => (prev ?? []).filter(x => x.id !== v.id));
+              if (isCurrent({ variation: v.id })) pick(undefined);
+            }}
+          />
         ))}
 
         {otherWips.length > 0 && (
@@ -205,6 +220,136 @@ export function PromptRefChip({ head, shown, onSelect }: ChipProps) {
       </button>
       {menu}
     </>
+  );
+}
+
+/**
+ * A saved variation in the ref menu: picking it opens it, and its row has
+ * Rename (inline) and Delete.
+ */
+function NamedVariationRow({
+  variation,
+  current,
+  onPick,
+  onRename,
+  onDelete,
+}: {
+  variation: VariationInfo;
+  current: boolean;
+  onPick: () => void;
+  onRename: (to: string) => Promise<void>;
+  onDelete: () => Promise<void>;
+}) {
+  const label = variationLabel(variation);
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(label);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+      return true;
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (renaming) {
+    const cancel = () => {
+      setRenaming(false);
+      setError(null);
+    };
+    return (
+      <form
+        className="pg-ref-rename"
+        onSubmit={async e => {
+          e.preventDefault();
+          const to = draft.trim();
+          if (!to || to === label) return cancel();
+          if (await run(() => onRename(to))) setRenaming(false);
+        }}
+      >
+        <input
+          autoFocus
+          className="pg-ref-name-input"
+          aria-label="Variation name"
+          value={draft}
+          disabled={busy}
+          onFocus={e => e.currentTarget.select()}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === "Escape") {
+              // Close the rename, not the menu.
+              e.stopPropagation();
+              cancel();
+            }
+          }}
+        />
+        <button type="submit" className="pg-ref-btn" disabled={busy}>
+          Rename
+        </button>
+        {error && <div className="pg-ref-error">{error}</div>}
+      </form>
+    );
+  }
+
+  return (
+    <div className="pg-ref-row">
+      <button
+        type="button"
+        role="menuitem"
+        className="pg-ref-item"
+        aria-current={current}
+        onClick={onPick}
+      >
+        <span className="pg-ref-item-name">{label}</span>
+        <span className="pg-ref-item-meta">
+          {variation.base
+            ? `on ${shortId(variation.base)}`
+            : "on uncommitted changes"}
+        </span>
+      </button>
+      <div className="pg-ref-row-actions">
+        <button
+          type="button"
+          className="pg-ref-row-btn"
+          aria-label={`Rename ${label}`}
+          title="Rename"
+          disabled={busy}
+          onClick={() => {
+            setDraft(label);
+            setRenaming(true);
+          }}
+        >
+          ✎
+        </button>
+        <button
+          type="button"
+          className="pg-ref-row-btn"
+          aria-label={`Delete ${label}`}
+          title="Delete"
+          disabled={busy}
+          onClick={() => {
+            if (
+              window.confirm(
+                `Delete the variation "${label}"? Traces that ran it can still open it.`,
+              )
+            ) {
+              void run(onDelete);
+            }
+          }}
+        >
+          ×
+        </button>
+      </div>
+      {error && <div className="pg-ref-error">{error}</div>}
+    </div>
   );
 }
 

@@ -1297,6 +1297,68 @@ describe("prompt refs on the prompt routes", () => {
     });
   });
 
+  it("renames a variation by one of its names", async () => {
+    const app = new Hono();
+    const info = {
+      id: "var_a",
+      promptId: "p#test",
+      updates: {},
+      wip: false,
+      names: ["terse"],
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    const renames: string[][] = [];
+    const provider: PromptProvider = {
+      ...fakeProvider(),
+      variations: {
+        get: async id => (id === info.id ? info : undefined),
+        rename: async (promptId, from, to) => {
+          renames.push([promptId, from, to]);
+          return { ...info, names: [to] };
+        },
+      } as PromptProvider["variations"],
+    };
+    setupRoutes({
+      app,
+      hotReloadSubscribers: new Set(),
+      hasConfig: true,
+      context: createApiContext({
+        promptProviders: new Map([[PROVIDER_ID, provider]]),
+        traceProviders: new Map(),
+        promptRegistry: new PromptRegistry(),
+        rootPath: "/demo",
+        tracer: trace.getTracer("test"),
+        defaultTraceProviderId: TRACE_PROVIDER_ID,
+      }),
+    });
+    const rename = (vid: string, body: unknown) =>
+      app.request(
+        new Request(`http://localhost/api/variations/fake/${vid}/rename`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    const ok = await rename("var_a", { from: "terse", to: "short" });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ id: "var_a", names: ["short"] });
+    expect(renames).toEqual([["p#test", "terse", "short"]]);
+
+    // Another variation's name, a missing new name, an unknown variation.
+    expect((await rename("var_a", { from: "other", to: "x" })).status).toBe(
+      400,
+    );
+    expect((await rename("var_a", { from: "terse", to: " " })).status).toBe(
+      400,
+    );
+    expect((await rename("var_b", { from: "terse", to: "x" })).status).toBe(
+      404,
+    );
+    expect(renames).toHaveLength(1);
+  });
+
   it("reports versions and variations as unsupported for a provider without them", async () => {
     const { app } = makeApp();
     const versions = await app.request("/api/prompts/fake/cCN0ZXN0/versions");

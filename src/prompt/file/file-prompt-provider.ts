@@ -609,6 +609,8 @@ export class FilePromptProvider
       list: async promptId => (await ready()).list(promptId),
       name: async (id, name) => (await ready()).name(id, name),
       unname: async (promptId, name) => (await ready()).unname(promptId, name),
+      rename: async (promptId, from, to) =>
+        (await ready()).rename(promptId, from, to),
       rebase: async (id, onto) => (await ready()).rebase(id, onto),
       openOnHead: async (id, options) =>
         (await ready()).openOnHead(id, options),

@@ -564,6 +564,26 @@ export function setupRoutes({
     }),
   );
 
+  // POST /api/variations/:providerId/:vid/rename - Rename a variation
+  app.post(
+    "/api/variations/:providerId/:vid/rename",
+    variationRoute(async (variations, { vid }, c) => {
+      const { from, to } = (await c.req.json().catch(() => ({}))) as {
+        from?: string;
+        to?: string;
+      };
+      if (typeof from !== "string" || typeof to !== "string" || !to.trim()) {
+        return c.json({ error: "A current and new name are required" }, 400);
+      }
+      const info = await variations.get(vid);
+      if (!info) return c.json({ error: "Variation not found" }, 404);
+      if (!info.names.includes(from)) {
+        return c.json({ error: `This variation isn't named "${from}"` }, 400);
+      }
+      return c.json(await variations.rename(info.promptId, from, to));
+    }),
+  );
+
   // POST /api/prompts/:providerId/:id/rename - Rename a prompt
   app.post("/api/prompts/:providerId/:id/rename", async c => {
     try {

@@ -323,4 +323,29 @@ export class TursoVariationStore implements VariationStore {
         );
     });
   }
+
+  rename(promptId: string, from: string, to: string): Promise<VariationId> {
+    return this.serialize(async () => {
+      const named = (name: string) =>
+        and(
+          eq(variationNames.promptId, promptId),
+          eq(variationNames.name, name),
+        );
+      const idNamed = async (name: string) => {
+        const [row] = await this.db
+          .select({ id: variationNames.variationId })
+          .from(variationNames)
+          .where(named(name));
+        return row?.id;
+      };
+      const id = await idNamed(from);
+      if (!id) throw new Error(`No variation named "${from}"`);
+      if (from === to) return id;
+      if (await idNamed(to)) {
+        throw new Error(`A variation named "${to}" already exists`);
+      }
+      await this.db.update(variationNames).set({ name: to }).where(named(from));
+      return id;
+    });
+  }
 }

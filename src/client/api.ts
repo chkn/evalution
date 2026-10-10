@@ -386,6 +386,37 @@ export async function nameVariation(
   return res.json();
 }
 
+/** Renames a variation: its name `from` becomes `to`. */
+export function renameVariation(
+  providerId: string,
+  id: string,
+  from: string,
+  to: string,
+): Promise<VariationInfo> {
+  return postVariation(providerId, id, "rename", { from, to });
+}
+
+/**
+ * Deletes a variation from the list by removing its names. Traces and eval
+ * runs that recorded it can still open it.
+ */
+export async function deleteVariation(
+  providerId: string,
+  variation: Pick<VariationInfo, "id" | "names">,
+): Promise<void> {
+  for (const name of variation.names) {
+    const res = await fetch(
+      variationUrl(
+        providerId,
+        variation.id,
+        `/name/${encodeURIComponent(name)}`,
+      ),
+      { method: "DELETE" },
+    );
+    await throwIfError(res);
+  }
+}
+
 /** Describes variations by id, across providers. Unknown ids are absent. */
 export async function lookupVariations(
   ids: string[],

@@ -132,4 +132,7 @@ export class LocalVariationStore implements VariationStore {
   async unname(promptId: string, name: string) {
     await (await this.existing())?.unname(promptId, name);
   }
+  async rename(promptId: string, from: string, to: string) {
+    return (await this.open()).rename(promptId, from, to);
+  }
 }
