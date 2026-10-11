@@ -29,14 +29,15 @@ import {
   PROMPT_VERSION_ATTRIBUTE,
   SPAN_KIND_ATTRIBUTE,
 } from "./prompt-tracer.ts";
-import type {
-  LLMSpanDetails,
-  PromptID,
-  Span,
-  SpanContentPart,
-  SpanKind,
-  SpanMessage,
-  ToolSpanDetails,
+import {
+  type LLMSpanDetails,
+  type PromptID,
+  type Span,
+  type SpanContentPart,
+  type SpanKind,
+  type SpanMessage,
+  type ToolSpanDetails,
+  unwrapToolResultOutput,
 } from "./trace-types.ts";
 
 const KNOWN_KINDS: readonly SpanKind[] = [
@@ -140,7 +141,7 @@ function readFinishReason(
  * Converts a raw message `content` value (a string, or an array of
  * OTel/Vercel-style content parts) into a {@link SpanMessage.content}. Image
  * (and image-bearing `file`) parts are kept rather than dropped — see §A.5 in
- * `specs/trace-workshopping.md`.
+ * `specs/trace-workshopping.md` — as are tool calls and tool results.
  */
 function toMessageContent(
   content: unknown,
@@ -170,6 +171,22 @@ function toMessageContent(
       if (mediaType?.startsWith("image/") && data) {
         parts.push({ type: "image", image: data, mediaType });
       }
+    } else if (part.type === "tool-call") {
+      // `args` is what AI SDK releases before v5 called `input`.
+      parts.push({
+        type: "tool-call",
+        toolCallId: str(part.toolCallId) ?? "",
+        toolName: str(part.toolName) ?? "",
+        input: part.input ?? part.args,
+      });
+    } else if (part.type === "tool-result") {
+      // Likewise `result` for `output`, which v5 wraps in a typed envelope.
+      parts.push({
+        type: "tool-result",
+        toolCallId: str(part.toolCallId) ?? "",
+        toolName: str(part.toolName) ?? "",
+        ...unwrapToolResultOutput(part.output ?? part.result),
+      });
     }
   }
   if (parts.length === 0) return undefined;
@@ -431,8 +448,12 @@ export function readTool(
     attributes["tool.output"] ??
     attributes["traceloop.entity.output"];
 
+  const toolCallId =
+    str(attributes["gen_ai.tool.call.id"]) ?? str(attributes["ai.toolCall.id"]);
+
   return {
     toolName: name,
+    ...(toolCallId && { toolCallId }),
     input,
     ...(outputRaw !== undefined && { output: parseJsonOrRaw(outputRaw) }),
   };

@@ -304,6 +304,8 @@ export type {
   SpanMessage,
   SpanMessageRole,
   SpanTextPart,
+  SpanToolCallPart,
+  SpanToolResultPart,
   ToolSpanDetails,
   Trace,
   TraceChangeEvent,

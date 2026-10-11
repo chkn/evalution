@@ -57,6 +57,85 @@ describe("parseMessages", () => {
     ]);
   });
 
+  it("keeps tool calls and tool results, unwrapping the result's envelope", () => {
+    const messages = parseMessages(
+      JSON.stringify([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "c1",
+              toolName: "search",
+              input: { q: "x" },
+            },
+            // An AI SDK release before v5 called `input` `args`.
+            {
+              type: "tool-call",
+              toolCallId: "c2",
+              toolName: "fetch",
+              args: { url: "u" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "c1",
+              toolName: "search",
+              output: { type: "json", value: { hits: 1 } },
+            },
+            {
+              type: "tool-result",
+              toolCallId: "c2",
+              toolName: "fetch",
+              output: { type: "error-text", value: "timed out" },
+            },
+          ],
+        },
+      ]),
+    );
+    expect(messages).toEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "c1",
+            toolName: "search",
+            input: { q: "x" },
+          },
+          {
+            type: "tool-call",
+            toolCallId: "c2",
+            toolName: "fetch",
+            input: { url: "u" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "c1",
+            toolName: "search",
+            output: { hits: 1 },
+          },
+          {
+            type: "tool-result",
+            toolCallId: "c2",
+            toolName: "fetch",
+            output: "timed out",
+            isError: true,
+          },
+        ],
+      },
+    ]);
+  });
+
   it("keeps an image-only message that previously would have been dropped", () => {
     const messages = parseMessages(
       JSON.stringify([
@@ -130,6 +209,17 @@ describe("readTool", () => {
       input: { query: "cats" },
       output: { count: 3 },
     });
+  });
+
+  it("reads the call's id, so a message's tool call can be matched to its span", () => {
+    expect(
+      readTool({ "ai.toolCall.name": "search", "ai.toolCall.id": "c1" })
+        ?.toolCallId,
+    ).toBe("c1");
+    expect(
+      readTool({ "gen_ai.tool.name": "search", "gen_ai.tool.call.id": "c2" })
+        ?.toolCallId,
+    ).toBe("c2");
   });
 
   it("reads Traceloop's traceloop.entity.* attributes only when span.kind is tool", () => {

@@ -4976,6 +4976,23 @@ pre {
   font-style: italic;
 }
 
+.message-tool-part {
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--trace-border);
+  border-radius: 4px;
+}
+
+.message-tool-part-label {
+  font-size: 11px;
+  color: var(--trace-text-dim);
+  margin-bottom: 2px;
+}
+
+.message-tool-part-error .message-tool-part-label {
+  color: var(--trace-error-text);
+}
+
 /* ── Markdown (streamdown) ── */
 
 .markdown {

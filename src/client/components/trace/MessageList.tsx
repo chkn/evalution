@@ -5,10 +5,12 @@
  * Renders an LLM span's `messages`, markdown-formatted, with image content
  * parts rendered as actual images (validated via `./imageSrc.ts`) rather than
  * dropped or shown as a placeholder — see `specs/trace-workshopping.md` §A.5/§D.
+ * Tool calls and tool results render as their tool's name over their JSON.
  */
 
 import type { SpanContentPart, SpanMessage } from "../../../shared/types";
 import { toSafeImageSrc } from "./imageSrc.ts";
+import { JsonView } from "./JsonView.tsx";
 import { Markdown } from "./Markdown.tsx";
 
 function MessageImage({
@@ -23,17 +25,45 @@ function MessageImage({
   return <img className="message-image" src={src} alt="" />;
 }
 
+function MessageToolPart({
+  part,
+}: {
+  part: Extract<SpanContentPart, { type: "tool-call" | "tool-result" }>;
+}) {
+  const call = part.type === "tool-call";
+  const error = !call && part.isError;
+  return (
+    <div
+      className={`message-tool-part message-${part.type}${error ? " message-tool-part-error" : ""}`}
+    >
+      <div className="message-tool-part-label">
+        {call ? "Call" : error ? "Error from" : "Result from"}{" "}
+        <code>{part.toolName}</code>
+      </div>
+      <JsonView data={call ? part.input : part.output} />
+    </div>
+  );
+}
+
+function MessagePart({ part }: { part: SpanContentPart }) {
+  switch (part.type) {
+    case "text":
+      return <Markdown>{part.text}</Markdown>;
+    case "image":
+      return <MessageImage part={part} />;
+    case "tool-call":
+    case "tool-result":
+      return <MessageToolPart part={part} />;
+  }
+}
+
 function MessageContent({ content }: { content: string | SpanContentPart[] }) {
   if (typeof content === "string") return <Markdown>{content}</Markdown>;
   return (
     <>
-      {content.map((part, i) =>
-        part.type === "text" ? (
-          <Markdown key={i}>{part.text}</Markdown>
-        ) : (
-          <MessageImage key={i} part={part} />
-        ),
-      )}
+      {content.map((part, i) => (
+        <MessagePart key={i} part={part} />
+      ))}
     </>
   );
 }

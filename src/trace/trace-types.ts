@@ -80,6 +80,32 @@ export interface SpanImagePart {
   mediaType?: string;
 }
 
+/**
+ * A tool call the assistant made, within a multi-part {@link SpanMessage}
+ * content. Matched to its {@link SpanToolResultPart} by `toolCallId`.
+ */
+export interface SpanToolCallPart {
+  type: "tool-call";
+  toolCallId: string;
+  toolName: string;
+  /** The arguments the model passed, as JSON. */
+  input: unknown;
+}
+
+/**
+ * A tool's result fed back to the model, within a multi-part
+ * {@link SpanMessage} content (usually a `tool` message).
+ */
+export interface SpanToolResultPart {
+  type: "tool-result";
+  toolCallId: string;
+  toolName: string;
+  /** What the tool returned, unwrapped from the SDK's output envelope. */
+  output: unknown;
+  /** Whether the result reports a failure (an error, or a denied call). */
+  isError?: boolean;
+}
+
 export type SpanMessageRole =
   | "user"
   | "assistant"
@@ -88,14 +114,18 @@ export type SpanMessageRole =
   | (string & {});
 
 /** One segment of a multi-part {@link SpanMessage} content. */
-export type SpanContentPart = SpanTextPart | SpanImagePart;
+export type SpanContentPart =
+  | SpanTextPart
+  | SpanImagePart
+  | SpanToolCallPart
+  | SpanToolResultPart;
 
 /**
  * A single message within an LLM span's input/output.
  *
  * `content` is a plain string for the common text-only case. It is an array
  * of {@link SpanContentPart} when the message carries non-text content (e.g.
- * an image) — the `string` form stays in the union so existing consumers and
+ * an image, or a tool call or result) — the `string` form stays in the union so existing consumers and
  * already-stored rows keep working unchanged.
  */
 export interface SpanMessage {
@@ -159,6 +189,11 @@ export function spanMessages(
 
 export interface ToolSpanDetails {
   toolName: string;
+  /**
+   * The id the model gave this call, when the integration reports it — the
+   * same id as the {@link SpanToolCallPart} that requested it.
+   */
+  toolCallId?: string;
   input: unknown;
   output?: unknown;
 }
@@ -360,4 +395,27 @@ export interface TraceProviderInfo {
   id: string;
   displayName?: string;
   description?: string;
+}
+
+/**
+ * A tool result's output as the tool returned it. The AI SDK wraps a result
+ * in a typed envelope (`{ type: "json", value }`, `{ type: "error-text",
+ * value }`, `{ type: "execution-denied", reason }`, …); this unwraps it and
+ * notes whether it reports a failure. Anything else is kept as is.
+ */
+export function unwrapToolResultOutput(
+  output: unknown,
+): Pick<SpanToolResultPart, "output" | "isError"> {
+  if (!output || typeof output !== "object" || Array.isArray(output)) {
+    return { output };
+  }
+  const envelope = output as { type?: unknown; value?: unknown };
+  const { type } = envelope;
+  if (type === "execution-denied") {
+    return { output: (output as { reason?: unknown }).reason, isError: true };
+  }
+  if (typeof type !== "string" || !("value" in envelope)) return { output };
+  return type.startsWith("error-")
+    ? { output: envelope.value, isError: true }
+    : { output: envelope.value };
 }

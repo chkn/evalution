@@ -137,6 +137,44 @@ export function newMessagesByTurn(rows: Row[]): Map<string, SpanMessage[]> {
 }
 
 /**
+ * For `ChatFlow`: a turn's messages without the tool calls and results a
+ * `TOOL` span's card already shows — those whose `toolCallId` is in
+ * `toolSpanCallIds`. A call no span covers (one seeded into the conversation
+ * rather than made in this run, say) stays. A message left with nothing to
+ * show is dropped, as is a `tool` message with plain-text content, which
+ * can't be matched to its span.
+ */
+export function chatMessages(
+  messages: SpanMessage[],
+  toolSpanCallIds: ReadonlySet<string>,
+): SpanMessage[] {
+  return messages.flatMap(msg => {
+    if (typeof msg.content === "string") {
+      return msg.role === "tool" ? [] : [msg];
+    }
+    const content = msg.content.filter(
+      part =>
+        !(
+          (part.type === "tool-call" || part.type === "tool-result") &&
+          toolSpanCallIds.has(part.toolCallId)
+        ),
+    );
+    return content.length > 0 ? [{ ...msg, content }] : [];
+  });
+}
+
+/** The `toolCallId`s of the trace's `TOOL` spans, for {@link chatMessages}. */
+export function toolSpanCallIds(rows: Row[]): Set<string> {
+  const ids = new Set<string>();
+  for (const { span } of rows) {
+    if (span.kind === "TOOL" && span.tool?.toolCallId) {
+      ids.add(span.tool.toolCallId);
+    }
+  }
+  return ids;
+}
+
+/**
  * A span's elapsed time in ms, or `undefined` while it is still running
  * (no `endTime` yet) — the one derived quantity the timeline and chat views
  * both need from a raw `Span`.

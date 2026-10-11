@@ -26,7 +26,13 @@ import { JsonView } from "./JsonView.tsx";
 import { MessageList } from "./MessageList.tsx";
 import { renderOutput } from "./output-renderers.tsx";
 import type { Row } from "./rows.ts";
-import { hasOutput, newMessagesByTurn, spanDuration } from "./rows.ts";
+import {
+  chatMessages,
+  hasOutput,
+  newMessagesByTurn,
+  spanDuration,
+  toolSpanCallIds,
+} from "./rows.ts";
 
 /**
  * A span's output as a chat bubble: text renders as the Markdown assistant
@@ -56,8 +62,8 @@ function OutputBubble({ output, input }: { output: unknown; input?: unknown }) {
  * Renders one `LLM` span's turn as bare chat bubbles (no surrounding card).
  * `newMessages` is the caller-computed suffix of the span's input messages that
  * hasn't already been rendered by an earlier turn — see {@link ChatFlow}. Tool
- * (role `"tool"`) messages are dropped here — the adjacent `TOOL` span's
- * card already shows that call's arguments/result.
+ * calls and results are dropped here when a `TOOL` span's card already shows
+ * that call's arguments/result — see {@link chatMessages}.
  *
  * Clicking anywhere in the turn selects its span, so the flame/combined
  * timeline above highlights (and shows details for) the same span — see
@@ -67,16 +73,19 @@ function OutputBubble({ output, input }: { output: unknown; input?: unknown }) {
 function ChatLLMBlock({
   row,
   newMessages,
+  toolCallIds,
   selected,
   onSelect,
 }: {
   row: Row;
   newMessages: SpanMessage[];
+  /** The trace's `TOOL` spans' call ids, from {@link toolSpanCallIds}. */
+  toolCallIds: ReadonlySet<string>;
   selected: boolean;
   onSelect: () => void;
 }) {
   const { span } = row;
-  const visibleMessages = newMessages.filter(m => m.role !== "tool");
+  const visibleMessages = chatMessages(newMessages, toolCallIds);
   // A model that isn't given a message list records its input as JSON, shown
   // where the messages would go.
   const input = span.llm?.input;
@@ -244,6 +253,7 @@ export function ChatFlow({
     );
   }
   const newMessages = newMessagesByTurn(rows);
+  const toolCallIds = toolSpanCallIds(rows);
   return (
     <div className="chat-flow" ref={containerRef}>
       {blocks.map(row =>
@@ -252,6 +262,7 @@ export function ChatFlow({
             key={row.span.id}
             row={row}
             newMessages={newMessages.get(row.span.id) ?? []}
+            toolCallIds={toolCallIds}
             selected={row.span.id === selectedSpanId}
             onSelect={() => onSelectSpan(row.span.id)}
           />

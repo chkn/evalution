@@ -19,10 +19,11 @@ type Arrayable<T> = T | T[];
 import { makeBrand } from "../../brand.ts";
 import { answersWithConfidence } from "../../trace/evaluation-answers.ts";
 import { BaseTraceIngestor } from "../../trace/trace-ingestor.ts";
-import type {
-  Span,
-  SpanContentPart,
-  SpanMessage,
+import {
+  type Span,
+  type SpanContentPart,
+  type SpanMessage,
+  unwrapToolResultOutput,
 } from "../../trace/trace-types.ts";
 
 export interface PerPromptTelemetry extends Telemetry {
@@ -114,6 +115,20 @@ function toSpanMessages(
         const data = typeof c.data === "string" ? c.data : c.data?.toString();
         if (data)
           parts.push({ type: "image", image: data, mediaType: c.mediaType });
+      } else if (c.type === "tool-call") {
+        parts.push({
+          type: "tool-call",
+          toolCallId: c.toolCallId,
+          toolName: c.toolName,
+          input: c.input,
+        });
+      } else if (c.type === "tool-result") {
+        parts.push({
+          type: "tool-result",
+          toolCallId: c.toolCallId,
+          toolName: c.toolName,
+          ...unwrapToolResultOutput(c.output),
+        });
       }
     }
     // Collapse an all-text part list back to a plain string — the common
@@ -472,6 +487,7 @@ export class VercelAISDKTelemetry
       startTime: Date.now(),
       tool: {
         toolName: event.toolCall.toolName,
+        toolCallId: event.toolCall.toolCallId,
         input: event.toolCall.input,
       },
     };
@@ -499,6 +515,7 @@ export class VercelAISDKTelemetry
       errorMessage: isError ? String(event.toolOutput.error) : undefined,
       tool: {
         toolName: event.toolCall.toolName,
+        toolCallId: event.toolCall.toolCallId,
         input: event.toolCall.input,
         output: isError ? undefined : event.toolOutput?.output,
       },

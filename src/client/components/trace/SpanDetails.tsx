@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import type { Annotation, AnnotationKind, Span } from "../../../shared/types";
+import { spanMessages } from "../../../trace/trace-types";
 import { DetailRow, type Fact, FactGroup, FactsGrid } from "../DetailsPane.tsx";
 import { AnnotationChip } from "./AnnotationChip.tsx";
 import {
@@ -22,6 +23,9 @@ import {
   TokensIcon,
 } from "./icons.tsx";
 import { JsonView } from "./JsonView.tsx";
+import { MessageList } from "./MessageList.tsx";
+import { renderOutput } from "./output-renderers.tsx";
+import { hasOutput } from "./rows.ts";
 import { AnnotationForm } from "./TraceAnnotations.tsx";
 
 export interface SpanDetailsProps {
@@ -111,6 +115,33 @@ export function SpanDetails({
   // A tool's arguments sit inside the first group, ahead of any error, so
   // what was asked reads before what went wrong.
   let argumentsValue: React.ReactNode | undefined;
+  // Everything the model was sent — tool calls and results included, even
+  // ones seeded into the conversation rather than made in this run — and
+  // everything it returned.
+  if (llm?.input !== undefined) {
+    const messages = spanMessages(llm);
+    rows.push({
+      label: "Input",
+      value: messages ? (
+        <MessageList messages={messages} />
+      ) : (
+        <JsonView data={llm.input} />
+      ),
+    });
+  }
+  if (hasOutput(llm)) {
+    rows.push({
+      label: "Output",
+      value:
+        typeof llm?.output === "string" ? (
+          <MessageList
+            messages={[{ role: "assistant", content: llm.output }]}
+          />
+        ) : (
+          renderOutput(llm?.output, llm?.input)
+        ),
+    });
+  }
   if (llm?.modelParameters) {
     rows.push({
       label: "Model Parameters",

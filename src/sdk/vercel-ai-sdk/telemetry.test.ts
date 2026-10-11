@@ -210,8 +210,84 @@ describe("Evalution", () => {
     const tool = trace?.spans.find(s => s.kind === "TOOL");
     expect(tool?.status).toBe("ok");
     expect(tool?.name).toContain("search");
+    expect(tool?.tool?.toolCallId).toBe("t1");
     const root = trace?.spans.find(s => !s.parentId);
     expect(root?.kind).toBe("AGENT");
+  });
+
+  it("keeps tool calls and results in a step's input messages", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-seeded";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#agent", name: "agent" })
+      .withTraceId(traceId);
+    const callId = "call-seeded";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      // A tool call and its result seeded into the conversation, as if an
+      // earlier step had made them.
+      messages: [
+        { role: "user", content: "Plan task `t-1`." },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "seed",
+              toolName: "get_task",
+              input: { taskId: "t-1" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "seed",
+              toolName: "get_task",
+              output: { type: "json", value: { ok: true, title: "Ship" } },
+            },
+          ],
+        },
+      ],
+    } as any);
+    await integration.onStepEnd?.(stepEndEvent(callId, "Done."));
+    await integration.onEnd?.({ callId, text: "Done." } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.kind === "LLM");
+    expect(step?.llm?.input).toEqual([
+      { role: "user", content: "Plan task `t-1`." },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "seed",
+            toolName: "get_task",
+            input: { taskId: "t-1" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "seed",
+            toolName: "get_task",
+            output: { ok: true, title: "Ship" },
+          },
+        ],
+      },
+    ]);
   });
 
   it("correlates parallel tool calls by toolCallId", async () => {

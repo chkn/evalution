@@ -13,9 +13,11 @@ import {
   barGeometry,
   buildGroupedRows,
   buildRows,
+  chatMessages,
   computeWindow,
   newMessagesByTurn,
   spanDuration,
+  toolSpanCallIds,
 } from "./rows.ts";
 
 describe("buildRows", () => {
@@ -264,5 +266,77 @@ describe("three-provenance parity", () => {
   it("yields no chat turn for a TOOL span", () => {
     const result = newMessagesByTurn(buildRows([toolSpan]));
     expect(result.has("s-tool")).toBe(false);
+  });
+});
+
+describe("chatMessages", () => {
+  const call = (id: string) => ({
+    type: "tool-call" as const,
+    toolCallId: id,
+    toolName: "get_task",
+    input: { taskId: "t-1" },
+  });
+  const result = (id: string) => ({
+    type: "tool-result" as const,
+    toolCallId: id,
+    toolName: "get_task",
+    output: { title: "Ship" },
+  });
+
+  it("drops tool calls and results a TOOL span already shows", () => {
+    const messages = chatMessages(
+      [
+        { role: "user", content: "hi" },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Looking." }, call("ran")],
+        },
+        { role: "tool", content: [result("ran")] },
+      ],
+      new Set(["ran"]),
+    );
+    expect(messages).toEqual([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: [{ type: "text", text: "Looking." }] },
+    ]);
+  });
+
+  it("keeps a tool call and result no TOOL span covers, such as a seeded one", () => {
+    const messages = chatMessages(
+      [
+        { role: "assistant", content: [call("seed")] },
+        { role: "tool", content: [result("seed")] },
+      ],
+      new Set(["ran"]),
+    );
+    expect(messages).toEqual([
+      { role: "assistant", content: [call("seed")] },
+      { role: "tool", content: [result("seed")] },
+    ]);
+  });
+
+  it("drops a plain-text tool message, which can't be matched to its span", () => {
+    expect(chatMessages([{ role: "tool", content: "42" }], new Set())).toEqual(
+      [],
+    );
+  });
+});
+
+describe("toolSpanCallIds", () => {
+  it("collects the call ids of the trace's TOOL spans", () => {
+    const rows = buildRows([
+      span("a", { kind: "AGENT" }),
+      span("t", {
+        parentId: "a",
+        kind: "TOOL",
+        tool: { toolName: "search", toolCallId: "c1", input: {} },
+      }),
+      span("u", {
+        parentId: "a",
+        kind: "TOOL",
+        tool: { toolName: "search", input: {} },
+      }),
+    ]);
+    expect(toolSpanCallIds(rows)).toEqual(new Set(["c1"]));
   });
 });
