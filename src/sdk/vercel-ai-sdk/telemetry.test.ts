@@ -85,6 +85,44 @@ describe("Evalution", () => {
     expect(step?.llm?.totalTokens).toBe(8);
   });
 
+  it("records a step's cache read and write tokens", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-cache";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#greet", name: "greet" })
+      .withTraceId(traceId);
+    const callId = "call-cache";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [{ role: "user", content: "Hi" }],
+    } as any);
+    const stepEnd = stepEndEvent(callId, "Hello!");
+    await integration.onStepEnd?.({
+      ...stepEnd,
+      usage: {
+        ...stepEnd.usage,
+        inputTokenDetails: {
+          noCacheTokens: 1,
+          cacheReadTokens: 3,
+          cacheWriteTokens: 1,
+        },
+      },
+    });
+    await integration.onEnd?.({ callId, text: "Hello!" } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.parentId);
+    expect(step?.llm?.promptTokens).toBe(5);
+    expect(step?.llm?.cacheReadTokens).toBe(3);
+    expect(step?.llm?.cacheWriteTokens).toBe(1);
+  });
+
   it("keeps image content parts instead of dropping image-only messages", async () => {
     const evalution = new VercelAISDKTelemetry();
     const provider = new MemoryTraceProvider();

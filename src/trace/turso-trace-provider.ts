@@ -81,6 +81,8 @@ function spanToRow(span: Span) {
     llmPromptTokens: span.llm?.promptTokens ?? null,
     llmCompletionTokens: span.llm?.completionTokens ?? null,
     llmTotalTokens: span.llm?.totalTokens ?? null,
+    llmCacheReadTokens: span.llm?.cacheReadTokens ?? null,
+    llmCacheWriteTokens: span.llm?.cacheWriteTokens ?? null,
     llmCostPrompt: span.llm?.cost?.prompt ?? null,
     llmCostCompletion: span.llm?.cost?.completion ?? null,
     llmInput: span.llm?.input ? JSON.stringify(span.llm.input) : null,
@@ -106,6 +108,12 @@ function rowToSpan(row: typeof spans.$inferSelect): Span {
       completionTokens: row.llmCompletionTokens,
     }),
     ...(row.llmTotalTokens != null && { totalTokens: row.llmTotalTokens }),
+    ...(row.llmCacheReadTokens != null && {
+      cacheReadTokens: row.llmCacheReadTokens,
+    }),
+    ...(row.llmCacheWriteTokens != null && {
+      cacheWriteTokens: row.llmCacheWriteTokens,
+    }),
     ...(row.llmCostPrompt != null &&
       row.llmCostCompletion != null && {
         cost: { prompt: row.llmCostPrompt, completion: row.llmCostCompletion },

@@ -308,6 +308,13 @@ export function readLLM(
     num(attributes["gen_ai.usage.output_tokens"]) ??
     num(attributes["gen_ai.usage.completion_tokens"]) ??
     num(attributes["ai.usage.completionTokens"]);
+  // Both are counted in `promptTokens` too, per the OTel GenAI semconv.
+  const cacheReadTokens = num(
+    attributes["gen_ai.usage.cache_read.input_tokens"],
+  );
+  const cacheWriteTokens = num(
+    attributes["gen_ai.usage.cache_creation.input_tokens"],
+  );
   // Input/output: the OTel GenAI semconv uses `gen_ai.{input,output}.messages`,
   // but the Vercel AI SDK instead emits `ai.prompt.messages` (a JSON message
   // array) and `ai.response.text` (a plain string). Support both.
@@ -366,6 +373,8 @@ export function readLLM(
     ...(promptTokens !== undefined && { promptTokens }),
     ...(completionTokens !== undefined && { completionTokens }),
     ...(totalTokens !== undefined && { totalTokens }),
+    ...(cacheReadTokens !== undefined && { cacheReadTokens }),
+    ...(cacheWriteTokens !== undefined && { cacheWriteTokens }),
     ...(modelParameters && { modelParameters }),
   };
 }

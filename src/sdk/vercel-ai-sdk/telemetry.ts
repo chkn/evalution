@@ -544,6 +544,8 @@ export class VercelAISDKTelemetry
         promptTokens: event.usage.inputTokens,
         completionTokens: event.usage.outputTokens,
         totalTokens: event.usage.totalTokens,
+        cacheReadTokens: event.usage.inputTokenDetails.cacheReadTokens,
+        cacheWriteTokens: event.usage.inputTokenDetails.cacheWriteTokens,
       },
     };
     await this.recordSpanEnd(span);

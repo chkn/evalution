@@ -2,31 +2,54 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type { TraceSink } from "./trace-sink.ts";
-import type { Span } from "./trace-types.ts";
+import type { LLMSpanDetails, Span } from "./trace-types.ts";
 
-/** $/token, as `[input, output]`. */
-type PriceEntry = [number, number];
+/**
+ * A model's prices, in $/token. A cache price the catalog doesn't list is
+ * left unset, and those tokens are billed at the `input` price instead.
+ */
+interface PriceEntry {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}
 
 /** Normalized model id (see {@link normalizeModelId}) → its price. */
 type PriceTable = Map<string, PriceEntry>;
 
-interface OpenRouterModel {
-  id?: string;
-  pricing?: { prompt?: string; completion?: string };
-}
-
-interface OpenRouterModelsResponse {
-  data?: OpenRouterModel[];
+/** A model catalog response, as Vercel AI Gateway and OpenRouter return it. */
+interface ModelsResponse {
+  data?: { id?: string; pricing?: Record<string, string | undefined> }[];
 }
 
 /**
- * FIXME: OpenRouter doesn't list pricing for `jev-*` models, so it's
- * hardcoded here instead. Revisit once/if they're listed upstream.
+ * A model catalog to fetch prices from, and the `pricing` keys it uses for
+ * input and output prices. Both name cache prices `input_cache_read` and
+ * `input_cache_write`.
  */
-const HARDCODED_PRICES: PriceTable = new Map([["jev", [0.042 / 1_000_000, 0]]]);
+interface Catalog {
+  url: string;
+  inputKey: string;
+  outputKey: string;
+}
+
+/** The catalogs to fetch prices from, in order — each only if the last fails. */
+const CATALOGS: Catalog[] = [
+  {
+    url: "https://ai-gateway.vercel.sh/v1/models",
+    inputKey: "input",
+    outputKey: "output",
+  },
+  {
+    url: "https://openrouter.ai/api/v1/models",
+    inputKey: "prompt",
+    outputKey: "completion",
+  },
+];
 
 /**
- * Lowercases a model id and spells version dots as dashes, so OpenRouter's
+ * Lowercases a model id and spells version dots as dashes, so a catalog's
  * `claude-sonnet-4.5` and a provider SDK's `claude-sonnet-4-5` meet.
  */
 function normalizeModelId(id: string): string {
@@ -45,6 +68,59 @@ function findPrice(prices: PriceTable, model: string): PriceEntry | undefined {
     if (price) return price;
   }
   return undefined;
+}
+
+/** Parses a catalog's $/token string; `undefined` if absent or malformed. */
+function parseRate(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const rate = parseFloat(value);
+  return Number.isFinite(rate) && rate >= 0 ? rate : undefined;
+}
+
+/**
+ * Indexes a catalog's models by both their full id and their id stripped of
+ * its provider prefix, so a span's bare model name (e.g. from a provider SDK
+ * that doesn't know about `provider/model` ids) still matches. The first
+ * entry for a bare name wins. Models with no input or output price (images,
+ * embeddings, free models) are skipped.
+ */
+function parsePrices(data: ModelsResponse, catalog: Catalog): PriceTable {
+  const prices: PriceTable = new Map();
+  for (const m of data.data ?? []) {
+    if (!m.id || !m.pricing) continue;
+    const price: PriceEntry = {
+      input: parseRate(m.pricing[catalog.inputKey]) ?? 0,
+      output: parseRate(m.pricing[catalog.outputKey]) ?? 0,
+      cacheRead: parseRate(m.pricing.input_cache_read),
+      cacheWrite: parseRate(m.pricing.input_cache_write),
+    };
+    if (price.input === 0 && price.output === 0) continue;
+    const id = normalizeModelId(m.id);
+    const shortId = id.slice(id.lastIndexOf("/") + 1);
+    prices.set(id, price);
+    if (!prices.has(shortId)) prices.set(shortId, price);
+  }
+  return prices;
+}
+
+/**
+ * The prompt-side cost of a call. `promptTokens` counts every input token,
+ * cached or not, so the cache reads and writes are carved out of it and
+ * billed at their own rates — or at the input rate, if the catalog lists
+ * none.
+ */
+function promptCost(llm: LLMSpanDetails, price: PriceEntry): number {
+  const cacheRead = llm.cacheReadTokens ?? 0;
+  const cacheWrite = llm.cacheWriteTokens ?? 0;
+  const uncached = Math.max(
+    0,
+    (llm.promptTokens ?? 0) - cacheRead - cacheWrite,
+  );
+  return (
+    uncached * price.input +
+    cacheRead * (price.cacheRead ?? price.input) +
+    cacheWrite * (price.cacheWrite ?? price.input)
+  );
 }
 
 /** Options for {@link CostFetchingTraceSink}. */
@@ -66,10 +142,12 @@ export interface CostFetchingTraceSinkOptions {
  * A {@link TraceSink} that stamps `llm.cost` onto LLM spans with known token
  * usage, then fans the span out to its own registered downstream sinks.
  *
- * Pricing is fetched once, lazily on the first relevant span, from
- * OpenRouter's public model catalog and cached in memory for the life of the
- * instance — a fetch failure (or an offline environment) is logged to the
- * console but never thrown at the caller; costs just don't get stamped.
+ * Pricing is fetched once, lazily on the first relevant span, from Vercel AI
+ * Gateway's public model catalog — or, if that request fails, from
+ * OpenRouter's — and cached in memory for the life of the instance. Cache
+ * reads and writes are billed at the catalog's cache prices where it lists
+ * them. A fetch failure (or an offline environment) is logged to the console
+ * but never thrown at the caller; costs just don't get stamped.
  */
 export class CostFetchingTraceSink implements TraceSink {
   private readonly fetchImpl: typeof fetch;
@@ -126,59 +204,52 @@ export class CostFetchingTraceSink implements TraceSink {
       return span;
     }
 
-    // Fetch and cache prices from OpenRouter if we haven't already.
+    // Fetch and cache prices if we haven't already.
     this.prices ??= this.fetchPrices();
 
-    // First check the OpenRouter prices, and then fallback to our hardcoded list.
-    const rates =
-      findPrice(await this.prices, llm.model) ??
-      findPrice(HARDCODED_PRICES, llm.model);
-    if (!rates) return span;
+    const price = findPrice(await this.prices, llm.model);
+    if (!price) return span;
 
-    const promptCost = (llm.promptTokens ?? 0) * rates[0];
-    const completionCost = (llm.completionTokens ?? 0) * rates[1];
     return {
       ...span,
       llm: {
         ...llm,
-        cost: { prompt: promptCost, completion: completionCost },
+        cost: {
+          prompt: promptCost(llm, price),
+          completion: (llm.completionTokens ?? 0) * price.output,
+        },
       },
     };
   }
 
   private async fetchPrices(): Promise<PriceTable> {
-    try {
-      const res = await this.fetchImpl("https://openrouter.ai/api/v1/models");
-      if (res.ok) {
-        return this.parsePrices((await res.json()) as OpenRouterModelsResponse);
-      }
-      console.error(
-        `Failed to fetch model pricing: ${res.status} ${res.statusText}`,
-      );
-    } catch (err) {
-      // Costs just won't be stamped — never throw for the caller over this.
-      console.error("Failed to fetch model pricing:", err);
+    for (const catalog of CATALOGS) {
+      const prices = await this.fetchCatalog(catalog);
+      if (prices) return prices;
     }
     return new Map();
   }
 
-  private parsePrices(data: OpenRouterModelsResponse): PriceTable {
-    const prices: PriceTable = new Map();
-    for (const m of data.data ?? []) {
-      if (!m.id || !m.pricing) continue;
-      // OpenRouter prices in $/token
-      const inPrice = parseFloat(m.pricing.prompt ?? "0");
-      const outPrice = parseFloat(m.pricing.completion ?? "0");
-      if (inPrice <= 0 && outPrice <= 0) continue;
-      // Index by both the full id and the id stripped of its provider
-      // prefix, so a span's bare model name (e.g. from a provider SDK that
-      // doesn't know about OpenRouter's `provider/model` ids) still matches.
-      // The first entry for a bare name wins.
-      const id = normalizeModelId(m.id);
-      const shortId = id.slice(id.lastIndexOf("/") + 1);
-      prices.set(id, [inPrice, outPrice]);
-      if (!prices.has(shortId)) prices.set(shortId, [inPrice, outPrice]);
+  /**
+   * Fetches and parses one model catalog. Returns `undefined` if the request
+   * fails, so the caller can fall back to another — never throws for the
+   * caller over this.
+   */
+  private async fetchCatalog(
+    catalog: Catalog,
+  ): Promise<PriceTable | undefined> {
+    const { url } = catalog;
+    try {
+      const res = await this.fetchImpl(url);
+      if (res.ok) {
+        return parsePrices((await res.json()) as ModelsResponse, catalog);
+      }
+      console.error(
+        `Failed to fetch model pricing from ${url}: ${res.status} ${res.statusText}`,
+      );
+    } catch (err) {
+      console.error(`Failed to fetch model pricing from ${url}:`, err);
     }
-    return prices;
+    return undefined;
   }
 }

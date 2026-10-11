@@ -13,18 +13,77 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function openRouterFetchMock(
-  models: { id: string; prompt: string; completion: string }[],
-) {
-  return vi.fn(async () =>
-    jsonResponse({
-      data: models.map(m => ({
-        id: m.id,
-        pricing: { prompt: m.prompt, completion: m.completion },
-      })),
-    }),
+const GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/models";
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/models";
+
+interface MockModel {
+  id: string;
+  input: string;
+  output: string;
+  cacheRead?: string;
+  cacheWrite?: string;
+}
+
+function gatewayCatalog(models: MockModel[]) {
+  return {
+    object: "list",
+    data: models.map(m => ({
+      id: m.id,
+      object: "model",
+      type: "language",
+      pricing: {
+        input: m.input,
+        output: m.output,
+        ...(m.cacheRead && { input_cache_read: m.cacheRead }),
+        ...(m.cacheWrite && { input_cache_write: m.cacheWrite }),
+      },
+    })),
+  };
+}
+
+function openRouterCatalog(models: MockModel[]) {
+  return {
+    data: models.map(m => ({
+      id: m.id,
+      pricing: {
+        prompt: m.input,
+        completion: m.output,
+        ...(m.cacheRead && { input_cache_read: m.cacheRead }),
+        ...(m.cacheWrite && { input_cache_write: m.cacheWrite }),
+      },
+    })),
+  };
+}
+
+/** A fetch that serves `models` from the AI Gateway's catalog. */
+function gatewayFetchMock(models: MockModel[]) {
+  return vi.fn(async (_url: string | URL | Request) =>
+    jsonResponse(gatewayCatalog(models)),
   );
 }
+
+/**
+ * A fetch whose AI Gateway request fails with `gatewayFailure` (an HTTP status
+ * or a thrown error), and whose OpenRouter request serves `models`.
+ */
+function openRouterFallbackFetchMock(
+  gatewayFailure: number | Error,
+  models: MockModel[],
+) {
+  return vi.fn(async (url: string | URL | Request) => {
+    if (String(url) === GATEWAY_URL) {
+      if (gatewayFailure instanceof Error) throw gatewayFailure;
+      return jsonResponse({ error: "boom" }, gatewayFailure);
+    }
+    return jsonResponse(openRouterCatalog(models));
+  });
+}
+
+const GPT_4O: MockModel = {
+  id: "openai/gpt-4o",
+  input: "0.000005",
+  output: "0.00001",
+};
 
 function llmSpan(overrides: Partial<Span> = {}): Span {
   return {
@@ -42,9 +101,7 @@ function llmSpan(overrides: Partial<Span> = {}): Span {
 describe("CostFetchingTraceSink", () => {
   it("stamps llm.cost on a relevant span and forwards it to downstream sinks", async () => {
     // $5/1M input, $10/1M output.
-    const fetchMock = openRouterFetchMock([
-      { id: "openai/gpt-4o", prompt: "0.000005", completion: "0.00001" },
-    ]);
+    const fetchMock = gatewayFetchMock([GPT_4O]);
     const sink = new CostFetchingTraceSink({ fetch: fetchMock });
     const provider = new MemoryTraceProvider();
     sink.addSink(provider);
@@ -59,9 +116,7 @@ describe("CostFetchingTraceSink", () => {
   });
 
   it("fetches pricing only once across multiple spans", async () => {
-    const fetchMock = openRouterFetchMock([
-      { id: "openai/gpt-4o", prompt: "0.000005", completion: "0.00001" },
-    ]);
+    const fetchMock = gatewayFetchMock([GPT_4O]);
     const sink = new CostFetchingTraceSink({ fetch: fetchMock });
     sink.addSink(new MemoryTraceProvider());
 
@@ -72,9 +127,7 @@ describe("CostFetchingTraceSink", () => {
   });
 
   it("leaves cost unset when the model has no known price", async () => {
-    const fetchMock = openRouterFetchMock([
-      { id: "openai/gpt-4o", prompt: "0.000005", completion: "0.00001" },
-    ]);
+    const fetchMock = gatewayFetchMock([GPT_4O]);
     const sink = new CostFetchingTraceSink({ fetch: fetchMock });
 
     const stored = await sink.recordSpanEnd(
@@ -86,9 +139,9 @@ describe("CostFetchingTraceSink", () => {
 
   it("prices a dated model variant by the longest known id it starts with", async () => {
     // `gpt-4` listed first, so a first-substring-match would wrongly pick it.
-    const fetchMock = openRouterFetchMock([
-      { id: "openai/gpt-4", prompt: "0.00003", completion: "0.00006" },
-      { id: "openai/gpt-4o", prompt: "0.000005", completion: "0.00001" },
+    const fetchMock = gatewayFetchMock([
+      { id: "openai/gpt-4", input: "0.00003", output: "0.00006" },
+      GPT_4O,
     ]);
     const sink = new CostFetchingTraceSink({ fetch: fetchMock });
 
@@ -102,8 +155,8 @@ describe("CostFetchingTraceSink", () => {
   });
 
   it("does not price a model by a longer id that merely contains it", async () => {
-    const fetchMock = openRouterFetchMock([
-      { id: "openai/o3-pro", prompt: "0.00002", completion: "0.00008" },
+    const fetchMock = gatewayFetchMock([
+      { id: "openai/o3-pro", input: "0.00002", output: "0.00008" },
     ]);
     const sink = new CostFetchingTraceSink({ fetch: fetchMock });
 
@@ -114,12 +167,12 @@ describe("CostFetchingTraceSink", () => {
     expect(stored.llm?.cost).toBeUndefined();
   });
 
-  it("matches a dash-versioned model id against OpenRouter's dotted one", async () => {
-    const fetchMock = openRouterFetchMock([
+  it("matches a dash-versioned model id against the catalog's dotted one", async () => {
+    const fetchMock = gatewayFetchMock([
       {
         id: "anthropic/claude-sonnet-4.5",
-        prompt: "0.000003",
-        completion: "0.000015",
+        input: "0.000003",
+        output: "0.000015",
       },
     ]);
     const sink = new CostFetchingTraceSink({ fetch: fetchMock });
@@ -136,9 +189,7 @@ describe("CostFetchingTraceSink", () => {
   it("never fetches and passes spans through when EVALUTION_NO_COST_ESTIMATES is set", async () => {
     vi.stubEnv("EVALUTION_NO_COST_ESTIMATES", "1");
     try {
-      const fetchMock = openRouterFetchMock([
-        { id: "openai/gpt-4o", prompt: "0.000005", completion: "0.00001" },
-      ]);
+      const fetchMock = gatewayFetchMock([GPT_4O]);
       const sink = new CostFetchingTraceSink({ fetch: fetchMock });
       const provider = new MemoryTraceProvider();
       sink.addSink(provider);
@@ -154,7 +205,56 @@ describe("CostFetchingTraceSink", () => {
     }
   });
 
-  it("logs and leaves cost unset, without throwing, when the pricing response isn't ok", async () => {
+  it("only fetches the AI Gateway's catalog when it succeeds", async () => {
+    const fetchMock = gatewayFetchMock([GPT_4O]);
+    const sink = new CostFetchingTraceSink({ fetch: fetchMock });
+
+    await sink.recordSpanEnd(llmSpan());
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(GATEWAY_URL);
+  });
+
+  it("falls back to OpenRouter when the AI Gateway's response isn't ok", async () => {
+    const fetchMock = openRouterFallbackFetchMock(503, [GPT_4O]);
+    const sink = new CostFetchingTraceSink({ fetch: fetchMock });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const stored = await sink.recordSpanEnd(llmSpan());
+
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        GATEWAY_URL,
+        OPENROUTER_URL,
+      ]);
+      expect(stored.llm?.cost?.prompt).toBeCloseTo(0.000005 * 1000);
+      expect(stored.llm?.cost?.completion).toBeCloseTo(0.00001 * 500);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0].join(" ")).toContain("503");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("falls back to OpenRouter when the AI Gateway request rejects", async () => {
+    const fetchMock = openRouterFallbackFetchMock(new Error("network down"), [
+      GPT_4O,
+    ]);
+    const sink = new CostFetchingTraceSink({ fetch: fetchMock });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const stored = await sink.recordSpanEnd(llmSpan());
+
+      expect(stored.llm?.cost?.prompt).toBeCloseTo(0.000005 * 1000);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0].join(" ")).toContain("network down");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("logs and leaves cost unset, without throwing, when both catalogs fail", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ error: "boom" }, 500));
     const sink = new CostFetchingTraceSink({ fetch: fetchMock });
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -163,8 +263,10 @@ describe("CostFetchingTraceSink", () => {
       const stored = await sink.recordSpanEnd(llmSpan());
 
       expect(stored.llm?.cost).toBeUndefined();
-      expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy.mock.calls[0].join(" ")).toContain("500");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(spy).toHaveBeenCalledTimes(2);
+      expect(spy.mock.calls[0].join(" ")).toContain(GATEWAY_URL);
+      expect(spy.mock.calls[1].join(" ")).toContain(OPENROUTER_URL);
     } finally {
       spy.mockRestore();
     }
@@ -181,41 +283,99 @@ describe("CostFetchingTraceSink", () => {
       const stored = await sink.recordSpanEnd(llmSpan());
 
       expect(stored.llm?.cost).toBeUndefined();
-      expect(spy).toHaveBeenCalledTimes(1);
       expect(spy.mock.calls[0].join(" ")).toContain("network down");
     } finally {
       spy.mockRestore();
     }
   });
 
-  it("falls back to a hardcoded price for jev-* models when pricing fetch fails", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({ error: "boom" }, 500));
+  it("bills cache reads and writes at the catalog's cache prices", async () => {
+    // $3/1M input, $15/1M output, $0.30/1M cache read, $3.75/1M cache write.
+    const fetchMock = gatewayFetchMock([
+      {
+        id: "anthropic/claude-sonnet-4.5",
+        input: "0.000003",
+        output: "0.000015",
+        cacheRead: "0.0000003",
+        cacheWrite: "0.00000375",
+      },
+    ]);
+    const sink = new CostFetchingTraceSink({ fetch: fetchMock });
+
+    const stored = await sink.recordSpanEnd(
+      llmSpan({
+        llm: {
+          model: "claude-sonnet-4-5",
+          // 1000 input tokens: 600 read from cache, 300 written, 100 neither.
+          promptTokens: 1000,
+          cacheReadTokens: 600,
+          cacheWriteTokens: 300,
+          completionTokens: 50,
+        },
+      }),
+    );
+
+    expect(stored.llm?.cost?.prompt).toBeCloseTo(
+      100 * 0.000003 + 600 * 0.0000003 + 300 * 0.00000375,
+    );
+    expect(stored.llm?.cost?.completion).toBeCloseTo(50 * 0.000015);
+  });
+
+  it("bills cache tokens at the input price when the catalog lists no cache price", async () => {
+    const fetchMock = gatewayFetchMock([GPT_4O]);
+    const sink = new CostFetchingTraceSink({ fetch: fetchMock });
+
+    const stored = await sink.recordSpanEnd(
+      llmSpan({
+        llm: {
+          model: "gpt-4o",
+          promptTokens: 1000,
+          cacheReadTokens: 600,
+          cacheWriteTokens: 300,
+        },
+      }),
+    );
+
+    expect(stored.llm?.cost?.prompt).toBeCloseTo(1000 * 0.000005);
+  });
+
+  it("uses OpenRouter's cache prices when falling back to it", async () => {
+    const fetchMock = openRouterFallbackFetchMock(500, [
+      { ...GPT_4O, cacheRead: "0.0000025", cacheWrite: "0.00001" },
+    ]);
     const sink = new CostFetchingTraceSink({ fetch: fetchMock });
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     try {
       const stored = await sink.recordSpanEnd(
         llmSpan({
-          llm: { model: "jev-7b", promptTokens: 1000, completionTokens: 500 },
+          llm: {
+            model: "gpt-4o",
+            promptTokens: 1000,
+            cacheReadTokens: 600,
+            cacheWriteTokens: 300,
+          },
         }),
       );
 
-      expect(stored.llm?.cost?.prompt).toBeCloseTo((0.042 / 1_000_000) * 1000);
-      expect(stored.llm?.cost?.completion).toBe(0);
+      expect(stored.llm?.cost?.prompt).toBeCloseTo(
+        100 * 0.000005 + 600 * 0.0000025 + 300 * 0.00001,
+      );
     } finally {
       spy.mockRestore();
     }
   });
 
-  it("falls back to a hardcoded price for jev-* models OpenRouter doesn't list", async () => {
-    const fetchMock = openRouterFetchMock([
-      { id: "openai/gpt-4o", prompt: "0.000005", completion: "0.00001" },
+  it("prices jev-* models from the catalog's input-only `typesafe-ai/jev` entry", async () => {
+    // As the AI Gateway lists it: input-priced, with a free output.
+    const fetchMock = gatewayFetchMock([
+      { id: "typesafe-ai/jev", input: "0.000000042", output: "0" },
     ]);
     const sink = new CostFetchingTraceSink({ fetch: fetchMock });
 
     const stored = await sink.recordSpanEnd(
       llmSpan({
-        llm: { model: "jev-7b", promptTokens: 1000, completionTokens: 500 },
+        llm: { model: "jev-latest", promptTokens: 1000, completionTokens: 500 },
       }),
     );
 
@@ -223,21 +383,8 @@ describe("CostFetchingTraceSink", () => {
     expect(stored.llm?.cost?.completion).toBe(0);
   });
 
-  it("prefers OpenRouter's own price for a jev-* model over the hardcoded fallback", async () => {
-    const fetchMock = openRouterFetchMock([
-      { id: "jev/jev-7b", prompt: "0.00001", completion: "0.00002" },
-    ]);
-    const sink = new CostFetchingTraceSink({ fetch: fetchMock });
-
-    const stored = await sink.recordSpanEnd(
-      llmSpan({ llm: { model: "jev-7b", promptTokens: 1000 } }),
-    );
-
-    expect(stored.llm?.cost?.prompt).toBeCloseTo(0.00001 * 1000);
-  });
-
   it("does not touch non-LLM spans or LLM spans without usage", async () => {
-    const fetchMock = openRouterFetchMock([]);
+    const fetchMock = gatewayFetchMock([]);
     const sink = new CostFetchingTraceSink({ fetch: fetchMock });
 
     const toolSpan = await sink.recordSpanEnd({
@@ -258,7 +405,7 @@ describe("CostFetchingTraceSink", () => {
 
   it("fans a span out to every registered downstream sink", async () => {
     const sink = new CostFetchingTraceSink({
-      fetch: openRouterFetchMock([]),
+      fetch: gatewayFetchMock([]),
     });
     const a = new MemoryTraceProvider({ id: "a" });
     const b = new MemoryTraceProvider({ id: "b" });
@@ -274,7 +421,7 @@ describe("CostFetchingTraceSink", () => {
 
   it("stops forwarding to a sink once it is removed", async () => {
     const sink = new CostFetchingTraceSink({
-      fetch: openRouterFetchMock([]),
+      fetch: gatewayFetchMock([]),
     });
     const provider = new MemoryTraceProvider();
     sink.addSink(provider);
@@ -287,7 +434,7 @@ describe("CostFetchingTraceSink", () => {
 
   it("forwards failTrace to every downstream sink", async () => {
     const sink = new CostFetchingTraceSink({
-      fetch: openRouterFetchMock([]),
+      fetch: gatewayFetchMock([]),
     });
     const provider = new MemoryTraceProvider();
     sink.addSink(provider);

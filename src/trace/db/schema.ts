@@ -75,6 +75,8 @@ export const spans = sqliteTable(
     llmPromptTokens: integer("llm_prompt_tokens"),
     llmCompletionTokens: integer("llm_completion_tokens"),
     llmTotalTokens: integer("llm_total_tokens"),
+    llmCacheReadTokens: integer("llm_cache_read_tokens"),
+    llmCacheWriteTokens: integer("llm_cache_write_tokens"),
     llmCostPrompt: real("llm_cost_prompt"),
     llmCostCompletion: real("llm_cost_completion"),
     /** JSON `LLMSpanDetails["input"]`: a `SpanMessage[]`, or any JSON object. */

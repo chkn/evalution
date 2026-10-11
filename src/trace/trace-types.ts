@@ -182,12 +182,18 @@ export interface LLMSpanDetails {
   output?: unknown;
 
   // -- usage info --
+  /** Input tokens, counting any read from or written to a prompt cache. */
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  /** How many of {@link promptTokens} were read from a prompt cache. */
+  cacheReadTokens?: number;
+  /** How many of {@link promptTokens} were written to a prompt cache. */
+  cacheWriteTokens?: number;
   /**
    * Dollar cost of the call, broken down by token type, if known. The total
-   * cost is `cost.prompt + cost.completion`.
+   * cost is `cost.prompt + cost.completion`; `cost.prompt` includes cache
+   * reads and writes, each at its own price.
    */
   cost?: {
     prompt: number;

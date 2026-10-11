@@ -262,6 +262,18 @@ describe("readLLM token fallbacks", () => {
     expect(llm?.completionTokens).toBe(3);
     expect(llm?.totalTokens).toBe(10);
   });
+
+  it("reads cache read and write tokens from the OTel GenAI semconv", () => {
+    const llm = readLLM({
+      "gen_ai.usage.input_tokens": 100,
+      "gen_ai.usage.output_tokens": 5,
+      "gen_ai.usage.cache_read.input_tokens": 60,
+      "gen_ai.usage.cache_creation.input_tokens": 30,
+    });
+    expect(llm?.promptTokens).toBe(100);
+    expect(llm?.cacheReadTokens).toBe(60);
+    expect(llm?.cacheWriteTokens).toBe(30);
+  });
 });
 
 describe("readLLM input and output", () => {

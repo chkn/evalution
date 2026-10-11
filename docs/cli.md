@@ -166,7 +166,7 @@ Start the playground before your agents when you use both: while an agent's
 | --- | --- |
 | `PORT` | Port for the local server. When set, it's used as-is. When unset, Evalution uses `3000`, falling back to the next free port if it's already taken. |
 | `EVALUTION_NO_OPEN` | When set to any value, Evalution does **not** open the playground in your browser on start — useful for CI and remote or headless hosts. |
-| `EVALUTION_NO_COST_ESTIMATES` | By default, the first time a trace records an LLM call with token usage, Evalution downloads model prices from OpenRouter's public catalog (`https://openrouter.ai/api/v1/models`) to show estimated costs. When set to any value, that request is never made and traces show no costs — useful for offline or air-gapped hosts. |
+| `EVALUTION_NO_COST_ESTIMATES` | By default, the first time a trace records an LLM call with token usage, Evalution downloads model prices from Vercel AI Gateway's public catalog (`https://ai-gateway.vercel.sh/v1/models`), or from OpenRouter's (`https://openrouter.ai/api/v1/models`) if that fails, to show estimated costs. When set to any value, those requests are never made and traces show no costs — useful for offline or air-gapped hosts. |
 
 ### Provider API keys
 

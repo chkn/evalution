@@ -198,6 +198,8 @@ describe("TursoTraceProvider row round-tripping", () => {
         promptTokens: 5,
         completionTokens: 7,
         totalTokens: 12,
+        cacheReadTokens: 2,
+        cacheWriteTokens: 1,
         cost: { prompt: 0.004, completion: 0.006 },
         input: [
           {
@@ -247,6 +249,8 @@ describe("TursoTraceProvider row round-tripping", () => {
       promptTokens: 5,
       completionTokens: 7,
       totalTokens: 12,
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
       cost: { prompt: 0.004, completion: 0.006 },
       input: [
         {

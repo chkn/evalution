@@ -39,10 +39,12 @@ CREATE TABLE spans (
   llm_provider          TEXT,           -- e.g. 'openai', 'anthropic'
   llm_model             TEXT,           -- e.g. 'gpt-4o'
   llm_finish_reason     TEXT,           -- e.g. 'stop', 'length', 'tool-calls'
-  llm_prompt_tokens     INTEGER,
+  llm_prompt_tokens     INTEGER,        -- includes cache reads and writes
   llm_completion_tokens INTEGER,
   llm_total_tokens      INTEGER,
-  llm_cost_prompt       REAL,           -- USD
+  llm_cache_read_tokens INTEGER,        -- of llm_prompt_tokens, read from a prompt cache
+  llm_cache_write_tokens INTEGER,       -- of llm_prompt_tokens, written to a prompt cache
+  llm_cost_prompt       REAL,           -- USD, cache reads and writes included
   llm_cost_completion   REAL,           -- USD
   llm_input             TEXT,           -- JSON: an array of messages {role, content}, or any JSON object
   llm_output            TEXT,           -- JSON: always encoded, so a text output is a JSON string
