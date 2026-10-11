@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { rollupSpans } from "./span-rollup.ts";
-import type { Span } from "./trace-types.ts";
+import { CHECK_ATTRIBUTE, type Span } from "./trace-types.ts";
 
 function llmSpan(id: string, llm: Span["llm"]): Span {
   return {
@@ -81,6 +81,26 @@ describe("rollupSpans", () => {
       llmSpan("b", { model: "claude-opus-4-5" }),
     ]);
     expect(result.model).toBeUndefined();
+  });
+
+  it("leaves out what an eval check recorded while judging the trace", () => {
+    const result = rollupSpans([
+      llmSpan("a", {
+        model: "gpt-4o",
+        totalTokens: 10,
+        cost: { prompt: 0.01, completion: 0.02 },
+      }),
+      {
+        ...llmSpan("judge", {
+          model: "jev",
+          totalTokens: 99,
+          cost: { prompt: 1, completion: 1 },
+        }),
+        attributes: { [CHECK_ATTRIBUTE]: "c1" },
+      },
+    ]);
+    expect(result).toMatchObject({ totalTokens: 10, model: "gpt-4o" });
+    expect(result.cost).toBeCloseTo(0.03);
   });
 
   it("returns undefined for model when no span reports one", () => {

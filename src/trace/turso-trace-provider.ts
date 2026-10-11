@@ -9,7 +9,7 @@
  */
 
 import type { Database } from "@tursodatabase/sync";
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { TRACE_QUERY_SCHEMA } from "./db/query-schema.ts";
 import {
@@ -21,14 +21,15 @@ import {
 import { annotations, spans, traces } from "./db/schema.ts";
 import { mergeSpans } from "./span-merge.ts";
 import { BaseTraceProvider } from "./trace-sink.ts";
-import type {
-  Annotation,
-  AnnotationChanges,
-  LLMSpanDetails,
-  Span,
-  SpanKind,
-  Trace,
-  TraceSummary,
+import {
+  type Annotation,
+  type AnnotationChanges,
+  CHECK_ATTRIBUTE,
+  type LLMSpanDetails,
+  type Span,
+  type SpanKind,
+  type Trace,
+  type TraceSummary,
 } from "./trace-types.ts";
 
 function parseJson<T>(v: string | null): T | undefined {
@@ -252,25 +253,32 @@ export class TursoTraceProvider extends BaseTraceProvider {
     // agrees on (`model_count = 1`), else NULL. `promptVersion` and
     // `promptVariation` come off whichever span recorded the run's prompt
     // reference — its root, in practice. `environment` is the root span's
-    // resource's `deployment.environment.name`.
+    // resource's `deployment.environment.name`. Usage and the prompt reference
+    // count only the run's own spans — `ofRun` — not what an eval check
+    // recorded while judging it (`isCheckSpan`).
+    const ofRun = (value: SQL) =>
+      sql`case when json_extract(${spans.attributes}, ${`$."${CHECK_ATTRIBUTE}"`}) is null then ${value} end`;
     const spanRollups = this.db
       .select({
         traceId: spans.traceId,
         count: sql`count(*)`.as("count"),
         tokens:
-          sql`sum(case when ${spans.llmTotalTokens} is not null or ${spans.llmPromptTokens} is not null or ${spans.llmCompletionTokens} is not null then coalesce(${spans.llmTotalTokens}, coalesce(${spans.llmPromptTokens}, 0) + coalesce(${spans.llmCompletionTokens}, 0)) else null end)`.as(
+          sql`sum(${ofRun(sql`case when ${spans.llmTotalTokens} is not null or ${spans.llmPromptTokens} is not null or ${spans.llmCompletionTokens} is not null then coalesce(${spans.llmTotalTokens}, coalesce(${spans.llmPromptTokens}, 0) + coalesce(${spans.llmCompletionTokens}, 0)) else null end`)})`.as(
             "tokens",
           ),
-        cost: sql`sum(${spans.llmCostPrompt} + ${spans.llmCostCompletion})`.as(
+        cost: sql`sum(${ofRun(sql`${spans.llmCostPrompt} + ${spans.llmCostCompletion}`)})`.as(
           "cost",
         ),
-        modelCount: sql`count(distinct ${spans.llmModel})`.as("modelCount"),
-        model: sql`min(${spans.llmModel})`.as("model"),
-        promptVersion: sql`min(json_extract(${spans.prompt}, '$.version'))`.as(
-          "promptVersion",
+        modelCount: sql`count(distinct ${ofRun(sql`${spans.llmModel}`)})`.as(
+          "modelCount",
         ),
+        model: sql`min(${ofRun(sql`${spans.llmModel}`)})`.as("model"),
+        promptVersion:
+          sql`min(${ofRun(sql`json_extract(${spans.prompt}, '$.version')`)})`.as(
+            "promptVersion",
+          ),
         promptVariation:
-          sql`min(json_extract(${spans.prompt}, '$.variation'))`.as(
+          sql`min(${ofRun(sql`json_extract(${spans.prompt}, '$.variation')`)})`.as(
             "promptVariation",
           ),
         environment:

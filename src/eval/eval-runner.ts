@@ -33,6 +33,7 @@ import { runPrompt } from "../server/run-prompt.ts";
 import { stripReceipts } from "../shared/dataset-cells.ts";
 import { evalProblems } from "../shared/eval-problems.ts";
 import type { NormalizedPrompt, PromptRef } from "../shared/types.ts";
+import { CheckScope } from "../trace/check-scope.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
 import type { PromptID, TraceWithSpans } from "../trace/trace-types.ts";
 import type { EvalProvider } from "./eval-provider.ts";
@@ -306,6 +307,7 @@ export class EvalRunner {
       prompt,
       dataset,
       definition,
+      checkLabels: new Map(checkInfos.map(c => [c.uri, c.label])),
     })
       .then(
         () => (active.cancelled ? "cancelled" : "done") as EvalRunStatus,
@@ -522,7 +524,7 @@ export class EvalRunner {
   private async runRow(
     active: ActiveRun,
     job: Job,
-    { promptProvider, prompt, dataset, definition }: RowContext,
+    { promptProvider, prompt, dataset, definition, checkLabels }: RowContext,
   ): Promise<RowResults> {
     const { inputs } = definition;
     const key = {
@@ -562,6 +564,7 @@ export class EvalRunner {
     // 2. Resolve and execute.
     let resolved: ResolvedPromptInputs;
     let traceId: string;
+    let rootSpanId: string;
     let settled: Promise<void>;
     let version: string | undefined;
     let variation: string | undefined;
@@ -597,6 +600,7 @@ export class EvalRunner {
       resolved = ran.resolved;
       settled = ran.settled;
       traceId = ran.response.traceId;
+      rootSpanId = ran.response.rootSpanId;
       active.traceIds.add(traceId);
       version = ran.response.version;
       variation = ran.response.variation;
@@ -646,7 +650,8 @@ export class EvalRunner {
         active.drifted = true;
       }
 
-      // 4. Checks, in the run's lease, concurrently.
+      // 4. Checks, in the run's lease, concurrently — each in a scope, so
+      // whatever it traces (an LLM judge's call) lands in this row's trace.
       const checkRun: CheckRun = {
         trace,
         row: job.row,
@@ -657,7 +662,18 @@ export class EvalRunner {
       const checks = await Promise.all(
         definition.checks.map(async (check): Promise<EvalCheckResult> => {
           const started = Date.now();
-          const judged = await this.judge(check, resolved, checkRun);
+          const scope = new CheckScope({
+            traceId,
+            parentId: rootSpanId,
+            name: check.label ?? checkLabels.get(check.uri) ?? check.uri,
+            checkId: check.id,
+          });
+          const judged = await scope.run(() =>
+            this.judge(check, resolved, checkRun),
+          );
+          await scope.end(judged).catch(err => {
+            console.error("failed to record a check's span:", err);
+          });
           return {
             ...key,
             checkId: check.id,
@@ -796,6 +812,8 @@ interface RowContext {
   prompt: NormalizedPrompt;
   dataset: Dataset;
   definition: EvalDefinition;
+  /** Each check's own label, by URI. */
+  checkLabels: Map<string, string>;
 }
 
 /** A row's results, ready to record. */

@@ -13,7 +13,7 @@ import type {
   SpanKind,
   SpanMessage,
 } from "../../../shared/types";
-import { spanMessages } from "../../../trace/trace-types";
+import { isCheckSpan, spanMessages } from "../../../trace/trace-types";
 
 export interface Row {
   span: Span;
@@ -104,6 +104,14 @@ export function barGeometry(
     left: `${(start / total) * 100}%`,
     width: `${Math.max(0.5, ((end - start) / total) * 100)}%`,
   };
+}
+
+/**
+ * `rows` without what an eval check recorded while judging the trace — not
+ * part of the run's conversation, so `ChatFlow` leaves it out.
+ */
+export function runRows(rows: Row[]): Row[] {
+  return rows.filter(r => !isCheckSpan(r.span));
 }
 
 /** Whether an LLM span recorded any output — empty text counts as none. */

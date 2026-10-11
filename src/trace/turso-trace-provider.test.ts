@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createLocalTursoClient } from "./db/local-turso-client.ts";
 import { runMigrations } from "./db/migrate.ts";
 import { runTraceProviderContractTests } from "./trace-provider-contract.ts";
+import { CHECK_ATTRIBUTE } from "./trace-types.ts";
 import { TursoTraceProvider } from "./turso-trace-provider.ts";
 
 const dirs: string[] = [];
@@ -349,6 +350,32 @@ describe("TursoTraceProvider row round-tripping", () => {
       endTime: 2,
       status: "ok",
       llm: { model: "gpt-4o", promptTokens: 3, completionTokens: 4 },
+    });
+    // An eval check's judge call, recorded into "a" — not the run's spend.
+    await provider.recordSpanStart({
+      id: "a:judge",
+      traceId: "a",
+      parentId: "a:root",
+      name: "judge",
+      kind: "LLM",
+      startTime: 2,
+      attributes: { [CHECK_ATTRIBUTE]: "c1" },
+    });
+    await provider.recordSpanEnd({
+      id: "a:judge",
+      traceId: "a",
+      parentId: "a:root",
+      name: "judge",
+      kind: "LLM",
+      startTime: 2,
+      endTime: 3,
+      status: "ok",
+      attributes: { [CHECK_ATTRIBUTE]: "c1" },
+      llm: {
+        model: "jev",
+        totalTokens: 100,
+        cost: { prompt: 1, completion: 1 },
+      },
     });
     await provider.createAnnotation({
       traceId: "a",

@@ -61,9 +61,30 @@ export interface PromptID {
  * - `lmnr.span.type` from https://laminar.sh/docs/tracing/otel
  * - `mlflow.spanType` from https://mlflow.org/docs/latest/genai/tracing/opentelemetry/attribute-mapping/#translated-span-attributes
  *
- * Mapped from `gen_ai.operation.name`.
+ * Mapped from `gen_ai.operation.name`. `CHECK` is evalution's own: an eval
+ * check that traced something while judging the run — see
+ * {@link CHECK_ATTRIBUTE}.
  */
-export type SpanKind = "LLM" | "TOOL" | "AGENT" | "EMBEDDING" | "DEFAULT";
+export type SpanKind =
+  | "LLM"
+  | "TOOL"
+  | "AGENT"
+  | "EMBEDDING"
+  | "CHECK"
+  | "DEFAULT";
+
+/**
+ * Span attribute naming the eval check (by its id within the eval) that
+ * recorded the span while judging the trace — set on the check's `CHECK` span
+ * and on everything under it. Those spans aren't part of the run being
+ * judged, so the trace's rollups and chat view leave them out.
+ */
+export const CHECK_ATTRIBUTE = "evalution.check";
+
+/** Whether `span` was recorded by a check judging its trace, not by the run. */
+export function isCheckSpan(span: Pick<Span, "attributes">): boolean {
+  return span.attributes?.[CHECK_ATTRIBUTE] !== undefined;
+}
 
 /** A text segment within a multi-part {@link SpanMessage} content. */
 export interface SpanTextPart {

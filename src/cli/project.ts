@@ -16,6 +16,7 @@ import { LocalDirectoryDatasetProvider } from "../dataset/local-directory-datase
 import type { EvalProvider } from "../eval/eval-provider.ts";
 import { LocalEvalProvider } from "../eval/local-eval-provider.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
+import { CheckScopeTraceSink } from "../trace/check-scope.ts";
 import { CostFetchingTraceSink } from "../trace/cost-fetching-trace-sink.ts";
 import { LocalDatabaseTraceProvider } from "../trace/local-database-trace-provider.ts";
 import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
@@ -154,8 +155,12 @@ export async function setUpProject(
   for (const sink of traceSinks) {
     costSink.addSink(sink);
   }
+  // What an eval check traces while judging a run (an LLM judge's call)
+  // goes into the run's own trace, under the check's span.
+  const checkScopeSink = new CheckScopeTraceSink();
+  checkScopeSink.addSink(costSink);
   for (const ingestor of ingestors) {
-    ingestor.addSink(costSink);
+    ingestor.addSink(checkScopeSink);
   }
 
   return {

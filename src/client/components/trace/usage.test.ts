@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
+import { CHECK_ATTRIBUTE } from "../../../trace/trace-types.ts";
 import { nativeSpan, otelSpan, toolSpan } from "./__fixtures__/spans.ts";
 import { computeCostBreakdown, summarizeUsage } from "./usage.ts";
 
@@ -32,6 +33,17 @@ describe("summarizeUsage", () => {
     expect(usage.model).toBeUndefined();
     expect(usage.promptTokens).toBe(7);
     expect(usage.completionTokens).toBe(11);
+  });
+
+  it("leaves out what an eval check recorded while judging the trace", () => {
+    const judge = {
+      ...nativeSpan,
+      attributes: { [CHECK_ATTRIBUTE]: "c1" },
+      llm: { ...nativeSpan.llm, cost: { prompt: 1, completion: 1 } },
+    };
+    expect(summarizeUsage([otelSpan, judge])).toEqual(
+      summarizeUsage([otelSpan]),
+    );
   });
 
   it("leaves tokens/cost undefined when no span reports them", () => {

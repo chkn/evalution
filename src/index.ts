@@ -380,7 +380,9 @@ export {
 export type { TraceProvider } from "./trace/trace-provider.ts";
 export { BaseTraceProvider, type TraceSink } from "./trace/trace-sink.ts";
 export {
+  CHECK_ATTRIBUTE,
   DEPLOYMENT_ENVIRONMENT_ATTRIBUTE,
+  isCheckSpan,
   PLAYGROUND_ENVIRONMENT,
   SERVICE_NAME_ATTRIBUTE,
   spanMessages,

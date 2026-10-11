@@ -10,7 +10,11 @@
  * an N-row fetch per trace just to summarize it. Keep the two in sync.
  */
 
-import { DEPLOYMENT_ENVIRONMENT_ATTRIBUTE, type Span } from "./trace-types.ts";
+import {
+  DEPLOYMENT_ENVIRONMENT_ATTRIBUTE,
+  isCheckSpan,
+  type Span,
+} from "./trace-types.ts";
 
 /** Token/cost/model rollup across a trace's spans, as carried by `TraceSummary`. */
 export interface SpanRollup {
@@ -44,9 +48,13 @@ function spanTokens(span: Span): number | undefined {
   );
 }
 
-/** Computes a {@link SpanRollup} across a trace's spans. */
+/**
+ * Computes a {@link SpanRollup} across a trace's spans. Usage counts only the
+ * run's own spans: what an eval check spent judging it isn't the run's.
+ */
 export function rollupSpans(spans: Span[]): SpanRollup {
-  const tokenContributions = spans
+  const runSpans = spans.filter(s => !isCheckSpan(s));
+  const tokenContributions = runSpans
     .map(spanTokens)
     .filter((t): t is number => t !== undefined);
   const totalTokens =
@@ -54,7 +62,7 @@ export function rollupSpans(spans: Span[]): SpanRollup {
       ? tokenContributions.reduce((sum, t) => sum + t, 0)
       : undefined;
 
-  const costContributions = spans
+  const costContributions = runSpans
     .map(s => s.llm?.cost)
     .filter((c): c is { prompt: number; completion: number } => c !== undefined)
     .map(c => c.prompt + c.completion);
@@ -64,13 +72,13 @@ export function rollupSpans(spans: Span[]): SpanRollup {
       : undefined;
 
   const models = new Set(
-    spans.map(s => s.llm?.model).filter((m): m is string => !!m),
+    runSpans.map(s => s.llm?.model).filter((m): m is string => !!m),
   );
   const model = models.size === 1 ? [...models][0] : undefined;
 
   // The run's prompt reference sits on its root span; any span that carries
   // one names the same run, so the first is as good as any.
-  const prompt = spans.find(
+  const prompt = runSpans.find(
     s => s.prompt?.version || s.prompt?.variation,
   )?.prompt;
 

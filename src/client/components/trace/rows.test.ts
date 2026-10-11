@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
+import { CHECK_ATTRIBUTE } from "../../../trace/trace-types.ts";
 import {
   allProvenanceSpans,
   nativeSpan,
@@ -16,6 +17,7 @@ import {
   chatMessages,
   computeWindow,
   newMessagesByTurn,
+  runRows,
   spanDuration,
   toolSpanCallIds,
 } from "./rows.ts";
@@ -338,5 +340,18 @@ describe("toolSpanCallIds", () => {
       }),
     ]);
     expect(toolSpanCallIds(rows)).toEqual(new Set(["c1"]));
+  });
+});
+
+describe("runRows", () => {
+  it("leaves out a check's span and everything under it", () => {
+    const check = { [CHECK_ATTRIBUTE]: "c1" };
+    const rows = buildRows([
+      span("root", { kind: "AGENT" }),
+      span("llm", { parentId: "root", kind: "LLM" }),
+      span("check", { parentId: "root", kind: "CHECK", attributes: check }),
+      span("judge", { parentId: "check", kind: "LLM", attributes: check }),
+    ]);
+    expect(runRows(rows).map(r => r.span.id)).toEqual(["root", "llm"]);
   });
 });

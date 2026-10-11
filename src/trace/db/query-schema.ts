@@ -31,7 +31,7 @@ CREATE TABLE spans (
   trace_id              TEXT NOT NULL,  -- traces.id
   parent_id             TEXT,           -- spans.id; NULL for the root span
   name                  TEXT NOT NULL,
-  kind                  TEXT NOT NULL,  -- 'LLM' | 'TOOL' | 'AGENT' | 'EMBEDDING' | 'DEFAULT'
+  kind                  TEXT NOT NULL,  -- 'LLM' | 'TOOL' | 'AGENT' | 'EMBEDDING' | 'CHECK' | 'DEFAULT'
   start_time            REAL NOT NULL,  -- ms since epoch
   end_time              REAL,           -- ms since epoch; NULL while running
   status                TEXT,           -- 'ok' | 'error'; NULL while running
@@ -47,7 +47,7 @@ CREATE TABLE spans (
   llm_input             TEXT,           -- JSON: an array of messages {role, content}, or any JSON object
   llm_output            TEXT,           -- JSON: always encoded, so a text output is a JSON string
   llm_parameters        TEXT,           -- JSON object of model parameters (temperature, ...)
-  attributes            TEXT,           -- JSON object of free-form attributes
+  attributes            TEXT,           -- JSON object of free-form attributes; "evalution.check" is set on spans an eval check recorded while judging the trace (its CHECK span and everything under it), which aren't part of the run
   resource              TEXT,           -- JSON object: the OTel resource that produced the span ("service.name", "deployment.environment.name" = 'playground' for runs evalution made, ...)
   prompt                TEXT,           -- JSON {id, providerId?, version?, variation?, functionInputs?, executeInputs?, ...}: the prompt this span ran
   tool                  TEXT            -- JSON {toolName, input, output?} for TOOL spans

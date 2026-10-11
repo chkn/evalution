@@ -8,6 +8,7 @@
  */
 
 import type { Span } from "../../../shared/types";
+import { isCheckSpan } from "../../../trace/trace-types";
 
 /** Aggregate token/cost/model usage across a trace's spans, for the trace header. */
 export interface UsageSummary {
@@ -24,8 +25,12 @@ export interface UsageSummary {
   model?: string;
 }
 
-/** Computes a {@link UsageSummary} across all of a trace's spans. */
-export function summarizeUsage(spans: Span[]): UsageSummary {
+/**
+ * Computes a {@link UsageSummary} across a trace's spans — the run's own: what
+ * an eval check spent judging it isn't the run's.
+ */
+export function summarizeUsage(allSpans: Span[]): UsageSummary {
+  const spans = allSpans.filter(s => !isCheckSpan(s));
   const hasTokens = spans.some(
     s =>
       s.llm?.promptTokens !== undefined ||

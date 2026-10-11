@@ -5,9 +5,12 @@ import { trace } from "@opentelemetry/api";
 import { connect, type Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { afterEach, describe, expect, it } from "vitest";
+import { builtinCheckInfos } from "../checks/index.ts";
 import { runDatasetMigrations } from "../dataset/db/migrate.ts";
 import { TursoDatasetProvider } from "../dataset/turso-dataset-provider.ts";
+import { resolveExecutionInputs } from "../prompt/execution-inputs.ts";
 import type {
+  PreparedCheck,
   PromptProvider,
   PromptVariations,
 } from "../prompt/prompt-provider.ts";
@@ -17,7 +20,9 @@ import type {
   PropDefinition,
   RunResources,
 } from "../shared/types.ts";
+import { CheckScopeTraceSink } from "../trace/check-scope.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
+import { CHECK_ATTRIBUTE } from "../trace/trace-types.ts";
 import { runEvalMigrations } from "./db/migrate.ts";
 import {
   EvalRunner,
@@ -74,13 +79,32 @@ function fakeProvider(
     /** Never settles the generation for these questions — a hung SDK call. */
     hang?: (question: string) => boolean;
     variations?: PromptVariations;
+    /** A check of the provider's own, at `fake#judge`. */
+    judge?: PreparedCheck["run"];
   } = {},
 ): PromptProvider & { calls: { question: string; variation?: string }[] } {
   const calls: { question: string; variation?: string }[] = [];
+  const judge = options.judge;
   return {
     id: "fake",
     calls,
     variations: options.variations,
+    ...(judge && {
+      async listChecks() {
+        return [
+          ...builtinCheckInfos(),
+          { uri: "fake#judge", label: "Judge", parameters: [] },
+        ];
+      },
+      async resolveInputs(_ref, inputs, context) {
+        return {
+          ...(await resolveExecutionInputs(inputs, undefined, context)),
+          async prepareCheck() {
+            return { run: judge };
+          },
+        };
+      },
+    }),
     async getAllPrompts() {
       return [PROMPT];
     },
@@ -195,7 +219,7 @@ async function setUp(
     traceWait: { intervalMs: 5, timeoutMs: 1000 },
     ...options.runner,
   });
-  return { runner, evals, def, prompts, progress };
+  return { runner, evals, def, prompts, progress, traces };
 }
 
 describe("EvalRunner", () => {
@@ -261,6 +285,59 @@ describe("EvalRunner", () => {
       "done",
       "done",
     ]);
+  });
+
+  it("records what a check traces in the trace it judged, under a CHECK span", async () => {
+    // The check's model call, recorded as an ingestor records one: a trace
+    // of its own, through the sink every ingestor writes to.
+    const sink = new CheckScopeTraceSink();
+    const { runner, evals, def, traces } = await setUp({
+      rows: [{ "0": text("cats") }],
+      checks: [{ id: "j", uri: "fake#judge", args: {} }],
+      provider: {
+        judge: async () => {
+          const span = {
+            id: "judge:root",
+            traceId: "judge",
+            name: "evaluate",
+            kind: "LLM" as const,
+            startTime: Date.now(),
+          };
+          await sink.recordSpanStart(span);
+          await sink.recordSpanEnd({
+            ...span,
+            endTime: Date.now(),
+            llm: { model: "jev", cost: { prompt: 1, completion: 0 } },
+          });
+          return { pass: false, message: "judged no" };
+        },
+      },
+    });
+    sink.addSink(traces);
+    const run = await runner.start(evals, def.id);
+    await runner.finished(run.id);
+
+    const { rows } = await evals.listResults(run.id);
+    expect(await traces.hasTrace("judge")).toBe(false);
+    const { spans } = (await traces.getTrace(rows[0]!.traceId!))!;
+    const check = spans.find(s => s.kind === "CHECK");
+    expect(check).toMatchObject({
+      parentId: `${rows[0]!.traceId}:root`,
+      name: "Judge",
+      status: "ok",
+      attributes: {
+        [CHECK_ATTRIBUTE]: "j",
+        "evalution.check.outcome": "fail",
+        "evalution.check.message": "judged no",
+      },
+    });
+    expect(spans.find(s => s.id === "judge:root")).toMatchObject({
+      parentId: check!.id,
+      attributes: { [CHECK_ATTRIBUTE]: "j" },
+    });
+    // The judge's spend isn't the run's.
+    const [summary] = await traces.getAllTraces();
+    expect(summary).toMatchObject({ cost: 0.003 });
   });
 
   it("lists the trace's check results", async () => {

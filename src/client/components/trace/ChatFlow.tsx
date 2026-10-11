@@ -30,6 +30,7 @@ import {
   chatMessages,
   hasOutput,
   newMessagesByTurn,
+  runRows,
   spanDuration,
   toolSpanCallIds,
 } from "./rows.ts";
@@ -211,7 +212,9 @@ function ChatToolBlock({
 /**
  * Renders `rows` (already parent-sorted by `buildRows`) as a linear thread.
  * `AGENT`/`EMBEDDING`/`DEFAULT` spans are structural — their `LLM`/`TOOL`
- * descendants are what actually render a chat block.
+ * descendants are what actually render a chat block. What an eval check
+ * recorded while judging the run isn't part of its conversation, so it's left
+ * out.
  *
  * Each `LLM` span's input messages are the *full* conversation sent to the model,
  * so a later turn's `messages` re-includes everything already shown by
@@ -226,7 +229,7 @@ function ChatToolBlock({
  * highlights it here.
  */
 export function ChatFlow({
-  rows,
+  rows: allRows,
   selectedSpanId,
   onSelectSpan,
 }: {
@@ -235,6 +238,7 @@ export function ChatFlow({
   onSelectSpan: (spanId: string | null) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const rows = runRows(allRows);
   const blocks = rows.filter(
     r => r.span.kind === "LLM" || r.span.kind === "TOOL",
   );
