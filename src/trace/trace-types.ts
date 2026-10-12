@@ -198,6 +198,10 @@ export interface LLMSpanDetails {
   cost?: {
     prompt: number;
     completion: number;
+    /** The part of `prompt` spent on {@link cacheReadTokens}. */
+    cacheRead?: number;
+    /** The part of `prompt` spent on {@link cacheWriteTokens}. */
+    cacheWrite?: number;
   };
 }
 

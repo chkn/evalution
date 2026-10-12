@@ -505,6 +505,8 @@ test("hovering the header's cost meta item reveals the prompt/completion breakdo
     `Completion (${formatCost(50)}/1M tok)${formatCost(0.00025)}`,
   );
   await expect(tooltip).toContainText(`Total${formatCost(0.000265)}`);
+  // No span read or wrote cached tokens, so there are no cache rows.
+  await expect(tooltip).not.toContainText("Cache");
 
   // Moving off the badge closes it again.
   await page.mouse.move(0, 0);

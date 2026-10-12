@@ -318,7 +318,20 @@ describe("CostFetchingTraceSink", () => {
     expect(stored.llm?.cost?.prompt).toBeCloseTo(
       100 * 0.000003 + 600 * 0.0000003 + 300 * 0.00000375,
     );
+    expect(stored.llm?.cost?.cacheRead).toBeCloseTo(600 * 0.0000003);
+    expect(stored.llm?.cost?.cacheWrite).toBeCloseTo(300 * 0.00000375);
     expect(stored.llm?.cost?.completion).toBeCloseTo(50 * 0.000015);
+  });
+
+  it("doesn't break out cache costs for a span that reports no cache usage", async () => {
+    const sink = new CostFetchingTraceSink({
+      fetch: gatewayFetchMock([GPT_4O]),
+    });
+
+    const stored = await sink.recordSpanEnd(llmSpan());
+
+    expect(stored.llm?.cost).not.toHaveProperty("cacheRead");
+    expect(stored.llm?.cost).not.toHaveProperty("cacheWrite");
   });
 
   it("bills cache tokens at the input price when the catalog lists no cache price", async () => {

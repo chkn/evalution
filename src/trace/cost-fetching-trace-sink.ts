@@ -104,23 +104,29 @@ function parsePrices(data: ModelsResponse, catalog: Catalog): PriceTable {
 }
 
 /**
- * The prompt-side cost of a call. `promptTokens` counts every input token,
- * cached or not, so the cache reads and writes are carved out of it and
- * billed at their own rates — or at the input rate, if the catalog lists
- * none.
+ * What a call cost. `promptTokens` counts every input token, cached or not,
+ * so the cache reads and writes are carved out of it and billed at their own
+ * rates — or at the input rate, if the catalog lists none. Their share of
+ * `prompt` is broken out only when the span reports cache usage.
  */
-function promptCost(llm: LLMSpanDetails, price: PriceEntry): number {
-  const cacheRead = llm.cacheReadTokens ?? 0;
-  const cacheWrite = llm.cacheWriteTokens ?? 0;
-  const uncached = Math.max(
+function callCost(
+  llm: LLMSpanDetails,
+  price: PriceEntry,
+): NonNullable<LLMSpanDetails["cost"]> {
+  const cacheReadTokens = llm.cacheReadTokens ?? 0;
+  const cacheWriteTokens = llm.cacheWriteTokens ?? 0;
+  const uncachedTokens = Math.max(
     0,
-    (llm.promptTokens ?? 0) - cacheRead - cacheWrite,
+    (llm.promptTokens ?? 0) - cacheReadTokens - cacheWriteTokens,
   );
-  return (
-    uncached * price.input +
-    cacheRead * (price.cacheRead ?? price.input) +
-    cacheWrite * (price.cacheWrite ?? price.input)
-  );
+  const cacheRead = cacheReadTokens * (price.cacheRead ?? price.input);
+  const cacheWrite = cacheWriteTokens * (price.cacheWrite ?? price.input);
+  return {
+    prompt: uncachedTokens * price.input + cacheRead + cacheWrite,
+    completion: (llm.completionTokens ?? 0) * price.output,
+    ...(llm.cacheReadTokens !== undefined && { cacheRead }),
+    ...(llm.cacheWriteTokens !== undefined && { cacheWrite }),
+  };
 }
 
 /** Options for {@link CostFetchingTraceSink}. */
@@ -214,10 +220,7 @@ export class CostFetchingTraceSink implements TraceSink {
       ...span,
       llm: {
         ...llm,
-        cost: {
-          prompt: promptCost(llm, price),
-          completion: (llm.completionTokens ?? 0) * price.output,
-        },
+        cost: callCost(llm, price),
       },
     };
   }

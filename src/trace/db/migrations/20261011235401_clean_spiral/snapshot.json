@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "2f666769-45c1-4e12-9e05-d63c45c6b8a3",
+  "id": "75f28c0c-17ef-479c-ab52-b29afbdfed69",
   "prevIds": [
     "f8f3dd02-542a-47f1-bc3d-dae093c9a05c"
   ],
@@ -275,6 +275,26 @@
       "default": null,
       "generated": null,
       "name": "llm_cost_completion",
+      "entityType": "columns",
+      "table": "spans"
+    },
+    {
+      "type": "real",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "llm_cost_cache_read",
+      "entityType": "columns",
+      "table": "spans"
+    },
+    {
+      "type": "real",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "llm_cost_cache_write",
       "entityType": "columns",
       "table": "spans"
     },

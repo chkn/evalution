@@ -28,6 +28,22 @@ describe("summarizeUsage", () => {
     });
   });
 
+  it("sums cache tokens and cache costs across the spans that report them", () => {
+    const span = (cacheRead: number, cost: number) => ({
+      ...nativeSpan,
+      llm: {
+        ...nativeSpan.llm,
+        cacheReadTokens: cacheRead,
+        cost: { prompt: cost, completion: 0, cacheRead: cost },
+      },
+    });
+    const usage = summarizeUsage([span(10, 0.001), span(20, 0.002), otelSpan]);
+    expect(usage.cacheReadTokens).toBe(30);
+    expect(usage.cacheWriteTokens).toBeUndefined();
+    expect(usage.cost?.cacheRead).toBeCloseTo(0.003);
+    expect(usage.cost).not.toHaveProperty("cacheWrite");
+  });
+
   it("leaves model undefined when spans disagree, but still sums tokens/cost", () => {
     const usage = summarizeUsage([otelSpan, nativeSpan]);
     expect(usage.model).toBeUndefined();
@@ -79,6 +95,42 @@ describe("computeCostBreakdown", () => {
     expect(breakdown?.promptRate).toBeUndefined();
     expect(breakdown?.completionRate).toBeUndefined();
     expect(breakdown?.total).toBe(0.01);
+  });
+
+  it("breaks cache reads and writes out of the prompt cost, each with its implied rate", () => {
+    // 1000 prompt tokens: 600 read from cache, 300 written, 100 neither.
+    const breakdown = computeCostBreakdown({
+      promptTokens: 1000,
+      cacheReadTokens: 600,
+      cacheWriteTokens: 300,
+      completionTokens: 100,
+      cost: {
+        prompt: 0.0003 + 0.00018 + 0.001125,
+        completion: 0.0015,
+        cacheRead: 0.00018,
+        cacheWrite: 0.001125,
+      },
+    });
+    expect(breakdown?.prompt).toBeCloseTo(0.0003);
+    expect(breakdown?.promptRate).toBeCloseTo(3);
+    expect(breakdown?.cacheRead).toBeCloseTo(0.00018);
+    expect(breakdown?.cacheReadRate).toBeCloseTo(0.3);
+    expect(breakdown?.cacheWrite).toBeCloseTo(0.001125);
+    expect(breakdown?.cacheWriteRate).toBeCloseTo(3.75);
+    expect(breakdown?.total).toBeCloseTo(0.0003 + 0.00018 + 0.001125 + 0.0015);
+  });
+
+  it("omits a cache row when the trace touched no cached tokens", () => {
+    const breakdown = computeCostBreakdown({
+      promptTokens: 1000,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cost: { prompt: 0.005, completion: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+    expect(breakdown).not.toHaveProperty("cacheRead");
+    expect(breakdown).not.toHaveProperty("cacheWrite");
+    expect(breakdown?.prompt).toBe(0.005);
+    expect(breakdown?.promptRate).toBe(5);
   });
 
   it("returns undefined when no span reported a cost", () => {

@@ -44,13 +44,15 @@ export const bundledMigrations: MigrationMeta[] = [
     ]
   },
   {
-    "name": "20261011231818_calm_bedlam",
-    "hash": "8b39ac7e343cc7e93458b4241704901904cad102ac2cf6b3366c5edf193f8b35",
-    "folderMillis": 1791760698000,
+    "name": "20261011235401_clean_spiral",
+    "hash": "96cd624b624e5168a5b8d58177084f183e1bd4cb3d3b2bcefdb2f85bc6f25806",
+    "folderMillis": 1791762841000,
     "bps": true,
     "sql": [
       "-- SPDX\u002DLicense-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nALTER TABLE `spans` ADD `llm_cache_read_tokens` integer;",
-      "\nALTER TABLE `spans` ADD `llm_cache_write_tokens` integer;\n"
+      "\nALTER TABLE `spans` ADD `llm_cache_write_tokens` integer;",
+      "\nALTER TABLE `spans` ADD `llm_cost_cache_read` real;",
+      "\nALTER TABLE `spans` ADD `llm_cost_cache_write` real;\n"
     ]
   }
 ];

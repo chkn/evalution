@@ -46,6 +46,8 @@ CREATE TABLE spans (
   llm_cache_write_tokens INTEGER,       -- of llm_prompt_tokens, written to a prompt cache
   llm_cost_prompt       REAL,           -- USD, cache reads and writes included
   llm_cost_completion   REAL,           -- USD
+  llm_cost_cache_read   REAL,           -- USD, the part of llm_cost_prompt spent on cache reads
+  llm_cost_cache_write  REAL,           -- USD, the part of llm_cost_prompt spent on cache writes
   llm_input             TEXT,           -- JSON: an array of messages {role, content}, or any JSON object
   llm_output            TEXT,           -- JSON: always encoded, so a text output is a JSON string
   llm_parameters        TEXT,           -- JSON object of model parameters (temperature, ...)

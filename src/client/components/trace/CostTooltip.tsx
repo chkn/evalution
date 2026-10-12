@@ -13,8 +13,9 @@ export interface CostTooltipProps {
 
 /**
  * The trace header's cost meta item: a total that reveals a breakdown panel
- * on hover, with prompt/completion dollars and the $/1M-token price each
- * implies (`cost / tokens`, scaled to a million).
+ * on hover, with prompt/cache read/cache write/completion dollars and the
+ * $/1M-token price each implies (`cost / tokens`, scaled to a million). The
+ * cache rows appear only when the trace read or wrote cached tokens.
  *
  * Positioned via {@link useAnchoredPopover} (the same clamping the header's
  * "more actions" menu uses) rather than a plain CSS `:hover` reveal, so the
@@ -47,22 +48,30 @@ export function CostTooltip({ breakdown }: CostTooltipProps) {
           role="tooltip"
           style={style}
         >
-          <div className="trace-cost-tooltip-row">
-            <span>
-              Prompt
-              {breakdown.promptRate !== undefined &&
-                ` (${formatCost(breakdown.promptRate)}/1M tok)`}
-            </span>
-            <span>{formatCost(breakdown.prompt)}</span>
-          </div>
-          <div className="trace-cost-tooltip-row">
-            <span>
-              Completion
-              {breakdown.completionRate !== undefined &&
-                ` (${formatCost(breakdown.completionRate)}/1M tok)`}
-            </span>
-            <span>{formatCost(breakdown.completion)}</span>
-          </div>
+          <CostRow
+            label="Prompt"
+            cost={breakdown.prompt}
+            rate={breakdown.promptRate}
+          />
+          {breakdown.cacheRead !== undefined && (
+            <CostRow
+              label="Cache read"
+              cost={breakdown.cacheRead}
+              rate={breakdown.cacheReadRate}
+            />
+          )}
+          {breakdown.cacheWrite !== undefined && (
+            <CostRow
+              label="Cache write"
+              cost={breakdown.cacheWrite}
+              rate={breakdown.cacheWriteRate}
+            />
+          )}
+          <CostRow
+            label="Completion"
+            cost={breakdown.completion}
+            rate={breakdown.completionRate}
+          />
           <div className="trace-cost-tooltip-row trace-cost-tooltip-total">
             <span>Total</span>
             <span>{formatCost(breakdown.total)}</span>
@@ -70,5 +79,26 @@ export function CostTooltip({ breakdown }: CostTooltipProps) {
         </div>
       )}
     </span>
+  );
+}
+
+/** One line of the breakdown: a label, its implied $/1M price, and its cost. */
+function CostRow({
+  label,
+  cost,
+  rate,
+}: {
+  label: string;
+  cost: number;
+  rate: number | undefined;
+}) {
+  return (
+    <div className="trace-cost-tooltip-row">
+      <span>
+        {label}
+        {rate !== undefined && ` (${formatCost(rate)}/1M tok)`}
+      </span>
+      <span>{formatCost(cost)}</span>
+    </div>
   );
 }

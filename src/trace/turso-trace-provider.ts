@@ -85,6 +85,8 @@ function spanToRow(span: Span) {
     llmCacheWriteTokens: span.llm?.cacheWriteTokens ?? null,
     llmCostPrompt: span.llm?.cost?.prompt ?? null,
     llmCostCompletion: span.llm?.cost?.completion ?? null,
+    llmCostCacheRead: span.llm?.cost?.cacheRead ?? null,
+    llmCostCacheWrite: span.llm?.cost?.cacheWrite ?? null,
     llmInput: span.llm?.input ? JSON.stringify(span.llm.input) : null,
     llmOutput:
       span.llm?.output !== undefined ? JSON.stringify(span.llm.output) : null,
@@ -116,7 +118,16 @@ function rowToSpan(row: typeof spans.$inferSelect): Span {
     }),
     ...(row.llmCostPrompt != null &&
       row.llmCostCompletion != null && {
-        cost: { prompt: row.llmCostPrompt, completion: row.llmCostCompletion },
+        cost: {
+          prompt: row.llmCostPrompt,
+          completion: row.llmCostCompletion,
+          ...(row.llmCostCacheRead != null && {
+            cacheRead: row.llmCostCacheRead,
+          }),
+          ...(row.llmCostCacheWrite != null && {
+            cacheWrite: row.llmCostCacheWrite,
+          }),
+        },
       }),
     ...(row.llmInput && {
       input: parseJson<NonNullable<LLMSpanDetails["input"]>>(row.llmInput),
