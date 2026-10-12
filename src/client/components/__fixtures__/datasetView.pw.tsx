@@ -1738,12 +1738,22 @@ test("the Columns picker hides a column, adds one from the path tree, and sets t
   });
   await expect(picker.getByTitle("Row label")).toBeVisible();
 
-  // An added column can be removed; a field's can only be hidden.
+  await picker.getByRole("button", { name: "More for title" }).click();
+  await picker.getByRole("button", { name: "Stop using as row label" }).click();
+  expect(sent.at(-1)?.rowLabel).toBeNull();
+  await expect(picker.getByTitle("Row label")).toHaveCount(0);
+  await picker.getByRole("button", { name: "More for title" }).click();
+  await picker.getByRole("button", { name: "Use as row label" }).click();
+  await expect(picker.getByTitle("Row label")).toBeVisible();
+
+  // An added column can be removed, taking the row label with it; a field's
+  // can only be hidden.
   await expect(
     picker.getByRole("button", { name: "Remove column task" }),
   ).toHaveCount(0);
   await picker.getByRole("button", { name: "Remove column title" }).click();
   await expect.poll(() => headerOrder(component)).toEqual(["ticket", "task"]);
+  expect(sent.at(-1)?.rowLabel).toBeNull();
 });
 
 test("a column of an unknown kind keeps its place as a dimmed placeholder", async ({

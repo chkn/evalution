@@ -16,6 +16,7 @@ import {
   type ForeignColumnSpec,
   fieldPath,
   isKnownColumn,
+  pathField,
 } from "../../shared/column-paths";
 import type { DatasetField, DatasetRowsOverview } from "../../shared/types";
 
@@ -104,38 +105,39 @@ export function reconcileColumns(
     const { path, title } = spec;
     const id = columnPathId(path);
     if (seen.has(id)) continue;
-    const field = "field" in path.root ? path.root.field : undefined;
+    const field = pathField(path);
     if (field !== undefined && !fieldIds.has(field)) continue;
-    const keys = shape[field ?? ""]?.keys ?? [];
-    if (field !== undefined && path.keys.length === 0) {
+    const [key, ...deeper] = path.keys;
+    if (field !== undefined && key === undefined) {
+      // The field's whole column.
       seen.add(id);
       const entry = fieldEntry(field);
       entry.hidden = hidden;
       if (title !== undefined) entry.title = title;
-    } else if (
-      field !== undefined &&
-      path.keys.length === 1 &&
-      keys.includes(path.keys[0])
-    ) {
-      // A field's key, derived from the rows — even if it was added from
-      // the picker before any row held it.
-      seen.add(id);
-      fieldEntry(field).keys.push({
-        key: path.keys[0],
-        hidden,
-        ...(title !== undefined && { title }),
-      });
-    } else if (field !== undefined && path.keys.length === 1 && !spec.added) {
-      // A derived key no row holds any more: dropped.
-    } else {
-      seen.add(id);
-      layout.push({
-        kind: "added",
-        path,
-        hidden,
-        ...(title !== undefined && { title }),
-      });
+      continue;
     }
+    if (field !== undefined && deeper.length === 0) {
+      if (shape[field]?.keys.includes(key)) {
+        // One of the field's keys, derived from the rows — even if it was
+        // added from the picker before any row held it.
+        seen.add(id);
+        fieldEntry(field).keys.push({
+          key,
+          hidden,
+          ...(title !== undefined && { title }),
+        });
+        continue;
+      }
+      // A derived key no row holds any more.
+      if (!spec.added) continue;
+    }
+    seen.add(id);
+    layout.push({
+      kind: "added",
+      path,
+      hidden,
+      ...(title !== undefined && { title }),
+    });
   }
 
   for (const field of fields) {

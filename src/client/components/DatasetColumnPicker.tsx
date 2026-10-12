@@ -20,7 +20,6 @@ import {
   type LayoutSlot,
   moveColumn,
   moveKey,
-  removeColumn,
   setHidden,
   slotPath,
 } from "./dataset-columns";
@@ -43,6 +42,11 @@ interface Props {
   onRowLabel: (path: ColumnPath | undefined) => void;
   /** Adds a column at `path`. */
   onAdd: (path: ColumnPath) => void;
+  /**
+   * Removes the added column at `index` — and the row label with it, if
+   * that column was the label, since no menu would be left to clear it.
+   */
+  onRemove: (index: number) => void;
   /** The keys one level inside a path, for "Add column…"'s tree. */
   describePath: (path: ColumnPath) => Promise<DatasetPathChild[]>;
 }
@@ -69,6 +73,7 @@ export function DatasetColumnPicker({
   onChange,
   onRowLabel,
   onAdd,
+  onRemove,
   describePath,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -246,7 +251,7 @@ export function DatasetColumnPicker({
             className="dataset-column-picker-icon-btn"
             aria-label={`Remove column ${title}`}
             title="Remove column"
-            onClick={() => onChange(removeColumn(layout, slot.index))}
+            onClick={() => onRemove(slot.index)}
           >
             ✕
           </button>

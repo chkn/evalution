@@ -75,8 +75,10 @@ import {
   addColumn,
   type ColumnLayout,
   reconcileColumns,
+  removeColumn,
   serializeColumns,
   setHidden,
+  slotPath,
 } from "./dataset-columns";
 import {
   buildColumns,
@@ -521,12 +523,13 @@ function DatasetView({
   const rowLabel = dataset?.rowLabel;
 
   /**
-   * Writes the shared layout and row label. Optimistic, as a cell edit is:
+   * Writes the shared layout and row label (`null` clears the label; left
+   * out, it stays as it is). Optimistic, as a cell edit is:
    * the grid redraws at once, and the `dataset-changed` refetch confirms. A
    * failure says why and reloads the dataset as the server has it.
    */
   const saveColumns = useCallback(
-    (next: ColumnLayout, label: ColumnPath | undefined = rowLabel) => {
+    (next: ColumnLayout, label: ColumnPath | null = rowLabel ?? null) => {
       const serialized = serializeColumns(next);
       setDataset(d => {
         if (!d) return d;
@@ -537,7 +540,7 @@ function DatasetView({
           ...(label && { rowLabel: label }),
         };
       });
-      setDatasetColumns(providerId, datasetId, serialized, label ?? null).catch(
+      setDatasetColumns(providerId, datasetId, serialized, label).catch(
         (err: Error) => {
           setError(`Couldn't save the columns: ${err.message}`);
           setReload(n => n + 1);
@@ -1111,8 +1114,17 @@ function DatasetView({
               instances={overview.instances}
               rowLabel={rowLabel}
               onChange={next => saveColumns(next)}
-              onRowLabel={path => saveColumns(columnLayout, path)}
+              onRowLabel={path => saveColumns(columnLayout, path ?? null)}
               onAdd={path => saveColumns(addColumn(columnLayout, path))}
+              onRemove={index => {
+                const path = slotPath(columnLayout, { index });
+                saveColumns(
+                  removeColumn(columnLayout, index),
+                  path && columnPathId(path) === labelId
+                    ? null
+                    : (rowLabel ?? null),
+                );
+              }}
               describePath={path =>
                 describeDatasetPath(providerId, datasetId, path)
               }
@@ -1203,7 +1215,7 @@ function DatasetView({
               toggle: () =>
                 saveColumns(
                   columnLayout,
-                  columnPathId(menuPath) === labelId ? undefined : menuPath,
+                  columnPathId(menuPath) === labelId ? null : menuPath,
                 ),
             },
           })}

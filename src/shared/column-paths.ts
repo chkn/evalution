@@ -4,10 +4,11 @@
 /**
  * Column paths: where a dataset column reads from in a row. Shared by the
  * grid, the server (which describes and validates paths) and dataset views,
- * which must all agree on what a path reads. Pure — no runtime
- * dependencies. See `specs/datasets.md` §Q.1.
+ * which must all agree on what a path reads. Pure, and depends only on
+ * the rest of `shared/`. See `specs/datasets.md` §Q.1.
  */
 
+import { isValidInstanceName } from "./instance-names.ts";
 import type { ExecutionInput, ResourceInstanceInput } from "./types.ts";
 
 /** Where a column reads from in a row. */
@@ -58,6 +59,14 @@ export function isKnownColumn(
   spec: DatasetColumnSpec,
 ): spec is KnownColumnSpec {
   return KNOWN_COLUMN_KINDS.has(spec.kind);
+}
+
+/** A layout column that reads a {@link ColumnPath}. */
+export type PathColumnSpec = Extract<KnownColumnSpec, { kind: "path" }>;
+
+/** Whether `spec` is a column that reads a path. */
+export function isPathColumn(spec: DatasetColumnSpec): spec is PathColumnSpec {
+  return isKnownColumn(spec) && spec.kind === "path";
 }
 
 /** The parts of a row a path reads: its cells, and its resource instances. */
@@ -113,6 +122,11 @@ export function instancePath(
 /** The field a path is rooted at, or `undefined` for an instance root. */
 export function pathField(path: ColumnPath): string | undefined {
   return "field" in path.root ? path.root.field : undefined;
+}
+
+/** The instance a path is rooted at, or `undefined` for a field root. */
+export function pathInstance(path: ColumnPath): string | undefined {
+  return "instance" in path.root ? path.root.instance : undefined;
 }
 
 /**
@@ -231,8 +245,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Checks that `value` is a well-formed {@link ColumnPath} — a root naming a
- * field or an instance by a non-empty string, and `keys` of non-empty
- * strings — and returns it. Whether the root exists is the caller's
+ * field by a non-empty string or an instance by a valid instance name, and
+ * `keys` of non-empty strings — and returns it. Whether the root exists is the caller's
  * business.
  *
  * @param at - Where `value` sits, for the error message.
@@ -249,6 +263,11 @@ export function parseColumnPath(value: unknown, at = "path"): ColumnPath {
   if (typeof root.field === "string" && root.field !== "") {
     parsedRoot = { field: root.field };
   } else if (typeof root.instance === "string" && root.instance !== "") {
+    if (!isValidInstanceName(root.instance)) {
+      throw new InvalidColumnPathError(
+        `${at}.root.instance: "${root.instance}" is not a valid resource name`,
+      );
+    }
     parsedRoot = { instance: root.instance };
   } else {
     throw new InvalidColumnPathError(

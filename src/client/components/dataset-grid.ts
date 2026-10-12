@@ -25,6 +25,7 @@ import {
   columnPathId,
   fieldPath,
   pathField,
+  pathInstance,
   readColumnPath,
   resolveColumnPath,
 } from "../../shared/column-paths";
@@ -110,8 +111,8 @@ export function addedTitle(
 ): string {
   const last = path.keys.at(-1);
   if (last !== undefined) return last;
-  if ("instance" in path.root) return path.root.instance;
-  const { field } = path.root;
+  const field = pathField(path);
+  if (field === undefined) return pathInstance(path) ?? "";
   return fields.find(f => f.id === field)?.def.name ?? field;
 }
 
@@ -120,12 +121,11 @@ export function pathLabel(
   path: ColumnPath,
   fields: readonly DatasetField[],
 ): string {
+  const field = pathField(path);
   const root =
-    "instance" in path.root
-      ? `◆ ${path.root.instance}`
-      : (fields.find(f => f.id === pathField(path))?.def.name ??
-        pathField(path) ??
-        "");
+    field === undefined
+      ? `◆ ${pathInstance(path)}`
+      : (fields.find(f => f.id === field)?.def.name ?? field);
   return [root, ...path.keys].join(" › ");
 }
 
@@ -510,6 +510,8 @@ export interface GridEdit {
  * The grid's edits as {@link CellEdit}s, skipping any that land outside the
  * editable set ({@link editableCell}) or don't fit the cell's type — a paste
  * or fill over a range can cover both, and the rest of it still applies.
+ * Emptying an instance's argument is skipped too: it would delete the
+ * argument, leaving nothing in the grid to type into (see {@link clearEdits}).
  */
 export function cellEdits(
   edits: readonly GridEdit[],
@@ -522,7 +524,7 @@ export function cellEdits(
     const e = row && editableCell(row, columns[col]);
     if (!e) continue;
     const cell = editedCell(e.base, value);
-    if (cell === undefined) continue;
+    if (cell === undefined || (cell === null && !("fieldId" in e))) continue;
     out.push({ rowId: row.id, ...targetOf(e), cell });
   }
   return out;
@@ -538,8 +540,10 @@ export interface CellRange {
 
 /**
  * Clearing `ranges` (Delete or Backspace over a selection): a `null` for each
- * editable cell in them that holds something. Read-only cells are left as
- * they are, even inside the selection — the details pane clears those.
+ * editable field cell in them that holds something. Read-only cells are
+ * left as they are, even inside the selection — the details pane clears
+ * those. So are instances' arguments: clearing one would delete it, and an
+ * argument that isn't there has no editor to type a new value into.
  */
 export function clearEdits(
   ranges: readonly CellRange[],
@@ -552,7 +556,7 @@ export function clearEdits(
       const row = rowAt(index);
       for (let col = x; col < x + width; col++) {
         const e = row && editableCell(row, columns[col]);
-        if (e && e.value !== undefined) {
+        if (e && "fieldId" in e && e.value !== undefined) {
           out.push({ rowId: row.id, ...targetOf(e), cell: null });
         }
       }

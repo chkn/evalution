@@ -532,6 +532,45 @@ describe("column layout handlers (§Q)", () => {
     ).toBe(400);
   });
 
+  it("still saves a layout whose instance no row declares any more", async () => {
+    const { provider, dataset, set } = await seeded();
+    const title = { root: { instance: "task" }, keys: ["title"] };
+    const column = { kind: "path", path: title, added: true };
+    expect((await set({ columns: [column], rowLabel: title })).status).toBe(
+      200,
+    );
+    const rows = await provider.listRows(dataset.id);
+    await provider.deleteRows(
+      dataset.id,
+      rows.map(r => r.id),
+    );
+
+    // Stop using it as the row label; remove the column; hide it.
+    expect((await set({ columns: [column], rowLabel: null })).status).toBe(200);
+    expect((await set({ columns: [], rowLabel: title })).status).toBe(200);
+    expect(
+      (await set({ columns: [{ ...column, hidden: true }], rowLabel: null }))
+        .status,
+    ).toBe(200);
+    // A new root the rows don't declare is still refused.
+    const other = { root: { instance: "other" }, keys: [] };
+    expect(
+      (await set({ columns: [{ ...column, hidden: true }], rowLabel: other }))
+        .status,
+    ).toBe(400);
+  });
+
+  it("refuses an instance root that isn't a valid resource name", async () => {
+    const { dataset, provider, set } = await seeded();
+    const bad = { root: { instance: 'a"b' }, keys: [] };
+    const res = await set({ columns: [], rowLabel: bad });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain("not a valid resource name");
+    expect(
+      (await handleDescribePath(provider, dataset.id, { path: bad })).status,
+    ).toBe(400);
+  });
+
   it("describes a path, refusing an unknown field", async () => {
     const { provider, dataset } = await seeded();
     const describe = (path: unknown) =>

@@ -244,6 +244,8 @@ describe("parseColumnPath", () => {
       { root: { field: "1" } },
       { root: { field: "1" }, keys: [""] },
       { root: { field: "1" }, keys: [3] },
+      { root: { instance: 'a"b' }, keys: [] },
+      { root: { instance: "9lives" }, keys: [] },
     ]) {
       expect(() => parseColumnPath(bad)).toThrow(InvalidColumnPathError);
     }

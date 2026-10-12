@@ -15,7 +15,9 @@ import {
   type ColumnPath,
   childInputs,
   type DatasetColumnSpec,
+  isPathColumn,
   pathField,
+  pathInstance,
   resolveColumnPath,
 } from "../shared/column-paths.ts";
 import { matchKey } from "../shared/dataset-fields.ts";
@@ -400,11 +402,10 @@ export class TursoDatasetProvider implements DatasetProvider {
     // Only rows with something at the root can have anything inside it. The
     // rest of the walk is `resolveColumnPath`'s, row by row, so it agrees
     // with what the grid reads — references included, which resolve per row.
+    // A root's name can't hold a `"`: a field's is an id, and an instance's
+    // is checked by `parseColumnPath`.
     const field = pathField(path);
-    const rootKey =
-      field !== undefined
-        ? `$."${field}"`
-        : `$."${"instance" in path.root ? path.root.instance : ""}"`;
+    const rootKey = `$."${field ?? pathInstance(path)}"`;
     const rootColumn =
       field !== undefined ? datasetRows.cells : datasetRows.resources;
     const rows = await this.db.all<{
@@ -865,7 +866,7 @@ function layoutWithoutField(
   const pruned: StoredLayout = {
     ...(layout.columns && {
       columns: layout.columns.filter(
-        c => !(c.kind === "path" && readsField(c.path as ColumnPath)),
+        c => !(isPathColumn(c) && readsField(c.path)),
       ),
     }),
     ...(layout.rowLabel &&

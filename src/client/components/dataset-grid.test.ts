@@ -864,6 +864,20 @@ describe("columns from a layout (§Q.3)", () => {
         note: spec.args?.note,
       });
     });
+
+    it("doesn't clear an argument in place, so its cell stays editable", () => {
+      const cols = [added(instancePath("seededTask", ["title"]))].filter(
+        c => c !== undefined,
+      );
+      const range = [{ x: 0, y: 0, width: 1, height: 1 }];
+      expect(clearEdits(range, cols, () => planTask)).toEqual([]);
+      expect(
+        cellEdits([{ col: 0, row: 0, value: "" }], cols, () => planTask),
+      ).toEqual([]);
+      expect(editableCell(planTask, cols[0])).toMatchObject({
+        value: "Web site",
+      });
+    });
   });
 });
 
