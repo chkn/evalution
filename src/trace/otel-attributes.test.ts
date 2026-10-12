@@ -290,6 +290,53 @@ describe("readLLM input and output", () => {
     });
   });
 
+  it("keeps the tool calls of a turn that only calls tools as its output", () => {
+    const call = {
+      type: "tool-call",
+      toolCallId: "c1",
+      toolName: "get_task",
+      input: { taskId: "t-1" },
+    };
+    const expected = [{ role: "assistant", content: [call] }];
+    expect(
+      readLLM({
+        "gen_ai.output.messages": JSON.stringify([
+          { role: "assistant", content: [call] },
+        ]),
+      })?.output,
+    ).toEqual(expected);
+    expect(
+      readLLM({
+        "ai.response.toolCalls": JSON.stringify([
+          { toolCallId: "c1", toolName: "get_task", input: { taskId: "t-1" } },
+        ]),
+      })?.output,
+    ).toEqual(expected);
+  });
+
+  it("keeps a tool-calling turn's text alongside its calls", () => {
+    const output = readLLM({
+      "ai.response.text": "Looking it up.",
+      "ai.response.toolCalls": JSON.stringify([
+        { toolCallId: "c1", toolName: "get_task", args: {} },
+      ]),
+    })?.output;
+    expect(output).toEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Looking it up." },
+          {
+            type: "tool-call",
+            toolCallId: "c1",
+            toolName: "get_task",
+            input: {},
+          },
+        ],
+      },
+    ]);
+  });
+
   it("parses the output when gen_ai.output.type is json", () => {
     const llm = readLLM({
       "ai.response.text": JSON.stringify({ answer: 42 }),

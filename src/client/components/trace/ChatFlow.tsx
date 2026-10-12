@@ -18,8 +18,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { SpanMessage } from "../../../shared/types";
-import { spanMessages } from "../../../trace/trace-types";
+import type { LLMSpanDetails, SpanMessage } from "../../../shared/types";
+import { outputMessages, spanMessages } from "../../../trace/trace-types";
 import { formatDuration } from "./format.ts";
 import { ChevronIcon, StopwatchIcon, WrenchIcon } from "./icons.tsx";
 import { JsonView } from "./JsonView.tsx";
@@ -37,17 +37,25 @@ import {
 
 /**
  * A span's output as a chat bubble: text renders as the Markdown assistant
- * message it is, anything else (structured output, a model whose answer is
- * data) in the same bubble, through a renderer picked by its shape.
+ * message it is, a turn that called tools as its message (less calls a `TOOL`
+ * span's card already shows — see {@link chatMessages}), anything else
+ * (structured output, a model whose answer is data) in the same bubble,
+ * through a renderer picked by its shape.
  */
-function OutputBubble({ output, input }: { output: unknown; input?: unknown }) {
-  if (typeof output === "string") {
-    return (
-      <MessageList
-        messages={[{ role: "assistant", content: output }]}
-        variant="bubble"
-      />
-    );
+function OutputBubble({
+  llm,
+  toolCallIds,
+}: {
+  llm: LLMSpanDetails | undefined;
+  toolCallIds: ReadonlySet<string>;
+}) {
+  const { output, input } = llm ?? {};
+  const messages = outputMessages(llm);
+  if (messages) {
+    const visible = chatMessages(messages, toolCallIds);
+    return visible.length > 0 ? (
+      <MessageList messages={visible} variant="bubble" />
+    ) : null;
   }
   return (
     <div className="message-list-bubble">
@@ -111,7 +119,7 @@ function ChatLLMBlock({
         <MessageList messages={visibleMessages} variant="bubble" />
       )}
       {hasOutput(span.llm) && (
-        <OutputBubble output={span.llm?.output} input={span.llm?.input} />
+        <OutputBubble llm={span.llm} toolCallIds={toolCallIds} />
       )}
       {span.errorMessage && (
         <pre className="span-details-error">{span.errorMessage}</pre>

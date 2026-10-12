@@ -36,7 +36,9 @@ import {
   type SpanContentPart,
   type SpanKind,
   type SpanMessage,
+  type SpanToolCallPart,
   type ToolSpanDetails,
+  toolCallingOutput,
   unwrapToolResultOutput,
 } from "./trace-types.ts";
 
@@ -245,6 +247,32 @@ export function parseOutput(v: unknown): string | undefined {
     .join("\n");
 }
 
+/**
+ * The tool calls a model response requested, from `gen_ai.output.messages`
+ * (tool-call content parts) or the Vercel AI SDK's `ai.response.toolCalls`.
+ * Without them a turn that only calls tools would have no output at all, as
+ * {@link parseOutput} keeps just the text.
+ */
+function readOutputToolCalls(
+  attributes: Record<string, unknown>,
+): SpanToolCallPart[] {
+  const isToolCall = (p: SpanContentPart): p is SpanToolCallPart =>
+    p.type === "tool-call";
+  const fromMessages = (
+    parseMessages(attributes["gen_ai.output.messages"]) ?? []
+  ).flatMap(m =>
+    typeof m.content === "string" ? [] : m.content.filter(isToolCall),
+  );
+  if (fromMessages.length > 0) return fromMessages;
+
+  // Bare calls, so tagged as the content parts they'd be in a message.
+  const calls = tryParseJson(attributes["ai.response.toolCalls"]);
+  const parts = Array.isArray(calls)
+    ? toMessageContent(calls.map(c => ({ ...c, type: "tool-call" })))
+    : undefined;
+  return Array.isArray(parts) ? parts.filter(isToolCall) : [];
+}
+
 /** A JSON-string attribute holding an object or array, or `undefined`. */
 function parseJsonObject(
   v: unknown,
@@ -331,6 +359,7 @@ export function readLLM(
   const text =
     parseOutput(attributes["gen_ai.output.messages"]) ??
     str(attributes["ai.response.text"]);
+  const toolCalls = readOutputToolCalls(attributes);
   // `gen_ai.output.type` says the model produced data, not prose, so its text
   // is that data's JSON encoding. Kept as text if it doesn't parse.
   const output =
@@ -338,7 +367,9 @@ export function readLLM(
       ? jsonOutput
       : text !== undefined && attributes["gen_ai.output.type"] === "json"
         ? parseJsonOrRaw(text)
-        : text;
+        : toolCalls.length > 0
+          ? toolCallingOutput(text, toolCalls)
+          : text;
 
   const paramEntries = PARAM_ATTRIBUTES.map(
     key => [key.replace("gen_ai.request.", ""), attributes[key]] as const,

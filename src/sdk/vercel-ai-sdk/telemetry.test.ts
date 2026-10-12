@@ -328,6 +328,47 @@ describe("Evalution", () => {
     ]);
   });
 
+  it("records the tool calls of a step that only calls tools as its output", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-tool-step";
+    const integration = evalution
+      .createTelemetryForPrompt()
+      .withTraceId(traceId);
+    const callId = "call-tool-step";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [{ role: "user", content: "Look up t-1" }],
+    } as any);
+    await integration.onStepEnd?.({
+      ...stepEndEvent(callId, ""),
+      finishReason: "tool-calls",
+      toolCalls: [{ toolCallId: "t1", toolName: "search", input: { q: "x" } }],
+    });
+    await integration.onEnd?.({ callId, text: "" } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.kind === "LLM");
+    expect(step?.llm?.output).toEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "t1",
+            toolName: "search",
+            input: { q: "x" },
+          },
+        ],
+      },
+    ]);
+  });
+
   it("correlates parallel tool calls by toolCallId", async () => {
     const evalution = new VercelAISDKTelemetry();
     const provider = new MemoryTraceProvider();

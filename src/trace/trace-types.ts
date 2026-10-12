@@ -176,8 +176,9 @@ export interface LLMSpanDetails {
    */
   input?: SpanMessage[] | { [key: string]: unknown };
   /**
-   * What it returned: text for a chat model, or JSON for structured output
-   * and for any model whose answer is data rather than prose.
+   * What it returned: text for a chat model, the assistant message of a turn
+   * that called tools (see `toolCallingOutput`), or JSON for structured
+   * output and for any model whose answer is data rather than prose.
    */
   output?: unknown;
 
@@ -216,6 +217,51 @@ export function spanMessages(
   llm: LLMSpanDetails | undefined,
 ): SpanMessage[] | undefined {
   return Array.isArray(llm?.input) ? llm.input : undefined;
+}
+
+/**
+ * The output of a turn that called tools: its text (if any) and the calls, as
+ * the one assistant message the next turn's input repeats. Without the calls
+ * such a turn would record no output at all, its text being empty.
+ */
+export function toolCallingOutput(
+  text: string | undefined,
+  toolCalls: SpanToolCallPart[],
+): SpanMessage[] {
+  return [
+    {
+      role: "assistant",
+      content: [
+        ...(text ? [{ type: "text" as const, text }] : []),
+        ...toolCalls,
+      ],
+    },
+  ];
+}
+
+/**
+ * An LLM span's output as a message list: text as the assistant message it
+ * is, a turn that called tools as the message it recorded. `undefined` for
+ * structured output, which can be an array too: every element must look like
+ * a message.
+ */
+export function outputMessages(
+  llm: LLMSpanDetails | undefined,
+): SpanMessage[] | undefined {
+  const output = llm?.output;
+  if (typeof output === "string")
+    return [{ role: "assistant", content: output }];
+  return Array.isArray(output) &&
+    output.length > 0 &&
+    output.every(
+      m =>
+        m &&
+        typeof m === "object" &&
+        typeof m.role === "string" &&
+        (typeof m.content === "string" || Array.isArray(m.content)),
+    )
+    ? (output as SpanMessage[])
+    : undefined;
 }
 
 export interface ToolSpanDetails {

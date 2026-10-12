@@ -23,6 +23,8 @@ import {
   type Span,
   type SpanContentPart,
   type SpanMessage,
+  type SpanToolCallPart,
+  toolCallingOutput,
   unwrapToolResultOutput,
 } from "../../trace/trace-types.ts";
 
@@ -531,6 +533,12 @@ export class VercelAISDKTelemetry
 
     const startSpan = run.step;
     run.step = undefined;
+    const toolCalls: SpanToolCallPart[] = (event.toolCalls ?? []).map(c => ({
+      type: "tool-call",
+      toolCallId: c.toolCallId,
+      toolName: c.toolName,
+      input: c.input,
+    }));
     const span: Span = {
       ...startSpan,
       endTime: Date.now(),
@@ -540,7 +548,12 @@ export class VercelAISDKTelemetry
         provider: event.model.provider,
         model: event.model.modelId,
         finishReason: event.finishReason,
-        output: run.structuredOutput ? parseStructured(event.text) : event.text,
+        output:
+          toolCalls.length > 0
+            ? toolCallingOutput(event.text, toolCalls)
+            : run.structuredOutput
+              ? parseStructured(event.text)
+              : event.text,
         promptTokens: event.usage.inputTokens,
         completionTokens: event.usage.outputTokens,
         totalTokens: event.usage.totalTokens,

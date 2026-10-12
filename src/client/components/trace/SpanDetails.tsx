@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import type { Annotation, AnnotationKind, Span } from "../../../shared/types";
-import { spanMessages } from "../../../trace/trace-types";
+import { outputMessages, spanMessages } from "../../../trace/trace-types";
 import { DetailRow, type Fact, FactGroup, FactsGrid } from "../DetailsPane.tsx";
 import { AnnotationChip } from "./AnnotationChip.tsx";
 import {
@@ -130,16 +130,14 @@ export function SpanDetails({
     });
   }
   if (hasOutput(llm)) {
+    const outMessages = outputMessages(llm);
     rows.push({
       label: "Output",
-      value:
-        typeof llm?.output === "string" ? (
-          <MessageList
-            messages={[{ role: "assistant", content: llm.output }]}
-          />
-        ) : (
-          renderOutput(llm?.output, llm?.input)
-        ),
+      value: outMessages ? (
+        <MessageList messages={outMessages} />
+      ) : (
+        renderOutput(llm?.output, llm?.input)
+      ),
     });
   }
   if (llm?.modelParameters) {

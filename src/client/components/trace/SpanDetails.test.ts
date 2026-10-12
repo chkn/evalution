@@ -65,6 +65,32 @@ describe("SpanDetails", () => {
     expect(html).toContain("Planned.");
   });
 
+  it("shows the output of a turn that called tools", () => {
+    const html = render(
+      makeSpan("step", {
+        kind: "LLM",
+        llm: {
+          input: [{ role: "user", content: "Plan task t-1." }],
+          output: [
+            {
+              role: "assistant",
+              content: [
+                {
+                  type: "tool-call",
+                  toolCallId: "c1",
+                  toolName: "get_task",
+                  input: { taskId: "t-1" },
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    expect(html).toContain(">Output<");
+    expect(html).toMatch(/Call <code>get_task<\/code>/);
+  });
+
   it("shows a non-message input as JSON, and no output row when there is none", () => {
     const html = render(
       makeSpan("eval", {
