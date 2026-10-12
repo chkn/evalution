@@ -26,7 +26,6 @@ import {
   menuFieldId,
   parseDatasetLayout,
   RowPager,
-  readPath,
   serializeDatasetLayout,
 } from "./dataset-grid";
 
@@ -155,38 +154,6 @@ describe("menuFieldId", () => {
     expect(menuFieldId(byId(cols, "1/title"))).toBeUndefined();
     expect(menuFieldId(byId(cols, "source"))).toBeUndefined();
     expect(menuFieldId(undefined)).toBeUndefined();
-  });
-});
-
-describe("readPath", () => {
-  it("reads a whole cell, or absent for a sparse row", () => {
-    expect(readPath(row({ "1": seeded }), { fieldId: "1" })).toBe(seeded);
-    expect(readPath(row({}), { fieldId: "1" })).toBe("absent");
-    expect(readPath(row({}), { fieldId: "1", key: "title" })).toBe("absent");
-  });
-
-  it("reads an object's property by key", () => {
-    expect(
-      readPath(row({ "1": seeded }), { fieldId: "1", key: "title" }),
-    ).toEqual(text("Milk"));
-  });
-
-  it("reads a typed-in object's property, wrapped as the value cell it would be", () => {
-    expect(
-      readPath(row({ "2": info }), { fieldId: "2", key: "title" }),
-    ).toEqual({ kind: "value", value: { kind: "primitive", value: "Say hi" } });
-    expect(readPath(row({ "2": info }), { fieldId: "2", key: "nope" })).toBe(
-      "n/a",
-    );
-  });
-
-  it("is n/a when the row's cell has no such key", () => {
-    expect(readPath(row({ "1": blank }), { fieldId: "1", key: "title" })).toBe(
-      "n/a",
-    );
-    expect(
-      readPath(row({ "1": text("plain") }), { fieldId: "1", key: "title" }),
-    ).toBe("n/a");
   });
 });
 

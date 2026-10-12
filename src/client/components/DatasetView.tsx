@@ -38,6 +38,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { shortSyntax } from "ts-proppy/react";
+import { pathField } from "../../shared/column-paths";
 import type {
   Dataset,
   DatasetField,
@@ -770,9 +771,10 @@ function DatasetView({
   const onGroupHeaderClicked = useCallback(
     (col: number, event: { preventDefault: () => void }) => {
       const column = columns[col];
-      if (!column || !("path" in column)) return;
+      const fieldId =
+        column && "path" in column ? pathField(column.path) : undefined;
+      if (fieldId === undefined) return;
       event.preventDefault();
-      const { fieldId } = column.path;
       const next = new Set(expanded);
       if (!next.delete(fieldId)) next.add(fieldId);
       updateLayout({ ...layout, expanded: next });

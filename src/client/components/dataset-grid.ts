@@ -19,6 +19,12 @@
  */
 
 import {
+  type ColumnPath,
+  fieldPath,
+  pathField,
+  readColumnPath,
+} from "../../shared/column-paths";
+import {
   committedCell,
   type EditableBase,
   primitiveBase,
@@ -33,13 +39,6 @@ import type {
 } from "../../shared/types";
 import { previewCell, previewPropValue } from "./dataset-preview";
 import { DISCLOSURE_COLLAPSED, DISCLOSURE_EXPANDED } from "./grid-sprites";
-
-/** Where a column reads from: a field, or one key one level inside it. */
-export interface CellPath {
-  fieldId: string;
-  /** An object property's name. */
-  key?: string;
-}
 
 /** One column of the dataset table. */
 export type DatasetColumn = {
@@ -63,9 +62,10 @@ export type DatasetColumn = {
   | {
       /** A field in one column. */
       role: "whole";
-      path: CellPath;
+      path: ColumnPath;
     }
-  | { role: "key"; path: Required<CellPath> }
+  /** One key inside a field. */
+  | { role: "key"; path: ColumnPath }
   /** Where the row came from. */
   | { role: "source" }
 );
@@ -105,7 +105,7 @@ export function buildColumns({
     const fieldShape = shape[field.id];
     const fieldKeys = fieldShape?.keys ?? [];
     const type = shortType(field.def.type.syntax);
-    const path = { fieldId: field.id };
+    const path = fieldPath(field.id);
     const base = primitiveBase(field.def.type);
     const whole: DatasetColumn = {
       id: field.id,
@@ -131,7 +131,7 @@ export function buildColumns({
         title: key,
         group,
         role: "key",
-        path: { fieldId: field.id, key },
+        path: fieldPath(field.id, [key]),
         width: WIDTHS.key,
       });
     }
@@ -153,7 +153,7 @@ export function buildColumns({
 export function menuFieldId(
   column: DatasetColumn | undefined,
 ): string | undefined {
-  return column?.role === "whole" ? column.path.fieldId : undefined;
+  return column?.role === "whole" ? pathField(column.path) : undefined;
 }
 
 /**
@@ -164,10 +164,9 @@ export function menuFieldId(
 export function fieldIdsByGroup(columns: DatasetColumn[]): Map<string, string> {
   const byGroup = new Map<string, string>();
   for (const column of columns) {
-    if (column.group !== undefined && "path" in column) {
-      if (!byGroup.has(column.group)) {
-        byGroup.set(column.group, column.path.fieldId);
-      }
+    const fieldId = "path" in column ? pathField(column.path) : undefined;
+    if (column.group !== undefined && fieldId !== undefined) {
+      if (!byGroup.has(column.group)) byGroup.set(column.group, fieldId);
     }
   }
   return byGroup;
@@ -190,31 +189,6 @@ export function groupHeader(
     name: group,
     icon: expanded.has(fieldId) ? DISCLOSURE_EXPANDED : DISCLOSURE_COLLAPSED,
   };
-}
-
-/**
- * What a path reads in a row: the input there, `"absent"` when the row has
- * nothing there, or `"n/a"` when the field's cell has no such key.
- *
- * A typed-in object's property is a `PropValue`, not an `ExecutionInput`; it
- * comes back wrapped as the value cell it would have been on its own.
- */
-export function readPath(
-  row: DatasetRow,
-  path: CellPath,
-): ExecutionInput | "absent" | "n/a" {
-  const cell = row.cells[path.fieldId];
-  if (!cell) return "absent";
-  const { key } = path;
-  if (key === undefined) return cell;
-  if (cell.kind === "value") {
-    const { value } = cell;
-    return value.kind === "object" && Object.hasOwn(value.properties, key)
-      ? { kind: "value", value: value.properties[key] }
-      : "n/a";
-  }
-  const inner = cell.kind === "object" ? cell.properties : undefined;
-  return inner && Object.hasOwn(inner, key) ? inner[key] : "n/a";
 }
 
 /** A cell the grid types into in place — see {@link editableCell}. */
@@ -241,7 +215,8 @@ export function editableCell(
 ): EditableCell | undefined {
   if (!row || column?.role !== "whole" || !column.base) return undefined;
   const { base } = column;
-  const { fieldId } = column.path;
+  const fieldId = pathField(column.path);
+  if (fieldId === undefined) return undefined;
   const cell = row.cells[fieldId];
   if (!cell) return { base, fieldId };
   if (cell.kind !== "value" || cell.value.kind !== "primitive")
@@ -471,7 +446,7 @@ export function cellView(
           ? { kind: "text", text: "playground", tone: "dim" }
           : { kind: "empty" };
     default: {
-      const found = readPath(row, column.path);
+      const found = readColumnPath(row, column.path);
       const e = editableCell(row, column);
       if (e) {
         return {
