@@ -16,7 +16,7 @@ import type {
 } from "../../shared/types";
 import { executePrompt } from "../api";
 import { useStructurallyStable } from "../hooks/useStructurallyStable";
-import { AddToDatasetMenu } from "./AddToDatasetMenu";
+import { AddToDatasetMenu, type DatasetLink } from "./AddToDatasetMenu";
 import { CombinedInputEditor } from "./CombinedInputEditor";
 import {
   collapseLossy,
@@ -80,6 +80,8 @@ interface Props {
   fill?: PanelFill;
   /** Opens where a fill came from. Without it, the notice names the source as plain text. */
   onOpenFillSource?: (from: PanelFillSource) => void;
+  /** Opens the dataset "Add to dataset" just added to. */
+  onOpenDataset?: (dataset: DatasetLink) => void;
 }
 
 /**
@@ -211,6 +213,7 @@ function PlaygroundExecution({
   onExecuted,
   fill,
   onOpenFillSource,
+  onOpenDataset,
 }: Props) {
   const stored = useState(() => loadStored(prompt))[0];
   const [functionSelections, setFunctionSelections] = useState<Selections>(
@@ -629,6 +632,7 @@ function PlaygroundExecution({
               providerId: prompt.providerId,
             }}
             disabled={panelInputs.length === 0}
+            onOpenDataset={onOpenDataset}
           />
         )
       }

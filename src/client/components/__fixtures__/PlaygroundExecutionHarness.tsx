@@ -7,6 +7,7 @@ import type {
   PromptInputSources,
   PropDefinition,
 } from "../../../shared/types";
+import type { DatasetLink } from "../AddToDatasetMenu";
 import type { PanelFill, PanelFillSource } from "../named-inputs";
 import PlaygroundExecution from "../PlaygroundExecution";
 
@@ -38,6 +39,7 @@ export function PlaygroundExecutionHarness({
   inputSources,
   fill,
   onOpenFillSource,
+  onOpenDataset,
 }: {
   functionParameters: PropDefinition[];
   /** Overrides the mounted prompt's `id`, for testing per-prompt storage keys. */
@@ -50,6 +52,8 @@ export function PlaygroundExecutionHarness({
   fill?: PanelFill;
   /** Opens where a fill came from; without it the notice's source is plain text. */
   onOpenFillSource?: (from: PanelFillSource) => void;
+  /** Opens the dataset "Add to dataset" added to; without it the note's name is plain text. */
+  onOpenDataset?: (dataset: DatasetLink) => void;
 }) {
   return (
     <PlaygroundExecution
@@ -59,6 +63,7 @@ export function PlaygroundExecutionHarness({
       })}
       fill={fill}
       onOpenFillSource={onOpenFillSource}
+      onOpenDataset={onOpenDataset}
     />
   );
 }

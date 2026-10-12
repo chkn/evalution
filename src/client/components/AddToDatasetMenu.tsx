@@ -33,6 +33,13 @@ import {
 import { DatasetsIcon } from "./trace/icons.tsx";
 import { useAnchoredPopover } from "./use-anchored-popover";
 
+/** A dataset, as `onOpenDataset` is handed it. */
+export interface DatasetLink {
+  providerId: string;
+  id: string;
+  name: string;
+}
+
 interface Props {
   /** What would be added — one row's worth. */
   inputs: NamedInputs;
@@ -55,6 +62,11 @@ interface Props {
   className?: string;
   /** The trigger's content, when not the default icon and label. */
   children?: ReactNode;
+  /**
+   * Opens a dataset — what the "Added to …" note links to. Without it the
+   * note's dataset name is plain text.
+   */
+  onOpenDataset?: (dataset: DatasetLink) => void;
 }
 
 /**
@@ -70,6 +82,10 @@ export function isInAddToDatasetMenu(target: Node): boolean {
 interface Outcome {
   ok: boolean;
   message: string;
+  /** The dataset a success added to, so the note can link to it. */
+  dataset?: DatasetLink;
+  /** Said after the dataset's name: what was left out. */
+  skipped?: string;
 }
 
 /** How long a success note stays beside the trigger. */
@@ -97,6 +113,7 @@ export function AddToDatasetMenu({
   disabled,
   className,
   children,
+  onOpenDataset,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [datasets, setDatasets] = useState<DatasetSummary[] | null>(null);
@@ -159,9 +176,16 @@ export function AddToDatasetMenu({
     await addDatasetRows(target.providerId, target.id, [
       { cells, source, ...(kept && { resources: kept }) },
     ]);
+    const skippedNote = describeSkipped(skipped);
     setOutcome({
       ok: true,
-      message: `Added to ${target.name}${describeSkipped(skipped)}`,
+      message: `Added to ${target.name}${skippedNote}`,
+      dataset: {
+        providerId: target.providerId,
+        id: target.id,
+        name: target.name,
+      },
+      skipped: skippedNote,
     });
   };
 
@@ -283,6 +307,8 @@ export function AddToDatasetMenu({
       document.body,
     );
 
+  const addedTo = outcome?.dataset;
+
   return (
     <span className="add-to-dataset">
       {outcome && (
@@ -291,7 +317,26 @@ export function AddToDatasetMenu({
           role="status"
           title={outcome.message}
         >
-          {outcome.message}
+          {addedTo && onOpenDataset ? (
+            <span>
+              Added to{" "}
+              <button
+                type="button"
+                className="add-to-dataset-link"
+                onClick={e => {
+                  // Otherwise this bubbles to the pane's own onClick,
+                  // which refocuses *this* pane right back.
+                  e.stopPropagation();
+                  onOpenDataset(addedTo);
+                }}
+              >
+                {addedTo.name} ↗
+              </button>
+              {outcome.skipped}
+            </span>
+          ) : (
+            outcome.message
+          )}
           <button
             type="button"
             className="pg-dismiss"

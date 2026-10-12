@@ -6897,6 +6897,23 @@ pre {
   color: var(--panel-text-secondary);
 }
 
+.add-to-dataset-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.add-to-dataset-link:hover {
+  color: var(--panel-text-secondary);
+}
+
 .pg-exec-fill-skipped {
   color: var(--panel-text-secondary);
 }

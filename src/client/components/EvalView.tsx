@@ -18,6 +18,7 @@ import type {
   EvalDefinition,
   EvalDefinitionPatch,
   EvalInputs,
+  EvalRun,
   EvalRunProgress,
   EvalRunSummary,
 } from "../../eval/eval-types";
@@ -120,6 +121,8 @@ interface Props {
   /** The latest progress of every run in flight, by run id. */
   progress: Record<string, EvalRunProgress>;
   onOpenRun: (run: EvalRunSummary, evalName: string) => void;
+  /** A run was just started from the Run button. */
+  onRunStarted: (run: EvalRun, evalName: string) => void;
   onOpenPrompt: (prompt: NormalizedPrompt) => void;
   onOpenDataset: (dataset: DatasetSummary) => void;
   onDeleted: () => void;
@@ -207,6 +210,7 @@ function EvalView({
   datasetVersion,
   progress,
   onOpenRun,
+  onRunStarted,
   onOpenPrompt,
   onOpenDataset,
   onDeleted,
@@ -971,7 +975,8 @@ function EvalView({
             await flush();
             try {
               // The run's own change event refetches the runs list.
-              await startEvalRun(providerId, evalId, options);
+              const run = await startEvalRun(providerId, evalId, options);
+              onRunStarted(run, def.name);
             } catch (err: any) {
               setError(
                 err instanceof EvalRunRefused

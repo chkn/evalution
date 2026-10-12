@@ -325,6 +325,35 @@ test("the pickers' chevrons and the Delete button match the playground's and the
   await expect(del).toHaveCSS("border-top-style", "dashed");
 });
 
+test("Run hands the started run on, with the eval's name", async ({
+  mount,
+  page,
+}) => {
+  await mockEval(page, EVAL);
+  // Registered after mockEval's, so it answers the POST first.
+  await page.route("**/api/evals/local-evals/e1/runs", route =>
+    route.request().method() === "POST"
+      ? route.fulfill({
+          status: 201,
+          json: { id: "r1", evalId: "e1", status: "running", startedAt: 5 },
+        })
+      : route.fallback(),
+  );
+  const started: unknown[] = [];
+  const component = await mount(
+    <EvalViewHarness
+      providerId="local-evals"
+      evalId="e1"
+      prompts={[TRIAGE]}
+      datasets={[TICKETS_SUMMARY]}
+      onRunStarted={(run, evalName) => started.push([run.id, evalName])}
+    />,
+  );
+
+  await component.getByRole("button", { name: /Run/ }).click();
+  await expect.poll(() => started).toEqual([["r1", "Triage"]]);
+});
+
 test("Duplicate, left of Delete, creates a copy of the eval and hands it on", async ({
   mount,
   page,

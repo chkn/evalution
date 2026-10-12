@@ -59,6 +59,7 @@ import { usePrompts } from "./hooks/usePrompts";
 import { useResizable } from "./hooks/useResizable";
 import { useSSE } from "./hooks/useSSE";
 import { useTraces } from "./hooks/useTraces";
+import { type PaneState, placeTab } from "./pane-layout";
 import { consumeSelfEdit } from "./self-edits";
 import { requireProviderId, withSetMembership } from "./utils";
 
@@ -154,11 +155,7 @@ const tabKey = (t: AppTab) =>
 
 let _terminalSeq = 0;
 
-interface Pane {
-  id: string;
-  tabs: AppTab[];
-  activeTabKey: string | null;
-}
+type Pane = PaneState<AppTab>;
 
 let _paneSeq = 0;
 const mkPaneId = () => `pane${++_paneSeq}`;
@@ -388,6 +385,23 @@ function App() {
   });
 
   const contentCardRef = useRef<HTMLDivElement>(null);
+  // Whether the click being handled has Cmd (Mac) / Ctrl held. Links open in
+  // the current pane unless it is, in which case they open in a split. Set in
+  // the capture phase so it is current by the time a React onClick runs —
+  // and on pointerdown too, for handlers that fire before the click event
+  // (the dataset grid's onCellClicked runs on pointerup).
+  const splitOnClick = useRef(false);
+  useEffect(() => {
+    const track = (e: MouseEvent) => {
+      splitOnClick.current = e.metaKey || e.ctrlKey;
+    };
+    window.addEventListener("pointerdown", track, true);
+    window.addEventListener("click", track, true);
+    return () => {
+      window.removeEventListener("pointerdown", track, true);
+      window.removeEventListener("click", track, true);
+    };
+  }, []);
   const dragTabRef = useRef<{ paneId: string; key: string } | null>(null);
 
   const refetchConfig = useCallback(() => {
@@ -645,62 +659,51 @@ function App() {
   };
 
   /**
+   * Opens `tab` beside `fromPaneId` (split right), or in `fromPaneId` itself
+   * unless `split`. An already-open copy is focused instead.
+   *
    * @param replace - Whether an already-open copy of the tab is replaced by
    *   `tab` rather than just focused — how a fresh `fill` reaches a prompt tab
    *   that's already open.
    */
-  const openTabRightOf = (fromPaneId: string, tab: AppTab, replace = false) => {
-    const key = tabKey(tab);
+  const openTab = (
+    fromPaneId: string,
+    tab: AppTab,
+    { replace = false, split = true } = {},
+  ) => {
     setPanes(prev => {
-      // If already open anywhere, just focus it.
-      const existing = prev.find(p => p.tabs.some(t => tabKey(t) === key));
-      if (existing) {
-        setFocusedPaneId(existing.id);
-        flashPane(existing.id);
-        return prev.map(p =>
-          p.id === existing.id
-            ? {
-                ...p,
-                tabs: replace
-                  ? p.tabs.map(t => (tabKey(t) === key ? tab : t))
-                  : p.tabs,
-                activeTabKey: key,
-              }
-            : p,
-        );
-      }
-
-      const idx = prev.findIndex(p => p.id === fromPaneId);
-      if (idx < 0) return prev;
-
-      // If there's already another pane, use the adjacent one (prefer right, else left).
-      let targetId = prev[idx + 1]?.id ?? prev[idx - 1]?.id;
-      let next = prev;
-      if (!targetId) {
-        // Only pane — create a split.
-        const newId = mkPaneId();
-        targetId = newId;
+      const placed = placeTab(
+        prev,
+        fromPaneId,
+        tab,
+        tabKey,
+        { replace, split },
+        mkPaneId,
+      );
+      if (placed.panes === prev) return prev;
+      if (placed.splitFrom) {
         const el = contentCardRef.current?.querySelector<HTMLElement>(
-          `[data-pane="${fromPaneId}"]`,
+          `[data-pane="${placed.splitFrom}"]`,
         );
         const currentWidth = el?.getBoundingClientRect().width ?? 400;
         paneResize.setSize(
-          fromPaneId,
+          placed.splitFrom,
           Math.max(200, Math.floor(currentWidth / 2)),
         );
-        next = [...prev];
-        next.splice(idx + 1, 0, { id: newId, tabs: [], activeTabKey: null });
       }
-
-      const targetIdResolved = targetId;
-      setFocusedPaneId(targetIdResolved);
-      return next.map(p =>
-        p.id === targetIdResolved
-          ? { ...p, tabs: [...p.tabs, tab], activeTabKey: key }
-          : p,
-      );
+      setFocusedPaneId(placed.focusId);
+      if (placed.flashId) flashPane(placed.flashId);
+      return placed.panes;
     });
   };
+
+  /**
+   * Opens `tab` for a clicked link: beside the current pane if the
+   * Cmd (Mac) / Ctrl key is held, else in the current pane. Only for
+   * synchronous click handlers — see `splitOnClick`.
+   */
+  const openLinkedTab = (fromPaneId: string, tab: AppTab, replace = false) =>
+    openTab(fromPaneId, tab, { replace, split: splitOnClick.current });
 
   /**
    * Opens an interactive terminal tab (split right) with `target`'s command
@@ -719,7 +722,7 @@ function App() {
       command,
       label: label ?? command,
     };
-    openTabRightOf(fromPaneId, tab);
+    openTab(fromPaneId, tab);
   };
 
   /**
@@ -749,11 +752,11 @@ function App() {
     prompts.find(p => samePrompt(p, ref));
 
   /**
-   * Opens a prompt tab to the right, optionally carrying a `fill` for its
-   * execute panel. An already-open tab gets the new fill (with its fresh
-   * nonce) and focus.
+   * Opens a prompt tab for a clicked link (see `openLinkedTab`), optionally
+   * carrying a `fill` for its execute panel. An already-open tab gets the new
+   * fill (with its fresh nonce) and focus.
    */
-  const openPromptTabRightOf = (
+  const openPromptTab = (
     fromPaneId: string,
     prompt: Pick<PromptID, "id" | "providerId">,
     fill?: PanelFill,
@@ -771,7 +774,7 @@ function App() {
       ...(fill && { fill }),
       ...(ref && { ref }),
     };
-    openTabRightOf(fromPaneId, tab, !!fill || !!ref);
+    openLinkedTab(fromPaneId, tab, !!fill || !!ref);
   };
 
   /** "Open prompt" on a trace: open it with the panel filled from the trace's inputs. */
@@ -803,13 +806,24 @@ function App() {
       : recorded.version
         ? { promptId: recorded.id, version: recorded.version }
         : undefined;
-    openPromptTabRightOf(
+    openPromptTab(
       fromPaneId,
       { id: recorded.id, providerId: recorded.providerId },
       fill,
       ref,
     );
   };
+
+  const evalRunTab = (
+    providerId: string,
+    run: { id: string; startedAt: number },
+    evalName: string,
+  ): EvalRunTab => ({
+    type: "eval-run",
+    providerId,
+    runId: run.id,
+    label: `${evalName} · ${formatTimestampCompact(run.startedAt)}`,
+  });
 
   const traceTab = (providerId: string, traceId: string): TraceTab => ({
     type: "trace",
@@ -821,9 +835,9 @@ function App() {
       `trace ${traceId.slice(0, 8)}…`,
   });
 
-  /** A filled panel's "trace ↗" / "dataset ↗": focus the source if open, else open it beside the panel. */
+  /** A filled panel's "trace ↗" / "dataset ↗": focus the source if open, else open it per `openLinkedTab`. */
   const openFillSource = (fromPaneId: string, from: PanelFillSource) =>
-    openTabRightOf(
+    openLinkedTab(
       fromPaneId,
       from.type === "trace"
         ? traceTab(from.providerId, from.traceId)
@@ -861,7 +875,7 @@ function App() {
       rootSpanId,
       label,
     };
-    openTabRightOf(fromPaneId, tab);
+    openTab(fromPaneId, tab);
   };
 
   const closeTab = (paneId: string, key: string) => {
@@ -1482,6 +1496,14 @@ function App() {
                               onOpenFillSource={from =>
                                 openFillSource(pane.id, from)
                               }
+                              onOpenDataset={d =>
+                                openLinkedTab(pane.id, {
+                                  type: "dataset",
+                                  providerId: d.providerId,
+                                  datasetId: d.id,
+                                  label: d.name,
+                                })
+                              }
                               agents={agents}
                               onAskAgent={agent =>
                                 askAgentRightOf(pane.id, agent, {
@@ -1505,13 +1527,13 @@ function App() {
                                 findPrompt={findPrompt}
                                 prompts={prompts}
                                 onOpenPrompt={prompt =>
-                                  openPromptTabRightOf(pane.id, prompt)
+                                  openPromptTab(pane.id, prompt)
                                 }
                                 onOpenInPlayground={(prompt, fill) =>
-                                  openPromptTabRightOf(pane.id, prompt, fill)
+                                  openPromptTab(pane.id, prompt, fill)
                                 }
                                 onOpenTrace={(providerId, traceId) =>
-                                  openTabRightOf(
+                                  openLinkedTab(
                                     pane.id,
                                     traceTab(providerId, traceId),
                                   )
@@ -1544,18 +1566,22 @@ function App() {
                                 datasetVersion={datasetVersion}
                                 progress={evalProgress}
                                 onOpenRun={(run, evalName) =>
-                                  openTabRightOf(pane.id, {
-                                    type: "eval-run",
-                                    providerId: tab.providerId,
-                                    runId: run.id,
-                                    label: `${evalName} · ${formatTimestampCompact(run.startedAt)}`,
-                                  })
+                                  openLinkedTab(
+                                    pane.id,
+                                    evalRunTab(tab.providerId, run, evalName),
+                                  )
+                                }
+                                onRunStarted={(run, evalName) =>
+                                  openTab(
+                                    pane.id,
+                                    evalRunTab(tab.providerId, run, evalName),
+                                  )
                                 }
                                 onOpenPrompt={prompt =>
-                                  openPromptTabRightOf(pane.id, prompt)
+                                  openPromptTab(pane.id, prompt)
                                 }
                                 onOpenDataset={d =>
-                                  openTabRightOf(pane.id, {
+                                  openLinkedTab(pane.id, {
                                     type: "dataset",
                                     providerId: d.providerId,
                                     datasetId: d.id,
@@ -1565,12 +1591,16 @@ function App() {
                                 onDeleted={() => closeTabEverywhere(key)}
                                 onDuplicated={created => {
                                   refetchEvals();
-                                  openTabRightOf(pane.id, {
-                                    type: "eval",
-                                    providerId: created.providerId,
-                                    evalId: created.id,
-                                    label: created.name,
-                                  });
+                                  openTab(
+                                    pane.id,
+                                    {
+                                      type: "eval",
+                                      providerId: created.providerId,
+                                      evalId: created.id,
+                                      label: created.name,
+                                    },
+                                    { split: false },
+                                  );
                                 }}
                                 onRunDeleted={run =>
                                   closeTabEverywhere(
@@ -1605,7 +1635,7 @@ function App() {
                                 version={evalVersion}
                                 progress={evalProgress[tab.runId]}
                                 onOpenTrace={(providerId, traceId) =>
-                                  openTabRightOf(
+                                  openLinkedTab(
                                     pane.id,
                                     traceTab(providerId, traceId),
                                   )

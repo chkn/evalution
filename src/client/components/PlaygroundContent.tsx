@@ -68,6 +68,7 @@ import {
 import { autosave } from "../autosave";
 import { usePersistentValue } from "../hooks/usePersistentValue";
 import { createInFlight } from "../in-flight";
+import type { DatasetLink } from "./AddToDatasetMenu";
 import { AskAgentButton } from "./AskAgentButton";
 import { PromptSplit } from "./ExecPanelShell";
 import type { PanelFill, PanelFillSource } from "./named-inputs";
@@ -123,6 +124,8 @@ interface Props {
   fill?: PanelFill;
   /** Opens where a fill came from — the notice's "trace ↗" / "dataset ↗". */
   onOpenFillSource?: (from: PanelFillSource) => void;
+  /** Opens the dataset "Add to dataset" just added to. */
+  onOpenDataset?: (dataset: DatasetLink) => void;
   /** Coding agents the "Ask" button offers. */
   agents?: readonly AgentInfo[];
   /**
@@ -196,6 +199,7 @@ function PlaygroundContent({
   onExecuted,
   fill,
   onOpenFillSource,
+  onOpenDataset,
   agents = [],
   onAskAgent,
 }: Props) {
@@ -604,6 +608,7 @@ function PlaygroundContent({
           onExecuted={onExecuted}
           fill={fill}
           onOpenFillSource={onOpenFillSource}
+          onOpenDataset={onOpenDataset}
         />
       }
     />

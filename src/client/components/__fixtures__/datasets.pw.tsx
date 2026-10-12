@@ -178,6 +178,72 @@ test("New dataset… creates a dataset from the prompt's signature and adds the 
   ]);
 });
 
+test("the Added to note links to the dataset with onOpenDataset", async ({
+  mount,
+  page,
+}) => {
+  await mockDatasetList(page, [
+    {
+      providerId: "local",
+      id: "tickets",
+      name: "Tickets",
+      rowCount: 0,
+      fields: [{ id: "0", def: TICKET, createdAt: 0 }],
+    } as unknown as DatasetSummary,
+  ]);
+  await page.route("**/api/datasets/local/tickets/rows", route =>
+    route.fulfill({ status: 201, json: [] }),
+  );
+  await seedPanel(page, { ticket: text("Refund please") });
+  const opened: unknown[] = [];
+
+  const component = await mount(
+    <PlaygroundExecutionHarness
+      functionParameters={[TICKET]}
+      onOpenDataset={dataset => opened.push(dataset)}
+    />,
+  );
+  await component.getByRole("button", { name: "Add to dataset" }).click();
+  await page.getByRole("menuitem", { name: /Tickets/ }).click();
+
+  const link = component.getByRole("button", { name: "Tickets ↗" });
+  await expect(component.getByRole("status")).toContainText("Added to");
+  await link.click();
+  await expect
+    .poll(() => opened)
+    .toEqual([{ providerId: "local", id: "tickets", name: "Tickets" }]);
+});
+
+test("the Added to note is plain text without onOpenDataset", async ({
+  mount,
+  page,
+}) => {
+  await mockDatasetList(page, [
+    {
+      providerId: "local",
+      id: "tickets",
+      name: "Tickets",
+      rowCount: 0,
+      fields: [{ id: "0", def: TICKET, createdAt: 0 }],
+    } as unknown as DatasetSummary,
+  ]);
+  await page.route("**/api/datasets/local/tickets/rows", route =>
+    route.fulfill({ status: 201, json: [] }),
+  );
+  await seedPanel(page, { ticket: text("Refund please") });
+
+  const component = await mount(
+    <PlaygroundExecutionHarness functionParameters={[TICKET]} />,
+  );
+  await component.getByRole("button", { name: "Add to dataset" }).click();
+  await page.getByRole("menuitem", { name: /Tickets/ }).click();
+
+  await expect(component.getByRole("status")).toContainText("Added to Tickets");
+  await expect(
+    component.getByRole("button", { name: "Tickets ↗" }),
+  ).toHaveCount(0);
+});
+
 test("a fill overwrites matched slots, keeps the rest, says so, and persists", async ({
   mount,
   page,
