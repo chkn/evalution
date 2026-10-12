@@ -126,6 +126,7 @@ export function reconcileColumns(
         ...(title !== undefined && { title }),
       });
     } else if (field !== undefined && path.keys.length === 1 && !spec.added) {
+      // A derived key no row holds any more: dropped.
     } else {
       seen.add(id);
       layout.push({
@@ -138,9 +139,7 @@ export function reconcileColumns(
   }
 
   for (const field of fields) {
-    if (!byField.has(field.id)) fieldEntry(field.id);
-    const entry = byField.get(field.id);
-    if (!entry) continue;
+    const entry = fieldEntry(field.id);
     const listed = new Set(entry.keys.map(k => k.key));
     for (const key of shape[field.id]?.keys ?? []) {
       if (!listed.has(key)) entry.keys.push({ key, hidden: false });
