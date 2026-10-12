@@ -233,6 +233,28 @@ describe("describePseudoSource", () => {
     ).toEqual({ note: "same value as that input" });
   });
 
+  it("lets a value fill an optional slot of its type", () => {
+    const taskId = def("x", "`tsk_${string}`", "string").type;
+    const optional = {
+      kind: "union" as const,
+      syntax: "`tsk_${string}` | undefined",
+      types: [taskId, def("u", "undefined").type],
+    };
+    const fields = [
+      { id: "0", def: def("t", "`tsk_${string}`", "string") },
+      { id: "1", def: { name: "o", optional: false, type: optional } },
+    ];
+    expect(
+      describePseudoSource(columnUri("0"), optional, { ...options, fields }),
+    ).toEqual({ note: "column from dataset" });
+    expect(
+      describePseudoSource(columnUri("1"), taskId, { ...options, fields }),
+    ).toEqual({
+      note: "column from dataset",
+      warning: "`tsk_${string}` | undefined into `tsk_${string}`",
+    });
+  });
+
   it("says when the column or slot is gone", () => {
     expect(
       describePseudoSource(columnUri("9"), def("x", "string").type, options),

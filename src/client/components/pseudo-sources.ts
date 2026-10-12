@@ -112,10 +112,14 @@ export function slotLabel(half: "function" | "execute", path: string): string {
 /**
  * Whether a value of type `from` can fill a slot of type `to`, loosely: the
  * same syntax, or primitives with the same base. Loose on purpose — `string`
- * into a branded `TaskId` is a mismatch the schema will accept.
+ * into a branded `TaskId` is a mismatch the schema will accept. A union fits
+ * a slot when every member does, and fills a union slot that any member of
+ * fits — so `TaskId` fills an optional `TaskId | undefined`.
  */
 export function typesFit(from: PropType, to: PropType): boolean {
   if (from.syntax === to.syntax) return true;
+  if (from.kind === "union") return from.types.every(t => typesFit(t, to));
+  if (to.kind === "union") return to.types.some(t => typesFit(from, t));
   return (
     from.kind === "primitive" &&
     to.kind === "primitive" &&
