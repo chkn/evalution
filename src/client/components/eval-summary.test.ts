@@ -5,11 +5,13 @@ import { describe, expect, it } from "vitest";
 import type {
   EvalCheckOutcome,
   EvalCheckResult,
+  EvalDefinition,
   EvalResults,
   EvalRowResult,
 } from "../../eval/eval-types";
 import {
   compareRuns,
+  copyOfEval,
   deleteRunQuestion,
   formatRate,
   gridRows,
@@ -143,5 +145,39 @@ describe("deleteRunQuestion", () => {
     expect(deleteRunQuestion(0, true)).toMatch(
       /^Cancel and delete the run from .+, with its results\?$/,
     );
+  });
+});
+
+describe("copyOfEval", () => {
+  const def: EvalDefinition = {
+    id: "e1",
+    name: "Triage",
+    prompt: { id: "src/support.ts#triage", providerId: "files" },
+    dataset: { providerId: "local", id: "tickets" },
+    inputs: {
+      functionInputs: {
+        ticket: { kind: "value", value: { kind: "primitive", value: "hi" } },
+      },
+      executeInputs: {},
+    },
+    checks: [{ id: "c1", uri: "evalution/checks#contains", args: {} }],
+    createdAt: 1,
+    updatedAt: 2,
+  };
+
+  it("keeps the prompt, dataset, bindings and checks under a new name", () => {
+    expect(copyOfEval(def)).toEqual({
+      name: "Triage copy",
+      prompt: def.prompt,
+      dataset: def.dataset,
+      inputs: def.inputs,
+      checks: def.checks,
+    });
+  });
+
+  it("shares nothing with the original", () => {
+    const copy = copyOfEval(def);
+    expect(copy.inputs).not.toBe(def.inputs);
+    expect(copy.checks[0]).not.toBe(def.checks[0]);
   });
 });

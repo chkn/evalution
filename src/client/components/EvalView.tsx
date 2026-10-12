@@ -35,6 +35,7 @@ import type {
 import {
   addDatasetField,
   cancelEvalRun,
+  createEval,
   deleteEval,
   deleteEvalRun,
   EvalRunRefused,
@@ -53,7 +54,12 @@ import { datasetKey } from "./DatasetList";
 import { ExecPanelShell, PromptSplit } from "./ExecPanelShell";
 import { ExecutionInputEditor } from "./ExecutionInputEditor";
 import { evalProblems, prefillBindings } from "./eval-bindings";
-import { deleteRunQuestion, formatRate, passRate } from "./eval-summary";
+import {
+  copyOfEval,
+  deleteRunQuestion,
+  formatRate,
+  passRate,
+} from "./eval-summary";
 import {
   fromExecutionInput,
   readStoredInputs,
@@ -85,6 +91,7 @@ import {
 } from "./run-resources-state";
 import { formatTimestampCompact } from "./trace/format.ts";
 import {
+  CopyIcon,
   PromptLinkIcon,
   DatasetsIcon as SmallDatasetsIcon,
   TrashIcon,
@@ -115,6 +122,8 @@ interface Props {
   onOpenPrompt: (prompt: NormalizedPrompt) => void;
   onOpenDataset: (dataset: DatasetSummary) => void;
   onDeleted: () => void;
+  /** Called with the copy once the eval is duplicated, so it can be opened. */
+  onDuplicated: (created: EvalDefinition & { providerId: string }) => void;
   /** Called once one of the eval's runs is deleted, so its tab can close. */
   onRunDeleted: (run: EvalRunSummary) => void;
   /** Coding agents the "Ask" button offers. */
@@ -200,6 +209,7 @@ function EvalView({
   onOpenPrompt,
   onOpenDataset,
   onDeleted,
+  onDuplicated,
   onRunDeleted,
   agents = [],
   onAskAgent,
@@ -607,6 +617,15 @@ function EvalView({
     else if (def) setName(def.name);
   };
 
+  const handleDuplicate = async () => {
+    if (!def) return;
+    try {
+      onDuplicated(await createEval(copyOfEval(def), providerId));
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
   const handleDelete = async () => {
     if (!def) return;
     if (!window.confirm(`Delete "${def.name}" and all its runs?`)) return;
@@ -747,6 +766,15 @@ function EvalView({
             </div>
           )}
           {onAskAgent && <AskAgentButton agents={agents} onAsk={onAskAgent} />}
+          <button
+            type="button"
+            className="trace-view-prompt-btn"
+            onClick={handleDuplicate}
+            title="Duplicate eval"
+            aria-label="Duplicate eval"
+          >
+            <CopyIcon />
+          </button>
           <button
             type="button"
             className="trace-view-prompt-btn trace-view-delete-btn"

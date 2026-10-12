@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { EvalRunSummary } from "../../../eval/eval-types";
+import type { EvalDefinition, EvalRunSummary } from "../../../eval/eval-types";
 import type { DatasetSummary, NormalizedPrompt } from "../../../shared/types";
 import EvalView from "../EvalView";
 
@@ -19,6 +19,7 @@ export function EvalViewHarness({
   height = 700,
   onOpenRun = () => {},
   onRunDeleted = () => {},
+  onDuplicated = () => {},
 }: {
   providerId: string;
   evalId: string;
@@ -29,6 +30,7 @@ export function EvalViewHarness({
   height?: number;
   onOpenRun?: (run: EvalRunSummary) => void;
   onRunDeleted?: (run: EvalRunSummary) => void;
+  onDuplicated?: (created: EvalDefinition & { providerId: string }) => void;
 }) {
   return (
     <div style={{ width, height }}>
@@ -44,6 +46,7 @@ export function EvalViewHarness({
         onOpenPrompt={() => {}}
         onOpenDataset={() => {}}
         onDeleted={() => {}}
+        onDuplicated={onDuplicated}
         onRunDeleted={onRunDeleted}
       />
     </div>

@@ -325,6 +325,60 @@ test("the pickers' chevrons and the Delete button match the playground's and the
   await expect(del).toHaveCSS("border-top-style", "dashed");
 });
 
+test("Duplicate, left of Delete, creates a copy of the eval and hands it on", async ({
+  mount,
+  page,
+}) => {
+  await mockEval(page, EVAL);
+  const posted: unknown[] = [];
+  await page.route("**/api/evals/local-evals", route => {
+    const body = route.request().postDataJSON();
+    posted.push(body);
+    return route.fulfill({
+      status: 201,
+      json: { ...body, id: "e2", createdAt: 2, updatedAt: 2 },
+    });
+  });
+  const duplicated: { id: string; name: string; providerId: string }[] = [];
+  const component = await mount(
+    <EvalViewHarness
+      providerId="local-evals"
+      evalId="e1"
+      prompts={[TRIAGE]}
+      datasets={[TICKETS_SUMMARY]}
+      onDuplicated={({ id, name, providerId }) =>
+        duplicated.push({ id, name, providerId })
+      }
+    />,
+  );
+
+  const dup = component.getByRole("button", { name: "Duplicate eval" });
+  const del = component.getByRole("button", { name: "Delete eval" });
+  await expect(dup).toHaveClass(/trace-view-prompt-btn/);
+  await expect(dup).not.toHaveClass(/trace-view-delete-btn/);
+  expect((await rect(dup)).right).toBeLessThanOrEqual((await rect(del)).left);
+
+  // The copy has the bindings as they are, saved or not: here, the one
+  // filled in for the user.
+  await expect(component.locator(".eval-matched")).toHaveCount(1);
+  await dup.click();
+  await expect
+    .poll(() => duplicated)
+    .toEqual([{ id: "e2", name: "Triage copy", providerId: "local-evals" }]);
+  expect(posted).toEqual([
+    {
+      name: "Triage copy",
+      prompt: EVAL.prompt,
+      dataset: EVAL.dataset,
+      inputs: {
+        functionInputs: { ticket: { kind: "dataset", field: "0" } },
+        executeInputs: {},
+      },
+      checks: [],
+    },
+  ]);
+});
+
 test("checks are set apart by a rule, with their fields under one down the left", async ({
   mount,
   page,

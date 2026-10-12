@@ -12,6 +12,7 @@ import type {
   EvalCheckResult,
   EvalResults,
   EvalRowResult,
+  NewEvalDefinition,
 } from "../../eval/eval-types";
 import { formatTimestampCompact } from "./trace/format.ts";
 
@@ -111,4 +112,18 @@ export function deleteRunQuestion(startedAt: number, running: boolean): string {
   return running
     ? `Cancel and delete ${what}, with its results?`
     : `Delete ${what} and its results?`;
+}
+
+/**
+ * A copy of `def` to create as a new eval: the same prompt, dataset, bindings
+ * and checks under "<name> copy". Its runs aren't copied.
+ */
+export function copyOfEval(def: NewEvalDefinition): NewEvalDefinition {
+  return structuredClone({
+    name: `${def.name} copy`,
+    prompt: def.prompt,
+    dataset: def.dataset,
+    inputs: def.inputs,
+    checks: def.checks,
+  });
 }

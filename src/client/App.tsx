@@ -1563,6 +1563,15 @@ function App() {
                                   })
                                 }
                                 onDeleted={() => closeTabEverywhere(key)}
+                                onDuplicated={created => {
+                                  refetchEvals();
+                                  openTabRightOf(pane.id, {
+                                    type: "eval",
+                                    providerId: created.providerId,
+                                    evalId: created.id,
+                                    label: created.name,
+                                  });
+                                }}
                                 onRunDeleted={run =>
                                   closeTabEverywhere(
                                     tabKey({
