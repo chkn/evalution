@@ -1692,6 +1692,59 @@ test("an added column edits a referenced instance's argument inline, and can nam
   await expect(pane).toContainText("Row 1 · Buy oat milk");
 });
 
+test("hiding an added resource column from its header menu redraws without it", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  const errors: string[] = [];
+  page.on("pageerror", e => errors.push(e.message));
+  page.on("console", m => {
+    if (m.type() === "error") errors.push(m.text());
+  });
+  const dataset: Dataset = {
+    ...SUPPORT,
+    columns: [
+      path("0"),
+      path("1"),
+      { kind: "source" },
+      // Last, where "Add column…" puts it.
+      {
+        kind: "path",
+        path: { root: { instance: "seededTask" }, keys: [] },
+        added: true,
+      },
+    ],
+  };
+  await mockDataset(page, dataset, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const sent = await mockColumns(page, dataset);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect
+    .poll(() => headerOrder(component))
+    .toEqual(["ticket", "task", "source", "seededTask"]);
+
+  // The pointer is left over one of the column's cells, as it is when the
+  // menu item sat over the grid: Glide still asks about the hovered cell on
+  // the redraw that drops the column.
+  await openColumnMenu(page, GRID.marker + 240 + 240 + 96, 200);
+  const box = await page.getByTestId("data-grid-canvas").boundingBox();
+  if (!box) throw new Error("grid canvas not laid out");
+  await page.mouse.move(
+    box.x + GRID.marker + 240 + 240 + 96 + 150,
+    box.y + GRID.header + 2 * GRID.row + GRID.row / 2,
+  );
+  await page
+    .getByRole("menuitem", { name: "Hide column" })
+    .dispatchEvent("click");
+  await expect
+    .poll(() => headerOrder(component))
+    .toEqual(["ticket", "task", "source"]);
+  expect(sent.at(-1)?.columns[3]).toMatchObject({ hidden: true });
+  expect(errors).toEqual([]);
+});
+
 test("the Columns picker hides a column, adds one from the path tree, and sets the row label", async ({
   mount,
   page,

@@ -175,6 +175,12 @@ describe("cellView", () => {
     expect(cellView(undefined, columns()[0])).toEqual({ kind: "loading" });
   });
 
+  it("shows nothing past the last column, where Glide's stale hover can ask", () => {
+    const cols = columns();
+    expect(cellView(row({}), cols[cols.length])).toEqual({ kind: "empty" });
+    expect(cellView(undefined, cols[cols.length])).toEqual({ kind: "empty" });
+  });
+
   it("previews a value, an empty cell, and a resource instance as a chip", () => {
     const cols = columns();
     const r = row({ "0": text("Hi"), "1": task });

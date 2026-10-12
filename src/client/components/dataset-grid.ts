@@ -694,11 +694,17 @@ function inputView(input: ExecutionInput): CellView {
   }
 }
 
-/** What the cell of `column` shows for `row`, which is `undefined` while its page loads. */
+/**
+ * What the cell of `column` shows for `row`, which is `undefined` while its
+ * page loads. `column` is `undefined` past the last column: Glide still asks
+ * about the hovered cell on the redraw that drops its column (hiding the
+ * last one from its header menu, say), and that cell shows nothing.
+ */
 export function cellView(
   row: DatasetRow | undefined,
-  column: DatasetColumn,
+  column: DatasetColumn | undefined,
 ): CellView {
+  if (!column) return { kind: "empty" };
   if (!row) return { kind: "loading" };
   switch (column.role) {
     case "source":
