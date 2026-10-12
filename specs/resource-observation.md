@@ -12,6 +12,12 @@
 > resources, so offline evals need none of this (see its §K). §A's premise — state capture as a
 > `ResourceInstance` hook — also can't serve *online* evals, because production has no resources;
 > if online evals return, capture belongs in app code shipped with the app.
+>
+> **Update (2026-10-12):** `specs/trace-visualizers.md` brings back this document's question, *where
+> does the state before a change come from?*, for visualizers, which see only the trace. Its answer
+> for now is app-side capture (the tool reports its own change), not `observe()`. `observe()` stays
+> parked. If it ships, its samples use that spec's §E.3 shape instead of §C's
+> `evalution.resources` key.
 
 ## Context
 

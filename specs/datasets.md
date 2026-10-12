@@ -820,3 +820,229 @@ as it does today.
 This doesn't depend on evals and can ship first. Evals depend on it only for the Odin example.
 Inline editing is the one piece to cover with a Playwright component test: an edit, a paste over a
 range, and an append that focuses the new row all need the real grid.
+
+## Q. Follow-up (2026-10-12): column paths, a shared column layout, and a row label
+
+asgard's planTask datasets made a gap obvious. What tells one row from another is the title of
+the task being planned, and that sits two references deep. The prompt's `toolsContext` points at
+`@seededTask.taskId`, and `seededTask`'s arguments hold the title. The grid shows a chip for each
+seeded resource, so every row looks the same. A person can't see what a row is about without
+opening it.
+
+The grid's model already reads columns through a path (`CellPath`: a field, or one key one level
+inside it), and `dataset-grid.ts` notes that paths are what sorting and filtering will name. This
+section generalizes the path, lets a dataset pick columns from anywhere a path can reach, and names
+one of them as the row's label. The custom summary columns considered alongside this are not part
+of it. They are a lot of work for a summary that wouldn't say enough. A row's structure is better
+served by a dataset view (`specs/dataset-views.md`).
+
+### Q.1 Paths
+
+```ts
+/** Where a column reads from in a row. */
+export interface ColumnPath {
+  /** A field's cell, or one of the row's resource instances by name. */
+  root: { field: string } | { instance: string };
+  /** Steps inward, by name. Empty for the root itself. */
+  keys: string[];
+}
+```
+
+`readColumnPath(row, path)` replaces `readPath` and takes each step according to what it is
+standing on:
+
+- **A `value` holding an object `PropValue`**: the property, wrapped as a value cell, as
+  `readPath` does today.
+- **An `object` cell**: the property.
+- **An `instance` reference**: that instance's argument, in the same row's `resources`. The
+  reference's `output` is ignored when stepping, because a step names an argument, not an output.
+  This one rule turns "`toolsContext` › `create_task` › `rootTaskId` › `title`" into the title of
+  the task the prompt is planning.
+- **Anything else** (a template, a literal primitive, an array, or a `dataset`/`input` reference):
+  the path ends there, and a further step reads as `"n/a"`.
+
+A row whose references form a cycle can't run: resolution refuses it (`execution-inputs.ts`).
+Nothing stops one from being *stored*, though, so `readColumnPath` stops after 16 reference hops.
+
+**Root at a field when the prompt already points at the thing.** Instance names are the row
+author's choice, and two rows may name the focus task differently. `toolsContext` is a prompt
+input, so every row has it, and the reference inside it is what the prompt actually uses. An
+instance root (`seededTask` › `title`) is shorter, and right when the rows share instance names.
+
+`readColumnPath` lives in `src/shared/column-paths.ts`, because the grid, the server (Q.2), and
+dataset views (`specs/dataset-views.md`) all read paths, and they must agree.
+
+### Q.2 Finding paths
+
+`DatasetRowsOverview` gains the row's instances, summarized across rows the way field keys are:
+
+```ts
+export interface DatasetRowsOverview {
+  rowCount: number;
+  fields: Record<string, DatasetFieldShape>;
+  /** Instance name → its resource and argument names, merged across rows. */
+  instances: Record<string, { uri: string; rows: number; args: string[] }>;
+}
+```
+
+Anything deeper is found when the picker expands a node, not up front:
+`DatasetProvider.describePath(datasetId, path)` returns the keys one level inside `path`, merged
+across rows in order of first appearance, plus a sample value from the first row that has one. Both
+providers answer it with the same JSONB queries `describeRows` uses, applying Q.1's rules on the
+server. A path through an instance reference resolves per row, since rows may point at differently
+shaped instances.
+
+The column picker's "Add column…" (Q.3) browses these as a tree. It lists the fields, then the
+instances, each expanding a level at a time through `describePath`, with each node's sample value
+shown dimmed beside it. Choosing a node adds a column at that path.
+
+### Q.3 The column layout: shown, hidden, ordered, and shared
+
+The grid's columns become one ordered, editable list, arranged the same way the trace list's
+columns are (`TraceList.tsx`'s `ColumnPickerButton`, `trace-columns.ts`).
+
+```ts
+export interface Dataset {
+  // …
+  /** The grid's columns, in order. Reconciled with the schema on read (below). */
+  columns?: DatasetColumnSpec[];
+  /** The path whose value names a row wherever a row is named. */
+  rowLabel?: ColumnPath;
+}
+
+/** One column of the layout, discriminated by `kind`. */
+export type DatasetColumnSpec =
+  | {
+      kind: "path";
+      path: ColumnPath;
+      /** Shown instead of the path's last key. */
+      title?: string;
+      hidden?: true;
+      /** Added from the picker, as opposed to derived from a field or one of its keys. */
+      added?: true;
+    }
+  /** Where the row came from. Moved and hidden like any column, but never removed. */
+  | { kind: "source"; hidden?: true };
+```
+
+**Every column of the data is a path.** A field's whole column is `{ root: { field }, keys: [] }`, and one of
+its keys is `keys: [key]`. An added column is any other path. That gives one list to order and one
+flag to hide, with no separate notion of "picked columns" layered over the fields.
+
+**Reconciled on read, like `parseTraceColumns`.** The stored list is a layout, not the schema. So
+`reconcileColumns(spec, fields, overview)` makes it fit what the dataset actually has:
+
+- An entry for a field that no longer exists is dropped.
+- A field, or a field key, that isn't listed is appended at the end, shown, in today's order. A
+  new field appears without anyone arranging it, and a dataset with no `columns` at all looks
+  exactly as it does today.
+- A repeated path keeps its first entry.
+- The `source` column isn't a path, so it is its own `{ kind: "source" }` entry. It is moved and
+  hidden like any other column, but it can't be removed, because it isn't something anyone added.
+  When the stored list doesn't mention it, it is appended last, which is where it sits today. Any
+  future column that isn't a path (a row's eval results, say) is
+  another `kind`.
+- **A `kind` this client doesn't know becomes a grayed-out placeholder column**, in its place in
+  the list. Its header reads "Unknown column" and dims the `kind` beside it, with a tooltip saying
+  it was added by a newer version of evalution. Its cells are empty and dimmed, and they can't be
+  edited, sorted, or chosen as the row label. It can be moved and hidden like any column, in the
+  grid and in the picker, but not removed, since this client can't tell whether it was added or
+  derived. Keeping it as a real column means:
+  - **It is visible, so the layout isn't a mystery.** An older client reading a newer layout shows
+    a gap where the newer column sits, rather than columns that seem to have shifted.
+  - **Its position survives a write.** When the older client writes the layout back (after a drag,
+    say), the entry comes back intact rather than being silently dropped.
+  - **No second special case when mapping a drag.** Glide reports a drag as a pair of grid column
+    indexes, and mapping those back to the list already has to skip hidden columns. An unknown
+    column is either shown, and so an ordinary grid column, or hidden, and so skipped like any
+    other. It never needs a third rule.
+
+`DatasetProvider.deleteField` (P.1) already drops a field's columns from the stored list, so a
+deleted field doesn't linger as a dead entry until the next read.
+
+**The picker** is a "Columns" button in the dataset view's header, opening the same popover the
+trace list has. Each column is a row with a grab handle, a checkbox, and its title. Two kinds of
+row have extra controls: a field row also has its keys, and an added column's row also has a ✕.
+The tree is one level deep, so reordering stays simple:
+
+- **Top-level rows are fields and added columns.** They reorder among themselves.
+- **A field with keys has a disclosure** showing its keys as indented rows. Keys reorder only
+  within their field, and the drop target refuses anything else. A field's keys are always columns
+  of that field, and Glide draws them under one group header, which only works if they stay
+  together.
+- **The checkbox hides or shows.** Unchecking a field hides it and all its keys. A key can be
+  hidden on its own, which shows when the field is expanded in the grid.
+- **✕ removes an added column.** A field's columns can only be hidden. Removing a field is P.1's
+  "Delete field", which deletes data; the picker never does that.
+- **"Add column…"** at the bottom of the popover opens Q.2's path tree. The new column is appended
+  at the top level, shown.
+- **"Use as row label"** is in each row's overflow menu, and in the grid header's column menu. The
+  current row label is marked in both.
+
+**Dragging headers in the grid does the same thing.** Glide supports it with `onColumnMoved`, and
+`onColumnProposeMove` vetoes moves that would break the tree. A key column can only land inside
+its own field's group. A top-level column can't land inside an expanded group. An expanded field
+can't be dragged as a whole, because Glide moves single columns. To move it, collapse it first and
+drag its one column, or use the picker. A move is written to the same `columns` list the picker
+edits. The grid header's column menu also gets "Hide column".
+
+**Shared, except widths and expansion.**
+
+- **Order, visibility, added columns, and the row label are dataset metadata.** "This dataset's
+  rows are about `seededTask` › `title`, and the raw `toolsContext` column isn't worth showing" is
+  a statement about the data, true for everyone who opens it and synced with the dataset to the
+  cloud. That is how a spreadsheet's column order and hidden columns behave too. All of it is
+  written by `DatasetProvider.setColumns(datasetId, columns, rowLabel)`
+  (`PATCH /api/datasets/:p/:id/columns`, which emits `dataset-changed`), and stored in a new
+  nullable JSON column on `datasets`, which needs one migration per provider.
+- **Widths and which fields are expanded stay per viewer**, in `DatasetLayout` (`localStorage`).
+  They are about one screen and one person's reading. Widths are keyed by the column's id, which for
+  every column is now its serialized path. A field root serializes as its id, an instance root as
+  `@name`, and each key as `/` plus the key with `/` and `%` percent-encoded. Today's ids
+  (`fieldId`, `fieldId/key`) are already in that form, so stored widths survive.
+
+Moves and toggles are optimistic, the same as cell edits (P.2). The grid redraws at once, and the
+`dataset-changed` refetch confirms. A drag fires one `setColumns` on drop, not one per column it
+passes.
+
+**The row label names a row everywhere a row is named.** The details pane header changes from
+"Row 3" to "Row 3 · Web site for Evalution". It also labels the row list beside a dataset view's
+tab (`specs/dataset-views.md` §C), and it can later label rows in eval run results. Without a row
+label, rows are named by their number, as they are today. A hidden column can still be the row
+label: hiding the "Task" column from the grid because the label already shows it is a reasonable
+thing to do.
+
+### Q.4 Editing through an added column
+
+An added column is editable inline under P.2's rules when its path ends at a primitive `value`
+that one `DatasetRowUpdate` can address:
+
+- **A field's cell, or a key inside it**: as P.2 handles cells today.
+- **An instance's argument**, reached directly (`seededTask` › `title`) or through references
+  (`toolsContext` › … › `rootTaskId` › `title`). The edit replaces that instance in the update's
+  `resources` with the argument changed. Editing the focus task's title from the grid is the case
+  this exists for.
+
+Anything nested inside an argument's value object stays read-only for now. `resources` updates
+replace a whole instance, which is fine for a top-level argument but would mean rebuilding a nested
+value from a path. The details pane already edits those.
+
+### Q.5 Phasing
+
+1. `ColumnPath` and `readColumnPath` in `src/shared/`, replacing `CellPath` and `readPath`. The
+   existing whole-field and one-key columns become paths with `keys` of length 0 and 1, so the
+   grid's behavior doesn't change. Unit tests cover each step rule, a path through two references,
+   a cycle hitting the hop limit, and `"n/a"`.
+2. `instances` in `describeRows`, and `describePath`, in both providers. Contract tests in
+   `dataset-provider-contract.ts`.
+3. `columns` and `rowLabel`: the migration, `setColumns`, the route, validation, and
+   `deleteField` pruning its columns. The server checks that a path's root exists in the schema or
+   in some row, and that `keys` are non-empty strings.
+4. `reconcileColumns`, as a pure function next to `parseTraceColumns`'s pattern. Unit tests cover
+   a dropped field, a new field and a new key being appended, a duplicate path, and a stored list
+   with no `columns`, which must produce today's layout.
+5. UI: the Columns picker (reorder, hide, remove, nested keys, "Add column…", row label), header
+   drag with `onColumnProposeMove`'s rules, "Hide column" in the header menu, the row label in the
+   details pane header, and Q.4's inline editing. Playwright CT for what needs the real grid: a
+   header drag that's accepted, one that's vetoed (a key dragged out of its group), and editing a
+   referenced instance's argument inline.
