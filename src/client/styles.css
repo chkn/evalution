@@ -7393,7 +7393,26 @@ pre {
 }
 
 .eval-check-label {
+  min-width: 80px;
+  padding: 2px 6px;
+  margin-left: -7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   font-weight: 600;
+  field-sizing: content;
+  outline: none;
+}
+
+.eval-check-label:hover,
+.eval-check-label:focus {
+  border-color: var(--panel-card-border);
+}
+
+.eval-check-label[aria-invalid="true"] {
+  border-color: var(--error-border);
 }
 
 .eval-check-group {

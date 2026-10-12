@@ -17,6 +17,7 @@ import type {
   QuestionsPromptUpdates,
 } from "../../shared/types";
 import { useSyncedExternal } from "../hooks/useSyncedExternal";
+import DraftInput from "./DraftInput";
 import { EDIT_SAVE_DELAY_MS } from "./edit-save-delay";
 import ModelRow from "./ModelRow";
 import { questionPlugins } from "./question-plugins";
@@ -62,32 +63,15 @@ function QuestionId({
   disabled: boolean;
   onRename: (next: string) => void;
 }) {
-  const [draft, setDraft] = useState(id);
-  useEffect(() => setDraft(id), [id]);
-  const error = recordKeyError(questions, id, draft);
-  const commit = () => {
-    if (error) setDraft(id);
-    else if (draft !== id) onRename(draft);
-  };
   return (
-    <input
+    <DraftInput
       className="pg-question-id"
-      aria-label="Question id"
-      aria-invalid={!!error}
-      title={error ?? "Identifies this question's answer"}
-      value={draft}
+      label="Question id"
+      title="Identifies this question's answer"
+      value={id}
+      validate={draft => recordKeyError(questions, id, draft)}
       readOnly={disabled}
-      spellCheck={false}
-      onChange={e => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={e => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          commit();
-        } else if (e.key === "Escape") {
-          setDraft(id);
-        }
-      }}
+      onCommit={onRename}
     />
   );
 }

@@ -51,6 +51,7 @@ import {
 import { useStructurallyStable } from "../hooks/useStructurallyStable";
 import { AskAgentButton } from "./AskAgentButton";
 import { datasetKey } from "./DatasetList";
+import DraftInput from "./DraftInput";
 import { ExecPanelShell, PromptSplit } from "./ExecPanelShell";
 import { ExecutionInputEditor } from "./ExecutionInputEditor";
 import { evalProblems, prefillBindings } from "./eval-bindings";
@@ -577,6 +578,7 @@ function EvalView({
       if (patch.threshold === undefined && "threshold" in patch) {
         delete merged.threshold;
       }
+      if (patch.label === undefined && "label" in patch) delete merged.label;
       return merged;
     });
     save({ checks: foldChecks(state, next) });
@@ -1054,9 +1056,13 @@ function CheckEditor({
   return (
     <div className="eval-check">
       <div className="eval-check-header">
-        <span className="eval-check-label" title={check.uri}>
-          {label}
-        </span>
+        <DraftInput
+          className="eval-check-label"
+          label="Check name"
+          title={check.uri}
+          value={label}
+          onCommit={next => onChangeCheck({ label: next.trim() || undefined })}
+        />
         {info?.group && <span className="eval-check-group">{info.group}</span>}
         <button
           type="button"

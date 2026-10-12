@@ -495,6 +495,41 @@ test("a check's fields live in its card, and a pass/fail built-in has no score t
   await expect(card.getByLabel("Threshold")).toHaveCount(0);
 });
 
+test("a check can be renamed in place; clearing the name restores the check's own", async ({
+  mount,
+  page,
+}) => {
+  const patches = await mockEval(page, {
+    ...EVAL,
+    checks: [{ id: "c1", uri: CONTAINS.uri, args: {} }],
+  });
+  const component = await mountEval(mount);
+  const name = component.getByLabel("Check name");
+  await expect(name).toHaveValue("Contains");
+
+  // Clearing a name that was never changed saves nothing, but still puts the
+  // check's own name back.
+  await name.fill("");
+  await page.keyboard.press("Enter");
+  await expect(name).toHaveValue("Contains");
+  expect(patches).toHaveLength(0);
+
+  await name.fill("Mentions refunds");
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() => (patches.at(-1)?.checks as any[])?.[0]?.label)
+    .toBe("Mentions refunds");
+  await expect(name).toBeFocused();
+  await expect(name).toHaveValue("Mentions refunds");
+
+  await name.fill("  ");
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() => (patches.at(-1)?.checks as any[])?.[0]?.label)
+    .toBeUndefined();
+  await expect(name).toHaveValue("Contains");
+});
+
 const RUN: EvalRunSummary = {
   id: "run_1",
   evalId: "e1",
