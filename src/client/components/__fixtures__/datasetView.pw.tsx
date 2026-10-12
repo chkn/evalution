@@ -1486,3 +1486,294 @@ test("clicking the grid closes a column header's menu", async ({
   await clickGrid(page, 100, 60);
   await expect(menu).toHaveCount(0);
 });
+
+// ─── Column layout and row label (specs/datasets.md §Q) ─────────────────────
+
+/**
+ * Answers `PATCH …/columns`, returning the body of every request — the
+ * layouts the view wrote.
+ */
+async function mockColumns(page: Page, dataset: Dataset) {
+  const sent: { columns: unknown[]; rowLabel: unknown }[] = [];
+  await page.route("**/api/datasets/local/tickets/columns", route => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    const body = route.request().postDataJSON();
+    sent.push(body);
+    return route.fulfill({ json: { ...dataset, ...body } });
+  });
+  return sent;
+}
+
+/** The grid's column headers, left to right, as its accessible mirror has them. */
+async function headerOrder(scope: Locator) {
+  const texts = await scope
+    .getByRole("grid", { includeHidden: true })
+    .getByRole("columnheader", { includeHidden: true })
+    .allTextContents();
+  return texts.filter(t => t !== "");
+}
+
+/** Drags a column header from `fromX` to `toX`, at height `y`, in steps. */
+async function dragHeader(page: Page, fromX: number, toX: number, y: number) {
+  const box = await page.getByTestId("data-grid-canvas").boundingBox();
+  if (!box) throw new Error("grid canvas not laid out");
+  await page.mouse.move(box.x + fromX, box.y + y);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i++) {
+    await page.mouse.move(box.x + fromX + ((toX - fromX) * i) / 8, box.y + y);
+  }
+  await page.mouse.up();
+}
+
+const path = (field: string, keys: string[] = []) => ({
+  kind: "path" as const,
+  path: { root: { field }, keys },
+});
+
+test("dragging a header moves the column, saving the shared layout once", async ({
+  mount,
+  page,
+}) => {
+  await page.evaluate(() => localStorage.clear());
+  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const sent = await mockColumns(page, SUPPORT);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect
+    .poll(() => headerOrder(component))
+    .toEqual(["ticket", "task", "source"]);
+
+  // `task` onto `ticket`.
+  await dragHeader(
+    page,
+    GRID.marker + 240 + 60,
+    GRID.marker + 40,
+    GRID.header / 2,
+  );
+
+  await expect
+    .poll(() => headerOrder(component))
+    .toEqual(["task", "ticket", "source"]);
+  expect(sent).toEqual([
+    {
+      columns: [path("1"), path("0"), { kind: "source" }],
+      rowLabel: null,
+    },
+  ]);
+});
+
+test("a key's header moves within its field's group, and is refused outside it", async ({
+  mount,
+  page,
+}) => {
+  await page.evaluate(() => localStorage.clear());
+  const dataset: Dataset = {
+    ...SUPPORT,
+    fields: [
+      { id: "0", def: TICKET },
+      {
+        id: "1",
+        def: {
+          name: "taskInfo",
+          type: { kind: "object", syntax: "{ title?: string }" },
+          optional: false,
+        } as PropDefinition,
+      },
+    ],
+  };
+  await mockDataset(
+    page,
+    dataset,
+    [{ id: "r1", cells: { "0": text("Hi") }, createdAt: 1 }],
+    { "1": { keys: ["title", "description"] } },
+  );
+  const sent = await mockColumns(page, dataset);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await clickGrid(page, GRID.marker + 240 + 60, GRID.group / 2);
+  await expect
+    .poll(() => headerOrder(component))
+    .toEqual(["ticket", "title", "description", "source"]);
+  const y = GRID.group + GRID.header / 2;
+
+  // `title` out onto `ticket`: refused, so nothing moves and nothing is sent.
+  await dragHeader(page, GRID.marker + 240 + 40, GRID.marker + 40, y);
+  await page.waitForTimeout(300);
+  expect(await headerOrder(component)).toEqual([
+    "ticket",
+    "title",
+    "description",
+    "source",
+  ]);
+  expect(sent).toEqual([]);
+
+  // `description` onto `title`, within the group: moved.
+  await dragHeader(
+    page,
+    GRID.marker + 240 + 160 + 40,
+    GRID.marker + 240 + 40,
+    y,
+  );
+  await expect
+    .poll(() => headerOrder(component))
+    .toEqual(["ticket", "description", "title", "source"]);
+  expect(sent).toEqual([
+    {
+      columns: [
+        path("0"),
+        path("1"),
+        path("1", ["description"]),
+        path("1", ["title"]),
+        { kind: "source" },
+      ],
+      rowLabel: null,
+    },
+  ]);
+});
+
+test("an added column edits a referenced instance's argument inline, and can name the row", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  const titlePath = { root: { field: "1" }, keys: ["title"] };
+  const dataset: Dataset = {
+    ...SUPPORT,
+    columns: [
+      path("0"),
+      path("1"),
+      { kind: "path", path: titlePath, added: true },
+      { kind: "source" },
+    ],
+    rowLabel: titlePath,
+  };
+  await mockDataset(page, dataset, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const sent = await mockUpdates(page);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect
+    .poll(() => headerOrder(component))
+    .toEqual(["ticket", "task", "title", "source"]);
+  // `task` › `title` steps through the cell's reference to `seededTask`.
+  await expect(inGrid(component, "gridcell", "Buy milk")).toBeAttached();
+
+  await clickCell(page, 240 + 240 + 40, 0, false);
+  await typeIntoCell(page, "Buy oat milk");
+
+  await expect
+    .poll(() => sent)
+    .toEqual([
+      {
+        updates: [
+          {
+            rowId: "r1",
+            cells: {},
+            resources: {
+              seededTask: {
+                uri: ".evalution/playground/tasks.ts#seededTask",
+                args: { title: text("Buy oat milk") },
+              },
+            },
+          },
+        ],
+      },
+    ]);
+  await expect(inGrid(component, "gridcell", "Buy oat milk")).toBeAttached();
+
+  // The row label names the row in the details pane; a row with nothing
+  // there is named by its number alone.
+  const pane = component.getByRole("region", { name: "Row details" });
+  await expect(pane).toContainText("Row 2");
+  await expect(pane).not.toContainText("·");
+  await clickCell(page, 40, 0, false);
+  await expect(pane).toContainText("Row 1 · Buy oat milk");
+});
+
+test("the Columns picker hides a column, adds one from the path tree, and sets the row label", async ({
+  mount,
+  page,
+}) => {
+  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const sent = await mockColumns(page, SUPPORT);
+  await page.route("**/api/datasets/local/tickets/paths", route =>
+    route.fulfill({
+      json: [{ key: "title", sample: text("Buy milk") }],
+    }),
+  );
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect.poll(() => headerOrder(component)).toContain("task");
+
+  await component.getByRole("button", { name: "Columns" }).click();
+  const picker = page.getByRole("dialog", { name: "Columns" });
+  await picker.getByLabel("Show source").uncheck();
+  await expect.poll(() => headerOrder(component)).toEqual(["ticket", "task"]);
+  expect(sent.at(-1)?.columns).toEqual([
+    path("0"),
+    path("1"),
+    { kind: "source", hidden: true },
+  ]);
+
+  await picker.getByRole("button", { name: "Add column…" }).click();
+  await picker.getByRole("button", { name: "Expand task" }).click();
+  await expect(picker.getByText('"Buy milk"')).toBeVisible();
+  await picker.getByRole("button", { name: /^title/ }).click();
+  await expect
+    .poll(() => headerOrder(component))
+    .toEqual(["ticket", "task", "title"]);
+  expect(sent.at(-1)?.columns).toContainEqual({
+    ...path("1", ["title"]),
+    added: true,
+  });
+
+  await picker.getByRole("button", { name: "More for title" }).click();
+  await picker.getByRole("button", { name: "Use as row label" }).click();
+  expect(sent.at(-1)?.rowLabel).toEqual({
+    root: { field: "1" },
+    keys: ["title"],
+  });
+  await expect(picker.getByTitle("Row label")).toBeVisible();
+
+  // An added column can be removed; a field's can only be hidden.
+  await expect(
+    picker.getByRole("button", { name: "Remove column task" }),
+  ).toHaveCount(0);
+  await picker.getByRole("button", { name: "Remove column title" }).click();
+  await expect.poll(() => headerOrder(component)).toEqual(["ticket", "task"]);
+});
+
+test("a column of an unknown kind keeps its place as a dimmed placeholder", async ({
+  mount,
+  page,
+}) => {
+  const dataset: Dataset = {
+    ...SUPPORT,
+    columns: [path("0"), { kind: "evalResults", run: "r9" }, path("1")],
+  };
+  await mockDataset(page, dataset, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const sent = await mockColumns(page, dataset);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect
+    .poll(() => headerOrder(component))
+    .toEqual(["ticket", "Unknown column", "task", "source"]);
+
+  // Hiding another column writes the unknown one back intact.
+  await component.getByRole("button", { name: "Columns" }).click();
+  const picker = page.getByRole("dialog", { name: "Columns" });
+  await expect(
+    picker.getByRole("button", { name: "Remove column Unknown column" }),
+  ).toHaveCount(0);
+  await picker.getByLabel("Show ticket").uncheck();
+  expect(sent.at(-1)?.columns).toEqual([
+    { ...path("0"), hidden: true },
+    { kind: "evalResults", run: "r9" },
+    path("1"),
+    { kind: "source" },
+  ]);
+});

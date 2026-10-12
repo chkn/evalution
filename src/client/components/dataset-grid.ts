@@ -9,7 +9,7 @@
  * A column is a {@link ColumnPath} into a row: a whole field, one key inside
  * it — an object's property, or a property of a typed-in object value — or
  * any other path a column was added at. A field's keys come from
- * {@link DatasetRowsOverview}, found in the rows rather than the schema, and
+ * `DatasetRowsOverview`, found in the rows rather than the schema, and
  * merged by name. Which columns show, and in what order, is the dataset's
  * shared {@link ColumnLayout}. A path is also what sorting and filtering will
  * name when they arrive.
@@ -36,7 +36,6 @@ import {
 import type {
   DatasetField,
   DatasetRow,
-  DatasetRowsOverview,
   DatasetRowUpdate,
   ExecutionInput,
   PropValue,
@@ -583,7 +582,8 @@ export function groupEdits(edits: readonly CellEdit[]): DatasetRowUpdate[] {
       update.cells[edit.fieldId] = cell;
       continue;
     }
-    const resources = (update.resources ??= {});
+    const resources = update.resources ?? {};
+    update.resources = resources;
     const current = resources[edit.instance] ?? edit.spec;
     const { args: _, ...spec } = current;
     const args = { ...current.args };
@@ -721,6 +721,26 @@ export function cellView(
       return inputView(found);
     }
   }
+}
+
+/**
+ * What names `row` when `path` is the dataset's row label: the value there,
+ * a string as itself rather than quoted, or `undefined` when the row has
+ * nothing there to name it by.
+ */
+export function rowLabelText(
+  row: DatasetRow,
+  path: ColumnPath,
+): string | undefined {
+  const found = readColumnPath(row, path);
+  if (typeof found === "string") return undefined;
+  if (found.kind === "value" && found.value.kind === "primitive") {
+    const { value } = found.value;
+    return value === undefined || value === null || value === ""
+      ? undefined
+      : String(value);
+  }
+  return previewCell(found);
 }
 
 /** Fetches `limit` rows starting at `offset`. */

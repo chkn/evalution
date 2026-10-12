@@ -35,6 +35,8 @@ export type {
   DatasetChangeType,
   DatasetField,
   DatasetFieldShape,
+  DatasetInstanceShape,
+  DatasetPathChild,
   DatasetProviderInfo,
   DatasetRow,
   DatasetRowSource,
@@ -249,6 +251,12 @@ export {
   VercelAISDKTelemetry,
   type VercelAISDKTelemetryOptions,
 } from "./sdk/vercel-ai-sdk/telemetry.ts";
+export type {
+  ColumnPath,
+  DatasetColumnSpec,
+  ForeignColumnSpec,
+  KnownColumnSpec,
+} from "./shared/column-paths.ts";
 export { isValidInstanceName } from "./shared/instance-names.ts";
 export type {
   AddPromptContext,

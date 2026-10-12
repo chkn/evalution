@@ -38,6 +38,7 @@ import {
   parseDatasetLayout,
   pathLabel,
   RowPager,
+  rowLabelText,
   serializeDatasetLayout,
 } from "./dataset-grid";
 
@@ -858,7 +859,7 @@ describe("columns from a layout (§Q.3)", () => {
         },
         { rowId: "p", instance: "seededTask", arg: "count", spec, cell: null },
       ]);
-      expect(both.resources?.seededTask.args).toEqual({
+      expect(both.resources?.seededTask?.args).toEqual({
         title: text("A"),
         note: spec.args?.note,
       });
@@ -920,5 +921,22 @@ describe("moving columns in the grid (§Q.3)", () => {
       "title",
     ]);
     expect(movedLayout(layout, cols, 1, 0)).toBe(layout);
+  });
+});
+
+describe("rowLabelText", () => {
+  const r = row(
+    { "0": text("Web site"), "1": text(""), "2": info },
+    { resources: { t: { uri: "u", args: { n: text("Todo") } } } },
+  );
+  it("names a row by the label's value, a string unquoted", () => {
+    expect(rowLabelText(r, fieldPath("0"))).toBe("Web site");
+    expect(rowLabelText(r, instancePath("t", ["n"]))).toBe("Todo");
+    expect(rowLabelText(r, fieldPath("2", ["title"]))).toBe("Say hi");
+  });
+  it("names it by nothing when there's nothing there", () => {
+    expect(rowLabelText(r, fieldPath("1"))).toBeUndefined();
+    expect(rowLabelText(r, fieldPath("9"))).toBeUndefined();
+    expect(rowLabelText(r, fieldPath("0", ["x"]))).toBeUndefined();
   });
 });
