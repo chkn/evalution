@@ -47,6 +47,11 @@ export const datasets = sqliteTable("datasets", {
   nextFieldId: integer("next_field_id").notNull(),
   /** JSON `PromptID`. */
   prompt: text("prompt"),
+  /**
+   * JSON `{ columns?, rowLabel? }` — the grid's shared column layout and the
+   * row label (`specs/datasets.md` §Q.3). NULL until someone arranges them.
+   */
+  layout: text("layout"),
   /** Creation timestamp (ms). */
   createdAt: real("created_at").notNull(),
   /** Last-change timestamp (ms). */

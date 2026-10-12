@@ -358,6 +358,7 @@ function DatasetView({
   const [overview, setOverview] = useState<DatasetRowsOverview>({
     rowCount: 0,
     fields: {},
+    instances: {},
   });
   const [error, setError] = useState<string | null>(null);
   /** Bumped after a local change, to refetch as a `version` bump would. */
@@ -444,12 +445,13 @@ function DatasetView({
   useEffect(() => {
     let cancelled = false;
     getDataset(providerId, datasetId)
-      .then(({ dataset, rowCount, fields }) => {
+      .then(({ dataset, rowCount, fields, instances }) => {
         if (cancelled) return;
         setDataset(dataset);
         setOverview({
           rowCount: rowCount + pendingAppends.current.count,
           fields,
+          instances,
         });
         setError(appendError.current);
         appendError.current = null;

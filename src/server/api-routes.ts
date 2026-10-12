@@ -38,12 +38,14 @@ import {
   handleDeleteDataset,
   handleDeleteField,
   handleDeleteRow,
+  handleDescribePath,
   handleGetDataset,
   handleListDatasets,
   handleListRows,
   handleQueryRows,
   handleRenameDataset,
   handleRenameField,
+  handleSetColumns,
   handleUpdateRows,
 } from "./handlers/datasets.ts";
 import {
@@ -897,6 +899,22 @@ export function setupRoutes({
     "/api/datasets/:providerId/:id/fields/:fieldId",
     datasetRoute((provider, { id, fieldId }) =>
       handleDeleteField(provider, id, fieldId),
+    ),
+  );
+
+  // POST /api/datasets/:providerId/:id/paths - The keys one level inside a column path
+  app.post(
+    "/api/datasets/:providerId/:id/paths",
+    datasetRoute(async (provider, { id }, c) =>
+      handleDescribePath(provider, id, await jsonBody(c)),
+    ),
+  );
+
+  // PATCH /api/datasets/:providerId/:id/columns - The shared column layout and row label
+  app.patch(
+    "/api/datasets/:providerId/:id/columns",
+    datasetRoute(async (provider, { id }, c) =>
+      handleSetColumns(provider, id, await jsonBody(c), resolvePromptLink),
     ),
   );
 

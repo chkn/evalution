@@ -10,6 +10,8 @@ import type { ExecutionInput, PropDefinition } from "../../shared/types.ts";
 import {
   type FieldSourcePrompt,
   handleAddField,
+  handleDescribePath,
+  handleSetColumns,
   handleUpdateRows,
   type LookupFieldSourcePrompt,
   primitiveFieldDef,
@@ -444,5 +446,119 @@ describe("handleUpdateRows", () => {
     const { provider } = await seeded();
     const res = await handleUpdateRows(provider, "nope", { updates: [] });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("column layout handlers (§Q)", () => {
+  let client: Database | undefined;
+
+  afterEach(async () => {
+    await client?.close();
+    client = undefined;
+  });
+
+  /** A dataset of `title` and `ctx`, with one row declaring `task`. */
+  async function seeded() {
+    client = await connect({ path: ":memory:", url: () => null });
+    await runDatasetMigrations(drizzle({ client }));
+    const provider = new TursoDatasetProvider({ client });
+    const dataset = await provider.createDataset({
+      name: "Layout",
+      fields: [
+        { def: primitiveFieldDef("title", "string") },
+        { def: primitiveFieldDef("ctx", "string") },
+      ],
+    });
+    await provider.addRows(dataset.id, [
+      {
+        cells: { "1": { kind: "instance", name: "task", output: "taskId" } },
+        resources: {
+          task: {
+            uri: "file:///t.ts#task",
+            args: {
+              title: {
+                kind: "value",
+                value: { kind: "primitive", value: "Todo" },
+              },
+            },
+          },
+        },
+      },
+    ]);
+    const set = (body: unknown) =>
+      handleSetColumns(provider, dataset.id, body, p => p);
+    return { provider, dataset, set };
+  }
+
+  it("stores columns and a row label whose roots exist", async () => {
+    const { provider, dataset, set } = await seeded();
+    const columns = [
+      { kind: "source", hidden: true },
+      { kind: "path", path: { root: { field: "0" }, keys: [] } },
+      {
+        kind: "path",
+        path: { root: { instance: "task" }, keys: ["title"] },
+        added: true,
+      },
+      { kind: "fromTheFuture", whatever: 1 },
+    ];
+    const rowLabel = { root: { field: "1" }, keys: ["title"] };
+    const res = await set({ columns, rowLabel });
+    expect(res.status).toBe(200);
+    const stored = await provider.getDataset(dataset.id);
+    expect(stored?.columns).toEqual(columns);
+    expect(stored?.rowLabel).toEqual(rowLabel);
+
+    expect((await set({ columns: [], rowLabel: null })).status).toBe(200);
+    expect((await provider.getDataset(dataset.id))?.rowLabel).toBeUndefined();
+  });
+
+  it("rejects an unknown root, an empty key, or a malformed body", async () => {
+    const { set } = await seeded();
+    const path = (root: unknown, keys: unknown = []) => ({
+      columns: [{ kind: "path", path: { root, keys } }],
+    });
+    expect((await set(path({ field: "9" }))).status).toBe(400);
+    expect((await set(path({ instance: "nope" }))).status).toBe(400);
+    expect((await set(path({ field: "0" }, [""]))).status).toBe(400);
+    expect(
+      (await set({ columns: [], rowLabel: { root: { field: "9" }, keys: [] } }))
+        .status,
+    ).toBe(400);
+    expect((await set({ columns: {} })).status).toBe(400);
+    expect((await set({ columns: [{ hidden: true }] })).status).toBe(400);
+    expect(
+      (await handleSetColumns(client as never, "x", null, p => p)).status,
+    ).toBe(400);
+  });
+
+  it("describes a path, refusing an unknown field", async () => {
+    const { provider, dataset } = await seeded();
+    const describe = (path: unknown) =>
+      handleDescribePath(provider, dataset.id, { path });
+    const res = await describe({ root: { field: "1" }, keys: [] });
+    expect(res).toEqual({
+      status: 200,
+      body: [
+        {
+          key: "title",
+          sample: {
+            kind: "value",
+            value: { kind: "primitive", value: "Todo" },
+          },
+        },
+      ],
+    });
+    expect((await describe({ root: { field: "9" }, keys: [] })).status).toBe(
+      400,
+    );
+    expect((await describe({ root: {}, keys: [] })).status).toBe(400);
+    expect(
+      (
+        await handleDescribePath(provider, "nope", {
+          path: { root: { field: "0" }, keys: [] },
+        })
+      ).status,
+    ).toBe(404);
   });
 });

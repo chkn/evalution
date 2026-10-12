@@ -6,6 +6,7 @@
  * to exercise prompts. See `specs/datasets.md`.
  */
 
+import type { ColumnPath, DatasetColumnSpec } from "../shared/column-paths.ts";
 import type {
   ExecutionInput,
   PropDefinition,
@@ -60,10 +61,35 @@ export interface Dataset {
    * survives moves and renames; the server resolves it on read.
    */
   prompt?: PromptID;
+  /**
+   * The grid's columns, in order — a layout, not the schema, so a client
+   * reconciles it with the fields and rows it actually has on read. Absent
+   * until someone arranges the columns. See `specs/datasets.md` §Q.3.
+   */
+  columns?: DatasetColumnSpec[];
+  /** The path whose value names a row wherever a row is named. */
+  rowLabel?: ColumnPath;
   /** Creation timestamp (ms). */
   createdAt: number;
   /** Timestamp (ms) of the last change to the dataset or its rows. */
   updatedAt: number;
+}
+
+/** One key one level inside a path, as `DatasetProvider.describePath` finds it. */
+export interface DatasetPathChild {
+  key: string;
+  /** What the first row that has this key holds there. */
+  sample?: ExecutionInput;
+}
+
+/** One of the rows' resource instances, summarized across rows by name. */
+export interface DatasetInstanceShape {
+  /** The resource it instantiates, in the first row that declares it. */
+  uri: string;
+  /** How many rows declare it. */
+  rows: number;
+  /** Its argument names, merged across rows in order of first appearance. */
+  args: string[];
 }
 
 /** Where a {@link DatasetRow} came from, so the view can link back to it. */
@@ -135,6 +161,8 @@ export interface DatasetRowsOverview {
    * show. A field whose cells are all plain values has no entry.
    */
   fields: Record<string, DatasetFieldShape>;
+  /** Instance name → its resource and argument names, merged across rows. */
+  instances: Record<string, DatasetInstanceShape>;
 }
 
 /** Compact dataset entry for listings (sidebar / `GET /api/datasets`). */

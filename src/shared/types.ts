@@ -13,6 +13,8 @@ export type {
   DatasetChangeType,
   DatasetField,
   DatasetFieldShape,
+  DatasetInstanceShape,
+  DatasetPathChild,
   DatasetProviderInfo,
   DatasetRow,
   DatasetRowSource,

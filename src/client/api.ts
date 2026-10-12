@@ -14,6 +14,7 @@ import type {
   TraceCheckResult,
 } from "../eval/eval-types";
 import type { AgentContext, AgentInfo } from "../shared/agent";
+import type { ColumnPath, DatasetColumnSpec } from "../shared/column-paths";
 import type { AddDatasetFieldRequest } from "../shared/dataset-fields";
 import type { SetupTask } from "../shared/setup-task";
 import type {
@@ -24,6 +25,7 @@ import type {
   ConflictChoices,
   Dataset,
   DatasetField,
+  DatasetPathChild,
   DatasetProviderInfo,
   DatasetRow,
   DatasetRowsOverview,
@@ -776,6 +778,43 @@ export async function deleteDatasetField(
     { method: "DELETE" },
   );
   await throwIfError(res);
+}
+
+/**
+ * The keys one level inside `path` in a dataset's rows, each with a sample
+ * value — what the column picker's path tree expands a node into.
+ */
+export async function describeDatasetPath(
+  providerId: string,
+  datasetId: string,
+  path: ColumnPath,
+): Promise<DatasetPathChild[]> {
+  const res = await fetch(datasetUrl(providerId, datasetId, "/paths"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  await throwIfError(res);
+  return res.json();
+}
+
+/**
+ * Replaces a dataset's shared column layout and row label (`null` clears
+ * it). Resolves to the updated dataset.
+ */
+export async function setDatasetColumns(
+  providerId: string,
+  datasetId: string,
+  columns: DatasetColumnSpec[],
+  rowLabel: ColumnPath | null,
+): Promise<Dataset> {
+  const res = await fetch(datasetUrl(providerId, datasetId, "/columns"), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ columns, rowLabel }),
+  });
+  await throwIfError(res);
+  return res.json();
 }
 
 /** Deletes one row of a dataset. */

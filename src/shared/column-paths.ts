@@ -18,6 +18,48 @@ export interface ColumnPath {
   keys: string[];
 }
 
+/**
+ * One column of a dataset's layout (`Dataset.columns`), discriminated by `kind`. Kinds
+ * this version doesn't know (a newer client's) are stored and served as they
+ * were written — see {@link ForeignColumnSpec}.
+ */
+export type DatasetColumnSpec = KnownColumnSpec | ForeignColumnSpec;
+
+/** A column of the layout whose `kind` this version knows. */
+export type KnownColumnSpec =
+  | {
+      kind: "path";
+      path: ColumnPath;
+      /** Shown instead of the path's last key. */
+      title?: string;
+      hidden?: true;
+      /** Added from the picker, as opposed to derived from a field or one of its keys. */
+      added?: true;
+    }
+  /** Where the row came from. Moved and hidden like any column, but never removed. */
+  | { kind: "source"; hidden?: true };
+
+/**
+ * A column of a `kind` this version doesn't know, written by a newer one. Kept
+ * in its place, and written back intact, so an older client arranging the
+ * columns doesn't drop it.
+ */
+export interface ForeignColumnSpec {
+  kind: string;
+  hidden?: true;
+  [property: string]: unknown;
+}
+
+/** The kinds of {@link KnownColumnSpec}. */
+const KNOWN_COLUMN_KINDS = new Set<string>(["path", "source"]);
+
+/** Whether `spec` is a column this version knows how to draw. */
+export function isKnownColumn(
+  spec: DatasetColumnSpec,
+): spec is KnownColumnSpec {
+  return KNOWN_COLUMN_KINDS.has(spec.kind);
+}
+
 /** The parts of a row a path reads: its cells, and its resource instances. */
 export interface PathRow {
   cells: Record<string, ExecutionInput>;
@@ -224,4 +266,57 @@ export function parseColumnPath(value: unknown, at = "path"): ColumnPath {
     }
   }
   return { root: parsedRoot, keys: [...keys] };
+}
+
+/**
+ * Checks that `value` is a well-formed column layout and returns it. Each
+ * entry must be an object with a string `kind`. A `path` entry's path is
+ * checked by {@link parseColumnPath}, and its `title`, `hidden` and `added`
+ * by type; a `source` entry carries only `hidden`. An entry of a kind this
+ * version doesn't know is kept as it was written, so a newer client's
+ * column survives a write from an older one. Whether a path's root exists
+ * is the caller's business.
+ *
+ * @param at - Where `value` sits, for the error message.
+ * @throws {InvalidColumnPathError} naming the first problem found.
+ */
+export function parseColumnSpecs(
+  value: unknown,
+  at = "columns",
+): DatasetColumnSpec[] {
+  if (!Array.isArray(value)) {
+    throw new InvalidColumnPathError(`${at} must be an array`);
+  }
+  return value.map((entry, i): DatasetColumnSpec => {
+    const here = `${at}[${i}]`;
+    if (!isRecord(entry) || typeof entry.kind !== "string" || !entry.kind) {
+      throw new InvalidColumnPathError(`${here} must be an object with a kind`);
+    }
+    if (entry.hidden !== undefined && entry.hidden !== true) {
+      throw new InvalidColumnPathError(`${here}.hidden must be true if set`);
+    }
+    const hidden = entry.hidden === true ? { hidden: true as const } : {};
+    switch (entry.kind) {
+      case "source":
+        return { kind: "source", ...hidden };
+      case "path": {
+        if (entry.title !== undefined && typeof entry.title !== "string") {
+          throw new InvalidColumnPathError(`${here}.title must be a string`);
+        }
+        if (entry.added !== undefined && entry.added !== true) {
+          throw new InvalidColumnPathError(`${here}.added must be true if set`);
+        }
+        return {
+          kind: "path",
+          path: parseColumnPath(entry.path, `${here}.path`),
+          ...(typeof entry.title === "string" &&
+            entry.title !== "" && { title: entry.title }),
+          ...hidden,
+          ...(entry.added === true && { added: true as const }),
+        };
+      }
+      default:
+        return { ...entry, kind: entry.kind };
+    }
+  });
 }
