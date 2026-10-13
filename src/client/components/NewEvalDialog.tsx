@@ -139,6 +139,7 @@ function NewEvalDialog({
             <input
               id="new-eval-name"
               autoFocus
+              data-1p-ignore
               value={name}
               placeholder="Plans the right tasks"
               onChange={e => setName(e.target.value)}

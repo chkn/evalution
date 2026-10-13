@@ -8,8 +8,11 @@ import type { DatasetField } from "../../shared/types";
 import { useAnchoredPopover } from "./use-anchored-popover";
 
 interface Props {
-  /** The field the menu is for. */
-  field: DatasetField;
+  /**
+   * The field the column is, when it's a field's whole column — which is
+   * what offers renaming and deleting.
+   */
+  field?: DatasetField;
   /** The column header's place on screen, which the menu opens below. */
   anchor: Rectangle;
   /**
@@ -19,12 +22,20 @@ interface Props {
   onRename: (name: string) => Promise<void>;
   /** The field is to be deleted; the caller confirms, then closes the menu. */
   onDelete: () => void;
+  /** Hides the column. */
+  onHide: () => void;
+  /**
+   * Whether the column is the row label, and makes it so or stops it being
+   * so — absent for a column that can't name a row (the source, say).
+   */
+  rowLabel?: { isLabel: boolean; toggle: () => void };
   /** Called when the menu is dismissed or has done its job. */
   onClose: () => void;
 }
 
 /**
- * The menu a dataset grid's column header opens: rename the field, or delete
+ * The menu a dataset grid's column header opens: hide the column, make it
+ * the row label, and — for a field's own column — rename the field or delete
  * it. Renaming swaps the menu for a name box in place. Placed against `anchor`
  * — the header cell's rectangle, which Glide reports but draws on a canvas —
  * through an invisible fixed element standing in for a trigger.
@@ -34,10 +45,12 @@ export function DatasetColumnMenu({
   anchor,
   onRename,
   onDelete,
+  onHide,
+  rowLabel,
   onClose,
 }: Props) {
   const [renaming, setRenaming] = useState(false);
-  const [name, setName] = useState(field.def.name);
+  const [name, setName] = useState(field?.def.name ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { triggerRef, popoverRef, style } = useAnchoredPopover<HTMLSpanElement>(
@@ -47,7 +60,7 @@ export function DatasetColumnMenu({
   const submit = async () => {
     const trimmed = name.trim();
     if (busy) return;
-    if (!trimmed || trimmed === field.def.name) return onClose();
+    if (!trimmed || trimmed === field?.def.name) return onClose();
     setBusy(true);
     try {
       await onRename(trimmed);
@@ -125,18 +138,54 @@ export function DatasetColumnMenu({
             type="button"
             role="menuitem"
             className="trace-header-menu-item"
-            onClick={() => setRenaming(true)}
+            onClick={() => {
+              onHide();
+              onClose();
+            }}
           >
-            <span className="trace-header-menu-item-label">Rename field…</span>
+            <span className="trace-header-menu-item-label">Hide column</span>
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="trace-header-menu-item dataset-menu-delete"
-            onClick={onDelete}
-          >
-            <span className="trace-header-menu-item-label">Delete field</span>
-          </button>
+          {rowLabel && (
+            <button
+              type="button"
+              role="menuitem"
+              className="trace-header-menu-item"
+              onClick={() => {
+                rowLabel.toggle();
+                onClose();
+              }}
+            >
+              <span className="trace-header-menu-item-label">
+                {rowLabel.isLabel
+                  ? "Don't use as row label"
+                  : "Use as row label"}
+              </span>
+            </button>
+          )}
+          {field && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                className="trace-header-menu-item"
+                onClick={() => setRenaming(true)}
+              >
+                <span className="trace-header-menu-item-label">
+                  Rename field…
+                </span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="trace-header-menu-item dataset-menu-delete"
+                onClick={onDelete}
+              >
+                <span className="trace-header-menu-item-label">
+                  Delete field
+                </span>
+              </button>
+            </>
+          )}
         </div>
       )}
     </>,

@@ -11,6 +11,15 @@
 import type { Database } from "@tursodatabase/sync";
 import { and, asc, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
+import {
+  type ColumnPath,
+  childInputs,
+  type DatasetColumnSpec,
+  isPathColumn,
+  pathField,
+  pathInstance,
+  resolveColumnPath,
+} from "../shared/column-paths.ts";
 import { matchKey } from "../shared/dataset-fields.ts";
 import { isValidInstanceName } from "../shared/instance-names.ts";
 import type {
@@ -46,6 +55,8 @@ import type {
   DatasetChangeEvent,
   DatasetField,
   DatasetFieldShape,
+  DatasetInstanceShape,
+  DatasetPathChild,
   DatasetRow,
   DatasetRowSource,
   DatasetRowsOverview,
@@ -58,12 +69,21 @@ function parseJson<T>(v: string | null): T | undefined {
   return v == null ? undefined : (JSON.parse(v) as T);
 }
 
+/** What the `layout` column holds — see `Dataset.columns`. */
+interface StoredLayout {
+  columns?: DatasetColumnSpec[];
+  rowLabel?: ColumnPath;
+}
+
 function rowToDataset(row: typeof datasets.$inferSelect): Dataset {
+  const layout = parseJson<StoredLayout>(row.layout);
   return {
     id: row.id,
     name: row.name,
     fields: JSON.parse(row.fields) as DatasetField[],
     ...(row.prompt && { prompt: parseJson<PromptID>(row.prompt) }),
+    ...(layout?.columns && { columns: layout.columns }),
+    ...(layout?.rowLabel && { rowLabel: layout.rowLabel }),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -323,7 +343,96 @@ export class TursoDatasetProvider implements DatasetProvider {
       fields[field] ??= { keys: [] };
       fields[field].keys.push(key);
     }
-    return { rowCount: Number(count), fields };
+    return {
+      rowCount: Number(count),
+      fields,
+      instances: await this.describeInstances(datasetId),
+    };
+  }
+
+  /**
+   * The rows' resource instances, by name, in order of first appearance:
+   * each one's resource, how many rows declare it, and its argument names
+   * merged across rows the way {@link describeRows} merges a field's keys.
+   */
+  private async describeInstances(
+    datasetId: string,
+  ): Promise<Record<string, DatasetInstanceShape>> {
+    // `json_each(NULL)` yields a row in Turso, hence the IS NOT NULL.
+    // Grouped by resource too, since one name may instantiate different
+    // resources in different rows; the first row's is the one reported.
+    const declared = await this.db.all<{
+      name: string;
+      uri: string | null;
+      rows: number;
+    }>(sql`
+      SELECT inst.key AS name, json_extract(inst.value, '$.uri') AS uri,
+        count(*) AS rows
+      FROM ${datasetRows}, json_each(${datasetRows.resources}) AS inst
+      WHERE ${datasetRows.datasetId} = ${datasetId}
+        AND ${datasetRows.resources} IS NOT NULL
+      GROUP BY inst.key, uri
+      ORDER BY min(${datasetRows}.rowid), min(inst.id)
+    `);
+    const args = await this.db.all<{ name: string; arg: string }>(sql`
+      SELECT inst.key AS name, arg.key AS arg
+      FROM ${datasetRows},
+        json_each(${datasetRows.resources}) AS inst,
+        json_each(inst.value, '$.args') AS arg
+      WHERE ${datasetRows.datasetId} = ${datasetId}
+        AND ${datasetRows.resources} IS NOT NULL
+      GROUP BY inst.key, arg.key
+      ORDER BY inst.key, min(${datasetRows}.rowid), min(arg.id)
+    `);
+
+    const instances: Record<string, DatasetInstanceShape> = {};
+    for (const { name, uri, rows } of declared) {
+      const known = instances[name];
+      if (known) known.rows += Number(rows);
+      else instances[name] = { uri: uri ?? "", rows: Number(rows), args: [] };
+    }
+    for (const { name, arg } of args) instances[name]?.args.push(arg);
+    return instances;
+  }
+
+  async describePath(
+    datasetId: string,
+    path: ColumnPath,
+  ): Promise<DatasetPathChild[]> {
+    // Only rows with something at the root can have anything inside it. The
+    // rest of the walk is `resolveColumnPath`'s, row by row, so it agrees
+    // with what the grid reads — references included, which resolve per row.
+    // A root's name can't hold a `"`: a field's is an id, and an instance's
+    // is checked by `parseColumnPath`.
+    const field = pathField(path);
+    const rootKey = `$."${field ?? pathInstance(path)}"`;
+    const rootColumn =
+      field !== undefined ? datasetRows.cells : datasetRows.resources;
+    const rows = await this.db.all<{
+      cells: string | null;
+      resources: string | null;
+    }>(sql`
+      SELECT json(${datasetRows.cells}) AS cells,
+        json(${datasetRows.resources}) AS resources
+      FROM ${datasetRows}
+      WHERE ${datasetRows.datasetId} = ${datasetId}
+        AND json_type(${rootColumn}, ${rootKey}) IS NOT NULL
+      ORDER BY ${datasetRows.createdAt}, ${datasetRows}.rowid
+    `);
+
+    const children = new Map<string, DatasetPathChild>();
+    for (const stored of rows) {
+      const row = {
+        cells: parseJson<Record<string, ExecutionInput>>(stored.cells) ?? {},
+        resources: parseJson<RunResources>(stored.resources),
+      };
+      const { value } = resolveColumnPath(row, path);
+      if (typeof value === "string") continue;
+      for (const [key, sample] of childInputs(row, value)) {
+        if (!children.has(key)) children.set(key, { key, sample });
+      }
+    }
+    return [...children.values()];
   }
 
   async createDataset(
@@ -662,7 +771,12 @@ export class TursoDatasetProvider implements DatasetProvider {
   async deleteField(datasetId: string, fieldId: string): Promise<void> {
     await this.serializeWrite(() =>
       this.db.transaction(async tx => {
-        const fields = await this.fieldsIn(tx, datasetId);
+        const [row] = await tx
+          .select({ fields: datasets.fields, layout: datasets.layout })
+          .from(datasets)
+          .where(eq(datasets.id, datasetId));
+        if (!row) throw new DatasetNotFoundError(datasetId);
+        const fields = JSON.parse(row.fields) as DatasetField[];
         if (!fields.some(f => f.id === fieldId)) {
           throw noSuchField(datasetId, fieldId);
         }
@@ -672,6 +786,7 @@ export class TursoDatasetProvider implements DatasetProvider {
           .update(datasets)
           .set({
             fields: JSON.stringify(fields.filter(f => f.id !== fieldId)),
+            layout: layoutWithoutField(row.layout, fieldId),
             updatedAt: Date.now(),
           })
           .where(eq(datasets.id, datasetId));
@@ -684,6 +799,25 @@ export class TursoDatasetProvider implements DatasetProvider {
       }),
     );
     this.emit({ type: "update", datasetId });
+  }
+
+  async setColumns(
+    datasetId: string,
+    columns: DatasetColumnSpec[],
+    rowLabel: ColumnPath | undefined,
+  ): Promise<Dataset> {
+    const dataset = await this.serializeWrite(async () => {
+      const layout: StoredLayout = { columns, ...(rowLabel && { rowLabel }) };
+      const updated = await this.db
+        .update(datasets)
+        .set({ layout: JSON.stringify(layout), updatedAt: Date.now() })
+        .where(eq(datasets.id, datasetId))
+        .returning();
+      if (updated.length === 0) throw new DatasetNotFoundError(datasetId);
+      return rowToDataset(updated[0]);
+    });
+    this.emit({ type: "update", datasetId });
+    return dataset;
   }
 
   /**
@@ -716,6 +850,29 @@ export class TursoDatasetProvider implements DatasetProvider {
     if (!row) throw new DatasetNotFoundError(datasetId);
     return JSON.parse(row.fields) as DatasetField[];
   }
+}
+
+/**
+ * A stored layout without the columns that read from `fieldId`, nor the row
+ * label if it did — so a deleted field doesn't linger as a dead entry.
+ */
+function layoutWithoutField(
+  stored: string | null,
+  fieldId: string,
+): string | null {
+  const layout = parseJson<StoredLayout>(stored);
+  if (!layout) return stored;
+  const readsField = (path: ColumnPath) => pathField(path) === fieldId;
+  const pruned: StoredLayout = {
+    ...(layout.columns && {
+      columns: layout.columns.filter(
+        c => !(isPathColumn(c) && readsField(c.path)),
+      ),
+    }),
+    ...(layout.rowLabel &&
+      !readsField(layout.rowLabel) && { rowLabel: layout.rowLabel }),
+  };
+  return JSON.stringify(pruned);
 }
 
 function noSuchField(datasetId: string, fieldId: string): Error {

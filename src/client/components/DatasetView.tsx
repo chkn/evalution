@@ -38,6 +38,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { shortSyntax } from "ts-proppy/react";
+import {
+  type ColumnPath,
+  columnPathId,
+  pathField,
+} from "../../shared/column-paths";
 import type {
   Dataset,
   DatasetField,
@@ -52,24 +57,38 @@ import {
   deleteDataset,
   deleteDatasetField,
   deleteDatasetRow,
+  describeDatasetPath,
   getDataset,
   getDatasetRows,
   renameDataset,
   renameDatasetField,
+  setDatasetColumns,
   updateDatasetRows,
 } from "../api";
 import { useStructurallyStable } from "../hooks/useStructurallyStable";
 import { DatasetAddField } from "./DatasetAddField";
 import { DatasetColumnMenu } from "./DatasetColumnMenu";
+import { DatasetColumnPicker } from "./DatasetColumnPicker";
 import { DatasetRowDetails } from "./DatasetRowDetails";
 import { DetailsPane, DetailsPaneHeader, useIsWide } from "./DetailsPane";
+import {
+  addColumn,
+  type ColumnLayout,
+  reconcileColumns,
+  removeColumn,
+  serializeColumns,
+  setHidden,
+  slotPath,
+} from "./dataset-columns";
 import {
   buildColumns,
   type CellEdit,
   type CellView,
+  canMoveColumn,
   cellEdits,
   cellView,
   clearEdits,
+  columnPath,
   type DatasetColumn,
   type DatasetLayout,
   DEFAULT_LAYOUT,
@@ -83,8 +102,10 @@ import {
   layoutStorageKey,
   layoutWithoutField,
   menuFieldId,
+  movedLayout,
   parseDatasetLayout,
   RowPager,
+  rowLabelText,
   serializeDatasetLayout,
 } from "./dataset-grid";
 import { datasetInputSources } from "./dataset-row-editing";
@@ -307,6 +328,13 @@ function toGridCell(view: CellView, theme: Partial<Theme>): GridCell {
           bgCell: theme.bgCellMedium,
         },
       });
+    case "unknown":
+      return text("", {
+        themeOverride: {
+          textDark: theme.textLight,
+          bgCell: theme.bgCellMedium,
+        },
+      });
     case "chip":
       return {
         kind: GridCellKind.Bubble,
@@ -357,6 +385,7 @@ function DatasetView({
   const [overview, setOverview] = useState<DatasetRowsOverview>({
     rowCount: 0,
     fields: {},
+    instances: {},
   });
   const [error, setError] = useState<string | null>(null);
   /** Bumped after a local change, to refetch as a `version` bump would. */
@@ -410,9 +439,9 @@ function DatasetView({
     onClose: closeMenu,
     matchTriggerWidth: false,
   });
-  /** The column header menu that's open: its field, and where it opened from. */
+  /** The column header menu that's open: its column, and where it opened from. */
   const [columnMenu, setColumnMenu] = useState<{
-    fieldId: string;
+    columnId: string;
     anchor: Rectangle;
   } | null>(null);
   const closeColumnMenu = useCallback(() => setColumnMenu(null), []);
@@ -443,12 +472,13 @@ function DatasetView({
   useEffect(() => {
     let cancelled = false;
     getDataset(providerId, datasetId)
-      .then(({ dataset, rowCount, fields }) => {
+      .then(({ dataset, rowCount, fields, instances }) => {
         if (cancelled) return;
         setDataset(dataset);
         setOverview({
           rowCount: rowCount + pendingAppends.current.count,
           fields,
+          instances: instances ?? {},
         });
         setError(appendError.current);
         appendError.current = null;
@@ -470,17 +500,54 @@ function DatasetView({
     dataset ? datasetInputSources(dataset.fields, linkedPrompt) : undefined,
   );
 
+  /** The dataset's shared column layout, fitted to its fields and rows. */
+  const columnLayout = useMemo(
+    () =>
+      dataset
+        ? reconcileColumns(dataset.columns, dataset.fields, overview.fields)
+        : [],
+    [dataset, overview.fields],
+  );
   const columns = useMemo(
     () =>
       dataset
         ? buildColumns({
             fields: dataset.fields,
-            shape: overview.fields,
+            layout: columnLayout,
             expanded,
             shortType: syntax => shortSyntax(syntax, 24),
           })
         : [],
-    [dataset, overview.fields, expanded],
+    [dataset, columnLayout, expanded],
+  );
+  const rowLabel = dataset?.rowLabel;
+
+  /**
+   * Writes the shared layout and row label (`null` clears the label; left
+   * out, it stays as it is). Optimistic, as a cell edit is:
+   * the grid redraws at once, and the `dataset-changed` refetch confirms. A
+   * failure says why and reloads the dataset as the server has it.
+   */
+  const saveColumns = useCallback(
+    (next: ColumnLayout, label: ColumnPath | null = rowLabel ?? null) => {
+      const serialized = serializeColumns(next);
+      setDataset(d => {
+        if (!d) return d;
+        const { rowLabel: _, ...rest } = d;
+        return {
+          ...rest,
+          columns: serialized,
+          ...(label && { rowLabel: label }),
+        };
+      });
+      setDatasetColumns(providerId, datasetId, serialized, label).catch(
+        (err: Error) => {
+          setError(`Couldn't save the columns: ${err.message}`);
+          setReload(n => n + 1);
+        },
+      );
+    },
+    [providerId, datasetId, rowLabel],
   );
   const fieldIdByGroup = useMemo(() => fieldIdsByGroup(columns), [columns]);
   const getGroupDetails = useCallback(
@@ -498,10 +565,13 @@ function DatasetView({
         id: c.id,
         title: c.title,
         width: widths[c.id] ?? c.width,
-        hasMenu: menuFieldId(c) !== undefined,
+        hasMenu: true,
         ...(c.group !== undefined && { group: c.group }),
+        ...(c.role === "unknown" && {
+          themeOverride: { textHeader: theme.textLight },
+        }),
       })),
-    [columns, widths],
+    [columns, widths, theme],
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `loaded` redraws cells as their pages land.
@@ -770,9 +840,10 @@ function DatasetView({
   const onGroupHeaderClicked = useCallback(
     (col: number, event: { preventDefault: () => void }) => {
       const column = columns[col];
-      if (!column || !("path" in column)) return;
+      const fieldId =
+        column && "path" in column ? pathField(column.path) : undefined;
+      if (fieldId === undefined) return;
       event.preventDefault();
-      const { fieldId } = column.path;
       const next = new Set(expanded);
       if (!next.delete(fieldId)) next.add(fieldId);
       updateLayout({ ...layout, expanded: next });
@@ -782,10 +853,25 @@ function DatasetView({
 
   const onHeaderMenuClick = useCallback(
     (col: number, anchor: Rectangle) => {
-      const fieldId = menuFieldId(columns[col]);
-      if (fieldId !== undefined) setColumnMenu({ fieldId, anchor });
+      const column = columns[col];
+      if (column) setColumnMenu({ columnId: column.id, anchor });
     },
     [columns],
+  );
+
+  /** Refuses a header drag that would split a field's keys up (§Q.3). */
+  const onColumnProposeMove = useCallback(
+    (from: number, to: number) => canMoveColumn(columns, from, to),
+    [columns],
+  );
+
+  /** A header was dragged to a new place: one write, on drop. */
+  const onColumnMoved = useCallback(
+    (from: number, to: number) => {
+      const next = movedLayout(columnLayout, columns, from, to);
+      if (next !== columnLayout) saveColumns(next);
+    },
+    [columnLayout, columns, saveColumns],
   );
 
   const act = async (action: () => Promise<void>) => {
@@ -825,9 +911,16 @@ function DatasetView({
     setRenaming(true);
   };
 
-  const menuField = columnMenu
-    ? dataset.fields.find(f => f.id === columnMenu.fieldId)
+  const menuColumn = columnMenu
+    ? columns.find(c => c.id === columnMenu.columnId)
     : undefined;
+  const menuFieldIdValue = menuFieldId(menuColumn);
+  const menuField =
+    menuFieldIdValue !== undefined
+      ? dataset.fields.find(f => f.id === menuFieldIdValue)
+      : undefined;
+  const menuPath = columnPath(menuColumn);
+  const labelId = rowLabel && columnPathId(rowLabel);
 
   const renameField = async (field: DatasetField, name: string) => {
     const renamed = await renameDatasetField(
@@ -877,6 +970,21 @@ function DatasetView({
     menuOpen &&
     createPortal(
       <div className="trace-header-menu" ref={menuRef} style={menuStyle}>
+        {onNewEval && (
+          <button
+            type="button"
+            className="trace-header-menu-item"
+            onClick={() => {
+              setMenuOpen(false);
+              newEval();
+            }}
+          >
+            <span className="trace-header-menu-item-icon">
+              <EvalsIcon size={14} />
+            </span>
+            <span className="trace-header-menu-item-label">New eval…</span>
+          </button>
+        )}
         {onAskAgent && (
           <AskAgentMenuItems
             // Only those that can run: the button's own menu is where the
@@ -888,18 +996,7 @@ function DatasetView({
             }}
           />
         )}
-        {onNewEval && (
-          <button
-            type="button"
-            className="trace-header-menu-item"
-            onClick={() => {
-              setMenuOpen(false);
-              newEval();
-            }}
-          >
-            <span className="trace-header-menu-item-label">New eval…</span>
-          </button>
-        )}
+        {(onNewEval || onAskAgent) && <hr className="ask-agent-menu-divider" />}
         <button
           type="button"
           className="trace-header-menu-item dataset-menu-delete"
@@ -908,6 +1005,9 @@ function DatasetView({
             handleDelete();
           }}
         >
+          <span className="trace-header-menu-item-icon">
+            <TrashIcon />
+          </span>
           <span className="trace-header-menu-item-label">Delete dataset</span>
         </button>
       </div>,
@@ -922,10 +1022,20 @@ function DatasetView({
       }),
     });
 
+  const selectedLabel =
+    selectedRow && rowLabel ? rowLabelText(selectedRow, rowLabel) : undefined;
+
   const rowDetails = selectedRow && selectedIndex !== null && (
     <>
       <DetailsPaneHeader
-        title={<span className="trace-row-name">Row {selectedIndex + 1}</span>}
+        title={
+          <span className="trace-row-name">
+            Row {selectedIndex + 1}
+            {selectedLabel !== undefined && (
+              <span className="dataset-row-label"> · {selectedLabel}</span>
+            )}
+          </span>
+        }
         actions={
           <>
             {linkedPrompt && (
@@ -1005,10 +1115,28 @@ function DatasetView({
             )}
           </div>
           <div className="trace-view-header-actions">
+            <DatasetColumnPicker
+              layout={columnLayout}
+              fields={dataset.fields}
+              instances={overview.instances}
+              rowLabel={rowLabel}
+              onChange={next => saveColumns(next)}
+              onRowLabel={path => saveColumns(columnLayout, path ?? null)}
+              onAdd={path => saveColumns(addColumn(columnLayout, path))}
+              onRemove={index => {
+                const path = slotPath(columnLayout, { index });
+                saveColumns(
+                  removeColumn(columnLayout, index),
+                  path && columnPathId(path) === labelId
+                    ? null
+                    : (rowLabel ?? null),
+                );
+              }}
+              describePath={path =>
+                describeDatasetPath(providerId, datasetId, path)
+              }
+            />
             <div className="trace-view-header-actions-full">
-              {onAskAgent && (
-                <AskAgentButton agents={agents} onAsk={onAskAgent} />
-              )}
               {onNewEval && (
                 <button
                   type="button"
@@ -1019,6 +1147,9 @@ function DatasetView({
                   <EvalsIcon size={14} />
                   New eval…
                 </button>
+              )}
+              {onAskAgent && (
+                <AskAgentButton agents={agents} onAsk={onAskAgent} />
               )}
               <button
                 type="button"
@@ -1073,13 +1204,28 @@ function DatasetView({
         </div>
       </div>
       {menu}
-      {columnMenu && menuField && (
+      {columnMenu && menuColumn && (
         <DatasetColumnMenu
-          key={menuField.id}
-          field={menuField}
+          key={menuColumn.id}
+          {...(menuField && { field: menuField })}
           anchor={columnMenu.anchor}
-          onRename={name => renameField(menuField, name)}
-          onDelete={() => handleDeleteField(menuField)}
+          onRename={async name => {
+            if (menuField) await renameField(menuField, name);
+          }}
+          onDelete={() => menuField && handleDeleteField(menuField)}
+          onHide={() =>
+            saveColumns(setHidden(columnLayout, menuColumn.slot, true))
+          }
+          {...(menuPath && {
+            rowLabel: {
+              isLabel: columnPathId(menuPath) === labelId,
+              toggle: () =>
+                saveColumns(
+                  columnLayout,
+                  columnPathId(menuPath) === labelId ? null : menuPath,
+                ),
+            },
+          })}
           onClose={closeColumnMenu}
         />
       )}
@@ -1146,6 +1292,8 @@ function DatasetView({
               onCellActivated={onCellActivated}
               onGroupHeaderClicked={onGroupHeaderClicked}
               onHeaderMenuClick={onHeaderMenuClick}
+              onColumnProposeMove={onColumnProposeMove}
+              onColumnMoved={onColumnMoved}
               onCellsEdited={onCellsEdited}
               validateCell={validateCell}
               onDelete={onDelete}

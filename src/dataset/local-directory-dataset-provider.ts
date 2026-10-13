@@ -5,6 +5,7 @@ import { access, constants, readdir, stat, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
+import type { ColumnPath, DatasetColumnSpec } from "../shared/column-paths.ts";
 import type { PropDefinition } from "../shared/types.ts";
 import {
   assertSqliteFile,
@@ -32,6 +33,7 @@ import type {
   Dataset,
   DatasetChangeEvent,
   DatasetField,
+  DatasetPathChild,
   DatasetRow,
   DatasetRowsOverview,
   DatasetRowUpdate,
@@ -300,8 +302,17 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
 
   async describeRows(datasetId: string): Promise<DatasetRowsOverview> {
     const entry = await this.entryFor(datasetId);
-    if (!entry?.ok) return { rowCount: 0, fields: {} };
+    if (!entry?.ok) return { rowCount: 0, fields: {}, instances: {} };
     return entry.inner.describeRows(entry.innerId);
+  }
+
+  async describePath(
+    datasetId: string,
+    path: ColumnPath,
+  ): Promise<DatasetPathChild[]> {
+    const entry = await this.entryFor(datasetId);
+    if (!entry?.ok) return [];
+    return entry.inner.describePath(entry.innerId, path);
   }
 
   /**
@@ -409,6 +420,20 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
   async deleteField(datasetId: string, fieldId: string): Promise<void> {
     const entry = await this.requireEntry(datasetId);
     await entry.inner.deleteField(entry.innerId, fieldId);
+  }
+
+  async setColumns(
+    datasetId: string,
+    columns: DatasetColumnSpec[],
+    rowLabel: ColumnPath | undefined,
+  ): Promise<Dataset> {
+    const entry = await this.requireEntry(datasetId);
+    const updated = await entry.inner.setColumns(
+      entry.innerId,
+      columns,
+      rowLabel,
+    );
+    return this.withFileId(datasetId, updated);
   }
 
   async queryRows(

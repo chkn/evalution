@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { ColumnPath, DatasetColumnSpec } from "../shared/column-paths.ts";
 import type { PropDefinition } from "../shared/types.ts";
 import type {
   SqlQueryOptions,
@@ -11,6 +12,7 @@ import type {
   Dataset,
   DatasetChangeEvent,
   DatasetField,
+  DatasetPathChild,
   DatasetRow,
   DatasetRowsOverview,
   DatasetRowUpdate,
@@ -97,6 +99,18 @@ export interface DatasetProvider {
    */
   describeRows(datasetId: string): Promise<DatasetRowsOverview>;
 
+  /**
+   * The keys one level inside `path`, merged across rows in order of first
+   * appearance, each with a sample of what the first row that has it holds
+   * there. Each row is walked by `readColumnPath`'s rules, so a path through
+   * an instance reference resolves per row. Empty for an unknown dataset, or
+   * a path that leads nowhere. See `specs/datasets.md` §Q.2.
+   */
+  describePath(
+    datasetId: string,
+    path: ColumnPath,
+  ): Promise<DatasetPathChild[]>;
+
   /** Creates a dataset, minting its id and field ids. */
   createDataset(input: CreateDatasetInput): Promise<Dataset>;
 
@@ -154,11 +168,25 @@ export interface DatasetProvider {
 
   /**
    * Deletes a field and every row's cell for it. Its id is never reused. An
-   * unknown field is rejected with a {@link DatasetValidationError}.
+   * unknown field is rejected with a {@link DatasetValidationError}. The
+   * field's columns are dropped from the layout, and the row label with them
+   * if it read from the field.
    *
    * Optional — as {@link renameField}.
    */
   deleteField?(datasetId: string, fieldId: string): Promise<void>;
+
+  /**
+   * Replaces the dataset's column layout and row label — metadata, so rows
+   * are untouched. `columns` is stored as given (any validation is the
+   * caller's); an undefined `rowLabel` clears it. Resolves to the updated
+   * dataset. See `specs/datasets.md` §Q.3.
+   */
+  setColumns(
+    datasetId: string,
+    columns: DatasetColumnSpec[],
+    rowLabel: ColumnPath | undefined,
+  ): Promise<Dataset>;
 
   /**
    * Runs one read-only SQL query against a `rows` view of a dataset's rows —

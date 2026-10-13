@@ -226,6 +226,7 @@ export function runDatasetProviderContractTests(
       expect(await provider.describeRows("nope")).toEqual({
         rowCount: 0,
         fields: {},
+        instances: {},
       });
       const dataset = await provider.createDataset({
         name: "Shapes",
@@ -294,6 +295,184 @@ export function runDatasetProviderContractTests(
           "2": { keys: ["db", "userId"] },
           "3": { keys: ["title", "note"] },
         },
+        instances: {},
+      });
+    });
+
+    describe("column paths (§Q.2)", () => {
+      /** asgard's planTask rows: the title sits two references deep. */
+      async function planTask(provider: DatasetProvider) {
+        const dataset = await provider.createDataset({
+          name: "Plan task",
+          fields: [{ def: def("toolsContext", "Ctx") }, { def: def("note") }],
+        });
+        const ctx = (task: string): ExecutionInput => ({
+          kind: "object",
+          properties: {
+            create_task: {
+              kind: "object",
+              properties: {
+                db: { kind: "instance", name: "db" },
+                rootTaskId: { kind: "instance", name: task, output: "taskId" },
+              },
+            },
+          },
+        });
+        await provider.addRows(dataset.id, [
+          {
+            cells: { "0": ctx("seededTask") },
+            resources: {
+              db: { uri: "file:///db.ts#db" },
+              seededTask: {
+                uri: "file:///tasks.ts#seededTask",
+                args: { title: text("Web site") },
+              },
+            },
+          },
+          // Another row names its focus task differently, and gives it more.
+          {
+            cells: { "0": ctx("focus"), "1": text("n") },
+            resources: {
+              db: { uri: "file:///db.ts#db", args: { seed: text("1") } },
+              focus: {
+                uri: "file:///tasks.ts#seededTask",
+                args: { title: text("Todo app"), owner: text("ann") },
+              },
+            },
+          },
+          { cells: { "1": text("no instances") } },
+        ]);
+        return dataset;
+      }
+
+      it("summarizes the rows' instances by name", async () => {
+        const provider = await makeProvider();
+        const dataset = await planTask(provider);
+        expect((await provider.describeRows(dataset.id)).instances).toEqual({
+          db: { uri: "file:///db.ts#db", rows: 2, args: ["seed"] },
+          seededTask: {
+            uri: "file:///tasks.ts#seededTask",
+            rows: 1,
+            args: ["title"],
+          },
+          focus: {
+            uri: "file:///tasks.ts#seededTask",
+            rows: 1,
+            args: ["title", "owner"],
+          },
+        });
+      });
+
+      it("describes the keys inside a path, resolving references per row", async () => {
+        const provider = await makeProvider();
+        const dataset = await planTask(provider);
+        const at = (keys: string[]) =>
+          provider.describePath(dataset.id, { root: { field: "0" }, keys });
+
+        expect(await at([])).toEqual([
+          {
+            key: "create_task",
+            sample: expect.objectContaining({ kind: "object" }),
+          },
+        ]);
+        expect((await at(["create_task"])).map(c => c.key)).toEqual([
+          "db",
+          "rootTaskId",
+        ]);
+        // Each row's reference leads to its own instance; their arguments merge.
+        expect(await at(["create_task", "rootTaskId"])).toEqual([
+          { key: "title", sample: text("Web site") },
+          { key: "owner", sample: text("ann") },
+        ]);
+        expect(await at(["create_task", "rootTaskId", "title"])).toEqual([]);
+        expect(
+          await provider.describePath(dataset.id, {
+            root: { instance: "focus" },
+            keys: [],
+          }),
+        ).toEqual([
+          { key: "title", sample: text("Todo app") },
+          { key: "owner", sample: text("ann") },
+        ]);
+        expect(
+          await provider.describePath("nope", {
+            root: { field: "0" },
+            keys: [],
+          }),
+        ).toEqual([]);
+      });
+    });
+
+    describe("setColumns (§Q.3)", () => {
+      it("stores the layout and row label as dataset metadata", async () => {
+        const provider = await makeProvider();
+        const dataset = await provider.createDataset({
+          name: "Layout",
+          fields: [{ def: def("a") }, { def: def("b") }],
+        });
+        expect(dataset.columns).toBeUndefined();
+        const columns = [
+          { kind: "path" as const, path: { root: { field: "1" }, keys: [] } },
+          { kind: "source" as const, hidden: true as const },
+          // A newer client's column, kept as it was written.
+          { kind: "evalResults", hidden: true as const, run: "r1" },
+          {
+            kind: "path" as const,
+            path: { root: { instance: "task" }, keys: ["title"] },
+            title: "Task",
+            added: true as const,
+          },
+        ];
+        const rowLabel = { root: { instance: "task" }, keys: ["title"] };
+        const events: DatasetChangeEvent[] = [];
+        provider.watch?.(e => events.push(e));
+
+        const updated = await provider.setColumns(
+          dataset.id,
+          columns,
+          rowLabel,
+        );
+        expect(updated).toMatchObject({ id: dataset.id, columns, rowLabel });
+        expect(await provider.getDataset(dataset.id)).toEqual(updated);
+        if (provider.watch) {
+          expect(events).toContainEqual({
+            type: "update",
+            datasetId: dataset.id,
+          });
+        }
+
+        const cleared = await provider.setColumns(dataset.id, [], undefined);
+        expect(cleared.columns).toEqual([]);
+        expect(cleared.rowLabel).toBeUndefined();
+        await expect(
+          provider.setColumns("missing", [], undefined),
+        ).rejects.toBeInstanceOf(DatasetNotFoundError);
+      });
+
+      it("drops a deleted field's columns, and the row label if it read from it", async () => {
+        const provider = await makeProvider();
+        if (!provider.deleteField) return;
+        const dataset = await provider.createDataset({
+          name: "Prune",
+          fields: [{ def: def("a") }, { def: def("b") }],
+        });
+        await provider.setColumns(
+          dataset.id,
+          [
+            { kind: "path", path: { root: { field: "0" }, keys: [] } },
+            { kind: "path", path: { root: { field: "0" }, keys: ["k"] } },
+            { kind: "path", path: { root: { field: "1" }, keys: [] } },
+            { kind: "source" },
+          ],
+          { root: { field: "0" }, keys: ["k"] },
+        );
+        await provider.deleteField(dataset.id, "0");
+        const pruned = await provider.getDataset(dataset.id);
+        expect(pruned?.columns).toEqual([
+          { kind: "path", path: { root: { field: "1" }, keys: [] } },
+          { kind: "source" },
+        ]);
+        expect(pruned?.rowLabel).toBeUndefined();
       });
     });
 

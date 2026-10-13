@@ -23,6 +23,15 @@ import type {
   DatasetSummary,
 } from "../../dataset/dataset-types.ts";
 import {
+  type ColumnPath,
+  InvalidColumnPathError,
+  isPathColumn,
+  parseColumnPath,
+  parseColumnSpecs,
+  pathField,
+  pathInstance,
+} from "../../shared/column-paths.ts";
+import {
   fitsPrimitiveBase,
   InvalidCellError,
   parseCell,
@@ -75,6 +84,7 @@ function failure(err: unknown): DatasetHandlerResult {
   if (
     err instanceof DatasetValidationError ||
     err instanceof InvalidCellError ||
+    err instanceof InvalidColumnPathError ||
     err instanceof BadRequest
   ) {
     return { status: 400, body: { error: message } };
@@ -738,4 +748,114 @@ export async function handleQueryRows(
     (sql, options) => queryRows.call(provider, datasetId, sql, options),
     failure,
   );
+}
+
+/**
+ * Checks that `path`'s root exists: a field in `dataset`'s schema, or one of
+ * `instances`.
+ */
+function checkPathRoot(
+  path: ColumnPath,
+  dataset: Dataset,
+  instances: ReadonlySet<string>,
+  at: string,
+): void {
+  const field = pathField(path);
+  if (field !== undefined) {
+    if (!dataset.fields.some(f => f.id === field)) {
+      throw new BadRequest(`${at}: the dataset has no field "${field}"`);
+    }
+    return;
+  }
+  const instance = pathInstance(path);
+  if (instance !== undefined && !instances.has(instance)) {
+    throw new BadRequest(
+      `${at}: no row declares a resource instance "${instance}"`,
+    );
+  }
+}
+
+/** The instances `dataset`'s stored layout and row label are rooted at. */
+function storedInstances(dataset: Dataset): Set<string> {
+  const paths = (dataset.columns ?? []).flatMap(c =>
+    isPathColumn(c) ? [c.path] : [],
+  );
+  if (dataset.rowLabel) paths.push(dataset.rowLabel);
+  return new Set(paths.flatMap(p => pathInstance(p) ?? []));
+}
+
+/**
+ * `POST /api/datasets/:providerId/:id/paths` — body `{ path }`: the keys one
+ * level inside `path`, each with a sample (see
+ * {@link DatasetProvider.describePath}). See `specs/datasets.md` §Q.2.
+ */
+export async function handleDescribePath(
+  provider: DatasetProvider,
+  datasetId: string,
+  body: unknown,
+): Promise<DatasetHandlerResult> {
+  try {
+    const path = parseColumnPath(isRecord(body) ? body.path : undefined);
+    const dataset = await provider.getDataset(datasetId);
+    if (!dataset) throw new DatasetNotFoundError(datasetId);
+    const field = pathField(path);
+    if (field !== undefined && !dataset.fields.some(f => f.id === field)) {
+      throw new BadRequest(`path: the dataset has no field "${field}"`);
+    }
+    return { status: 200, body: await provider.describePath(datasetId, path) };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
+/**
+ * `PATCH /api/datasets/:providerId/:id/columns` — body `{ columns, rowLabel }`:
+ * replace the grid's shared column layout and row label (`null` clears the
+ * label). Each path's root must be a field of the dataset, or an instance
+ * some row declares or the stored layout or row label already reads — so a
+ * layout whose instance no row declares any more can still be saved — and
+ * its keys non-empty strings. Columns of a kind this version doesn't know
+ * are stored as they are. See `specs/datasets.md` §Q.3.
+ */
+export async function handleSetColumns(
+  provider: DatasetProvider,
+  datasetId: string,
+  body: unknown,
+  resolvePrompt: ResolvePromptLink,
+): Promise<DatasetHandlerResult> {
+  try {
+    if (!isRecord(body))
+      throw new BadRequest("body must be { columns, rowLabel }");
+    const columns = parseColumnSpecs(body.columns);
+    const rowLabel =
+      body.rowLabel === undefined || body.rowLabel === null
+        ? undefined
+        : parseColumnPath(body.rowLabel, "rowLabel");
+    const dataset = await provider.getDataset(datasetId);
+    if (!dataset) throw new DatasetNotFoundError(datasetId);
+    const paths = columns.flatMap((c, i) =>
+      isPathColumn(c) ? [{ path: c.path, at: `columns[${i}].path` }] : [],
+    );
+    if (rowLabel) paths.push({ path: rowLabel, at: "rowLabel" });
+    // An instance the layout already reads stays valid however the rows
+    // change, so a layout can always be saved; only a new one is looked up
+    // in the rows.
+    const instances = storedInstances(dataset);
+    if (
+      paths.some(({ path }) => {
+        const instance = pathInstance(path);
+        return instance !== undefined && !instances.has(instance);
+      })
+    ) {
+      const overview = await provider.describeRows(datasetId);
+      for (const name of Object.keys(overview.instances)) instances.add(name);
+    }
+    for (const { path, at } of paths) {
+      checkPathRoot(path, dataset, instances, at);
+    }
+    const updated = await provider.setColumns(datasetId, columns, rowLabel);
+    return { status: 200, body: withResolvedPrompt(updated, resolvePrompt) };
+  } catch (err) {
+    return failure(err);
+  }
 }

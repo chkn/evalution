@@ -6,11 +6,13 @@
  * it has, what each cell shows, and the paged cache rows are read through.
  * Pure and grid-agnostic — `DatasetView` maps it onto Glide Data Grid.
  *
- * A column is a *path* into a row: a whole field, or one key inside it — an
- * object's property, or a property of a typed-in object value. The keys come
- * from {@link DatasetRowsOverview}, found in the rows rather than the schema,
- * and merged by name. A path is also what sorting and filtering will name
- * when they arrive.
+ * A column is a {@link ColumnPath} into a row: a whole field, one key inside
+ * it — an object's property, or a property of a typed-in object value — or
+ * any other path a column was added at. A field's keys come from
+ * `DatasetRowsOverview`, found in the rows rather than the schema, and
+ * merged by name. Which columns show, and in what order, is the dataset's
+ * shared {@link ColumnLayout}. A path is also what sorting and filtering will
+ * name when they arrive.
  *
  * Some cells are typed into in place — see {@link editableCell}. An edit is
  * reported per cell and sent per row ({@link groupEdits}), and the page it
@@ -19,6 +21,15 @@
  */
 
 import {
+  type ColumnPath,
+  columnPathId,
+  fieldPath,
+  pathField,
+  pathInstance,
+  readColumnPath,
+  resolveColumnPath,
+} from "../../shared/column-paths";
+import {
   committedCell,
   type EditableBase,
   primitiveBase,
@@ -26,24 +37,25 @@ import {
 import type {
   DatasetField,
   DatasetRow,
-  DatasetRowsOverview,
   DatasetRowUpdate,
   ExecutionInput,
   PropValue,
+  ResourceInstanceInput,
 } from "../../shared/types";
+import {
+  type ColumnLayout,
+  type LayoutSlot,
+  reorderVisible,
+} from "./dataset-columns";
 import { previewCell, previewPropValue } from "./dataset-preview";
 import { DISCLOSURE_COLLAPSED, DISCLOSURE_EXPANDED } from "./grid-sprites";
 
-/** Where a column reads from: a field, or one key one level inside it. */
-export interface CellPath {
-  fieldId: string;
-  /** An object property's name. */
-  key?: string;
-}
-
 /** One column of the dataset table. */
 export type DatasetColumn = {
-  /** Stable across layouts — resized widths are remembered by it. */
+  /**
+   * Stable across layouts — resized widths are remembered by it. A path's
+   * column is keyed by its serialized path ({@link columnPathId}).
+   */
   id: string;
   title: string;
   /** Shown after the title, dimmed — the field's type, shortened. */
@@ -59,18 +71,28 @@ export type DatasetColumn = {
    * as — see {@link editableCell}. Absent for any other column.
    */
   base?: EditableBase;
+  /** Where the column sits in the {@link ColumnLayout} it was built from. */
+  slot: LayoutSlot;
 } & (
   | {
       /** A field in one column. */
       role: "whole";
-      path: CellPath;
+      path: ColumnPath;
     }
-  | { role: "key"; path: Required<CellPath> }
+  /** One key inside a field. */
+  | { role: "key"; path: ColumnPath }
+  /** A column added from the picker, at any other path. */
+  | { role: "added"; path: ColumnPath }
   /** Where the row came from. */
   | { role: "source" }
+  /**
+   * A column of a kind this version doesn't know — a newer client's. Drawn
+   * as a dimmed placeholder, so the layout around it stays where it was.
+   */
+  | { role: "unknown"; kind: string }
 );
 
-const WIDTHS = { whole: 240, key: 160, source: 96 };
+const WIDTHS = { whole: 240, key: 160, added: 200, source: 96, unknown: 120 };
 
 /**
  * A field's group header, which is its name: only fields with keys have one,
@@ -82,78 +104,241 @@ export function fieldGroup(field: DatasetField): string {
   return field.def.name;
 }
 
+/** The title of a column added at `path`: its last key, or else its root. */
+export function addedTitle(
+  path: ColumnPath,
+  fields: readonly DatasetField[],
+): string {
+  const last = path.keys.at(-1);
+  if (last !== undefined) return last;
+  const field = pathField(path);
+  if (field === undefined) return pathInstance(path) ?? "";
+  return fields.find(f => f.id === field)?.def.name ?? field;
+}
+
+/** A path as a reader names it: `toolsContext › create_task › title`. */
+export function pathLabel(
+  path: ColumnPath,
+  fields: readonly DatasetField[],
+): string {
+  const field = pathField(path);
+  const root =
+    field === undefined
+      ? `◆ ${pathInstance(path)}`
+      : (fields.find(f => f.id === field)?.def.name ?? field);
+  return [root, ...path.keys].join(" › ");
+}
+
 /**
- * The table's columns, left to right: each field — split into its keys when
- * `expanded` has it — and then the source.
+ * The table's columns, left to right, as `layout` orders them, leaving out
+ * hidden ones: each field — split into its shown keys when `expanded` has it
+ * — each added column, the source, and a placeholder for any column of a
+ * kind this version doesn't know.
  */
 export function buildColumns({
   fields,
-  shape,
+  layout,
   expanded,
   shortType,
 }: {
-  fields: DatasetField[];
-  /** What each field's cells hold — see {@link DatasetRowsOverview.fields}. */
-  shape: DatasetRowsOverview["fields"];
+  fields: readonly DatasetField[];
+  /**
+   * The reconciled layout ({@link reconcileColumns}), whose fields carry the
+   * keys their cells hold.
+   */
+  layout: ColumnLayout;
   /** Ids of the fields shown split into their keys. */
   expanded: ReadonlySet<string>;
   /** Shortens a type's syntax for a header. */
   shortType: (syntax: string) => string;
 }): DatasetColumn[] {
+  const byId = new Map(fields.map(f => [f.id, f]));
   const columns: DatasetColumn[] = [];
-  for (const field of fields) {
-    const fieldShape = shape[field.id];
-    const fieldKeys = fieldShape?.keys ?? [];
-    const type = shortType(field.def.type.syntax);
-    const path = { fieldId: field.id };
-    const base = primitiveBase(field.def.type);
-    const whole: DatasetColumn = {
-      id: field.id,
-      title: field.def.name,
-      type,
-      role: "whole",
-      path,
-      width: WIDTHS.whole,
-      ...(base && { base }),
-    };
-    if (fieldKeys.length === 0) {
-      columns.push(whole);
-      continue;
-    }
-    const group = fieldGroup(field);
-    if (!expanded.has(field.id)) {
-      columns.push({ ...whole, group });
-      continue;
-    }
-    for (const key of fieldKeys) {
-      columns.push({
-        id: `${field.id}/${key}`,
-        title: key,
-        group,
-        role: "key",
-        path: { fieldId: field.id, key },
-        width: WIDTHS.key,
-      });
+  for (const [index, entry] of layout.entries()) {
+    if (entry.hidden) continue;
+    const slot = { index };
+    switch (entry.kind) {
+      case "field": {
+        const field = byId.get(entry.fieldId);
+        if (!field) break;
+        const type = shortType(field.def.type.syntax);
+        const base = primitiveBase(field.def.type);
+        const whole: DatasetColumn = {
+          id: field.id,
+          title: field.def.name,
+          type,
+          role: "whole",
+          path: fieldPath(field.id),
+          width: WIDTHS.whole,
+          slot,
+          ...(base && { base }),
+        };
+        if (entry.keys.length === 0) {
+          columns.push(whole);
+          break;
+        }
+        const group = fieldGroup(field);
+        const shown = entry.keys.filter(k => !k.hidden);
+        if (!expanded.has(field.id) || shown.length === 0) {
+          columns.push({ ...whole, group });
+          break;
+        }
+        for (const { key } of shown) {
+          const path = fieldPath(field.id, [key]);
+          columns.push({
+            id: columnPathId(path),
+            title: key,
+            group,
+            role: "key",
+            path,
+            width: WIDTHS.key,
+            slot: { index, key },
+          });
+        }
+        break;
+      }
+      case "added":
+        columns.push({
+          id: columnPathId(entry.path),
+          title: entry.title ?? addedTitle(entry.path, fields),
+          role: "added",
+          path: entry.path,
+          width: WIDTHS.added,
+          slot,
+        });
+        break;
+      case "source":
+        columns.push({
+          id: "source",
+          title: "source",
+          role: "source",
+          width: WIDTHS.source,
+          slot,
+        });
+        break;
+      case "unknown":
+        columns.push({
+          id: `?${index}`,
+          title: "Unknown column",
+          type: entry.spec.kind,
+          role: "unknown",
+          kind: entry.spec.kind,
+          width: WIDTHS.unknown,
+          slot,
+        });
+        break;
     }
   }
-  columns.push({
-    id: "source",
-    title: "source",
-    role: "source",
-    width: WIDTHS.source,
-  });
   return columns;
 }
 
 /**
  * The field a column's header menu renames or deletes, or `undefined` for a
- * column that has no menu: the source, and the per-key columns of an expanded
- * field, which are paths inside a field rather than fields of their own.
+ * column that isn't a field: the source, an added column, and the per-key
+ * columns of an expanded field, which are paths inside a field rather than
+ * fields of their own.
  */
 export function menuFieldId(
   column: DatasetColumn | undefined,
 ): string | undefined {
-  return column?.role === "whole" ? column.path.fieldId : undefined;
+  return column?.role === "whole" ? pathField(column.path) : undefined;
+}
+
+/**
+ * The path a column reads, which can name a row — `undefined` for the source
+ * and an unknown column, which aren't paths.
+ */
+export function columnPath(
+  column: DatasetColumn | undefined,
+): ColumnPath | undefined {
+  return column && "path" in column ? column.path : undefined;
+}
+
+function moved<T>(list: readonly T[], from: number, to: number): T[] {
+  const next = [...list];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}
+
+/**
+ * Whether the grid may move the column at `from` to `to` — Glide's indexes,
+ * which remove the column and insert it at `to`. A field's keys are always
+ * columns of that field, drawn under one group header, so:
+ *
+ * - a key column can only land inside its own field's group;
+ * - any other column can't land inside an expanded field's group.
+ *
+ * An expanded field can't be dragged as a whole, since Glide moves single
+ * columns: collapse it first, or use the picker.
+ */
+export function canMoveColumn(
+  columns: readonly DatasetColumn[],
+  from: number,
+  to: number,
+): boolean {
+  const column = columns[from];
+  if (!column || !columns[to]) return false;
+  if (from === to) return true;
+  if (column.role === "key") {
+    const target = columns[to];
+    return target.role === "key" && target.slot.index === column.slot.index;
+  }
+  // Every expanded field's keys must stay side by side.
+  const after = moved(columns, from, to);
+  const ended = new Set<number>();
+  let open: number | undefined;
+  for (const c of after) {
+    const group = c.role === "key" ? c.slot.index : undefined;
+    if (group === open) continue;
+    if (open !== undefined) ended.add(open);
+    if (group !== undefined && ended.has(group)) return false;
+    open = group;
+  }
+  return true;
+}
+
+/**
+ * `layout` after the grid moved the column at `from` to `to` (see
+ * {@link canMoveColumn}): a key reorders within its field, any other column
+ * among the top-level columns. Hidden columns keep their places between the
+ * shown ones.
+ */
+export function movedLayout(
+  layout: ColumnLayout,
+  columns: readonly DatasetColumn[],
+  from: number,
+  to: number,
+): ColumnLayout {
+  const column = columns[from];
+  if (!column || from === to || !canMoveColumn(columns, from, to)) {
+    return layout;
+  }
+  const after = moved(columns, from, to);
+  const { index } = column.slot;
+  const entry = layout[index];
+  if (column.role === "key" && entry?.kind === "field") {
+    const order = after.flatMap(c =>
+      c.role === "key" && c.slot.index === index ? [c.slot.key] : [],
+    );
+    const shown = new Set(order);
+    const keys = reorderVisible(
+      entry.keys,
+      k => shown.has(k.key),
+      order.flatMap(key => entry.keys.filter(k => k.key === key)),
+    );
+    return layout.map((e, i) => (i === index ? { ...entry, keys } : e));
+  }
+  const order: number[] = [];
+  for (const c of after) {
+    if (order.at(-1) !== c.slot.index) order.push(c.slot.index);
+  }
+  const shown = new Set(order);
+  return reorderVisible(
+    layout.map((_, i) => i),
+    i => shown.has(i),
+    order,
+  ).map(i => layout[i]);
 }
 
 /**
@@ -164,10 +349,9 @@ export function menuFieldId(
 export function fieldIdsByGroup(columns: DatasetColumn[]): Map<string, string> {
   const byGroup = new Map<string, string>();
   for (const column of columns) {
-    if (column.group !== undefined && "path" in column) {
-      if (!byGroup.has(column.group)) {
-        byGroup.set(column.group, column.path.fieldId);
-      }
+    const fieldId = "path" in column ? pathField(column.path) : undefined;
+    if (column.group !== undefined && fieldId !== undefined) {
+      if (!byGroup.has(column.group)) byGroup.set(column.group, fieldId);
     }
   }
   return byGroup;
@@ -193,55 +377,55 @@ export function groupHeader(
 }
 
 /**
- * What a path reads in a row: the input there, `"absent"` when the row has
- * nothing there, or `"n/a"` when the field's cell has no such key.
- *
- * A typed-in object's property is a `PropValue`, not an `ExecutionInput`; it
- * comes back wrapped as the value cell it would have been on its own.
+ * What an in-place edit changes: a field's cell, or — through an added
+ * column — one argument of one of the row's resource instances, whose
+ * current spec the edit is applied to. See `specs/datasets.md` §Q.4.
  */
-export function readPath(
-  row: DatasetRow,
-  path: CellPath,
-): ExecutionInput | "absent" | "n/a" {
-  const cell = row.cells[path.fieldId];
-  if (!cell) return "absent";
-  const { key } = path;
-  if (key === undefined) return cell;
-  if (cell.kind === "value") {
-    const { value } = cell;
-    return value.kind === "object" && Object.hasOwn(value.properties, key)
-      ? { kind: "value", value: value.properties[key] }
-      : "n/a";
-  }
-  const inner = cell.kind === "object" ? cell.properties : undefined;
-  return inner && Object.hasOwn(inner, key) ? inner[key] : "n/a";
-}
+export type EditTarget =
+  | { fieldId: string }
+  | { instance: string; arg: string; spec: ResourceInstanceInput };
 
 /** A cell the grid types into in place — see {@link editableCell}. */
-export interface EditableCell {
+export type EditableCell = EditTarget & {
   /** The type it's typed into as. */
   base: EditableBase;
-  /** The field it belongs to. */
-  fieldId: string;
   /** What it holds, or `undefined` when it's empty. */
   value?: string | number | boolean;
+};
+
+/** A primitive's base, when it's one the grid can type into. */
+function primitiveEditBase(value: unknown): EditableBase | undefined {
+  const type = typeof value;
+  return type === "string" || type === "number" || type === "boolean"
+    ? type
+    : undefined;
 }
 
 /**
  * The cell of `column` in `row` if it's typed into in place, or `undefined`
- * when it's read-only in the grid. Editable means: a field's whole column
- * (not a key inside it), a field typed `string`, `number`, or `boolean`, and
- * a cell that's empty or holds a plain primitive of that type. Anything else
- * — a template, say, whose interpolations a text box would flatten — is
- * edited in the details pane instead. See `specs/datasets.md` §P.2.
+ * when it's read-only in the grid. Editable means either:
+ *
+ * - a field's whole column (not a key inside it), a field typed `string`,
+ *   `number`, or `boolean`, and a cell that's empty or holds a plain
+ *   primitive of that type (`specs/datasets.md` §P.2); or
+ * - an added column whose path ends at one of the row's instances'
+ *   arguments — directly, or through references — that holds a plain
+ *   `string`, `number`, or `boolean`, typed in as that (§Q.4).
+ *
+ * Anything else — a template, say, whose interpolations a text box would
+ * flatten, or a value nested inside an argument — is edited in the details
+ * pane instead.
  */
 export function editableCell(
   row: DatasetRow | undefined,
   column: DatasetColumn | undefined,
 ): EditableCell | undefined {
-  if (!row || column?.role !== "whole" || !column.base) return undefined;
+  if (!row || !column) return undefined;
+  if (column.role === "added") return editableArgument(row, column.path);
+  if (column.role !== "whole" || !column.base) return undefined;
   const { base } = column;
-  const { fieldId } = column.path;
+  const fieldId = pathField(column.path);
+  if (fieldId === undefined) return undefined;
   const cell = row.cells[fieldId];
   if (!cell) return { base, fieldId };
   if (cell.kind !== "value" || cell.value.kind !== "primitive")
@@ -250,6 +434,29 @@ export function editableCell(
   return typeof value === base
     ? { base, fieldId, value: value as string | number | boolean }
     : undefined;
+}
+
+/** {@link editableCell} for an added column at `path`. */
+function editableArgument(
+  row: DatasetRow,
+  path: ColumnPath,
+): EditableCell | undefined {
+  const { value: found, argument } = resolveColumnPath(row, path);
+  const spec = argument && row.resources?.[argument.instance];
+  if (!argument || !spec || typeof found !== "object") return undefined;
+  if (found.kind !== "value" || found.value.kind !== "primitive") {
+    return undefined;
+  }
+  const { value } = found.value;
+  const base = primitiveEditBase(value);
+  if (!base) return undefined;
+  return {
+    base,
+    instance: argument.instance,
+    arg: argument.arg,
+    spec,
+    value: value as string | number | boolean,
+  };
 }
 
 /** What an in-place editor holds: empty is `undefined` (or `null`, or `""`). */
@@ -278,12 +485,18 @@ export function editedCell(
   return committedCell({ kind: "primitive", value: value ?? undefined });
 }
 
-/** One cell's edit, located by row and field. */
-export interface CellEdit {
+/** One cell's edit, located by row and what it changes. */
+export type CellEdit = EditTarget & {
   rowId: string;
-  fieldId: string;
   /** The new cell, or `null` to clear it. */
   cell: ExecutionInput | null;
+};
+
+/** `e`'s target alone, without its base and value. */
+function targetOf(e: EditableCell): EditTarget {
+  return "fieldId" in e
+    ? { fieldId: e.fieldId }
+    : { instance: e.instance, arg: e.arg, spec: e.spec };
 }
 
 /** One edited grid cell, as the grid reports it: column and row indexes. */
@@ -297,6 +510,8 @@ export interface GridEdit {
  * The grid's edits as {@link CellEdit}s, skipping any that land outside the
  * editable set ({@link editableCell}) or don't fit the cell's type — a paste
  * or fill over a range can cover both, and the rest of it still applies.
+ * Emptying an instance's argument is skipped too: it would delete the
+ * argument, leaving nothing in the grid to type into (see {@link clearEdits}).
  */
 export function cellEdits(
   edits: readonly GridEdit[],
@@ -309,8 +524,8 @@ export function cellEdits(
     const e = row && editableCell(row, columns[col]);
     if (!e) continue;
     const cell = editedCell(e.base, value);
-    if (cell === undefined) continue;
-    out.push({ rowId: row.id, fieldId: e.fieldId, cell });
+    if (cell === undefined || (cell === null && !("fieldId" in e))) continue;
+    out.push({ rowId: row.id, ...targetOf(e), cell });
   }
   return out;
 }
@@ -325,8 +540,10 @@ export interface CellRange {
 
 /**
  * Clearing `ranges` (Delete or Backspace over a selection): a `null` for each
- * editable cell in them that holds something. Read-only cells are left as
- * they are, even inside the selection — the details pane clears those.
+ * editable field cell in them that holds something. Read-only cells are
+ * left as they are, even inside the selection — the details pane clears
+ * those. So are instances' arguments: clearing one would delete it, and an
+ * argument that isn't there has no editor to type a new value into.
  */
 export function clearEdits(
   ranges: readonly CellRange[],
@@ -339,8 +556,8 @@ export function clearEdits(
       const row = rowAt(index);
       for (let col = x; col < x + width; col++) {
         const e = row && editableCell(row, columns[col]);
-        if (e && e.value !== undefined) {
-          out.push({ rowId: row.id, fieldId: e.fieldId, cell: null });
+        if (e && "fieldId" in e && e.value !== undefined) {
+          out.push({ rowId: row.id, ...targetOf(e), cell: null });
         }
       }
     }
@@ -351,17 +568,35 @@ export function clearEdits(
 /**
  * A batch of cell edits — one keystroke's, a paste's over a range, a fill's —
  * as one update per row, rows in the order first edited. A cell edited twice
- * keeps its last value.
+ * keeps its last value. An edit to an instance's argument replaces that
+ * whole instance in the update's `resources`, with the argument set — or
+ * removed, when cleared — and every other edit to the same instance in the
+ * batch applied on top.
  */
 export function groupEdits(edits: readonly CellEdit[]): DatasetRowUpdate[] {
   const byRow = new Map<string, DatasetRowUpdate>();
-  for (const { rowId, fieldId, cell } of edits) {
+  for (const edit of edits) {
+    const { rowId, cell } = edit;
     let update = byRow.get(rowId);
     if (!update) {
       update = { rowId, cells: {} };
       byRow.set(rowId, update);
     }
-    update.cells[fieldId] = cell;
+    if ("fieldId" in edit) {
+      update.cells[edit.fieldId] = cell;
+      continue;
+    }
+    const resources = update.resources ?? {};
+    update.resources = resources;
+    const current = resources[edit.instance] ?? edit.spec;
+    const { args: _, ...spec } = current;
+    const args = { ...current.args };
+    if (cell === null) delete args[edit.arg];
+    else args[edit.arg] = cell;
+    resources[edit.instance] = {
+      ...spec,
+      ...(Object.keys(args).length > 0 && { args }),
+    };
   }
   return [...byRow.values()];
 }
@@ -403,6 +638,8 @@ export type CellView =
   | { kind: "text"; text: string; tone?: "dim" | "link" }
   /** A resource instance, drawn as a chip. */
   | { kind: "chip"; text: string }
+  /** A cell of a column this version doesn't know: empty and dimmed. */
+  | { kind: "unknown" }
   /**
    * A cell typed into in place (see {@link editableCell}): `value` is what
    * its editor starts from, `text` what's drawn — `—` when it's empty.
@@ -457,11 +694,17 @@ function inputView(input: ExecutionInput): CellView {
   }
 }
 
-/** What the cell of `column` shows for `row`, which is `undefined` while its page loads. */
+/**
+ * What the cell of `column` shows for `row`, which is `undefined` while its
+ * page loads. `column` is `undefined` past the last column: Glide still asks
+ * about the hovered cell on the redraw that drops its column (hiding the
+ * last one from its header menu, say), and that cell shows nothing.
+ */
 export function cellView(
   row: DatasetRow | undefined,
-  column: DatasetColumn,
+  column: DatasetColumn | undefined,
 ): CellView {
+  if (!column) return { kind: "empty" };
   if (!row) return { kind: "loading" };
   switch (column.role) {
     case "source":
@@ -470,8 +713,10 @@ export function cellView(
         : row.source?.kind === "playground"
           ? { kind: "text", text: "playground", tone: "dim" }
           : { kind: "empty" };
+    case "unknown":
+      return { kind: "unknown" };
     default: {
-      const found = readPath(row, column.path);
+      const found = readColumnPath(row, column.path);
       const e = editableCell(row, column);
       if (e) {
         return {
@@ -486,6 +731,26 @@ export function cellView(
       return inputView(found);
     }
   }
+}
+
+/**
+ * What names `row` when `path` is the dataset's row label: the value there,
+ * a string as itself rather than quoted, or `undefined` when the row has
+ * nothing there to name it by.
+ */
+export function rowLabelText(
+  row: DatasetRow,
+  path: ColumnPath,
+): string | undefined {
+  const found = readColumnPath(row, path);
+  if (typeof found === "string") return undefined;
+  if (found.kind === "value" && found.value.kind === "primitive") {
+    const { value } = found.value;
+    return value === undefined || value === null || value === ""
+      ? undefined
+      : String(value);
+  }
+  return previewCell(found);
 }
 
 /** Fetches `limit` rows starting at `offset`. */

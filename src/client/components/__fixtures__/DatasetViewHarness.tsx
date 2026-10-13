@@ -3,6 +3,7 @@
 
 import type { NormalizedPrompt } from "../../../shared/types";
 import DatasetView from "../DatasetView";
+import type { NewEvalSeed } from "../NewEvalDialog";
 import type { PanelFill } from "../named-inputs";
 
 /**
@@ -26,6 +27,7 @@ export function DatasetViewHarness({
   onOpenInPlayground = () => {},
   onOpenTrace = () => {},
   onDeleted = () => {},
+  onNewEval,
 }: {
   providerId: string;
   datasetId: string;
@@ -36,6 +38,7 @@ export function DatasetViewHarness({
   onOpenInPlayground?: (prompt: NormalizedPrompt, fill: PanelFill) => void;
   onOpenTrace?: (providerId: string, traceId: string) => void;
   onDeleted?: () => void;
+  onNewEval?: (seed: NewEvalSeed) => void;
 }) {
   return (
     <div style={{ height: "500px" }}>
@@ -58,6 +61,7 @@ export function DatasetViewHarness({
         onOpenInPlayground={onOpenInPlayground}
         onOpenTrace={onOpenTrace}
         onDeleted={onDeleted}
+        onNewEval={onNewEval}
       />
     </div>
   );

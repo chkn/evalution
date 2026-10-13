@@ -4110,6 +4110,140 @@ pre {
   cursor: grabbing;
 }
 
+/* ─── Dataset column picker (specs/datasets.md §Q.3) ─────────────────────── */
+
+.dataset-column-picker {
+  min-width: 240px;
+  max-width: 360px;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+}
+
+.dataset-column-picker-key {
+  padding-left: 28px;
+}
+
+.dataset-column-picker-dim .trace-column-picker-check {
+  color: var(--dropdown-text-muted);
+}
+
+.dataset-column-picker-disclosure {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex-shrink: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--dropdown-text-muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.dataset-column-picker-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dataset-column-picker-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dropdown-text-muted);
+  font-size: 11px;
+}
+
+.dataset-column-picker-badge {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--dropdown-option-hover);
+  color: var(--dropdown-text-muted);
+  font-size: 10.5px;
+  line-height: 16px;
+}
+
+.dataset-column-picker-more {
+  position: relative;
+  display: inline-flex;
+}
+
+.dataset-column-picker-icon-btn {
+  flex-shrink: 0;
+  padding: 0 4px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--dropdown-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.dataset-column-picker-icon-btn:hover {
+  color: var(--dropdown-text);
+  background: var(--dropdown-option-hover);
+}
+
+.dataset-column-picker-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 1;
+  white-space: nowrap;
+}
+
+.dataset-column-picker-add,
+.dataset-path-tree-back {
+  width: 100%;
+  margin-top: 2px;
+}
+
+.dataset-path-tree-node {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+
+.dataset-path-tree-node:hover {
+  background: var(--dropdown-option-hover);
+}
+
+.dataset-path-tree-pick {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--dropdown-text);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dataset-path-tree-note {
+  padding: 3px 6px;
+  color: var(--dropdown-text-muted);
+  font-size: 11.5px;
+}
+
+.dataset-columns-btn-active {
+  color: var(--trace-text);
+  border-color: var(--trace-text-dim);
+}
+
+.dataset-row-label {
+  color: var(--trace-text-dim);
+}
+
 /* ── Annotation count badges (table/card annotations column) ── */
 
 .trace-annotation-counts {
@@ -6944,7 +7078,7 @@ pre {
   container-name: dataset-header;
 }
 
-@container dataset-header (max-width: 500px) {
+@container dataset-header (max-width: 727px) {
   .trace-view-header-actions-full {
     display: none;
   }

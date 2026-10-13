@@ -391,15 +391,6 @@ function TraceView({
           </div>
           <div className="trace-view-header-actions">
             <div className="trace-view-header-actions-full">
-              {onAskAgent && (
-                <AskAgentButton agents={agents} onAsk={onAskAgent} />
-              )}
-              {addToDatasetProps && (
-                <AddToDatasetMenu
-                  {...addToDatasetProps}
-                  className="trace-view-prompt-btn"
-                />
-              )}
               <button
                 type="button"
                 className="trace-annotations-add"
@@ -407,6 +398,15 @@ function TraceView({
               >
                 + Add annotation
               </button>
+              {addToDatasetProps && (
+                <AddToDatasetMenu
+                  {...addToDatasetProps}
+                  className="trace-view-prompt-btn"
+                />
+              )}
+              {onAskAgent && (
+                <AskAgentButton agents={agents} onAsk={onAskAgent} />
+              )}
               {onDeleted && (
                 <button
                   type="button"

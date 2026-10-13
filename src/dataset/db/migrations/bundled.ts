@@ -28,5 +28,14 @@ export const bundledMigrations: MigrationMeta[] = [
     "sql": [
       "-- SPDX\u002DLicense-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nALTER TABLE `dataset_rows` ADD `resources` blob;\n"
     ]
+  },
+  {
+    "name": "20261012152455_column_layout",
+    "hash": "a226b20ea4b58a7dd558132c94611a2fb09e97e408e34ba6237387293c8fe869",
+    "folderMillis": 1791818695000,
+    "bps": true,
+    "sql": [
+      "-- SPDX\u002DLicense-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nALTER TABLE `datasets` ADD `layout` text;\n"
+    ]
   }
 ];

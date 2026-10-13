@@ -2,17 +2,27 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it, vi } from "vitest";
+import { fieldPath, instancePath } from "../../shared/column-paths";
 import type {
   DatasetField,
   DatasetRow,
   ExecutionInput,
 } from "../../shared/types";
 import {
+  addColumn,
+  type ColumnLayout,
+  reconcileColumns,
+  setHidden,
+} from "./dataset-columns";
+import {
+  addedTitle,
   applyUpdate,
   buildColumns,
+  canMoveColumn,
   cellEdits,
   cellView,
   clearEdits,
+  columnPath,
   type DatasetColumn,
   DEFAULT_LAYOUT,
   editableCell,
@@ -24,9 +34,11 @@ import {
   layoutStorageKey,
   layoutWithoutField,
   menuFieldId,
+  movedLayout,
   parseDatasetLayout,
+  pathLabel,
   RowPager,
-  readPath,
+  rowLabelText,
   serializeDatasetLayout,
 } from "./dataset-grid";
 
@@ -78,7 +90,7 @@ const row = (
 function columns(expanded: string[] = []) {
   return buildColumns({
     fields: FIELDS,
-    shape: SHAPE,
+    layout: reconcileColumns(undefined, FIELDS, SHAPE),
     expanded: new Set(expanded),
     shortType: s => s,
   });
@@ -158,41 +170,15 @@ describe("menuFieldId", () => {
   });
 });
 
-describe("readPath", () => {
-  it("reads a whole cell, or absent for a sparse row", () => {
-    expect(readPath(row({ "1": seeded }), { fieldId: "1" })).toBe(seeded);
-    expect(readPath(row({}), { fieldId: "1" })).toBe("absent");
-    expect(readPath(row({}), { fieldId: "1", key: "title" })).toBe("absent");
-  });
-
-  it("reads an object's property by key", () => {
-    expect(
-      readPath(row({ "1": seeded }), { fieldId: "1", key: "title" }),
-    ).toEqual(text("Milk"));
-  });
-
-  it("reads a typed-in object's property, wrapped as the value cell it would be", () => {
-    expect(
-      readPath(row({ "2": info }), { fieldId: "2", key: "title" }),
-    ).toEqual({ kind: "value", value: { kind: "primitive", value: "Say hi" } });
-    expect(readPath(row({ "2": info }), { fieldId: "2", key: "nope" })).toBe(
-      "n/a",
-    );
-  });
-
-  it("is n/a when the row's cell has no such key", () => {
-    expect(readPath(row({ "1": blank }), { fieldId: "1", key: "title" })).toBe(
-      "n/a",
-    );
-    expect(
-      readPath(row({ "1": text("plain") }), { fieldId: "1", key: "title" }),
-    ).toBe("n/a");
-  });
-});
-
 describe("cellView", () => {
   it("is loading until the row's page arrives", () => {
     expect(cellView(undefined, columns()[0])).toEqual({ kind: "loading" });
+  });
+
+  it("shows nothing past the last column, where Glide's stale hover can ask", () => {
+    const cols = columns();
+    expect(cellView(row({}), cols[cols.length])).toEqual({ kind: "empty" });
+    expect(cellView(undefined, cols[cols.length])).toEqual({ kind: "empty" });
   });
 
   it("previews a value, an empty cell, and a resource instance as a chip", () => {
@@ -310,7 +296,7 @@ describe("editableCell", () => {
   const whole = (f: DatasetField) =>
     buildColumns({
       fields: [f],
-      shape: {},
+      layout: reconcileColumns(undefined, [f], {}),
       expanded: new Set(),
       shortType: s => s,
     })[0];
@@ -410,7 +396,7 @@ describe("grid edits", () => {
   ];
   const cols = buildColumns({
     fields: FLAGS,
-    shape: {},
+    layout: reconcileColumns(undefined, FLAGS, {}),
     expanded: new Set(),
     shortType: s => s,
   });
@@ -699,5 +685,278 @@ describe("dataset layout storage", () => {
         widths: { a: 100, b: "wide", c: 0, d: -5, e: Number.NaN },
       }),
     ).toEqual({ expanded: new Set(["1", "2"]), widths: { a: 100 } });
+  });
+});
+
+describe("columns from a layout (§Q.3)", () => {
+  const planTask: DatasetRow = row(
+    {
+      "0": text("t-1"),
+      "1": { kind: "instance", name: "seededTask", output: "taskId" },
+    },
+    {
+      id: "p",
+      resources: {
+        seededTask: {
+          uri: "file:///tasks.ts#seededTask",
+          args: {
+            title: text("Web site"),
+            count: {
+              kind: "value",
+              value: { kind: "primitive", value: 3 },
+            },
+            note: {
+              kind: "value",
+              value: { kind: "template", value: ["Hi ", { expr: "x" }] },
+            } as ExecutionInput,
+          },
+        },
+      },
+    },
+  );
+
+  const titled = addColumn(
+    reconcileColumns(undefined, FIELDS, SHAPE),
+    fieldPath("1", ["title"]),
+  );
+  const layout = addColumn(
+    addColumn(titled, instancePath("seededTask", ["title"])),
+    fieldPath("1", ["nested", "deep"]),
+  );
+  const build = (l: ColumnLayout, expanded: string[] = []) =>
+    buildColumns({
+      fields: FIELDS,
+      layout: l,
+      expanded: new Set(expanded),
+      shortType: s => s,
+    });
+
+  it("lays out added columns after the fields, titled by their last key", () => {
+    const cols = build(layout);
+    expect(cols.map(c => [c.id, c.title, c.role])).toEqual([
+      ["0", "ticket", "whole"],
+      ["1", "task", "whole"],
+      ["2", "info", "whole"],
+      ["source", "source", "source"],
+      ["@seededTask/title", "title", "added"],
+      ["1/nested/deep", "deep", "added"],
+    ]);
+  });
+
+  it("leaves hidden columns out, and a field's hidden keys out of its group", () => {
+    const hidden = setHidden(
+      setHidden(layout, { index: 0 }, true),
+      { index: 1, key: "owner" },
+      true,
+    );
+    expect(build(hidden, ["1"]).map(c => c.id)).toEqual([
+      "1/title",
+      "2",
+      "source",
+      "@seededTask/title",
+      "1/nested/deep",
+    ]);
+  });
+
+  it("shows a column of an unknown kind as a dimmed placeholder", () => {
+    const withFuture = reconcileColumns(
+      [{ kind: "evalResults" }, { kind: "path", path: fieldPath("0") }],
+      FIELDS,
+      SHAPE,
+    );
+    const [unknown] = build(withFuture);
+    expect(unknown).toMatchObject({
+      title: "Unknown column",
+      type: "evalResults",
+      role: "unknown",
+    });
+    expect(cellView(planTask, unknown)).toEqual({ kind: "unknown" });
+    expect(editableCell(planTask, unknown)).toBeUndefined();
+    expect(columnPath(unknown)).toBeUndefined();
+  });
+
+  it("reads an added column through references", () => {
+    const cols = build(layout);
+    expect(cellView(planTask, byId(cols, "@seededTask/title"))).toMatchObject({
+      kind: "edit",
+      base: "string",
+      value: "Web site",
+    });
+    expect(cellView(planTask, byId(cols, "1/nested/deep"))).toEqual({
+      kind: "n/a",
+    });
+  });
+
+  it("names a path for a reader", () => {
+    expect(pathLabel(fieldPath("1", ["create_task", "title"]), FIELDS)).toBe(
+      "task › create_task › title",
+    );
+    expect(pathLabel(instancePath("t", ["title"]), FIELDS)).toBe("◆ t › title");
+    expect(addedTitle(instancePath("t"), FIELDS)).toBe("t");
+    expect(addedTitle(fieldPath("2"), FIELDS)).toBe("info");
+  });
+
+  describe("editing through an added column (§Q.4)", () => {
+    const added = (p: ReturnType<typeof fieldPath>) =>
+      build(addColumn(reconcileColumns(undefined, FIELDS, {}), p)).at(-1);
+
+    it("edits a primitive instance argument reached directly or through a reference", () => {
+      const spec = planTask.resources?.seededTask;
+      for (const p of [
+        instancePath("seededTask", ["title"]),
+        fieldPath("1", ["title"]),
+      ]) {
+        expect(editableCell(planTask, added(p))).toEqual({
+          base: "string",
+          instance: "seededTask",
+          arg: "title",
+          spec,
+          value: "Web site",
+        });
+      }
+      expect(
+        editableCell(planTask, added(instancePath("seededTask", ["count"]))),
+      ).toMatchObject({ base: "number", value: 3 });
+    });
+
+    it("leaves a template argument, a field's key, and the instance itself read-only", () => {
+      for (const p of [
+        instancePath("seededTask", ["note"]),
+        instancePath("seededTask"),
+        instancePath("seededTask", ["missing"]),
+      ]) {
+        expect(editableCell(planTask, added(p))).toBeUndefined();
+      }
+      const keyed = build(reconcileColumns(undefined, FIELDS, SHAPE), ["1"]);
+      expect(editableCell(planTask, byId(keyed, "1/title"))).toBeUndefined();
+    });
+
+    it("sends an argument edit as the whole instance with the argument changed", () => {
+      const cols = [added(instancePath("seededTask", ["title"]))].filter(
+        c => c !== undefined,
+      );
+      const edits = cellEdits(
+        [{ col: 0, row: 0, value: "Todo app" }],
+        cols,
+        () => planTask,
+      );
+      const [update] = groupEdits(edits);
+      expect(update.cells).toEqual({});
+      expect(update.resources?.seededTask?.args?.title).toEqual(
+        text("Todo app"),
+      );
+      expect(update.resources?.seededTask?.args?.count).toEqual(
+        planTask.resources?.seededTask.args?.count,
+      );
+      expect(applyUpdate(planTask, update).resources?.seededTask).toEqual(
+        update.resources?.seededTask,
+      );
+
+      // Two arguments of one instance in one batch both land; clearing removes.
+      const spec = planTask.resources?.seededTask;
+      if (!spec) throw new Error("no spec");
+      const [both] = groupEdits([
+        {
+          rowId: "p",
+          instance: "seededTask",
+          arg: "title",
+          spec,
+          cell: text("A"),
+        },
+        { rowId: "p", instance: "seededTask", arg: "count", spec, cell: null },
+      ]);
+      expect(both.resources?.seededTask?.args).toEqual({
+        title: text("A"),
+        note: spec.args?.note,
+      });
+    });
+
+    it("doesn't clear an argument in place, so its cell stays editable", () => {
+      const cols = [added(instancePath("seededTask", ["title"]))].filter(
+        c => c !== undefined,
+      );
+      const range = [{ x: 0, y: 0, width: 1, height: 1 }];
+      expect(clearEdits(range, cols, () => planTask)).toEqual([]);
+      expect(
+        cellEdits([{ col: 0, row: 0, value: "" }], cols, () => planTask),
+      ).toEqual([]);
+      expect(editableCell(planTask, cols[0])).toMatchObject({
+        value: "Web site",
+      });
+    });
+  });
+});
+
+describe("moving columns in the grid (§Q.3)", () => {
+  const layout = reconcileColumns(undefined, FIELDS, SHAPE);
+  // ticket | task/title task/owner | info | source
+  const cols = buildColumns({
+    fields: FIELDS,
+    layout,
+    expanded: new Set(["1"]),
+    shortType: s => s,
+  });
+
+  it("lets a key move only within its own group", () => {
+    expect(canMoveColumn(cols, 1, 2)).toBe(true);
+    expect(canMoveColumn(cols, 1, 0)).toBe(false);
+    expect(canMoveColumn(cols, 2, 3)).toBe(false);
+  });
+
+  it("keeps any other column out of an expanded group", () => {
+    expect(canMoveColumn(cols, 0, 1)).toBe(false);
+    expect(canMoveColumn(cols, 0, 2)).toBe(true);
+    expect(canMoveColumn(cols, 4, 2)).toBe(false);
+    expect(canMoveColumn(cols, 4, 1)).toBe(true);
+    expect(canMoveColumn(cols, 4, 0)).toBe(true);
+  });
+
+  it("writes a top-level move to the layout, hidden columns staying put", () => {
+    const moved = movedLayout(layout, cols, 4, 0);
+    expect(moved.map(c => c.kind)).toEqual([
+      "source",
+      "field",
+      "field",
+      "field",
+    ]);
+    const hidden = setHidden(layout, { index: 2 }, true);
+    const shown = buildColumns({
+      fields: FIELDS,
+      layout: hidden,
+      expanded: new Set(),
+      shortType: s => s,
+    });
+    // ticket | task | source  → source first; info, hidden, keeps its place.
+    expect(
+      movedLayout(hidden, shown, 2, 0).map(c =>
+        c.kind === "field" ? c.fieldId : c.kind,
+      ),
+    ).toEqual(["source", "0", "2", "1"]);
+  });
+
+  it("writes a key move to its field's keys", () => {
+    const moved = movedLayout(layout, cols, 2, 1)[1];
+    expect(moved.kind === "field" && moved.keys.map(k => k.key)).toEqual([
+      "owner",
+      "title",
+    ]);
+    expect(movedLayout(layout, cols, 1, 0)).toBe(layout);
+  });
+});
+
+describe("rowLabelText", () => {
+  const r = row(
+    { "0": text("Web site"), "1": text(""), "2": info },
+    { resources: { t: { uri: "u", args: { n: text("Todo") } } } },
+  );
+  it("names a row by the label's value, a string unquoted", () => {
+    expect(rowLabelText(r, fieldPath("0"))).toBe("Web site");
+    expect(rowLabelText(r, instancePath("t", ["n"]))).toBe("Todo");
+    expect(rowLabelText(r, fieldPath("2", ["title"]))).toBe("Say hi");
+  });
+  it("names it by nothing when there's nothing there", () => {
+    expect(rowLabelText(r, fieldPath("1"))).toBeUndefined();
+    expect(rowLabelText(r, fieldPath("9"))).toBeUndefined();
+    expect(rowLabelText(r, fieldPath("0", ["x"]))).toBeUndefined();
   });
 });

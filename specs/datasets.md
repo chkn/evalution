@@ -1021,7 +1021,9 @@ that one `DatasetRowUpdate` can address:
 - **An instance's argument**, reached directly (`seededTask` › `title`) or through references
   (`toolsContext` › … › `rootTaskId` › `title`). The edit replaces that instance in the update's
   `resources` with the argument changed. Editing the focus task's title from the grid is the case
-  this exists for.
+  this exists for. Clearing one in place (Delete, or emptying the editor) does nothing: it would
+  delete the argument, and an argument that isn't there has nothing to type into. The details pane
+  removes an argument.
 
 Anything nested inside an argument's value object stays read-only for now. `resources` updates
 replace a whole instance, which is fine for a top-level argument but would mean rebuilding a nested
@@ -1037,7 +1039,9 @@ value from a path. The details pane already edits those.
    `dataset-provider-contract.ts`.
 3. `columns` and `rowLabel`: the migration, `setColumns`, the route, validation, and
    `deleteField` pruning its columns. The server checks that a path's root exists in the schema or
-   in some row, and that `keys` are non-empty strings.
+   in some row, and that `keys` are non-empty strings. An instance root the stored layout or row
+   label already has is accepted even when no row declares it any more, so a layout can always be
+   saved; it reads `"absent"` until a row declares the instance again.
 4. `reconcileColumns`, as a pure function next to `parseTraceColumns`'s pattern. Unit tests cover
    a dropped field, a new field and a new key being appended, a duplicate path, and a stored list
    with no `columns`, which must produce today's layout.

@@ -235,6 +235,24 @@ export function ChevronIcon({ open }: { open: boolean }) {
   );
 }
 
+export function ChevronDownIcon() {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
 /** Two overlapping speech bubbles — the "Conversation" tab. */
 export function ConversationIcon() {
   return (
@@ -501,6 +519,47 @@ export function EvalsIcon({ size = 11 }: { size?: number }) {
     >
       <rect x="3" y="3" width="18" height="18" rx="3" />
       <polyline points="8 12.5 11 15.5 16.5 9" />
+    </svg>
+  );
+}
+
+/** Three columns in a box — the column picker's trigger. */
+export function ColumnsIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <line x1="9" y1="4" x2="9" y2="20" />
+      <line x1="15" y1="4" x2="15" y2="20" />
+    </svg>
+  );
+}
+
+/** A 2×3 grid of dots — the column picker's drag-to-reorder grab handle. */
+export function GrabHandleIcon() {
+  return (
+    <svg
+      width="10"
+      height="16"
+      viewBox="0 0 10 16"
+      fill="currentColor"
+      aria-hidden
+    >
+      <circle cx="3" cy="3" r="1.3" />
+      <circle cx="7" cy="3" r="1.3" />
+      <circle cx="3" cy="8" r="1.3" />
+      <circle cx="7" cy="8" r="1.3" />
+      <circle cx="3" cy="13" r="1.3" />
+      <circle cx="7" cy="13" r="1.3" />
     </svg>
   );
 }
