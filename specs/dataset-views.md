@@ -78,7 +78,7 @@ one, so the same function serves both.
 | subject | `{ dataset: Dataset, overview: DatasetRowsOverview }` | What `applies` sees. Never rows: rows are paged and grow without bound, and a tab that appeared or vanished as you scrolled would be wrong. `overview.instances` (`datasets.md` §Q.2) is what lets `applies` ask "do any rows seed tasks?" without fetching them. |
 | changes | a fresh snapshot on each `dataset-changed` | Both halves are small. |
 | final when | until the next change | Frames that answer `false` are dropped and re-mounted on the next `dataset-changed`. That is the same rule `trace-visualizers.md` §C.2 applies to a late span: a dataset is simply never "live". |
-| context | `selected: { index, row, label } \| null` | The shared selection (§C). `label` is the row's `rowLabel` value (`datasets.md` §Q.3). The row arrives in full, `rev`-stamped, and is resent when it changes. |
+| context | `selected: { index, row, stored?, label } \| null` | The shared selection (§C). `label` is the row's `rowLabel` value (`datasets.md` §Q.3). The row arrives in full, `rev`-stamped, and is resent when it changes. `stored` is the row as it was stored when the view's unsaved draft began; it is there only while the draft changes something, so a view tells what's unsaved by comparing it with `row` (§D). |
 | actions | `selectRow(index)` (ephemeral), `showInstance(name)` (ephemeral), `proposeUpdate(update, rev)` (effectful) | §C, §D. |
 | placement | a tab beside **Grid**, above the main area; the details pane is shared | §C. |
 
@@ -144,6 +144,13 @@ and this is the first surface that uses them, so here is what they mean in pract
   becomes stale. Save is then refused with "this row changed since you started; discard and
   redo". The draft isn't rebased automatically, because a structural edit (a reparent, a delete)
   has no general merge with an unrelated one.
+- **A view can tell what is unsaved.** While the draft changes something, `selected.stored` is the
+  row as it was stored when the draft began, and `selected.row` is that row with the draft applied.
+  When the draft is saved or discarded, `stored` is gone. The host doesn't say what a view should
+  care about (cells, instances, anything `DatasetRow` grows later); the view compares the two rows,
+  or calls `diffRow`. The task hierarchy uses it to draw a card it just added with editors in place
+  until it is saved. `stored` is the draft's own base, not the freshly stored row, so a change made
+  in the details pane (which makes the draft stale) doesn't show up as the view's.
 - **Leaving a row with a draft** (another row, another tab, closing the dataset) asks to save or
   discard, the same question an unsaved editor asks.
 
@@ -158,6 +165,8 @@ addInstance(row: DatasetRow, instance: ResourceInstanceInput, hint?: string): { 
 setArgs(row: DatasetRow, name: string, args: Record<string, ExecutionInput | null>): DatasetRowUpdate;
 /** Removes instances, or reports what still refers to them (cells, other instances) and changes nothing. */
 removeInstances(row: DatasetRow, names: string[]): DatasetRowUpdate | { dangling: Reference[] };
+/** What differs between a row as stored and with the draft applied: cells by field id, instances by name. */
+diffRow(stored: DatasetRow, row: DatasetRow): { cells: RowChanges; resources: RowChanges };  // each { added, changed, removed }: string[]
 /** Every instance reference in the row: from where, to which instance and output. */
 references(row: DatasetRow): Reference[];
 /** `datasets.md` §Q.1's path reading, re-exported. */

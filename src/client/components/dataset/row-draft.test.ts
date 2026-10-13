@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { DatasetRow } from "../../../shared/types.ts";
 import {
+  draftBase,
   draftRow,
   foldDraft,
   hasChanges,
@@ -64,6 +65,29 @@ describe("row drafts", () => {
     expect(hasChanges(undefined)).toBe(false);
   });
 
+  it("have no changes when an instance is added and removed again", () => {
+    // Applying the update moves `resources` after `createdAt`: the same row,
+    // spelled differently.
+    const row: DatasetRow = {
+      id: "r1",
+      cells: {},
+      resources: { t: { uri: "x#t" } },
+      createdAt: 0,
+    };
+    let draft = foldDraft(undefined, row, {
+      rowId: "r1",
+      cells: {},
+      resources: { u: { uri: "x#u" } },
+    });
+    draft = foldDraft(draft, row, {
+      rowId: "r1",
+      cells: {},
+      resources: { u: null },
+    });
+    expect(hasChanges(draft)).toBe(false);
+    expect(draftBase(draft, "r1")).toBeUndefined();
+  });
+
   it("go stale when the stored row changes under them", () => {
     const draft = foldDraft(undefined, stored, { rowId: "r1", cells: {} });
     expect(isStale(draft, { ...stored })).toBe(false);
@@ -74,5 +98,21 @@ describe("row drafts", () => {
     expect(
       mergeUpdates({ rowId: "r", cells: {} }, { rowId: "r", cells: {} }),
     ).toEqual({ rowId: "r", cells: {} });
+  });
+
+  it("hand a view the stored row they started from, only while they change something", () => {
+    const changed = foldDraft(undefined, stored, {
+      rowId: "r1",
+      cells: { "0": v("b") },
+    });
+    expect(draftBase(changed, "r1")).toBe(stored);
+    // Another row, no draft, or one that put things back: nothing to compare.
+    expect(draftBase(changed, "r2")).toBeUndefined();
+    expect(draftBase(undefined, "r1")).toBeUndefined();
+    const reverted = foldDraft(undefined, stored, {
+      rowId: "r1",
+      cells: { "0": v("a") },
+    });
+    expect(draftBase(reverted, "r1")).toBeUndefined();
   });
 });

@@ -7,6 +7,7 @@ import {
   addInstance,
   danglingReferences,
   describeReference,
+  diffRow,
   references,
   removeInstances,
   setArgs,
@@ -147,5 +148,55 @@ describe("danglingReferences", () => {
     expect(
       danglingReferences({ ...row, resources: rest }).map(r => r.to),
     ).toEqual(["project", "project"]);
+  });
+});
+
+describe("diffRow", () => {
+  const stored = {
+    cells: { "0": text("a"), "1": text("b"), "2": text("c") },
+    resources: {
+      keep: { uri: TASK, args: { title: text("same") } },
+      edit: { uri: TASK, args: { title: text("old"), status: text("new") } },
+      gone: { uri: TASK },
+    },
+  };
+
+  it("lists what was added, changed and removed, in cells and instances", () => {
+    const next = {
+      cells: { "0": text("a"), "1": text("B"), "3": text("d") },
+      resources: {
+        keep: stored.resources.keep,
+        edit: { uri: TASK, args: { title: text("new"), status: text("new") } },
+        fresh: { uri: TASK },
+      },
+    };
+    expect(diffRow(stored, next)).toEqual({
+      cells: { added: ["3"], changed: ["1"], removed: ["2"] },
+      resources: { added: ["fresh"], changed: ["edit"], removed: ["gone"] },
+    });
+  });
+
+  it("finds nothing in rows that say the same, whatever their key order", () => {
+    const same = {
+      cells: { "2": text("c"), "1": text("b"), "0": text("a") },
+      resources: {
+        gone: { uri: TASK },
+        edit: { args: { status: text("new"), title: text("old") }, uri: TASK },
+        keep: { uri: TASK, args: { title: text("same") } },
+      },
+    };
+    const none = { added: [], changed: [], removed: [] };
+    expect(diffRow(stored, same)).toEqual({ cells: none, resources: none });
+  });
+
+  it("treats a row with no resources as having none", () => {
+    expect(
+      diffRow({ cells: {} }, { cells: {}, resources: { a: { uri: TASK } } })
+        .resources,
+    ).toEqual({ added: ["a"], changed: [], removed: [] });
+    expect(
+      diffRow({ cells: {}, resources: { a: { uri: TASK } } }, { cells: {} })
+        .resources,
+    ).toEqual({ added: [], changed: [], removed: ["a"] });
   });
 });

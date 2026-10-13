@@ -16,6 +16,7 @@ import type {
   DatasetRowUpdate,
 } from "../../dataset/dataset-types.ts";
 import { isValidInstanceName } from "../../shared/instance-names.ts";
+import { sameJson } from "../../shared/same-json.ts";
 import type {
   ExecutionInput,
   ResourceInstanceInput,
@@ -194,4 +195,44 @@ export function removeInstances(
     cells: {},
     resources: Object.fromEntries(names.map(n => [n, null])),
   };
+}
+
+/** What differs between two rows for one kind of thing, by name. */
+export interface RowChanges {
+  /** Names in the new row and not the old one. */
+  added: string[];
+  /** Names in both whose values differ. */
+  changed: string[];
+  /** Names in the old row and not the new one. */
+  removed: string[];
+}
+
+/**
+ * What differs between a row as it's stored and the same row with changes
+ * applied (`SelectedRow.stored` and `SelectedRow.row`): its cells, by field
+ * id, and its resource instances, by name.
+ */
+export function diffRow(
+  stored: Pick<DatasetRow, "cells" | "resources">,
+  row: Pick<DatasetRow, "cells" | "resources">,
+): { cells: RowChanges; resources: RowChanges } {
+  return {
+    cells: diffNamed(stored.cells, row.cells),
+    resources: diffNamed(stored.resources ?? {}, row.resources ?? {}),
+  };
+}
+
+function diffNamed(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): RowChanges {
+  const changes: RowChanges = { added: [], changed: [], removed: [] };
+  for (const [name, value] of Object.entries(after)) {
+    if (!Object.hasOwn(before, name)) changes.added.push(name);
+    else if (!sameJson(before[name], value)) changes.changed.push(name);
+  }
+  for (const name of Object.keys(before)) {
+    if (!Object.hasOwn(after, name)) changes.removed.push(name);
+  }
+  return changes;
 }

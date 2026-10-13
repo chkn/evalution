@@ -403,6 +403,21 @@ describe("the datasets surface", () => {
     ).toContain("isn't a valid instance name");
   });
 
+  it("hands the view the stored row beside the draft-applied one", () => {
+    const stored = { ...row, cells: {} };
+    const draft = {
+      ...row,
+      resources: { task: { uri: "tasks.ts#seededTask" } },
+    };
+    const props = datasetSurface.props(
+      { ...state, context: { selected: { index: 0, row: draft, stored } } },
+      () => {},
+      {} as never,
+    );
+    expect(props.selected?.row).toBe(draft);
+    expect(props.selected?.stored).toBe(stored);
+  });
+
   it("selects only rows that exist", () => {
     const { check } = datasetSurface.actions.selectRow;
     expect(check({ index: 1 }, state)).toBeUndefined();

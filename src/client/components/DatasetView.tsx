@@ -84,6 +84,7 @@ import { DetailsPane, DetailsPaneHeader, useIsWide } from "./DetailsPane";
 import { DatasetRowList } from "./dataset/DatasetRowList.tsx";
 import { RowDraftBar } from "./dataset/RowDraftBar.tsx";
 import {
+  draftBase,
   draftRow,
   foldDraft,
   hasChanges,
@@ -844,6 +845,8 @@ function DatasetView({
   );
   const contextLabel =
     contextRow && rowLabel ? rowLabelText(contextRow, rowLabel) : undefined;
+  // What the row was before the draft, while the draft changes anything.
+  const contextBase = contextStored && draftBase(draft, contextStored.id);
   useEffect(() => {
     channel.setContext({
       selected:
@@ -851,11 +854,12 @@ function DatasetView({
           ? {
               index: contextIndex,
               row: contextRow,
+              ...(contextBase && { stored: contextBase }),
               ...(contextLabel !== undefined && { label: contextLabel }),
             }
           : null,
     });
-  }, [channel, contextRow, contextIndex, contextLabel]);
+  }, [channel, contextRow, contextIndex, contextLabel, contextBase]);
 
   const chooseTab = (tab: string) => {
     if (tab === chosenTab || !leaveDraft()) return;

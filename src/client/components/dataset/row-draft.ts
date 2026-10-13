@@ -7,6 +7,7 @@
  * changes under it. See `specs/dataset-views.md` §D.
  */
 
+import { sameJson } from "../../../shared/same-json.ts";
 import type { DatasetRow, DatasetRowUpdate } from "../../../shared/types.ts";
 import { applyUpdate } from "../dataset-grid.ts";
 
@@ -61,15 +62,25 @@ export function isStale(
   draft: RowDraft,
   stored: DatasetRow | undefined,
 ): boolean {
-  return (
-    stored !== undefined &&
-    JSON.stringify(stored) !== JSON.stringify(draft.base)
-  );
+  return stored !== undefined && !sameJson(stored, draft.base);
 }
 
-/** Whether the draft would change anything if saved. */
+/**
+ * Whether the draft would change anything if saved. Compared by value, not
+ * spelling: applying an update can reorder a row's keys.
+ */
 export function hasChanges(draft: RowDraft | undefined): draft is RowDraft {
-  return (
-    !!draft && JSON.stringify(draftRow(draft)) !== JSON.stringify(draft.base)
-  );
+  return !!draft && !sameJson(draftRow(draft), draft.base);
+}
+
+/**
+ * The stored row `draft` was started from, if it's for `rowId` and would
+ * change something: what a view compares the draft-applied row against.
+ * Undefined when the row has no (effective) draft.
+ */
+export function draftBase(
+  draft: RowDraft | undefined,
+  rowId: string,
+): DatasetRow | undefined {
+  return draft?.rowId === rowId && hasChanges(draft) ? draft.base : undefined;
 }

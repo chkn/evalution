@@ -15,6 +15,7 @@ import {
   type CheckRun,
   check,
 } from "../prompt/playground/check.ts";
+import { sameJson } from "../shared/same-json.ts";
 import type { CheckInfo, PropDefinition } from "../shared/types.ts";
 import type { Span, TraceWithSpans } from "../trace/trace-types.ts";
 
@@ -162,22 +163,6 @@ function requireCompleteTrace(run: CheckRun): void {
   }
 }
 
-/** Whether `a` and `b` are the same JSON value. */
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  const ak = Object.keys(a);
-  const bk = Object.keys(b);
-  if (ak.length !== bk.length) return false;
-  return ak.every(k =>
-    deepEqual(
-      (a as Record<string, unknown>)[k],
-      (b as Record<string, unknown>)[k],
-    ),
-  );
-}
-
 /** `value` parsed as JSON, or as it is when it isn't JSON text. */
 function parseMaybeJson(value: unknown): unknown {
   if (typeof value !== "string") return value;
@@ -221,7 +206,7 @@ export const outputEquals = check({
     const equal =
       typeof output === "string" && typeof expected === "string"
         ? output.trim() === expected.trim()
-        : deepEqual(parseMaybeJson(output), parseMaybeJson(expected));
+        : sameJson(parseMaybeJson(output), parseMaybeJson(expected));
     return equal
       ? { pass: true }
       : {

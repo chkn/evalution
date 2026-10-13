@@ -38,6 +38,12 @@ const VIEWS = {
       shown.textContent = p.selected
         ? "row " + p.selected.row.id + " (" + (p.selected.label ?? "") + ")"
         : "none";
+      // What the row was before the draft: only there while there is one.
+      const stored = document.createElement("p");
+      stored.id = "stored";
+      stored.textContent = p.selected && p.selected.stored
+        ? "stored " + p.selected.stored.cells["0"].value.value
+        : "no draft";
       const rename = document.createElement("button");
       rename.textContent = "rename";
       rename.onclick = () => p.proposeUpdate({
@@ -56,7 +62,7 @@ const VIEWS = {
       const show = document.createElement("button");
       show.textContent = "show task";
       show.onclick = () => p.showInstance("task");
-      el.append(shown, rename, dangle, next, show);
+      el.append(shown, stored, rename, dangle, next, show);
     }
     export default datasetView({
       label: "Rows view",
@@ -135,6 +141,8 @@ async function mockDataset(page: Page) {
 
 const shown = (page: Page) =>
   page.frameLocator('iframe[title="Rows view"]').locator("#shown");
+const storedLine = (page: Page) =>
+  page.frameLocator('iframe[title="Rows view"]').locator("#stored");
 const inFrame = (page: Page, name: string) =>
   page.frameLocator('iframe[title="Rows view"]').getByRole("button", { name });
 const rowList = (page: Page) => page.getByRole("listbox", { name: "Rows" });
@@ -246,9 +254,12 @@ test("a view's proposal lands in a draft, which saves only on Save", async ({
   await expect(page.getByRole("status")).toContainText(
     "Unsaved changes to Row 1 from Rows view",
   );
+  // Beside it, the row as stored: so the view can tell what's unsaved.
+  await expect(storedLine(page)).toHaveText("stored alpha");
   expect(updates).toEqual([]);
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(storedLine(page)).toHaveText("no draft");
   await expect
     .poll(() => updates)
     .toEqual([[{ rowId: "r1", cells: { "0": text("renamed") } }]]);
@@ -263,8 +274,10 @@ test("Discard drops the draft, and a proposal that would dangle is refused", asy
   await expect(page.getByRole("status")).toHaveCount(0);
   await inFrame(page, "rename").click();
   await expect(shown(page)).toHaveText("row r1 (renamed)");
+  await expect(storedLine(page)).toHaveText("stored alpha");
   await page.getByRole("button", { name: "Discard" }).click();
   await expect(shown(page)).toHaveText("row r1 (alpha)");
+  await expect(storedLine(page)).toHaveText("no draft");
   expect(updates).toEqual([]);
 });
 

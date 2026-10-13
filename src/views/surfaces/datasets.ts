@@ -38,6 +38,13 @@ export interface SelectedRow {
   index: number;
   /** The row, with any unsaved changes the view proposed applied. */
   row: DatasetRow;
+  /**
+   * The row as it was stored when the view's unsaved changes began. Present
+   * only while there are changes (`row` differs from it) and gone once they
+   * are saved or discarded, so a view can tell what is unsaved by comparing
+   * the two (see `diffRow` in `evalution/views/datasets`).
+   */
+  stored?: DatasetRow;
   /** The row's label (`Dataset.rowLabel`), when the dataset names rows. */
   label?: string;
 }
