@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import { WebSocketServer } from "ws";
 import type { DatasetProvider } from "../dataset/dataset-provider.ts";
 import type { EvalProvider } from "../eval/eval-provider.ts";
+import { LocalFileProvider } from "../file-provider-local.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import type { SSEData } from "../shared/types.ts";
 import type { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
@@ -25,6 +26,8 @@ import {
   resolveSetupStepCommand,
   type TerminalSessionRegistry,
 } from "./terminal.ts";
+import { hostPageCsp } from "./view-frame.ts";
+import { ViewRegistry } from "./view-registry.ts";
 
 export interface ServerOptions {
   promptProviders: PromptProvider[];
@@ -63,6 +66,11 @@ export interface ServerOptions {
   otlpIngestor?: OtlpTraceIngestor;
   /** This package's version, reported to MCP clients. */
   version: string;
+  /**
+   * The project's views. Defaults to a registry over `rootPath` on the
+   * local filesystem.
+   */
+  views?: ViewRegistry;
 }
 
 /** A running server, returned by {@link startServer}. */
@@ -96,6 +104,12 @@ export async function startServer(
     otlpIngestor,
     version,
   } = options;
+  const views =
+    options.views ??
+    new ViewRegistry({
+      fileProvider: new LocalFileProvider(),
+      rootDir: rootPath,
+    });
 
   // Hot-reload SSE subscribers. Each `/api/events` connection registers a
   // writer here; `broadcast` fans an event out to all of them.
@@ -149,7 +163,12 @@ export async function startServer(
     setupTasks: { resolve: resolveSetupTasks, executeStep: executeSetupStep },
     agents,
     otlpIngestor,
+    views,
   });
+  // A view is rebuilt when its file, or anything it imports, changes.
+  const unwatchViews = views.watch(version =>
+    broadcast({ type: "views-changed", version }),
+  );
 
   // The same API over MCP (streamable HTTP), for an agent to connect to — or
   // for `evalution mcp` to relay stdio to, since this process holds the
@@ -174,6 +193,16 @@ export async function startServer(
   // `process.cwd()`, which the CLI changes to the user's project, so anchor it
   // to this module instead. Registered as a catch-all after the API routes.
   const clientRoot = fileURLToPath(new URL("../client/", import.meta.url));
+  app.get("*", async (c, next) => {
+    await next();
+    // The page may embed frames from the view frame route only.
+    if (c.res.headers.get("content-type")?.startsWith("text/html")) {
+      c.res.headers.set(
+        "Content-Security-Policy",
+        hostPageCsp(c.req.header("host") ?? new URL(url).host),
+      );
+    }
+  });
   app.get("*", serveStatic({ root: clientRoot }));
 
   // Forward trace change events to SSE clients
@@ -231,6 +260,7 @@ export async function startServer(
       // instead of killing the PTY, so a running coding agent survives the
       // restart and the reconnecting client resumes it.
       for (const ws of wss.clients) ws.close();
+      unwatchViews();
       void mcp.close();
       if ("closeAllConnections" in server) {
         server.closeAllConnections();

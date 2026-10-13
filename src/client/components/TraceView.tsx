@@ -4,14 +4,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { AgentInfo } from "../../shared/agent";
+import { applyStreamEvent, type TraceState } from "../../shared/trace-stream";
 import type {
   NormalizedPrompt,
   PromptID,
   RunResources,
-  Span,
-  Trace,
   TraceLiveEvent,
 } from "../../shared/types";
+import { ViewChannel } from "../../views/host.ts";
+import { traceSurface } from "../../views/surfaces/trace.ts";
 import { deleteTrace, getTrace, subscribeTraceEvents } from "../api";
 import { useAnnotations } from "../hooks/useAnnotations.ts";
 import { AddToDatasetMenu, isInAddToDatasetMenu } from "./AddToDatasetMenu";
@@ -53,6 +54,12 @@ import { TraceAnnotations } from "./trace/TraceAnnotations.tsx";
 import { TraceCheckResults } from "./trace/TraceCheckResults.tsx";
 import { computeCostBreakdown, summarizeUsage } from "./trace/usage.ts";
 import { useAnchoredPopover } from "./use-anchored-popover";
+import {
+  rememberedTab,
+  rememberTab,
+  useSurfaceViews,
+} from "./views/use-surface-views.tsx";
+import { ViewProblemsButton, ViewTabButtons } from "./views/ViewTabs.tsx";
 
 interface Props {
   providerId: string;
@@ -84,32 +91,18 @@ interface Props {
   onAskAgent?: (agent: AgentInfo) => void;
 }
 
-interface TraceState {
-  trace: Trace | null;
-  spans: Span[];
-}
+/** A built-in tab, or a view's (`view:<uri>`). */
+type MainTab = "conversation" | "spans" | `view:${string}`;
 
-function applyStreamEvent(prev: TraceState, event: TraceLiveEvent): TraceState {
-  switch (event.type) {
-    case "span-start":
-    case "span-end":
-    case "span-update": {
-      const existing = prev.spans.findIndex(s => s.id === event.span.id);
-      const spans =
-        existing >= 0
-          ? prev.spans.map((s, i) => (i === existing ? event.span : s))
-          : [...prev.spans, event.span];
-      return { ...prev, spans };
-    }
-    case "trace-update":
-    case "trace-end":
-      return { ...prev, trace: event.trace };
-    default:
-      return prev;
-  }
-}
+/** Where this viewer's last tab is remembered, across traces. */
+const TAB_KEY = "evalution.traceTab";
 
-type MainTab = "conversation" | "spans";
+function initialTab(): MainTab {
+  const tab = rememberedTab(TAB_KEY);
+  return tab === "spans" || tab?.startsWith("view:")
+    ? (tab as MainTab)
+    : "conversation";
+}
 
 function TraceView({
   providerId,
@@ -127,7 +120,11 @@ function TraceView({
     initialSpanId ?? null,
   );
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<MainTab>("conversation");
+  const [chosenTab, setChosenTab] = useState<MainTab>(initialTab);
+  const chooseTab = (tab: MainTab) => {
+    setChosenTab(tab);
+    rememberTab(TAB_KEY, tab);
+  };
   const [combined, setCombined] = useState(false);
   const { ref: bodyRef, isWide: showDetailsPane } = useIsWide(760);
   const listRef = useRef<HTMLDivElement>(null);
@@ -144,6 +141,36 @@ function TraceView({
     // The add-to-dataset menu it contains is its own portal.
     extraContains: isInAddToDatasetMenu,
   });
+
+  // What every view's frame is told: this trace, and the selected span.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one channel per trace.
+  const channel = useMemo(
+    () =>
+      new ViewChannel(traceSurface, {
+        selectedSpanId: null as string | null,
+      }),
+    [providerId, traceId],
+  );
+  useEffect(() => {
+    channel.setContext({ selectedSpanId });
+  }, [channel, selectedSpanId]);
+  const views = useSurfaceViews({
+    surface: traceSurface,
+    channel,
+    activeUri: chosenTab.startsWith("view:") ? chosenTab.slice(5) : null,
+    onAction: action => {
+      if (action.name === "selectSpan") {
+        setSelectedSpanId((action.args as { spanId: string }).spanId);
+      }
+      return undefined;
+    },
+  });
+  // A view's tab that doesn't apply (yet, or here) falls back to Conversation.
+  const activeTab: MainTab = chosenTab.startsWith("view:")
+    ? views.shownUri
+      ? chosenTab
+      : "conversation"
+    : chosenTab;
 
   const {
     annotations,
@@ -182,6 +209,7 @@ function TraceView({
     getTrace(providerId, traceId, { signal: controller.signal })
       .then(data => {
         setState({ trace: data.trace, spans: data.spans });
+        channel.setSubject({ trace: data.trace, spans: data.spans });
       })
       .catch(err => {
         if (err.name !== "AbortError") setError(err.message);
@@ -195,6 +223,7 @@ function TraceView({
           applyAnnotationEvent(event);
         } else {
           setState(prev => applyStreamEvent(prev, event));
+          channel.event(event);
         }
       },
     );
@@ -203,7 +232,7 @@ function TraceView({
       controller.abort();
       unsubscribe();
     };
-  }, [providerId, traceId, applyAnnotationEvent]);
+  }, [providerId, traceId, applyAnnotationEvent, channel]);
 
   const rows = useMemo(() => buildRows(state.spans), [state.spans]);
   const groupedRows = useMemo(
@@ -503,7 +532,7 @@ function TraceView({
               <button
                 type="button"
                 className={`trace-view-tab${activeTab === "conversation" ? " trace-view-tab-active" : ""}`}
-                onClick={() => setActiveTab("conversation")}
+                onClick={() => chooseTab("conversation")}
               >
                 <ConversationIcon />
                 Conversation
@@ -511,11 +540,17 @@ function TraceView({
               <button
                 type="button"
                 className={`trace-view-tab${activeTab === "spans" ? " trace-view-tab-active" : ""}`}
-                onClick={() => setActiveTab("spans")}
+                onClick={() => chooseTab("spans")}
               >
                 <TreeExpandedIcon />
                 Spans
               </button>
+              <ViewTabButtons
+                tabs={views.tabs}
+                active={views.shownUri}
+                onSelect={uri => chooseTab(`view:${uri}`)}
+              />
+              <ViewProblemsButton problems={views.problems} />
             </div>
             {activeTab === "spans" && (
               <button
@@ -531,34 +566,37 @@ function TraceView({
             )}
           </div>
 
-          {activeTab === "spans" ? (
-            <div className="trace-timeline-list" ref={listRef}>
-              {combined ? (
-                <CombinedTimeline
-                  groups={groupedRows}
-                  window={window}
-                  selectedSpanId={selectedSpanId}
-                  onSelectSpan={setSelectedSpanId}
-                />
-              ) : (
-                <FlameTimeline
+          <div className="view-stack">
+            {views.shownUri ? null : activeTab === "spans" ? (
+              <div className="trace-timeline-list" ref={listRef}>
+                {combined ? (
+                  <CombinedTimeline
+                    groups={groupedRows}
+                    window={window}
+                    selectedSpanId={selectedSpanId}
+                    onSelectSpan={setSelectedSpanId}
+                  />
+                ) : (
+                  <FlameTimeline
+                    rows={rows}
+                    window={window}
+                    selectedSpanId={selectedSpanId}
+                    onSelectSpan={setSelectedSpanId}
+                    annotations={annotations}
+                  />
+                )}
+              </div>
+            ) : (
+              <div className="trace-chat-region">
+                <ChatFlow
                   rows={rows}
-                  window={window}
                   selectedSpanId={selectedSpanId}
                   onSelectSpan={setSelectedSpanId}
-                  annotations={annotations}
                 />
-              )}
-            </div>
-          ) : (
-            <div className="trace-chat-region">
-              <ChatFlow
-                rows={rows}
-                selectedSpanId={selectedSpanId}
-                onSelectSpan={setSelectedSpanId}
-              />
-            </div>
-          )}
+              </div>
+            )}
+            {views.layer}
+          </div>
 
           {!showDetailsPane && spanDetailsContent && (
             <DetailsPane placement="bottom">{spanDetailsContent}</DetailsPane>

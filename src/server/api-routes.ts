@@ -22,7 +22,9 @@ import type {
   PromptRef,
   SSEData,
   UpdatePromptResponse,
+  ViewList,
 } from "../shared/types.ts";
+import { VIEW_FRAME_PATH } from "../shared/view-surfaces.ts";
 import type { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import type { ApiContext } from "./api-context.ts";
 import {
@@ -78,6 +80,8 @@ import {
   handleListTraces,
   handleQueryTraces,
 } from "./handlers/traces.ts";
+import { viewFrameCsp, viewFrameDocument } from "./view-frame.ts";
+import type { ViewRegistry } from "./view-registry.ts";
 
 /** Decodes a URL-safe base64 prompt id produced by `encodePromptId`. Uses the
  * Web `atob` (rather than Node's `Buffer`) so it works in browser/worker
@@ -207,6 +211,11 @@ export interface SetupRoutesOptions {
    * route's functionality — `resolveIngestor` always returns `undefined`.
    */
   otlpIngestor?: OtlpTraceIngestor;
+  /**
+   * The project's views, if the host serves them. Without one, `/api/views`
+   * lists none. See `specs/trace-visualizers.md` §B.
+   */
+  views?: ViewRegistry;
 }
 
 /**
@@ -221,6 +230,7 @@ export function setupRoutes({
   setupTasks,
   agents,
   otlpIngestor,
+  views,
 }: SetupRoutesOptions): void {
   const {
     promptProviders,
@@ -1096,6 +1106,39 @@ export function setupRoutes({
   };
   app.post("/v1/traces", otlpRoute);
   app.post("/otel/v1/traces", otlpRoute);
+
+  // #region Views
+
+  // GET /api/views - Every view, and every view file that can't be shown
+  app.get("/api/views", async c =>
+    c.json(
+      views
+        ? await views.list()
+        : ({ version: 0, views: [], errors: [] } satisfies ViewList),
+    ),
+  );
+
+  // GET /api/views/frame?uri=&v= - A view's sandboxed frame document
+  app.get(VIEW_FRAME_PATH, async c => {
+    const uri = c.req.query("uri");
+    const bundle = uri ? await views?.bundle(uri) : undefined;
+    if (!bundle) return c.text("No such view", 404);
+    const nonce = btoa(
+      String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))),
+    );
+    // Immutable only when asked for this exact build: a stale `v` gets the
+    // current one, uncached.
+    const current = c.req.query("v") === bundle.moduleVersion;
+    return c.html(viewFrameDocument(bundle, nonce), 200, {
+      "Content-Security-Policy": viewFrameCsp(nonce),
+      "Cache-Control": current
+        ? "private, max-age=31536000, immutable"
+        : "no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+  });
+
+  // #endregion
 
   // GET /api/events - Server-Sent Events for hot reload
   app.get("/api/events", c =>

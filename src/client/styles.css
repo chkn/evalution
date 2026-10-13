@@ -8025,3 +8025,247 @@ a.trace-header-menu-item {
   margin: 4px 6px;
   background: var(--dropdown-border);
 }
+
+/* #region Views — sandboxed view frames (specs/trace-visualizers.md §C.2) */
+
+/* Holds a tab's own content and, over it, the view frames — which stay in
+   this one place whatever tab is showing, since moving an iframe reloads it. */
+.view-stack {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.view-frames {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.view-frames-active {
+  pointer-events: auto;
+}
+
+/* Hidden frames keep their full size, so layout is right the moment one is
+   shown. */
+.view-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  visibility: hidden;
+  background: var(--content-bg);
+}
+
+.view-frame-visible {
+  visibility: visible;
+}
+
+.view-frame-message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  color: var(--panel-text-secondary);
+  background: var(--content-bg);
+}
+
+.view-frame-error {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--error-border);
+  background: var(--error-bg);
+  color: var(--error-text);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.view-problems-btn {
+  align-self: center;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--error-border);
+  border-radius: 10px;
+  background: var(--error-bg);
+  color: var(--error-text);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.view-problems {
+  z-index: 1000;
+  max-width: 520px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--dropdown-border);
+  border-radius: 8px;
+  background: var(--dropdown-bg);
+  box-shadow: var(--dropdown-shadow);
+}
+
+.view-problem + .view-problem {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--dropdown-border);
+}
+
+.view-problem-uri {
+  font-size: 12px;
+  color: var(--dropdown-text);
+}
+
+.view-problem-message {
+  margin: 4px 0 0;
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: var(--error-text);
+}
+
+.open-url-dialog {
+  max-width: 460px;
+}
+
+.open-url-lede {
+  margin: 0 0 6px;
+}
+
+.open-url-host {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.open-url-insecure {
+  color: var(--error-text);
+  font-weight: 400;
+}
+
+.open-url-full {
+  margin: 0 0 16px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--input-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* #endregion */
+
+/* #region Dataset views (specs/dataset-views.md §C, §D) */
+
+.dataset-view-tabs {
+  border-bottom: 1px solid var(--trace-border);
+}
+
+.dataset-view-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.dataset-view-main > .view-stack {
+  min-width: 0;
+}
+
+.dataset-row-list {
+  position: relative;
+  width: 220px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--trace-border);
+  outline: none;
+}
+
+.dataset-row-list:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--link);
+}
+
+.dataset-row-list-inner {
+  position: relative;
+}
+
+.dataset-row-list-item {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+  color: var(--panel-text);
+}
+
+.dataset-row-list-item:hover {
+  background: var(--tree-hover);
+}
+
+.dataset-row-list-item-selected,
+.dataset-row-list-item-selected:hover {
+  background: var(--tree-selected-bg);
+}
+
+.dataset-row-list-number {
+  min-width: 18px;
+  color: var(--panel-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.dataset-row-list-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-draft-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--trace-border);
+  background: var(--panel-bg);
+  font-size: 12.5px;
+}
+
+.row-draft-bar-text {
+  flex: 1;
+}
+
+.row-draft-bar-stale {
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+
+.row-draft-bar .dialog-btn-cancel,
+.row-draft-bar .dialog-btn-create {
+  padding: 4px 12px;
+}
+
+.dataset-row-draft-banner {
+  margin: 8px 12px 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--panel-text-secondary);
+  font-size: 12px;
+}
+
+/* #endregion */

@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { shortId } from "../../shared/helpers";
+import { diffWords } from "../../shared/text-diff";
 import type {
   ConflictChoices,
   NormalizedPrompt,
@@ -24,7 +25,6 @@ import {
   refChipLabel,
   variationLabel,
 } from "./prompt-ref";
-import { diffWords } from "./text-diff";
 import { useAnchoredPopover } from "./use-anchored-popover";
 
 /** How many versions the ref menu lists. */

@@ -1,6 +1,12 @@
 # Proposal: Trace visualizers, and getting "before" into the trace
 
-> **Status: PROPOSED (2026-10-12).** Revives part of `specs/resource-observation.md`: not its
+> **Status: IMPLEMENTED (2026-10-13)** for evalution's part: §H steps 1–4, plus step 7's first
+> building blocks (`<SpanLink>`, `<TextDiff>`, `<JsonView>`). Steps 5–6 are asgard's, and 8–11 are
+> later work. Step 12 shipped as `specs/dataset-views.md`. Where the code differs from the text
+> below, the text has been updated, except for one addition: the host side of the protocol is a
+> pure function in `src/views/host.ts`, next to the frame side in `runtime.ts`.
+>
+> **Proposed 2026-10-12.** Revives part of `specs/resource-observation.md`: not its
 > machinery, but its question, *where does the state before a change come from?* Visualizers are
 > the first feature that has to answer it the way online evals eventually will. Revised the same
 > day: visualizers are discovered only under `.evalution/views/traces/`, and each runs in its own
@@ -235,10 +241,12 @@ Browser modules live in one place only: `.evalution/views/<surface>/`, one direc
 surface (§A.1).
 
 ```ts
-export const DEFAULT_VIEW_INCLUDE_PATTERNS = [".evalution/views/traces/**/*.{ts,tsx}"];
+export const DEFAULT_VIEW_INCLUDE_PATTERNS = SURFACE_NAMES.map(
+  name => `${VIEWS_DIR}/${name}/**/*.{ts,tsx}`,
+);
 ```
 
-Each surface adds its own directory. Files under `.evalution/views/` but outside a known surface's
+Each surface adds its own directory (`SURFACE_NAMES` in `src/shared/view-surfaces.ts`). Files under `.evalution/views/` but outside a known surface's
 directory are reported (“no surface named `foo`”), not ignored, so a typo doesn't make a view
 silently vanish.
 
@@ -422,7 +430,7 @@ in the envelope from the start so the dataset surface doesn't have to bump `prot
 
 ### C.2 Tabs
 
-`MainTab` widens from `"conversation" | "spans"` to include `` `viz:${uri}` ``. When a trace view
+`MainTab` widens from `"conversation" | "spans"` to include `` `view:${uri}` ``. When a trace view
 opens, it mounts **one hidden frame per visualizer** and sends each one `init`. Hidden means
 `visibility: hidden` and full size, not `display: none`, so layout is correct the moment the frame
 is shown. A frame's tab appears when it answers `applies: true` and disappears if the answer
@@ -449,7 +457,7 @@ changes to false.
   Conversation and Spans are never affected.
 - **The details pane is the host's.** `selectSpan` is the same `setSelectedSpanId` the timeline
   uses, so clicking a task opens its `update_task` span in the details pane. When the host's
-  selection changes, it sends `select`, so the visualizer can highlight the node for it.
+  selection changes, it sends `context`, so the visualizer can highlight the node for it.
 - **On `views-changed`,** frames whose `moduleVersion` changed are reloaded. The others
   keep their state.
 - **The active tab can be remembered per URI** across trace views, as a per-viewer convenience in
@@ -695,13 +703,21 @@ the Spans tab more useful on its own.
   browser-safe and has no framework imports. Bundles resolve it to the running evalution's copy.
 - `src/views/react/index.tsx`: the `evalution/views/react` entry, with `react()` and the
   building blocks.
-- `src/views/view-registry.ts`: discovery, the per-file esbuild build,
+- `src/views/host.ts`: the host side of the protocol, apart from the DOM: `ViewChannel`, which
+  holds what every frame on a surface instance is told, and `hostReceive`, a pure function from a
+  frame's message to the host's reply.
+- `src/shared/view-surfaces.ts`: the surface names and the frame route, which the server needs
+  without the browser-side descriptors.
+- `src/server/view-registry.ts`: discovery, the per-file esbuild build,
   `FileProvider`-backed loading, and errors (`ViewModuleError` goes in
   `src/shared/types.ts`).
 - `src/shared/trace-stream.ts`: `applyStreamEvent`, moved out of `TraceView.tsx`.
   `src/shared/text-diff.ts`: moved from the client for `<TextDiff>`.
-- `src/server/api-routes.ts`: `/api/views` and the frame route. `src/cli/index.ts`: the
+- `src/server/api-routes.ts`: `/api/views` and the frame route. `src/server/index.ts`: the
   registry and the watcher.
+- `src/client/components/views/use-surface-views.tsx`: one surface instance's frames, tabs, and
+  problems, with the drop-and-remount rules of §C.2. `ViewTabs.tsx`: the tab buttons and the
+  problems list.
 - `src/client/components/views/ViewFrame.tsx`: one frame, the generic host side of the protocol,
   hidden-frame action filtering, and navigation detection. `src/client/components/views/OpenUrlDialog.tsx`:
   the confirmation. They live outside `trace/` because every surface uses them.

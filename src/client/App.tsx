@@ -52,6 +52,7 @@ import {
   DatasetsIcon as DatasetsGlyph,
   EvalsIcon as EvalsGlyph,
 } from "./components/trace/icons.tsx";
+import { refetchViews } from "./components/views/views-store.ts";
 import { WelcomeWizard } from "./components/welcome/WelcomeWizard";
 import { useDatasets } from "./hooks/useDatasets";
 import { useEvals } from "./hooks/useEvals";
@@ -447,6 +448,8 @@ function App() {
       } else if (data.type === "dataset-changed") {
         refetchDatasets();
         setDatasetVersion(v => v + 1);
+      } else if (data.type === "views-changed") {
+        refetchViews();
       } else if (data.type === "eval-changed") {
         refetchEvals();
         setEvalVersion(v => v + 1);
@@ -475,6 +478,7 @@ function App() {
     refetchTraces();
     refetchDatasets();
     refetchEvals();
+    refetchViews();
   }, [
     refetchConfig,
     refetchPrompts,

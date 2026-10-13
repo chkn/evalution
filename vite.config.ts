@@ -6,7 +6,25 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      // As the server does for the built client: the page may embed frames
+      // from the view frame route only (specs/trace-visualizers.md §B.3).
+      name: "evalution-frame-src",
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (!req.url?.startsWith("/api/") && req.headers.host) {
+            res.setHeader(
+              "Content-Security-Policy",
+              `frame-src http://${req.headers.host}/api/views/frame`,
+            );
+          }
+          next();
+        });
+      },
+    },
+  ],
   root: "src/client",
   build: {
     outDir: "../../dist/client",

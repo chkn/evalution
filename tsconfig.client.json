@@ -7,6 +7,6 @@
     "module": "ESNext",
     "moduleResolution": "bundler"
   },
-  "include": ["src/client/**/*", "src/shared/**/*"],
+  "include": ["src/client/**/*", "src/shared/**/*", "src/views/**/*"],
   "exclude": ["node_modules", "dist"]
 }

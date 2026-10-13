@@ -1,6 +1,11 @@
 # Proposal: Dataset views — tabs beside the grid
 
-> **Status: PROPOSED (2026-10-12).** The second surface for the sandboxed views in
+> **Status: IMPLEMENTED (2026-10-13)** for evalution's part: §G steps 1–3. Step 4 is asgard's.
+> One gap remains in §D: leaving a row with a draft asks only whether to discard it, using the
+> browser's `confirm`, and closing the dataset doesn't ask at all. A failed Save restores the
+> draft.
+>
+> **Proposed 2026-10-12.** The second surface for the sandboxed views in
 > `specs/trace-visualizers.md` §A.1, which this spec relies on for everything about frames:
 > bundling, the frame document and its CSP, the protocol envelope, `openUrl`, and the write-back
 > rules. It also uses `specs/datasets.md` §Q for row labels and paths. Comparing rows is left to a

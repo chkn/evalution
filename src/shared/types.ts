@@ -788,12 +788,57 @@ export interface EvalRunSSEData extends EvalRunProgress {
   type: "eval-run";
 }
 
+/**
+ * A project's views changed: one was added, removed, or rebuilt. See
+ * `specs/trace-visualizers.md` §B.2.
+ */
+export interface ViewsChangedSSEData {
+  type: "views-changed";
+  /** The new {@link ViewList.version}. */
+  version: number;
+}
+
 export type SSEData =
   | PromptChangedSSEData
   | TraceChangedSSEData
   | DatasetChangedSSEData
   | EvalChangedSSEData
-  | EvalRunSSEData;
+  | EvalRunSSEData
+  | ViewsChangedSSEData;
+
+// #region Views
+
+/**
+ * One view a project has: a file under `.evalution/views/<surface>/` that
+ * built. See `specs/trace-visualizers.md` §B.
+ */
+export interface ViewInfo {
+  /** The file's path relative to the project root. */
+  uri: string;
+  /** The surface it's for: the directory it's in. */
+  surface: string;
+  /** Changes whenever its bundle does, so a frame knows to reload. */
+  moduleVersion: string;
+}
+
+/** A view file that can't be shown: it failed to build, or is in the wrong place. */
+export interface ViewModuleError {
+  /** The file's path relative to the project root. */
+  uri: string;
+  /** The surface its directory names, if it names one. */
+  surface?: string;
+  message: string;
+}
+
+/** Response body of `GET /api/views`. */
+export interface ViewList {
+  /** Bumped on every change to the list. */
+  version: number;
+  views: ViewInfo[];
+  errors: ViewModuleError[];
+}
+
+// #endregion
 
 // #region Model
 

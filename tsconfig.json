@@ -16,8 +16,8 @@
     "rootDir": "./src",
     "types": ["node", "vitest/globals"]
   },
-  // Typecheck everything under src/ except the client (which has its own
-  // tsconfig.client.json) and test fixtures. The build emits via tsdown, not
+  // Typecheck everything under src/ except the client and views (which
+  // tsconfig.client.json checks) and test fixtures. The build emits via tsdown, not
   // this config, so a broad include here only affects `tsc --noEmit`; keeping
   // it broad means files reachable only from the package entry (src/index.ts) —
   // e.g. the SDK adapters — are checked rather than silently skipped.
@@ -26,6 +26,8 @@
     "node_modules",
     "dist",
     "src/client",
+    // Browser code (DOM, JSX): checked by tsconfig.client.json.
+    "src/views",
     "src/prompt/file/ts/__fixtures__"
   ]
 }

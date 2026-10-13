@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import { diffWords } from "./text-diff";
+import { diffWords } from "./text-diff.ts";
 
 /** Rebuilds either side from a diff, to check nothing was lost. */
 const side = (segments: ReturnType<typeof diffWords>, which: "a" | "b") =>

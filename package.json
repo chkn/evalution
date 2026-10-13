@@ -11,6 +11,18 @@
     "./checks": {
       "types": "./dist/checks/index.d.ts",
       "import": "./dist/checks/index.js"
+    },
+    "./views": {
+      "types": "./dist/views/index.d.ts",
+      "import": "./dist/views/index.js"
+    },
+    "./views/react": {
+      "types": "./dist/views/react/index.d.ts",
+      "import": "./dist/views/react/index.js"
+    },
+    "./views/datasets": {
+      "types": "./dist/views/datasets/index.d.ts",
+      "import": "./dist/views/datasets/index.js"
     }
   },
   "bin": {
@@ -64,6 +76,7 @@
     "@xterm/xterm": "^6.0.0",
     "chokidar": "^5.0.0",
     "drizzle-orm": "1.0.0-rc.4",
+    "esbuild": "^0.21.5",
     "hono": "^4.12.23",
     "minimatch": "^10.2.4",
     "protobufjs": "^7.5.3",
@@ -76,7 +89,9 @@
     "@google/genai": ">=2.0.0-0",
     "@typesafe-ai/sdk": ">=0.6.0-0",
     "ai": ">=3.4.0-0",
-    "typescript": ">=5.3.3-0 <7.0.0-0"
+    "typescript": ">=5.3.3-0 <7.0.0-0",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
   },
   "peerDependenciesMeta": {
     "ai": {
@@ -86,6 +101,12 @@
       "optional": true
     },
     "@typesafe-ai/sdk": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
       "optional": true
     }
   },

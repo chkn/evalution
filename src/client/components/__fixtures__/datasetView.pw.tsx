@@ -91,6 +91,10 @@ async function mockDataset(
   fields: Record<string, { keys: string[] }> = {},
 ) {
   const pages: [number, number][] = [];
+  // The project has no dataset views.
+  await page.route("**/api/views", route =>
+    route.fulfill({ json: { version: 0, views: [], errors: [] } }),
+  );
   const base = `**/api/datasets/local/${dataset.id}`;
   await page.route(base, route =>
     route.request().method() === "GET"

@@ -9,6 +9,7 @@ import {
   bubbleCellRenderer,
   CompactSelection,
   DataEditorCore,
+  type DataEditorRef,
   type DrawHeaderCallback,
   type EditableGridCell,
   type EditListItem,
@@ -53,6 +54,15 @@ import type {
   PromptID,
 } from "../../shared/types";
 import {
+  danglingReferences,
+  describeReference,
+} from "../../views/datasets/index.ts";
+import { ViewChannel } from "../../views/host.ts";
+import {
+  type DatasetViewContext,
+  datasetSurface,
+} from "../../views/surfaces/datasets.ts";
+import {
   addDatasetRows,
   deleteDataset,
   deleteDatasetField,
@@ -71,6 +81,15 @@ import { DatasetColumnMenu } from "./DatasetColumnMenu";
 import { DatasetColumnPicker } from "./DatasetColumnPicker";
 import { DatasetRowDetails } from "./DatasetRowDetails";
 import { DetailsPane, DetailsPaneHeader, useIsWide } from "./DetailsPane";
+import { DatasetRowList } from "./dataset/DatasetRowList.tsx";
+import { RowDraftBar } from "./dataset/RowDraftBar.tsx";
+import {
+  draftRow,
+  foldDraft,
+  hasChanges,
+  isStale,
+  type RowDraft,
+} from "./dataset/row-draft.ts";
 import {
   addColumn,
   type ColumnLayout,
@@ -129,6 +148,14 @@ import {
 import { useAnchoredPopover } from "./use-anchored-popover";
 import { useContentRectTest } from "./use-content-rect-test";
 import { GRID_MONO_FONT, useGridTheme } from "./use-grid-theme";
+import {
+  fallbackLabel,
+  rememberedTab,
+  rememberTab,
+  useSurfaceViews,
+} from "./views/use-surface-views.tsx";
+import type { AcceptedAction } from "./views/ViewFrame.tsx";
+import { ViewProblemsButton, ViewTabButtons } from "./views/ViewTabs.tsx";
 
 interface Props {
   providerId: string;
@@ -426,6 +453,35 @@ function DatasetView({
     setLayout(loadLayout(layoutKey));
   }, [layoutKey]);
   const [selection, setSelection] = useState<GridSelection>(NO_SELECTION);
+  const editorRef = useRef<DataEditorRef>(null);
+
+  // Tabs: Grid, and a tab per dataset view that applies. The last one is
+  // remembered per dataset. See `specs/dataset-views.md` §C.
+  const tabKey = `evalution.datasetTab:${providerId}/${datasetId}`;
+  const [chosenTab, setChosenTab] = useState<string>(
+    () => rememberedTab(tabKey) ?? "grid",
+  );
+  const tabKeyRef = useRef(tabKey);
+  useEffect(() => {
+    if (tabKeyRef.current === tabKey) return;
+    tabKeyRef.current = tabKey;
+    setChosenTab(rememberedTab(tabKey) ?? "grid");
+  }, [tabKey]);
+  /** The row a view tab shows, and the pane edits, while a view tab is active. */
+  const [viewIndex, setViewIndex] = useState<number | null>(null);
+  /** Whether the details pane is open in a view tab — apart from the selection. */
+  const [viewPaneOpen, setViewPaneOpen] = useState(false);
+  /** A view's unsaved changes to the row it's showing. */
+  const [draft, setDraft] = useState<RowDraft | undefined>();
+  // What every dataset view's frame is told: this dataset, and the selected row.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one channel per dataset.
+  const channel = useMemo(
+    () =>
+      new ViewChannel(datasetSurface, {
+        selected: null,
+      } as DatasetViewContext),
+    [providerId, datasetId],
+  );
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -459,6 +515,11 @@ function DatasetView({
       ),
     [providerId, datasetId],
   );
+  /** Loads a range of rows: what the view tabs' row list pages through. */
+  const ensureRows = useCallback(
+    (start: number, end: number) => pager.ensure(start, end),
+    [pager],
+  );
   /** The rows last on screen, so a refetch knows what to reload first. */
   const visibleRef = useRef({ start: 0, end: 0 });
 
@@ -491,6 +552,10 @@ function DatasetView({
       cancelled = true;
     };
   }, [providerId, datasetId, version, reload, pager]);
+
+  useEffect(() => {
+    if (dataset) channel.setSubject({ dataset, overview });
+  }, [channel, dataset, overview]);
 
   const linkedPrompt = dataset?.prompt ? findPrompt(dataset.prompt) : undefined;
   // The linked prompt's resources, offered on the fields that match its
@@ -661,6 +726,159 @@ function DatasetView({
       ? shownRef.current.row
       : undefined);
 
+  // #region Dataset views (`specs/dataset-views.md` §C, §D)
+
+  /** The draft, current between renders: proposals can arrive back to back. */
+  const draftRef = useRef(draft);
+  const updateDraft = (next: RowDraft | undefined) => {
+    draftRef.current = next;
+    setDraft(next);
+  };
+  const viewRow =
+    viewIndex !== null && viewIndex < overview.rowCount
+      ? pager.get(viewIndex)
+      : undefined;
+
+  /** Asks before leaving a view's unsaved changes behind; whether to go on. */
+  const leaveDraft = (): boolean => {
+    const current = draftRef.current;
+    if (!hasChanges(current)) {
+      if (current) updateDraft(undefined);
+      return true;
+    }
+    if (!window.confirm("Discard the unsaved changes to this row?")) {
+      return false;
+    }
+    updateDraft(undefined);
+    return true;
+  };
+  const selectViewRow = (index: number) => {
+    if (index === viewIndex || !leaveDraft()) return;
+    setViewIndex(index);
+  };
+
+  /** A visible view's action, its surface's checks passed. */
+  const onViewAction = (action: AcceptedAction): string | undefined => {
+    switch (action.name) {
+      case "selectRow":
+        selectViewRow((action.args as { index: number }).index);
+        return undefined;
+      case "proposeUpdate": {
+        const { update } = action.args as { update: DatasetRowUpdate };
+        if (!viewRow || viewRow.id !== update.rowId) {
+          return "the row isn't loaded";
+        }
+        const current = draftRef.current;
+        const next = foldDraft(
+          current?.rowId === viewRow.id ? current : undefined,
+          viewRow,
+          update,
+        );
+        const dangling = danglingReferences(draftRow(next));
+        if (dangling.length > 0) {
+          return `That would leave references to instances the row doesn't declare: ${dangling.map(describeReference).join("; ")}`;
+        }
+        updateDraft(next);
+        return undefined;
+      }
+      default:
+        return `no action ${action.name}`;
+    }
+  };
+
+  const views = useSurfaceViews({
+    surface: datasetSurface,
+    channel,
+    activeUri: chosenTab.startsWith("view:") ? chosenTab.slice(5) : null,
+    onAction: onViewAction,
+  });
+  const inView = views.shownUri !== null;
+  const viewLabel =
+    views.tabs.find(t => t.uri === views.shownUri)?.label ??
+    fallbackLabel(views.shownUri ?? "");
+
+  // A view tab always has a row to show, unless there are none.
+  useEffect(() => {
+    if (!inView) return;
+    const { rowCount } = overview;
+    if (rowCount === 0) setViewIndex(null);
+    else if (viewIndex === null) setViewIndex(0);
+    else if (viewIndex >= rowCount) setViewIndex(rowCount - 1);
+  }, [inView, viewIndex, overview]);
+  useEffect(() => {
+    if (inView && viewIndex !== null) {
+      pager.ensure(viewIndex, Math.min(viewIndex + 1, overview.rowCount));
+    }
+  }, [inView, viewIndex, pager, overview.rowCount]);
+
+  // The selected row, shared by every tab: the grid's in Grid, else the
+  // view's — with the view's unsaved changes applied.
+  const contextIndex = inView ? viewIndex : selectedIndex;
+  const contextStored = inView ? viewRow : selectedRow;
+  const contextRow = useMemo(
+    () =>
+      contextStored && draft?.rowId === contextStored.id
+        ? draftRow(draft)
+        : contextStored,
+    [contextStored, draft],
+  );
+  const contextLabel =
+    contextRow && rowLabel ? rowLabelText(contextRow, rowLabel) : undefined;
+  useEffect(() => {
+    channel.setContext({
+      selected:
+        contextRow && contextIndex !== null
+          ? {
+              index: contextIndex,
+              row: contextRow,
+              ...(contextLabel !== undefined && { label: contextLabel }),
+            }
+          : null,
+    });
+  }, [channel, contextRow, contextIndex, contextLabel]);
+
+  const chooseTab = (tab: string) => {
+    if (tab === chosenTab || !leaveDraft()) return;
+    if (tab.startsWith("view:") && !inView) {
+      // The grid's row carries over, and so does whether its pane was open.
+      setViewIndex(selectedIndex);
+      setViewPaneOpen(selectedIndex !== null && paneOpen);
+    } else if (tab === "grid" && inView && viewIndex !== null) {
+      setSelection({
+        columns: CompactSelection.empty(),
+        rows: CompactSelection.fromSingleSelection(viewIndex),
+      });
+      const row = viewIndex;
+      requestAnimationFrame(() => editorRef.current?.scrollTo(0, row));
+    }
+    setChosenTab(tab);
+    rememberTab(tabKey, tab);
+  };
+
+  const saveDraft = () => {
+    const current = draftRef.current;
+    if (!current) return;
+    if (!viewRow || viewRow.id !== current.rowId || isStale(current, viewRow)) {
+      setError("This row changed since you started; discard and redo.");
+      return;
+    }
+    updateDraft(undefined);
+    // Refused: bring the draft back, unless another has been started since.
+    // The row reloads as it was stored, so it isn't stale.
+    void saveUpdates([current.update]).then(saved => {
+      if (!saved && !draftRef.current) updateDraft(current);
+    });
+  };
+  const draftPending =
+    inView && hasChanges(draft) && viewRow?.id === draft.rowId;
+  const draftStale =
+    !!draft &&
+    !!viewRow &&
+    viewRow.id === draft.rowId &&
+    isStale(draft, viewRow);
+
+  // #endregion
+
   const openInPlayground = (index: number) => {
     const row = pager.get(index);
     if (!dataset || !linkedPrompt || !row) return;
@@ -749,20 +967,27 @@ function DatasetView({
    * `dataset-changed` refetch then replaces them. A failure says why and
    * reloads the visible rows from the server, dropping whatever optimistic
    * edits are on them — any still saving refetch again when they land.
+   * Settles to whether the server took the updates.
    */
   const saveUpdates = useCallback(
-    (updates: DatasetRowUpdate[]) => {
-      if (updates.length === 0) return;
+    async (updates: DatasetRowUpdate[]): Promise<boolean> => {
+      if (updates.length === 0) return true;
       pager.patch(updates);
       setLoaded(n => n + 1);
-      updateDatasetRows(providerId, datasetId, updates).catch(err => {
-        setError(`Couldn't save: ${err.message}`);
+      try {
+        await updateDatasetRows(providerId, datasetId, updates);
+        return true;
+      } catch (err) {
+        setError(`Couldn't save: ${(err as Error).message}`);
         pager.invalidate();
         const { start, end } = visibleRef.current;
         pager.ensure(start, Math.min(end, overview.rowCount));
-      });
+        // A view tab's row is shown with the grid hidden.
+        if (viewIndex !== null) pager.ensure(viewIndex, viewIndex + 1);
+        return false;
+      }
     },
-    [pager, providerId, datasetId, overview.rowCount],
+    [pager, providerId, datasetId, overview.rowCount, viewIndex],
   );
   const saveEdits = useCallback(
     (edits: CellEdit[]) => saveUpdates(groupEdits(edits)),
@@ -1022,15 +1247,19 @@ function DatasetView({
       }),
     });
 
+  // In Grid, the pane shows the selection; in a view tab, the view's row,
+  // while the pane is open.
+  const paneIndex = inView ? (viewPaneOpen ? viewIndex : null) : selectedIndex;
+  const paneRow = inView ? (viewPaneOpen ? viewRow : undefined) : selectedRow;
   const selectedLabel =
-    selectedRow && rowLabel ? rowLabelText(selectedRow, rowLabel) : undefined;
+    paneRow && rowLabel ? rowLabelText(paneRow, rowLabel) : undefined;
 
-  const rowDetails = selectedRow && selectedIndex !== null && (
+  const rowDetails = paneRow && paneIndex !== null && (
     <>
       <DetailsPaneHeader
         title={
           <span className="trace-row-name">
-            Row {selectedIndex + 1}
+            Row {paneIndex + 1}
             {selectedLabel !== undefined && (
               <span className="dataset-row-label"> · {selectedLabel}</span>
             )}
@@ -1044,7 +1273,7 @@ function DatasetView({
                 className="dataset-row-btn"
                 title={`Open in playground (${linkedPrompt.name})`}
                 aria-label="Open row in playground"
-                onClick={() => openInPlayground(selectedIndex)}
+                onClick={() => openInPlayground(paneIndex)}
               >
                 ▶
               </button>
@@ -1056,8 +1285,11 @@ function DatasetView({
               aria-label="Delete row"
               onClick={() =>
                 void act(async () => {
-                  await deleteDatasetRow(providerId, datasetId, selectedRow.id);
+                  await deleteDatasetRow(providerId, datasetId, paneRow.id);
                   setSelection(NO_SELECTION);
+                  if (draftRef.current?.rowId === paneRow.id) {
+                    updateDraft(undefined);
+                  }
                   setReload(n => n + 1);
                 })
               }
@@ -1066,16 +1298,22 @@ function DatasetView({
             </button>
           </>
         }
-        id={selectedRow.id}
-        onClose={() => setSelection(NO_SELECTION)}
+        id={paneRow.id}
+        onClose={() =>
+          inView ? setViewPaneOpen(false) : setSelection(NO_SELECTION)
+        }
       />
+      {hasChanges(draft) && draft.rowId === paneRow.id && (
+        <div className="dataset-row-draft-banner">
+          {viewLabel} has unsaved changes to this row. Edits here are saved at
+          once, and will leave those changes stale.
+        </div>
+      )}
       <DatasetRowDetails
         dataset={dataset}
-        row={selectedRow}
+        row={paneRow}
         onOpenTrace={onOpenTrace}
-        onChangeRow={update =>
-          saveUpdates([{ rowId: selectedRow.id, ...update }])
-        }
+        onChangeRow={update => saveUpdates([{ rowId: paneRow.id, ...update }])}
         sources={rowSources}
       />
     </>
@@ -1262,93 +1500,161 @@ function DatasetView({
       )}
       <div className="trace-view-body dataset-view-body" ref={bodyRef}>
         <div className="trace-view-main-column">
-          {/*
-           * Drawn even with no rows, so the header's "＋" can add a field to
-           * an empty dataset and the trailing row can add its first row.
-           */}
-          <div className="dataset-grid" ref={gridRef}>
-            <DataEditorCore
-              renderers={RENDERERS}
-              imageWindowLoader={NO_IMAGES}
-              headerIcons={GRID_HEADER_ICONS}
-              getGroupDetails={getGroupDetails}
-              width="100%"
-              height="100%"
-              theme={theme}
-              columns={gridColumns}
-              rows={rowCount}
-              trailingRowOptions={trailingRow}
-              onRowAppended={canAppend ? onRowAppended : undefined}
-              getCellContent={getCellContent}
-              onVisibleRegionChanged={onVisibleRegionChanged}
-              drawHeader={drawHeader}
-              rowMarkers="clickable-number"
-              rowSelect="single"
-              rangeSelect="rect"
-              columnSelect="none"
-              gridSelection={selection}
-              onGridSelectionChange={setSelection}
-              onCellClicked={onCellClicked}
-              onCellActivated={onCellActivated}
-              onGroupHeaderClicked={onGroupHeaderClicked}
-              onHeaderMenuClick={onHeaderMenuClick}
-              onColumnProposeMove={onColumnProposeMove}
-              onColumnMoved={onColumnMoved}
-              onCellsEdited={onCellsEdited}
-              validateCell={validateCell}
-              onDelete={onDelete}
-              // Split a pasted block over the cells from the selected one
-              // on. Left unset, Glide pastes the whole clipboard into the
-              // one selected cell.
-              onPaste
-              // Read cells out through `getCellContent`, which copying and
-              // the fill handle both need.
-              getCellsForSelection
-              fillHandle
-              onColumnResize={(column, width) =>
-                column.id &&
-                updateLayout({
-                  ...layout,
-                  widths: { ...widths, [column.id]: width },
-                })
-              }
-              rowHeight={ROW_HEIGHT}
-              headerHeight={HEADER_HEIGHT}
-              groupHeaderHeight={GROUP_HEADER_HEIGHT}
-              smoothScrollX
-              smoothScrollY
-              // Glide types this ref as never null.
-              portalElementRef={editorPortalRef as RefObject<HTMLElement>}
-              rightElement={
-                <DatasetAddField
-                  providerId={providerId}
-                  datasetId={datasetId}
-                  prompts={prompts}
-                  linked={dataset.prompt}
-                  top={grouped ? GROUP_HEADER_HEIGHT : 0}
-                  height={HEADER_HEIGHT}
-                  onAdded={() => setReload(n => n + 1)}
+          {(views.tabs.length > 0 ||
+            views.problems.length > 0 ||
+            chosenTab !== "grid") && (
+            <div className="trace-view-tabs dataset-view-tabs">
+              <div className="trace-view-tab-list">
+                <button
+                  type="button"
+                  className={`trace-view-tab${inView ? "" : " trace-view-tab-active"}`}
+                  onClick={() => chooseTab("grid")}
+                >
+                  <DatasetsIcon />
+                  Grid
+                </button>
+                <ViewTabButtons
+                  tabs={views.tabs}
+                  active={views.shownUri}
+                  onSelect={uri => chooseTab(`view:${uri}`)}
                 />
-              }
-              // Filled rather than spaced, so the "＋" follows the last
-              // column; not sticky, so it scrolls with the rest of the grid
-              rightElementProps={{ sticky: false, fill: true }}
-            />
-            {/*
-             * Glide rules the whole canvas, not just the rows: its
-             * horizontal lines are drawn past the last row and its vertical
-             * ones run the full height. Covering what's below the last row
-             * ends the table there, while the grid still fills the pane so
-             * the horizontal scrollbar stays at the bottom. Sits under the
-             * scroller (see `styles.css`) so that scrollbar stays visible.
-             */}
-            <div className="dataset-grid-fill" style={{ top: contentBottom }}>
-              {rowCount === 0 && !canAppend && (
-                <p className="dataset-grid-empty">
-                  No fields yet. Add one with the “＋” to start filling this
-                  dataset in by hand.
-                </p>
+                <ViewProblemsButton problems={views.problems} />
+              </div>
+              {inView && !viewPaneOpen && viewRow && (
+                <button
+                  type="button"
+                  className="trace-view-prompt-btn"
+                  onClick={() => setViewPaneOpen(true)}
+                >
+                  Details
+                </button>
               )}
+            </div>
+          )}
+          {draftPending && (
+            <RowDraftBar
+              viewLabel={viewLabel}
+              rowName={`Row ${(viewIndex ?? 0) + 1}`}
+              stale={draftStale}
+              onSave={saveDraft}
+              onDiscard={() => updateDraft(undefined)}
+            />
+          )}
+          <div className="dataset-view-main">
+            {inView && (
+              <DatasetRowList
+                rowCount={rowCount}
+                getRow={i => pager.get(i)}
+                ensure={ensureRows}
+                label={row =>
+                  rowLabel ? rowLabelText(row, rowLabel) : undefined
+                }
+                selected={viewIndex}
+                onSelect={selectViewRow}
+              />
+            )}
+            <div className="view-stack">
+              {/*
+               * Drawn even with no rows, so the header's "＋" can add a field to
+               * an empty dataset and the trailing row can add its first row.
+               */}
+              <div
+                className="dataset-grid"
+                ref={gridRef}
+                style={inView ? { display: "none" } : undefined}
+              >
+                <DataEditorCore
+                  ref={editorRef}
+                  renderers={RENDERERS}
+                  imageWindowLoader={NO_IMAGES}
+                  headerIcons={GRID_HEADER_ICONS}
+                  getGroupDetails={getGroupDetails}
+                  width="100%"
+                  height="100%"
+                  theme={theme}
+                  columns={gridColumns}
+                  rows={rowCount}
+                  trailingRowOptions={trailingRow}
+                  onRowAppended={canAppend ? onRowAppended : undefined}
+                  getCellContent={getCellContent}
+                  onVisibleRegionChanged={onVisibleRegionChanged}
+                  drawHeader={drawHeader}
+                  rowMarkers="clickable-number"
+                  rowSelect="single"
+                  rangeSelect="rect"
+                  columnSelect="none"
+                  gridSelection={selection}
+                  onGridSelectionChange={setSelection}
+                  onCellClicked={onCellClicked}
+                  onCellActivated={onCellActivated}
+                  onGroupHeaderClicked={onGroupHeaderClicked}
+                  onHeaderMenuClick={onHeaderMenuClick}
+                  onColumnProposeMove={onColumnProposeMove}
+                  onColumnMoved={onColumnMoved}
+                  onCellsEdited={onCellsEdited}
+                  validateCell={validateCell}
+                  onDelete={onDelete}
+                  // Split a pasted block over the cells from the selected one
+                  // on. Left unset, Glide pastes the whole clipboard into the
+                  // one selected cell.
+                  onPaste
+                  // Read cells out through `getCellContent`, which copying and
+                  // the fill handle both need.
+                  getCellsForSelection
+                  fillHandle
+                  onColumnResize={(column, width) =>
+                    column.id &&
+                    updateLayout({
+                      ...layout,
+                      widths: { ...widths, [column.id]: width },
+                    })
+                  }
+                  rowHeight={ROW_HEIGHT}
+                  headerHeight={HEADER_HEIGHT}
+                  groupHeaderHeight={GROUP_HEADER_HEIGHT}
+                  smoothScrollX
+                  smoothScrollY
+                  // Glide types this ref as never null.
+                  portalElementRef={editorPortalRef as RefObject<HTMLElement>}
+                  rightElement={
+                    <DatasetAddField
+                      providerId={providerId}
+                      datasetId={datasetId}
+                      prompts={prompts}
+                      linked={dataset.prompt}
+                      top={grouped ? GROUP_HEADER_HEIGHT : 0}
+                      height={HEADER_HEIGHT}
+                      onAdded={() => setReload(n => n + 1)}
+                    />
+                  }
+                  // Filled rather than spaced, so the "＋" follows the last
+                  // column; not sticky, so it scrolls with the rest of the grid
+                  rightElementProps={{ sticky: false, fill: true }}
+                />
+                {/*
+                 * Glide rules the whole canvas, not just the rows: its
+                 * horizontal lines are drawn past the last row and its vertical
+                 * ones run the full height. Covering what's below the last row
+                 * ends the table there, while the grid still fills the pane so
+                 * the horizontal scrollbar stays at the bottom. Sits under the
+                 * scroller (see `styles.css`) so that scrollbar stays visible.
+                 */}
+                <div
+                  className="dataset-grid-fill"
+                  style={{ top: contentBottom }}
+                >
+                  {rowCount === 0 && !canAppend && (
+                    <p className="dataset-grid-empty">
+                      No fields yet. Add one with the “＋” to start filling this
+                      dataset in by hand.
+                    </p>
+                  )}
+                </div>
+              </div>
+              {inView && rowCount === 0 && (
+                <div className="view-frame-message">No rows</div>
+              )}
+              {views.layer}
             </div>
           </div>
           {!showSidePane && rowDetails && (

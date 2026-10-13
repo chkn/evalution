@@ -5,8 +5,19 @@
   // the published surface and carry deps (ws, @lydell/node-pty) that needn't be
   // present to generate the API reference.
   "compilerOptions": {
-    "rootDir": "."
+    "rootDir": ".",
+    // The views entries are browser code.
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx"
   },
   "extends": "./tsconfig.json",
-  "include": ["src/index.ts", "packages/**/index.ts"]
+  "include": [
+    "src/index.ts",
+    "src/views/index.ts",
+    "src/views/react/index.tsx",
+    "src/views/datasets/index.ts",
+    "packages/**/index.ts"
+  ],
+  // Not tsconfig.json's, which leaves the browser-only `src/views` out.
+  "exclude": ["node_modules", "dist"]
 }

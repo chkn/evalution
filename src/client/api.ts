@@ -48,6 +48,7 @@ import type {
   UpdatePromptResponse,
   VariationInfo,
   VersionInfo,
+  ViewList,
 } from "../shared/types";
 import { markSelfEdit } from "./self-edits.ts";
 import { encodePromptId } from "./utils";
@@ -1026,6 +1027,13 @@ export async function getProviderHead(
   const res = await fetch(
     `/api/prompt-providers/${encodeURIComponent(providerId)}/head`,
   );
+  await throwIfError(res);
+  return res.json();
+}
+
+/** The project's views, and the view files that can't be shown. */
+export async function getViews(): Promise<ViewList> {
+  const res = await fetch("/api/views");
   await throwIfError(res);
   return res.json();
 }

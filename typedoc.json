@@ -1,6 +1,9 @@
 {
   "entryPoints": [
     "src/index.ts",
+    "src/views/index.ts",
+    "src/views/react/index.tsx",
+    "src/views/datasets/index.ts",
     "packages/vercel-ai-sdk/src/index.ts",
     "packages/typesafe-sdk/src/index.ts"
   ],
