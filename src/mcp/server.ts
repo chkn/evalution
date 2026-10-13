@@ -745,7 +745,7 @@ export function createMcpServer(
     {
       title: "Get a dataset",
       description:
-        "Gets a dataset's fields, row count, and the columns of the `rows` view query_dataset_rows runs against.",
+        "Gets a dataset's fields, row count, the resource instances its rows declare (by name, with the resource, how many rows declare it, and its argument names), and the columns of the `rows` view query_dataset_rows runs against.",
       inputSchema: z.object({
         datasetId: datasetIdParam,
         providerId: providerIdParam("dataset"),
@@ -754,7 +754,7 @@ export function createMcpServer(
     },
     ({ datasetId, providerId }) =>
       guard(async () => {
-        const { dataset, rowCount } = unwrap<DatasetWithOverview>(
+        const { dataset, rowCount, instances } = unwrap<DatasetWithOverview>(
           await handleGetDataset(
             datasetProvider(providerId),
             datasetId,
@@ -765,6 +765,7 @@ export function createMcpServer(
           ...dataset,
           fields: dataset.fields.map(describeField),
           rowCount,
+          ...(Object.keys(instances).length > 0 && { instances }),
           queryColumns: datasetQueryColumns(dataset.fields).map(
             ({ column, description }) => ({ column, description }),
           ),
@@ -1047,7 +1048,7 @@ export function createMcpServer(
     {
       title: "List dataset rows",
       description:
-        "Lists a page of a dataset's rows, oldest first, with values keyed by field name. For filtering, sorting, or aggregating, use query_dataset_rows.",
+        "Lists a page of a dataset's rows, oldest first, with values keyed by field name and each row's resource instances, if any. For filtering, sorting, or aggregating, use query_dataset_rows.",
       inputSchema: z.object({
         datasetId: datasetIdParam,
         offset: z.number().int().nonnegative().optional(),
@@ -1079,7 +1080,7 @@ export function createMcpServer(
     "query_dataset_rows",
     {
       title: "Query dataset rows with SQL",
-      description: `Runs one read-only SQL query (SQLite dialect) against a \`rows\` view of a dataset: one column per field, named after it, plus _id, _created_at, _source, and _cells. A typed-in string, number, or boolean reads as its plain value; anything else reads as JSON. get_dataset lists the columns. Example: SELECT city, count(*) FROM rows GROUP BY city. A query that runs longer than ${QUERY_TIMEOUT_SECONDS} seconds is stopped with an error.`,
+      description: `Runs one read-only SQL query (SQLite dialect) against a \`rows\` view of a dataset: one column per field, named after it, plus _id, _created_at, _source, _cells, and _resources (the row's resource instances). A typed-in string, number, or boolean reads as its plain value; anything else reads as JSON. get_dataset lists the columns. Example: SELECT city, count(*) FROM rows GROUP BY city. A query that runs longer than ${QUERY_TIMEOUT_SECONDS} seconds is stopped with an error.`,
       inputSchema: z.object({
         datasetId: datasetIdParam,
         sql: z.string().describe("The query."),

@@ -241,6 +241,7 @@ export function describeRow(row: DatasetRow, fields: readonly DatasetField[]) {
   return {
     id: row.id,
     values: describeCells(row.cells, fields),
+    ...(row.resources && { resources: row.resources }),
     ...(row.source && { source: row.source }),
     createdAt: row.createdAt,
   };

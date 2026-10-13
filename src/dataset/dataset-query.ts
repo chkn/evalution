@@ -37,6 +37,11 @@ const BUILT_IN_COLUMNS: DatasetQueryColumn[] = [
     description:
       "JSON: every cell, keyed by field id, exactly as stored (each an ExecutionInput).",
   },
+  {
+    column: "_resources",
+    description:
+      "JSON: the row's resource instances, keyed by name ({uri, args} each), or NULL when it has none.",
+  },
 ];
 
 /**
@@ -120,7 +125,8 @@ export function datasetRowsQuery(
     id AS _id,
     created_at AS _created_at,
     json(source) AS _source,
-    json(cells) AS _cells${select.map(s => `,\n    ${s}`).join("")}
+    json(cells) AS _cells,
+    json(resources) AS _resources${select.map(s => `,\n    ${s}`).join("")}
   FROM ${identifier(tables.rows)}
   WHERE dataset_id = ${literal(datasetId)}
   ORDER BY created_at, rowid

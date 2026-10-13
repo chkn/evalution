@@ -433,6 +433,7 @@ describe("MCP server", () => {
           "_created_at",
           "_source",
           "_cells",
+          "_resources",
           "name",
           "excited",
           "expected",
@@ -514,6 +515,21 @@ describe("MCP server", () => {
       const [row] = await datasets.listRows(dataset.id);
       expect(row.cells).toEqual({ "0": resource, "1": resource });
       expect(row.resources).toEqual({ notes });
+
+      // The read tools show them too.
+      const [listed] = await call("list_dataset_rows", {
+        datasetId: dataset.id,
+      });
+      expect(listed.resources).toEqual({ notes });
+      expect(
+        (await call("get_dataset", { datasetId: dataset.id })).instances,
+      ).toEqual({ notes: { uri: notes.uri, rows: 1, args: ["title"] } });
+      expect(
+        await call("query_dataset_rows", {
+          datasetId: dataset.id,
+          sql: "SELECT json_extract(_resources, '$.notes.uri') AS uri FROM rows",
+        }),
+      ).toEqual({ columns: ["uri"], rows: [{ uri: notes.uri }] });
     });
 
     it("updates and deletes rows, and renames and deletes fields", async () => {
