@@ -25,7 +25,11 @@ import {
 } from "./dataset-columns";
 import { addedTitle, pathLabel } from "./dataset-grid";
 import { previewCell } from "./dataset-preview";
-import { ColumnsIcon, GrabHandleIcon } from "./trace/icons.tsx";
+import {
+  ChevronDownIcon,
+  ColumnsIcon,
+  GrabHandleIcon,
+} from "./trace/icons.tsx";
 import { useAnchoredPopover } from "./use-anchored-popover";
 
 interface Props {
@@ -238,7 +242,7 @@ export function DatasetColumnPicker({
                   }}
                 >
                   <span className="trace-header-menu-item-label">
-                    {isLabel ? "Stop using as row label" : "Use as row label"}
+                    {isLabel ? "Don't use as row label" : "Use as row label"}
                   </span>
                 </button>
               </div>
@@ -326,6 +330,7 @@ export function DatasetColumnPicker({
       >
         <ColumnsIcon />
         Columns
+        <ChevronDownIcon />
       </button>
       {open &&
         createPortal(

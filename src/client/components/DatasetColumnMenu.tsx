@@ -157,7 +157,7 @@ export function DatasetColumnMenu({
             >
               <span className="trace-header-menu-item-label">
                 {rowLabel.isLabel
-                  ? "Stop using as row label"
+                  ? "Don't use as row label"
                   : "Use as row label"}
               </span>
             </button>

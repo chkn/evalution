@@ -5,6 +5,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { type AgentInfo, OTHER_AGENT_URL } from "../../shared/agent";
 import ProviderIcon from "./ProviderIcon";
+import { ChevronDownIcon } from "./trace/icons";
 import { useAnchoredPopover } from "./use-anchored-popover";
 
 interface Props {
@@ -145,24 +146,6 @@ function AgentIcon() {
     >
       <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
       <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" />
-    </svg>
-  );
-}
-
-function ChevronDownIcon() {
-  return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="6 9 12 15 18 9" />
     </svg>
   );
 }

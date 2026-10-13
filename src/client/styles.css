@@ -7078,7 +7078,7 @@ pre {
   container-name: dataset-header;
 }
 
-@container dataset-header (max-width: 500px) {
+@container dataset-header (max-width: 727px) {
   .trace-view-header-actions-full {
     display: none;
   }

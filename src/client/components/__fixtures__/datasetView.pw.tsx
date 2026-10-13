@@ -994,6 +994,37 @@ test("DatasetView shows Delete inline when wide, in the ⋯ menu when narrow", a
   ).toBeVisible();
 });
 
+test("the ⋯ menu divides Delete from the actions above it only when there are some", async ({
+  mount,
+  page,
+}) => {
+  await mockLinkedDataset(page);
+  await page.setViewportSize({ width: 320, height: 700 });
+  const divider = page.locator(".trace-header-menu .ask-agent-menu-divider");
+
+  const bare = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await bare.getByRole("button", { name: "More actions" }).click();
+  await expect(
+    page.locator(".trace-header-menu .trace-header-menu-item", {
+      hasText: "Delete dataset",
+    }),
+  ).toBeVisible();
+  await expect(divider).toHaveCount(0);
+  await bare.unmount();
+
+  const withEval = await mount(
+    <DatasetViewHarness
+      providerId="local"
+      datasetId="tickets"
+      onNewEval={() => {}}
+    />,
+  );
+  await withEval.getByRole("button", { name: "More actions" }).click();
+  await expect(divider).toHaveCount(1);
+});
+
 test("clicking the trailing row appends an empty row and selects it", async ({
   mount,
   page,
@@ -1792,7 +1823,7 @@ test("the Columns picker hides a column, adds one from the path tree, and sets t
   await expect(picker.getByTitle("Row label")).toBeVisible();
 
   await picker.getByRole("button", { name: "More for title" }).click();
-  await picker.getByRole("button", { name: "Stop using as row label" }).click();
+  await picker.getByRole("button", { name: "Don't use as row label" }).click();
   expect(sent.at(-1)?.rowLabel).toBeNull();
   await expect(picker.getByTitle("Row label")).toHaveCount(0);
   await picker.getByRole("button", { name: "More for title" }).click();

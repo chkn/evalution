@@ -970,6 +970,21 @@ function DatasetView({
     menuOpen &&
     createPortal(
       <div className="trace-header-menu" ref={menuRef} style={menuStyle}>
+        {onNewEval && (
+          <button
+            type="button"
+            className="trace-header-menu-item"
+            onClick={() => {
+              setMenuOpen(false);
+              newEval();
+            }}
+          >
+            <span className="trace-header-menu-item-icon">
+              <EvalsIcon size={14} />
+            </span>
+            <span className="trace-header-menu-item-label">New eval…</span>
+          </button>
+        )}
         {onAskAgent && (
           <AskAgentMenuItems
             // Only those that can run: the button's own menu is where the
@@ -981,18 +996,7 @@ function DatasetView({
             }}
           />
         )}
-        {onNewEval && (
-          <button
-            type="button"
-            className="trace-header-menu-item"
-            onClick={() => {
-              setMenuOpen(false);
-              newEval();
-            }}
-          >
-            <span className="trace-header-menu-item-label">New eval…</span>
-          </button>
-        )}
+        {(onNewEval || onAskAgent) && <hr className="ask-agent-menu-divider" />}
         <button
           type="button"
           className="trace-header-menu-item dataset-menu-delete"
@@ -1001,6 +1005,9 @@ function DatasetView({
             handleDelete();
           }}
         >
+          <span className="trace-header-menu-item-icon">
+            <TrashIcon />
+          </span>
           <span className="trace-header-menu-item-label">Delete dataset</span>
         </button>
       </div>,
@@ -1130,9 +1137,6 @@ function DatasetView({
               }
             />
             <div className="trace-view-header-actions-full">
-              {onAskAgent && (
-                <AskAgentButton agents={agents} onAsk={onAskAgent} />
-              )}
               {onNewEval && (
                 <button
                   type="button"
@@ -1143,6 +1147,9 @@ function DatasetView({
                   <EvalsIcon size={14} />
                   New eval…
                 </button>
+              )}
+              {onAskAgent && (
+                <AskAgentButton agents={agents} onAsk={onAskAgent} />
               )}
               <button
                 type="button"
