@@ -13,6 +13,7 @@ import {
   changesAnything,
   chosenResources,
   datasetInputSources,
+  duplicateRow,
   rowChanges,
   rowEditorState,
 } from "./dataset-row-editing";
@@ -166,5 +167,37 @@ describe("chosenResources", () => {
       instances: { renamed: { uri: SEEDED.uri, args: {} } },
     };
     expect(chosenResources(renamed)).not.toBe(before);
+  });
+});
+
+describe("duplicateRow", () => {
+  const text = (value: string): ExecutionInput => ({
+    kind: "value",
+    value: { kind: "primitive", value },
+  });
+
+  it("copies the cells and resources, but not the source or a receipt", () => {
+    const row = {
+      id: "r1",
+      createdAt: 1,
+      source: { kind: "playground" as const },
+      cells: { "0": text("a") },
+      resources: { task: { uri: SEEDED.uri, receipt: { id: 7 } } },
+    };
+    expect(duplicateRow(row)).toEqual({
+      cells: { "0": text("a") },
+      resources: { task: { uri: SEEDED.uri } },
+    });
+  });
+
+  it("leaves resources off a row that has none", () => {
+    expect(duplicateRow({ cells: {} })).toEqual({ cells: {} });
+    expect(duplicateRow({ cells: {}, resources: {} })).toEqual({ cells: {} });
+  });
+
+  it("copies deeply, so editing the copy leaves the original alone", () => {
+    const row = { cells: { "0": text("a") } };
+    const copy = duplicateRow(row);
+    expect(copy.cells["0"]).not.toBe(row.cells["0"]);
   });
 });

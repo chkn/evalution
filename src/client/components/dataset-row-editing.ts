@@ -137,6 +137,25 @@ export function rowChanges(
   };
 }
 
+/**
+ * A new row with `row`'s cells and resource instances, for
+ * `DatasetProvider.addRows`. Its `source` is left behind — a copy is added by
+ * hand — and so is any receipt, which a row never carries.
+ */
+export function duplicateRow(
+  row: Pick<DatasetRow, "cells" | "resources">,
+): Pick<DatasetRow, "cells" | "resources"> {
+  const resources = Object.fromEntries(
+    Object.entries(row.resources ?? {}).map(
+      ([name, { receipt: _, ...spec }]) => [name, structuredClone(spec)],
+    ),
+  );
+  return {
+    cells: structuredClone(row.cells),
+    ...(Object.keys(resources).length > 0 && { resources }),
+  };
+}
+
 /** Whether `changes` changes anything at all. */
 export function changesAnything(
   changes: Omit<DatasetRowUpdate, "rowId">,

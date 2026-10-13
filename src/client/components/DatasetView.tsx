@@ -127,7 +127,7 @@ import {
   rowLabelText,
   serializeDatasetLayout,
 } from "./dataset-grid";
-import { datasetInputSources } from "./dataset-row-editing";
+import { datasetInputSources, duplicateRow } from "./dataset-row-editing";
 import { GRID_HEADER_ICONS } from "./grid-sprites";
 import type { NewEvalSeed } from "./NewEvalDialog";
 import {
@@ -139,6 +139,7 @@ import {
 import { formatTimestamp, formatTimestampCompact } from "./trace/format.ts";
 import {
   CalendarIcon,
+  CopyIcon,
   DatasetsIcon,
   EvalsIcon,
   MoreIcon,
@@ -1254,6 +1255,25 @@ function DatasetView({
   const selectedLabel =
     paneRow && rowLabel ? rowLabelText(paneRow, rowLabel) : undefined;
 
+  /**
+   * Appends a copy of `row` (see {@link duplicateRow}) and, in the grid,
+   * selects it — the pane follows to the copy, which is where an edit to it
+   * would start.
+   */
+  const duplicateRowAt = (row: DatasetRow) =>
+    act(async () => {
+      const at = overview.rowCount;
+      await addDatasetRows(providerId, datasetId, [duplicateRow(row)]);
+      setReload(n => n + 1);
+      if (!inView) {
+        setSelection({
+          columns: CompactSelection.empty(),
+          rows: CompactSelection.fromSingleSelection(at),
+        });
+        requestAnimationFrame(() => editorRef.current?.scrollTo(0, at));
+      }
+    });
+
   const rowDetails = paneRow && paneIndex !== null && (
     <>
       <DetailsPaneHeader
@@ -1278,6 +1298,15 @@ function DatasetView({
                 ▶
               </button>
             )}
+            <button
+              type="button"
+              className="dataset-row-btn"
+              title="Duplicate row"
+              aria-label="Duplicate row"
+              onClick={() => void duplicateRowAt(paneRow)}
+            >
+              <CopyIcon />
+            </button>
             <button
               type="button"
               className="dataset-row-btn dataset-row-delete"
