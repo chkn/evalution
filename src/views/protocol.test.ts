@@ -410,6 +410,28 @@ describe("the datasets surface", () => {
     expect(check({ index: 0.5 }, state)).toBeDefined();
   });
 
+  it("shows only instances the selected row declares", () => {
+    const { check } = datasetSurface.actions.showInstance;
+    expect(datasetSurface.actions.showInstance.effect).toBe("ephemeral");
+    const withInstance = {
+      ...state,
+      context: {
+        selected: {
+          index: 0,
+          row: {
+            ...row,
+            resources: { task: { uri: "tasks.ts#seededTask" } },
+          },
+        },
+      },
+    };
+    expect(check({ name: "task" }, withInstance)).toBeUndefined();
+    expect(check({ name: "other" }, withInstance)).toContain("no instance");
+    expect(check({ name: "toString" }, withInstance)).toContain("no instance");
+    expect(check({ name: "task" }, state)).toContain("no instance");
+    expect(check({}, withInstance)).toContain("needs a name");
+  });
+
   it("is never live", () => {
     expect(datasetSurface.isFinal(state.subject)).toBe(true);
     expect(

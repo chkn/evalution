@@ -53,7 +53,10 @@ const VIEWS = {
       const next = document.createElement("button");
       next.textContent = "next";
       next.onclick = () => p.selectRow(p.selected.index + 1);
-      el.append(shown, rename, dangle, next);
+      const show = document.createElement("button");
+      show.textContent = "show task";
+      show.onclick = () => p.showInstance("task");
+      el.append(shown, rename, dangle, next, show);
     }
     export default datasetView({
       label: "Rows view",
@@ -91,12 +94,15 @@ const DATASET: Dataset = {
     },
   ],
   rowLabel: { root: { field: "0" }, keys: [] },
+  prompt: { id: "src/names.ts#greet", providerId: "files" },
   createdAt: 1,
   updatedAt: 1,
 };
 const ROWS: DatasetRow[] = ["alpha", "beta", "gamma"].map((name, i) => ({
   id: `r${i + 1}`,
   cells: { "0": text(name) },
+  // Only the first row declares an instance.
+  ...(i === 0 && { resources: { task: { uri: "tasks.ts#seededTask" } } }),
   createdAt: i,
 }));
 
@@ -133,13 +139,35 @@ const inFrame = (page: Page, name: string) =>
   page.frameLocator('iframe[title="Rows view"]').getByRole("button", { name });
 const rowList = (page: Page) => page.getByRole("listbox", { name: "Rows" });
 
+/** The linked prompt's resources: what gives a row's instances cards in the pane. */
+const TASK = {
+  uri: "tasks.ts#seededTask",
+  label: "Seeded task",
+  scope: "run" as const,
+};
+
 async function openRowsView(
   page: Page,
   mount: (c: ReactElement) => Promise<unknown>,
 ) {
   await routeViews(page, built);
   const updates = await mockDataset(page);
-  await mount(<DatasetViewHarness providerId="local" datasetId="names" />);
+  await mount(
+    <DatasetViewHarness
+      providerId="local"
+      datasetId="names"
+      promptName="greet"
+      linkedPrompt={{
+        functionParameters: DATASET.fields.map(f => f.def),
+        inputSources: {
+          resources: [TASK],
+          functionSlots: {},
+          executeSlots: {},
+          resourceSlots: {},
+        },
+      }}
+    />,
+  );
   await page.getByRole("button", { name: "Rows view" }).click();
   return updates;
 }
@@ -188,6 +216,23 @@ test("the selection survives switching to the grid and back; closing the pane ke
   await expect(shown(page)).toHaveText("row r2 (beta)");
   await page.getByRole("button", { name: "Details" }).click();
   await expect(page.locator(".trace-row-name")).toContainText("Row 2");
+});
+
+test("a view can ask for an instance to be shown, opening a closed details pane", async ({
+  mount,
+  page,
+}) => {
+  await openRowsView(page, mount);
+  await expect(page.locator(".trace-row-name")).toHaveCount(0);
+  await inFrame(page, "show task").click();
+  await expect(page.locator(".trace-row-name")).toContainText("Row 1");
+  const card = page.locator("[data-instance-card='task']");
+  await expect(card).toBeVisible();
+  await expect(card).toHaveClass(/pg-row-highlight/);
+  // Gone after a moment, and a repeat request flashes it again.
+  await expect(card).not.toHaveClass(/pg-row-highlight/);
+  await inFrame(page, "show task").click();
+  await expect(card).toHaveClass(/pg-row-highlight/);
 });
 
 test("a view's proposal lands in a draft, which saves only on Save", async ({

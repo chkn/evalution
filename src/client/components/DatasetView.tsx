@@ -136,6 +136,7 @@ import {
   panelFill,
   staleFields,
 } from "./named-inputs";
+import { scrollToInstance } from "./ResourcesSection";
 import { formatTimestamp, formatTimestampCompact } from "./trace/format.ts";
 import {
   CalendarIcon,
@@ -472,6 +473,8 @@ function DatasetView({
   const [viewIndex, setViewIndex] = useState<number | null>(null);
   /** Whether the details pane is open in a view tab — apart from the selection. */
   const [viewPaneOpen, setViewPaneOpen] = useState(false);
+  /** An instance a view asked to have shown in the details pane, until the pane has rendered it. */
+  const [reveal, setReveal] = useState<string | null>(null);
   /** A view's unsaved changes to the row it's showing. */
   const [draft, setDraft] = useState<RowDraft | undefined>();
   // What every dataset view's frame is told: this dataset, and the selected row.
@@ -764,6 +767,16 @@ function DatasetView({
       case "selectRow":
         selectViewRow((action.args as { index: number }).index);
         return undefined;
+      case "showInstance": {
+        const { name } = action.args as { name: string };
+        // The pane shows the stored row, which a draft may have added to.
+        if (!viewRow || !Object.hasOwn(viewRow.resources ?? {}, name)) {
+          return `the row has no stored instance ${name}`;
+        }
+        setViewPaneOpen(true);
+        setReveal(name);
+        return undefined;
+      }
       case "proposeUpdate": {
         const { update } = action.args as { update: DatasetRowUpdate };
         if (!viewRow || viewRow.id !== update.rowId) {
@@ -794,6 +807,12 @@ function DatasetView({
     onAction: onViewAction,
   });
   const inView = views.shownUri !== null;
+  // Scroll to a requested instance once the pane has rendered its card.
+  useEffect(() => {
+    if (!reveal) return;
+    scrollToInstance(reveal);
+    setReveal(null);
+  }, [reveal]);
   const viewLabel =
     views.tabs.find(t => t.uri === views.shownUri)?.label ??
     fallbackLabel(views.shownUri ?? "");

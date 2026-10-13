@@ -57,6 +57,13 @@ export interface DatasetViewProps extends ViewProps {
   /** Asks the host to select another row. */
   selectRow(index: number): void;
   /**
+   * Asks the host to show the selected row's resource instance `name` in the
+   * details pane — opening the pane if it's closed — scrolled into view and
+   * briefly highlighted, as clicking the instance's chip in the pane does.
+   * Refused if the stored row declares no such instance.
+   */
+  showInstance(name: string): void;
+  /**
    * Proposes a change to the selected row. The host stages it in a draft
    * — the view gets the row back with it applied — and saves only when the
    * viewer clicks Save. Build one with `evalution/views/datasets`.
@@ -125,6 +132,17 @@ export const datasetSurface: Surface<
           : `no row ${String(index)}`;
       },
     },
+    showInstance: {
+      effect: "ephemeral",
+      check(args, { context }) {
+        const name = (args as { name?: unknown } | null)?.name;
+        if (typeof name !== "string") return "an instance needs a name";
+        const { resources } = context.selected?.row ?? {};
+        return resources && Object.hasOwn(resources, name)
+          ? undefined
+          : `the selected row has no instance ${name}`;
+      },
+    },
     proposeUpdate: {
       effect: "effectful",
       check(args, { context }) {
@@ -144,6 +162,7 @@ export const datasetSurface: Surface<
     overview: subject.overview,
     selected: context.selected,
     selectRow: index => send("selectRow", { index }),
+    showInstance: name => send("showInstance", { name }),
     proposeUpdate: update => send("proposeUpdate", { update }),
   }),
 };

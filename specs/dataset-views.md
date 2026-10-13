@@ -79,11 +79,16 @@ one, so the same function serves both.
 | changes | a fresh snapshot on each `dataset-changed` | Both halves are small. |
 | final when | until the next change | Frames that answer `false` are dropped and re-mounted on the next `dataset-changed`. That is the same rule `trace-visualizers.md` §C.2 applies to a late span: a dataset is simply never "live". |
 | context | `selected: { index, row, label } \| null` | The shared selection (§C). `label` is the row's `rowLabel` value (`datasets.md` §Q.3). The row arrives in full, `rev`-stamped, and is resent when it changes. |
-| actions | `selectRow(index)` (ephemeral), `proposeUpdate(update, rev)` (effectful) | §C, §D. |
+| actions | `selectRow(index)` (ephemeral), `showInstance(name)` (ephemeral), `proposeUpdate(update, rev)` (effectful) | §C, §D. |
 | placement | a tab beside **Grid**, above the main area; the details pane is shared | §C. |
 
-`DatasetViewProps` is `ViewProps` plus `dataset`, `overview`, `selected`, `selectRow`, and
-`proposeUpdate`.
+`DatasetViewProps` is `ViewProps` plus `dataset`, `overview`, `selected`, `selectRow`,
+`showInstance`, and `proposeUpdate`.
+
+`showInstance(name)` asks the host to show one of the selected row's resource instances in the
+details pane: it opens the pane if it's closed, then scrolls to the instance's card and flashes it,
+exactly as clicking the instance's chip in a slot does. It is refused unless the stored row declares
+the instance (an instance only a draft adds has no card yet).
 
 **Many rows at once is reserved, not built.** A view that wants to draw the whole dataset, such as a
 board of every row's tree, would need a paged `requestRows(range)` action and a `rows` message.
