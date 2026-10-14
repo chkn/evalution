@@ -116,7 +116,7 @@ export class LocalFileProvider implements FileProvider {
 
     for await (const file of globLib(pattern, { cwd: baseCwd })) {
       const relativePath = file.replace(/\\/g, "/");
-      if (ignore.some(p => minimatch(relativePath, p))) continue;
+      if (ignore.some(p => minimatch(relativePath, p, { dot: true }))) continue;
       yield absolute ? path.resolve(baseCwd, file) : file;
     }
   }

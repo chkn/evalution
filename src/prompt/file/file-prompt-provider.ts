@@ -29,6 +29,7 @@ import {
 } from "../execution-inputs.ts";
 import { isResource, type Resource } from "../playground/resource.ts";
 import {
+  DEFAULT_PLAYGROUND_IGNORE_PATTERNS,
   DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
   type PlaygroundModuleError,
   type RegisteredResource,
@@ -149,6 +150,8 @@ export interface FilePromptProviderOptions {
    * and how their scope is decided.
    *
    * Defaults to `['**\/*.playground.ts', '.evalution/playground/**\/*.ts']`.
+   * Test files (`*.test.ts(x)`, `*.pw.ts(x)`) are never loaded as playground
+   * modules, whatever these patterns match.
    */
   playgroundIncludePatterns?: readonly string[];
 
@@ -444,7 +447,7 @@ export class FilePromptProvider
     this.playgroundIncludePatterns = playgroundIncludePatterns;
     this.playgroundIgnorePatterns = withDefaultIgnores(
       playgroundIncludePatterns,
-      ignorePatterns,
+      [...DEFAULT_PLAYGROUND_IGNORE_PATTERNS, ...ignorePatterns],
     );
     this.sdkAdapter = sdk;
     this.resources = new ResourceRegistry({

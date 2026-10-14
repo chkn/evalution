@@ -166,6 +166,7 @@ export {
   type StaticResourceDefinition,
 } from "./prompt/playground/resource.ts";
 export {
+  DEFAULT_PLAYGROUND_IGNORE_PATTERNS,
   DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
   type DeclaredInstance,
   type PlaygroundModuleError,

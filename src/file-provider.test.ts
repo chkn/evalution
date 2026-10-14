@@ -99,6 +99,17 @@ describe("MemoryFileProvider", () => {
       expect(files).toEqual(["a.ts"]);
     });
 
+    it("applies ** ignore patterns inside dot directories", async () => {
+      const provider = new MemoryFileProvider({
+        "/virtual/.hidden/a.ts": "",
+        "/virtual/.hidden/a.test.ts": "",
+      });
+      const files = await Array.fromAsync(
+        provider.glob(".hidden/*.ts", { cwd, ignore: ["**/*.test.ts"] }),
+      );
+      expect(files).toEqual([".hidden/a.ts"]);
+    });
+
     it("returns absolute paths when absolute: true", async () => {
       const provider = new MemoryFileProvider({
         "/virtual/a.ts": "",
@@ -168,6 +179,21 @@ describe("MemoryFileProvider", () => {
       await provider.writeFile("/virtual/node_modules/b.ts", "y");
 
       expect(events).toEqual([["add", "a.ts"]]);
+    });
+
+    it("applies ** ignored patterns inside dot directories", async () => {
+      const provider = new MemoryFileProvider();
+      const events: [string, string][] = [];
+      provider.watch(
+        [".hidden/*.ts"],
+        { cwd, ignored: ["**/*.test.ts"] },
+        (type, fp) => events.push([type, fp]),
+      );
+
+      await provider.writeFile("/virtual/.hidden/a.ts", "x");
+      await provider.writeFile("/virtual/.hidden/a.test.ts", "y");
+
+      expect(events).toEqual([["add", ".hidden/a.ts"]]);
     });
 
     it("ignores files outside the cwd", async () => {

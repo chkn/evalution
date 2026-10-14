@@ -22,6 +22,16 @@ export const DEFAULT_PLAYGROUND_INCLUDE_PATTERNS = [
   ".evalution/playground/**/*.ts",
 ];
 
+/**
+ * Patterns never treated as playground modules, even inside an included
+ * directory: test files call into a test runner when imported, which fails
+ * outside one.
+ */
+export const DEFAULT_PLAYGROUND_IGNORE_PATTERNS = [
+  "**/*.test.{ts,tsx}",
+  "**/*.pw.{ts,tsx}",
+];
+
 /** One discovered resource, with everything needed to resolve and describe it. */
 export interface RegisteredResource {
   /** `<module path relative to rootDir>#<export name>`. */
@@ -714,7 +724,7 @@ export class ResourceRegistry {
     fileProvider,
     rootDir,
     includePatterns = DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
-    ignorePatterns = [],
+    ignorePatterns = DEFAULT_PLAYGROUND_IGNORE_PATTERNS,
   }: {
     fileProvider: FileProvider;
     rootDir: string;

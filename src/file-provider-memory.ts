@@ -92,7 +92,7 @@ export class MemoryFileProvider implements FileProvider {
       if (!filePath.startsWith(cwd + path.sep)) continue;
       const relativePath = path.relative(cwd, filePath).replace(/\\/g, "/");
       if (!minimatch(relativePath, pattern)) continue;
-      if (ignore.some(p => minimatch(relativePath, p))) continue;
+      if (ignore.some(p => minimatch(relativePath, p, { dot: true }))) continue;
       yield absolute ? filePath : relativePath;
     }
   }
@@ -120,7 +120,8 @@ export class MemoryFileProvider implements FileProvider {
       if (!filePath.startsWith(cwd + path.sep)) continue;
       const relativePath = path.relative(cwd, filePath).replace(/\\/g, "/");
       if (!patterns.some(p => minimatch(relativePath, p))) continue;
-      if (ignored.some(p => minimatch(relativePath, p))) continue;
+      if (ignored.some(p => minimatch(relativePath, p, { dot: true })))
+        continue;
       callback(eventType, relativePath);
     }
   }

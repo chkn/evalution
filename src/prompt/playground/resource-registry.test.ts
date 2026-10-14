@@ -133,6 +133,21 @@ describe("playground module discovery", () => {
     );
   });
 
+  it("does not load test files under .evalution/playground as modules", async () => {
+    const { registry: reg } = registry({
+      [p(".evalution/playground/db.ts")]: `${importHelper}
+        export const db = resource({ create: () => ({ value: 1 }) });`,
+      // Would throw if imported, as a test runner's `describe` does outside one.
+      [p(".evalution/playground/db.test.ts")]:
+        `throw new Error("not a module");`,
+      [p(".evalution/playground/db.pw.tsx")]:
+        `throw new Error("not a module");`,
+    });
+
+    expect((await reg.all()).map(r => r.key)).toEqual(["db"]);
+    expect(await reg.errors()).toEqual([]);
+  });
+
   it("keeps the other modules usable when one throws at import time", async () => {
     const { registry: reg } = registry({
       [p("broken.playground.ts")]: `throw new Error("boom");`,
