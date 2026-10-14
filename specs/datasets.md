@@ -694,8 +694,10 @@ resource ref in each row. Both need fields a person adds and values a person typ
 
 ### P.1 Add field
 
-"＋" sits at the right end of the grid's header row. It's Glide's `rightElement`, so it stays put
-while the columns scroll. It opens a popover with a name box and a type picker:
+"＋" sits at the right end of the grid's header row. It's Glide's `rightElement`, so it follows the
+last column. It opens the same menu as the Columns picker's "Add column…" (Q.2, Q.3): the rows'
+paths as a tree, with "New field…" below it. "New field…" shows a form with a name box and a type
+picker:
 
 - **string**, **number**, or **boolean**. The `def` is built directly: `{ name, optional: true,
   type: { kind: "primitive", syntax: type, base: type } }`. §B objected to typed-in field types
@@ -974,8 +976,9 @@ The tree is one level deep, so reordering stays simple:
   hidden on its own, which shows when the field is expanded in the grid.
 - **✕ removes an added column.** A field's columns can only be hidden. Removing a field is P.1's
   "Delete field", which deletes data; the picker never does that.
-- **"Add column…"** at the bottom of the popover opens Q.2's path tree. The new column is appended
-  at the top level, shown.
+- **"Add column…"** at the bottom of the popover opens Q.2's path tree, with a "New field…" entry
+  below it that adds a field (P.1). A path adds a column, appended at the top level, shown. The
+  grid's "＋" opens this same menu.
 - **"Use as row label"** is in each row's overflow menu, and in the grid header's column menu. The
   current row label is marked in both.
 

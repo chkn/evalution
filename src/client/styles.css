@@ -4197,7 +4197,8 @@ pre {
 }
 
 .dataset-column-picker-add,
-.dataset-path-tree-back {
+.dataset-path-tree-back,
+.dataset-path-tree-new {
   width: 100%;
   margin-top: 2px;
 }
@@ -7199,13 +7200,16 @@ pre {
 }
 
 .dataset-add-field {
-  width: 260px;
   padding: 8px;
+  font-size: 12.5px;
+}
+
+.dataset-add-field-popover {
+  width: 260px;
   background: var(--dropdown-bg);
   border: 1px solid var(--dropdown-border);
   border-radius: 8px;
   box-shadow: var(--dropdown-shadow);
-  font-size: 12.5px;
 }
 
 .dataset-add-field form {

@@ -3,17 +3,13 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  type ColumnPath,
-  columnPathId,
-  fieldPath,
-  instancePath,
-} from "../../shared/column-paths";
+import { type ColumnPath, columnPathId } from "../../shared/column-paths";
 import type {
   DatasetField,
   DatasetPathChild,
   DatasetRowsOverview,
 } from "../../shared/types";
+import { AddColumnMenu, type NewFieldConfig } from "./DatasetAddColumn";
 import {
   type ColumnLayout,
   type LayoutColumn,
@@ -24,7 +20,6 @@ import {
   slotPath,
 } from "./dataset-columns";
 import { addedTitle, pathLabel } from "./dataset-grid";
-import { previewCell } from "./dataset-preview";
 import {
   ChevronDownIcon,
   ColumnsIcon,
@@ -53,6 +48,10 @@ interface Props {
   onRemove: (index: number) => void;
   /** The keys one level inside a path, for "Add column…"'s tree. */
   describePath: (path: ColumnPath) => Promise<DatasetPathChild[]>;
+  /** What "New field" in "Add column…" needs to add a field. */
+  newField: NewFieldConfig;
+  /** Called once "New field" has added one. */
+  onFieldAdded: () => void;
 }
 
 /** A slot as one string, to compare and key rows by. */
@@ -65,9 +64,10 @@ const slotKey = (slot: LayoutSlot) =>
  * shows it, and its title. A field with keys discloses them as indented
  * rows, which reorder only within that field; an added column's row has a
  * ✕ that removes it; and each path's overflow menu sets the row label.
- * "Add column…" at the bottom browses the rows' paths as a tree. Reordering
- * is a live swap off the grab handle, as the trace list's picker does, but
- * written once, when the drag ends. See `specs/datasets.md` §Q.3.
+ * "Add column…" at the bottom browses the rows' paths as a tree, with "New
+ * field…" below it. Reordering is a live swap off the grab handle, as the
+ * trace list's picker does, but written once, when the drag ends. See
+ * `specs/datasets.md` §Q.3.
  */
 export function DatasetColumnPicker({
   layout,
@@ -79,6 +79,8 @@ export function DatasetColumnPicker({
   onAdd,
   onRemove,
   describePath,
+  newField,
+  onFieldAdded,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -342,12 +344,17 @@ export function DatasetColumnPicker({
             aria-label="Columns"
           >
             {adding ? (
-              <PathTree
+              <AddColumnMenu
                 fields={fields}
                 instances={instances}
                 describePath={describePath}
                 onPick={path => {
                   onAdd(path);
+                  setAdding(false);
+                }}
+                newField={newField}
+                onFieldAdded={() => {
+                  onFieldAdded();
                   setAdding(false);
                 }}
                 onBack={() => setAdding(false)}
@@ -373,143 +380,5 @@ export function DatasetColumnPicker({
           document.body,
         )}
     </>
-  );
-}
-
-/**
- * "Add column…": the rows' paths as a tree — the fields, then the resource
- * instances — each node expanding a level at a time, with a sample of what
- * the first row holds there dimmed beside it. Picking a node adds a column
- * at its path. See `specs/datasets.md` §Q.2.
- */
-function PathTree({
-  fields,
-  instances,
-  describePath,
-  onPick,
-  onBack,
-}: {
-  fields: readonly DatasetField[];
-  instances: DatasetRowsOverview["instances"];
-  describePath: (path: ColumnPath) => Promise<DatasetPathChild[]>;
-  onPick: (path: ColumnPath) => void;
-  onBack: () => void;
-}) {
-  return (
-    <div className="dataset-path-tree" role="group" aria-label="Add column">
-      <button
-        type="button"
-        className="trace-header-menu-item dataset-path-tree-back"
-        onClick={onBack}
-      >
-        <span className="trace-header-menu-item-label">‹ Columns</span>
-      </button>
-      {fields.map(f => (
-        <PathNode
-          key={f.id}
-          path={fieldPath(f.id)}
-          label={f.def.name}
-          depth={0}
-          describePath={describePath}
-          onPick={onPick}
-        />
-      ))}
-      {Object.entries(instances).map(([name, shape]) => (
-        <PathNode
-          key={`@${name}`}
-          path={instancePath(name)}
-          label={`◆ ${name}`}
-          detail={shape.uri.slice(shape.uri.lastIndexOf("#") + 1)}
-          depth={0}
-          describePath={describePath}
-          onPick={onPick}
-        />
-      ))}
-    </div>
-  );
-}
-
-/** One node of {@link PathTree}, fetching its children when first expanded. */
-function PathNode({
-  path,
-  label,
-  detail,
-  depth,
-  describePath,
-  onPick,
-}: {
-  path: ColumnPath;
-  label: string;
-  detail?: string;
-  depth: number;
-  describePath: (path: ColumnPath) => Promise<DatasetPathChild[]>;
-  onPick: (path: ColumnPath) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [children, setChildren] = useState<DatasetPathChild[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const toggle = () => {
-    const next = !expanded;
-    setExpanded(next);
-    if (next && children === null) {
-      describePath(path).then(setChildren, (err: Error) =>
-        setError(err.message),
-      );
-    }
-  };
-
-  return (
-    <div>
-      <div
-        className="dataset-path-tree-node"
-        style={{ paddingLeft: 4 + depth * 14 }}
-      >
-        <button
-          type="button"
-          className="dataset-column-picker-disclosure"
-          aria-label={`${expanded ? "Collapse" : "Expand"} ${label}`}
-          onClick={toggle}
-          disabled={children?.length === 0}
-        >
-          {children?.length === 0 ? "" : expanded ? "▾" : "▸"}
-        </button>
-        <button
-          type="button"
-          className="dataset-path-tree-pick"
-          title={`Add a column at ${label}`}
-          onClick={() => onPick(path)}
-        >
-          <span className="dataset-column-picker-title">{label}</span>
-          {detail && (
-            <span className="dataset-column-picker-detail">{detail}</span>
-          )}
-        </button>
-      </div>
-      {expanded && (
-        <div role="group">
-          {error && <div className="dataset-path-tree-note">{error}</div>}
-          {children === null && !error && (
-            <div
-              className="dataset-path-tree-note"
-              style={{ paddingLeft: 22 + (depth + 1) * 14 }}
-            >
-              Loading…
-            </div>
-          )}
-          {children?.map(child => (
-            <PathNode
-              key={child.key}
-              path={{ root: path.root, keys: [...path.keys, child.key] }}
-              label={child.key}
-              {...(child.sample && { detail: previewCell(child.sample) })}
-              depth={depth + 1}
-              describePath={describePath}
-              onPick={onPick}
-            />
-          ))}
-        </div>
-      )}
-    </div>
   );
 }

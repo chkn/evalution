@@ -87,7 +87,7 @@ export function DatasetColumnMenu({
       />
       {renaming ? (
         <div
-          className="dataset-add-field"
+          className="dataset-add-field dataset-add-field-popover"
           ref={popoverRef}
           style={style}
           role="dialog"

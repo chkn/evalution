@@ -1235,7 +1235,7 @@ async function mockFields(page: Page, initial: Dataset) {
   return posted;
 }
 
-test("the header's ＋ adds a field, which shows up as a column", async ({
+test("the header's ＋ offers New field, which shows up as a column", async ({
   mount,
   page,
 }) => {
@@ -1248,8 +1248,9 @@ test("the header's ＋ adds a field, which shows up as a column", async ({
   );
   await expect(inGrid(component, "columnheader", "ticket")).toBeAttached();
 
-  await component.getByRole("button", { name: "Add field" }).click();
-  const popover = page.getByRole("dialog", { name: "Add field" });
+  await component.getByRole("button", { name: "Add column" }).click();
+  const popover = page.getByRole("dialog", { name: "Add column" });
+  await popover.getByRole("button", { name: "New field" }).click();
   const name = popover.getByLabel("Field name");
   await expect(name).toBeFocused();
   const submit = popover.getByRole("button", { name: "Add field" });
@@ -1307,8 +1308,9 @@ test("a field can copy a prompt parameter's type, the linked prompt's listed fir
     />,
   );
 
-  await component.getByRole("button", { name: "Add field" }).click();
-  const popover = page.getByRole("dialog", { name: "Add field" });
+  await component.getByRole("button", { name: "Add column" }).click();
+  const popover = page.getByRole("dialog", { name: "Add column" });
+  await popover.getByRole("button", { name: "New field" }).click();
   const type = popover.getByLabel("Field type");
   expect(
     await type
@@ -1349,11 +1351,11 @@ test("a dataset with no fields still draws its header, so a field can be added",
   );
   await expect(component.getByText(/^No fields yet\./)).toBeVisible();
   await expect(
-    component.getByRole("button", { name: "Add field" }),
+    component.getByRole("button", { name: "Add column" }),
   ).toBeVisible();
 });
 
-test("clicking the grid closes the add-field popover", async ({
+test("clicking the grid closes the add-column popover", async ({
   mount,
   page,
 }) => {
@@ -1363,13 +1365,70 @@ test("clicking the grid closes the add-field popover", async ({
   );
   await expect(component.getByTestId("data-grid-canvas")).toBeVisible();
 
-  await component.getByRole("button", { name: "Add field" }).click();
-  const popover = page.getByRole("dialog", { name: "Add field" });
+  await component.getByRole("button", { name: "Add column" }).click();
+  const popover = page.getByRole("dialog", { name: "Add column" });
   await expect(popover).toBeVisible();
 
   // Glide cancels `pointerdown` on its canvas, which suppresses `mousedown`.
   await clickGrid(page, 40, 10);
   await expect(popover).toHaveCount(0);
+});
+
+test("the Columns picker's Add column… offers New field too", async ({
+  mount,
+  page,
+}) => {
+  const posted = await mockFields(page, {
+    ...SUPPORT,
+    fields: [{ id: "0", def: TICKET }],
+  });
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect(inGrid(component, "columnheader", "ticket")).toBeAttached();
+
+  await component.getByRole("button", { name: "Columns" }).click();
+  const picker = page.getByRole("dialog", { name: "Columns" });
+  await picker.getByRole("button", { name: "Add column…" }).click();
+  await picker.getByRole("button", { name: "New field" }).click();
+  await picker.getByLabel("Field name").fill("expectedTitle");
+  await picker.getByRole("button", { name: "Add field" }).click();
+
+  await expect(
+    inGrid(component, "columnheader", "expectedTitle"),
+  ).toBeAttached();
+  expect(posted).toEqual([{ name: "expectedTitle", type: "string" }]);
+  // Back at the column list.
+  await expect(picker.getByLabel("Show ticket")).toBeVisible();
+});
+
+test("the header's ＋ browses paths like Add column…, and adds a column", async ({
+  mount,
+  page,
+}) => {
+  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const sent = await mockColumns(page, SUPPORT);
+  await page.route("**/api/datasets/local/tickets/paths", route =>
+    route.fulfill({
+      json: [{ key: "title", sample: text("Buy milk") }],
+    }),
+  );
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await expect.poll(() => headerOrder(component)).toContain("task");
+
+  await component.getByRole("button", { name: "Add column" }).click();
+  const menu = page.getByRole("dialog", { name: "Add column" });
+  await expect(menu.getByRole("button", { name: "New field" })).toBeVisible();
+  await menu.getByRole("button", { name: "Expand task" }).click();
+  await menu.getByRole("button", { name: /^title/ }).click();
+  await expect(menu).toHaveCount(0);
+  await expect.poll(() => headerOrder(component)).toContain("title");
+  expect(sent.at(-1)?.columns).toContainEqual({
+    ...path("1", ["title"]),
+    added: true,
+  });
 });
 
 /**
@@ -1453,6 +1512,9 @@ test("a column header's menu renames its field, saying why a rename is refused",
   const name = dialog.getByLabel("Field name");
   await expect(name).toHaveValue("note");
   await expect(name).toBeFocused();
+  // Drawn as a popover, not bare over the grid.
+  await expect(dialog).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(dialog).toHaveCSS("width", "260px");
 
   // `ticket` is taken: the dialog stays, with the server's reason.
   await name.fill("ticket");

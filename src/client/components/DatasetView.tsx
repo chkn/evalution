@@ -76,7 +76,7 @@ import {
   updateDatasetRows,
 } from "../api";
 import { useStructurallyStable } from "../hooks/useStructurallyStable";
-import { DatasetAddField } from "./DatasetAddField";
+import { DatasetAddColumn, type NewFieldConfig } from "./DatasetAddColumn";
 import { DatasetColumnMenu } from "./DatasetColumnMenu";
 import { DatasetColumnPicker } from "./DatasetColumnPicker";
 import { DatasetRowDetails } from "./DatasetRowDetails";
@@ -1201,6 +1201,19 @@ function DatasetView({
     });
   };
 
+  const describeColumnPath = (path: ColumnPath) =>
+    describeDatasetPath(providerId, datasetId, path);
+  const addColumnAt = (path: ColumnPath) =>
+    saveColumns(addColumn(columnLayout, path));
+  const reloadFields = () => setReload(n => n + 1);
+  /** What "New field", in both places that add a column, adds a field with. */
+  const newField: NewFieldConfig = {
+    providerId,
+    datasetId,
+    prompts,
+    ...(dataset.prompt && { linked: dataset.prompt }),
+  };
+
   const handleDelete = () => {
     if (
       !window.confirm(
@@ -1412,7 +1425,7 @@ function DatasetView({
               rowLabel={rowLabel}
               onChange={next => saveColumns(next)}
               onRowLabel={path => saveColumns(columnLayout, path ?? null)}
-              onAdd={path => saveColumns(addColumn(columnLayout, path))}
+              onAdd={addColumnAt}
               onRemove={index => {
                 const path = slotPath(columnLayout, { index });
                 saveColumns(
@@ -1422,9 +1435,9 @@ function DatasetView({
                     : (rowLabel ?? null),
                 );
               }}
-              describePath={path =>
-                describeDatasetPath(providerId, datasetId, path)
-              }
+              describePath={describeColumnPath}
+              newField={newField}
+              onFieldAdded={reloadFields}
             />
             <div className="trace-view-header-actions-full">
               {onNewEval && (
@@ -1669,14 +1682,15 @@ function DatasetView({
                   // Glide types this ref as never null.
                   portalElementRef={editorPortalRef as RefObject<HTMLElement>}
                   rightElement={
-                    <DatasetAddField
-                      providerId={providerId}
-                      datasetId={datasetId}
-                      prompts={prompts}
-                      linked={dataset.prompt}
+                    <DatasetAddColumn
+                      fields={dataset.fields}
+                      instances={overview.instances}
+                      describePath={describeColumnPath}
+                      onPick={addColumnAt}
+                      newField={newField}
+                      onFieldAdded={reloadFields}
                       top={grouped ? GROUP_HEADER_HEIGHT : 0}
                       height={HEADER_HEIGHT}
-                      onAdded={() => setReload(n => n + 1)}
                     />
                   }
                   // Filled rather than spaced, so the "＋" follows the last
