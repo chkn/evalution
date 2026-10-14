@@ -710,6 +710,12 @@ picker:
   field name. This is how a column gets a structured type, such as `threadMsgs:
   readonly Pick<ThreadMessage, "excerpt">[]`, and why a separate JSON type isn't needed yet.
   The linked prompt's parameters are listed first.
+- **Same type as an input of a resource** (added 2026-10-14): a code-defined resource's declared
+  input (`ResourceInfo.parameters`, `resource-arguments.md` §G), copied the same way. Each
+  resource is listed once per provider, under the first loaded prompt that has it in scope, and the request
+  is `{ from: { providerId, promptId, resourceUri, path } }`: the server reads the resource's
+  inputs off that prompt's `inputSources`, since that's the only place it has them. A resource
+  that failed to load, or a value read off another resource, has none to offer.
 
 ```ts
 // DatasetProvider
@@ -719,7 +725,8 @@ addField(datasetId: string, def: PropDefinition): Promise<DatasetField>;
 
 The server accepts a primitive `def` only in the exact shape above. It accepts any other `def`
 only if it arrived from a parameter lookup the server did itself (`POST …/fields` with
-`{ from: { providerId, promptId | checkUri, half?, path } }`), never as a hand-written structure.
+`{ from: { providerId, promptId | checkUri, half? | resourceUri, path } }`), never as a
+hand-written structure.
 
 Glide's `onColumnAppended` is the wrong hook for this. It fires when the user tabs past the last
 column mid-edit, and a field needs a name and type before it can exist.
@@ -769,14 +776,31 @@ own `ExecutionInputEditor` against the field's `def`, and typed edits commit on 
 rather than per keystroke. That covers templates, objects, and arrays such as `threadMsgs`, and an
 empty cell of any field can be given a value the same way.
 
-A dataset has no `inputSources` of its own (§J), so the pane borrows the linked prompt's: a field
-that matches a parameter by §B's rule takes that parameter's slots, whose paths are the field's as
-they stand since the names are equal. Resources, nested resource fields (`object` cells), and a
-resource's arguments are then picked and edited as in the panel, with the arguments shared by uri
-across the row's fields (§I of `resource-arguments.md`). Choosing or dropping a resource commits at
-once; a commit sends every field whose cell changed, as one `updateRows`. Without a linked prompt
-that's loaded, `object` and `resource` cells stay read-only, since the pane couldn't tell their
-resources from ones that are gone. A read-only cell can still be cleared.
+A dataset has no `inputSources` of its own (§J), so the pane borrows them from the loaded prompts
+(added 2026-10-14: before, only from the linked one):
+
+- **From the linked prompt, by match.** A field that matches a parameter by §B's rule takes that
+  parameter's slots, whose paths are the field's as they stand since the names are equal. These
+  come first.
+- **From any prompt, by type.** Each of a field's slots is also offered every source that fits a
+  slot with the same type syntax anywhere among the loaded prompts: their function and execute
+  parameters, and the arguments of the resources they have in scope (`resourceSlots`). With a
+  link, only the linked prompt's provider's prompts count; without one, all of them do. The
+  provider matched those sources to their slots by the checker's assignability, and a field whose
+  type reads the same is taken to be the same type. So a field added by hand (P.1) can be filled
+  from the same sources as the slot it resembles, whatever its name: an `expectedTitle: string`
+  from whatever fills a `string` parameter, or a field copied from a resource's `parentTaskId`
+  input from the resource that fills that input.
+- **Resources** are the union of those prompts' (the linked prompt's first), so a dataset with no
+  link still has some to offer.
+
+Resources, nested resource fields (`object` cells), and a resource's arguments are then picked and
+edited as in the panel, with the arguments shared by uri across the row's fields (§I of
+`resource-arguments.md`). Choosing or dropping a resource commits at once; a commit sends every
+field whose cell changed, as one `updateRows`. With no prompt to borrow from, or a link to a prompt
+that isn't loaded, `object` and `resource` cells stay read-only, since the pane couldn't tell their
+resources from ones that are gone (with a broken link, other prompts' resources would be a guess).
+A read-only cell can still be cleared.
 
 **Clearing a cell removes its key**, keeping rows sparse (§A).
 

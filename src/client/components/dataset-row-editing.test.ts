@@ -79,10 +79,71 @@ describe("datasetInputSources", () => {
     });
   });
 
+  it("offers a field every source that fits a slot of its type, wherever that slot is", () => {
+    const ROSTER = "a.playground.ts#roster";
+    const PARENT = def("parentTaskId", "TaskId");
+    // The seeded resource's own arguments are slots too, matched by type.
+    const seeded: ResourceInfo = {
+      ...SEEDED,
+      parameters: [def("title", "string"), PARENT],
+    };
+    const other = prompt({
+      id: "q",
+      inputSources: {
+        resources: [seeded, SEEDED_ID],
+        functionSlots: {},
+        executeSlots: {},
+        resourceSlots: {
+          [seeded.uri]: { title: [ROSTER], parentTaskId: [SEEDED_ID.uri] },
+        },
+      },
+    });
+    const fields: DatasetField[] = [
+      // A name no parameter has: only the type can match it.
+      { id: "0", def: def("expectedTitle", "string") },
+      { id: "1", def: PARENT },
+      { id: "2", def: def("unseen", "Unseen") },
+    ];
+    const sources = datasetInputSources(fields, prompt(), [other]);
+    expect(sources?.fieldSlots).toEqual({
+      "0": { expectedTitle: [ROSTER] },
+      "1": { parentTaskId: [SEEDED_ID.uri] },
+    });
+    // The other prompt's resources are there to pick from.
+    expect(sources?.resources.map(r => r.uri)).toContain(SEEDED_ID.uri);
+    expect(sources?.resourceSlots[seeded.uri]).toBeDefined();
+  });
+
+  it("keeps the linked prompt's own slots first, and borrows only from its provider", () => {
+    const linked = prompt({ providerId: "files" });
+    // Both have a `TaskId` slot, which the field's type matches.
+    const borrowing = (id: string, providerId: string, uri: string) =>
+      prompt({
+        id,
+        providerId,
+        functionParameters: [def("parentId", "TaskId")],
+        inputSources: {
+          resources: [],
+          functionSlots: { parentId: [uri] },
+          executeSlots: {},
+        },
+      });
+    const sources = datasetInputSources([{ id: "0", def: TASK }], linked, [
+      borrowing("q", "other", "elsewhere"),
+      borrowing("r", "files", "sibling"),
+    ]);
+    expect(sources?.fieldSlots).toEqual({
+      "0": { taskId: [SEEDED_ID.uri, "sibling"] },
+    });
+  });
+
   it("is undefined without a prompt or its sources", () => {
     expect(datasetInputSources([], undefined)).toBeUndefined();
     expect(
       datasetInputSources([], prompt({ inputSources: undefined })),
+    ).toBeUndefined();
+    expect(
+      datasetInputSources([], undefined, [prompt({ inputSources: undefined })]),
     ).toBeUndefined();
   });
 });

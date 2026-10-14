@@ -484,7 +484,7 @@ export async function handleUpdateRows(
  */
 export type FieldSourcePrompt = Pick<
   NormalizedPrompt,
-  "functionParameters" | "executeParameters"
+  "functionParameters" | "executeParameters" | "inputSources"
 >;
 
 /**
@@ -539,6 +539,50 @@ function defAtPath(
     level = found.type.kind === "object" ? found.type.properties : [];
   }
   return found;
+}
+
+/**
+ * The definition of a resource's input, for `{ from: { providerId, promptId,
+ * resourceUri, path } }`: looked up on the resource as the prompt has it in
+ * scope, since that's where the server learns a resource's parameters.
+ */
+async function resourceFieldDef(
+  body: Record<string, unknown>,
+  from: Record<string, unknown>,
+  lookupPrompt: LookupFieldSourcePrompt,
+): Promise<PropDefinition> {
+  if (
+    typeof from.providerId !== "string" ||
+    typeof from.promptId !== "string" ||
+    typeof from.resourceUri !== "string" ||
+    typeof from.path !== "string" ||
+    !from.path
+  ) {
+    throw new BadRequest(
+      "from must be { providerId, promptId, resourceUri, path } with string values",
+    );
+  }
+  const prompt = await lookupPrompt(from.providerId, from.promptId);
+  if (!prompt) {
+    throw new BadRequest(
+      `Prompt not found: ${from.promptId} (provider ${from.providerId})`,
+    );
+  }
+  // A value read off a resource (`parent` set) shares its root's inputs.
+  const resource = prompt.inputSources?.resources.find(
+    r => r.uri === from.resourceUri && r.parent === undefined,
+  );
+  if (!resource) {
+    throw new BadRequest(
+      `${from.promptId} has no resource ${from.resourceUri} in scope`,
+    );
+  }
+  const found = defAtPath(resource.parameters ?? [], from.path);
+  if (!found) {
+    throw new BadRequest(`${from.resourceUri} has no input "${from.path}"`);
+  }
+  const def = portableDef(found);
+  return body.name === undefined ? def : { ...def, name: parseName(body) };
 }
 
 /**
@@ -602,6 +646,9 @@ async function parseNewField(
     const def = portableDef(found);
     return body.name === undefined ? def : { ...def, name: parseName(body) };
   }
+  if (from.resourceUri !== undefined) {
+    return resourceFieldDef(body, from, lookupPrompt);
+  }
   if (
     typeof from.providerId !== "string" ||
     typeof from.promptId !== "string" ||
@@ -641,8 +688,9 @@ async function parseNewField(
  * `POST /api/datasets/:providerId/:id/fields` — body `{ name, type }` with a
  * `type` of `string`, `number`, or `boolean`, or `{ from: { providerId,
  * promptId, half?, path }, name? }` to copy a prompt parameter's definition,
- * or `{ from: { providerId, checkUri, path }, name? }` to copy a check's.
- * See `specs/datasets.md` §P.1 and `specs/evals.md` §F.1.
+ * or `{ from: { providerId, checkUri, path }, name? }` to copy a check's, or
+ * `{ from: { providerId, promptId, resourceUri, path }, name? }` to copy a
+ * resource's input. See `specs/datasets.md` §P.1 and `specs/evals.md` §F.1.
  */
 export async function handleAddField(
   provider: DatasetProvider,

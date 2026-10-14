@@ -8,10 +8,11 @@ import type { PanelFill } from "../named-inputs";
 
 /**
  * Mounts DatasetView for one dataset. With `promptName`, the dataset's
- * linked prompt resolves to a loaded prompt of that name; otherwise no
- * prompts are loaded; `linkedPrompt` overrides that prompt's details (its
- * parameters and `inputSources`, say). `prompts` are what a new field can
- * copy a parameter's type from.
+ * linked prompt resolves to a loaded prompt of that name; otherwise it isn't
+ * loaded; `linkedPrompt` overrides that prompt's details (its parameters and
+ * `inputSources`, say). `prompts` are the other loaded prompts: what a new
+ * field can copy a parameter's type from, and what the details pane borrows
+ * sources from.
  *
  * Wrapped in a fixed-height div, as `TraceViewHarness` is: in the app the
  * view's `height: 100%` resolves against the `.app` layout, and without a

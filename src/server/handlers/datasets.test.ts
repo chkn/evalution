@@ -58,10 +58,34 @@ const TOOLS_CONTEXT: PropDefinition = {
   optional: false,
 };
 
+const primitive = (name: string, base: string): PropDefinition => ({
+  name,
+  type: { kind: "primitive", syntax: base, base: base as "string" },
+  optional: true,
+});
+
 const PROMPTS: Record<string, FieldSourcePrompt> = {
   "files/odin.ts#plan": {
     functionParameters: [TASK_ID, THREAD_MSGS],
     executeParameters: [TOOLS_CONTEXT],
+    inputSources: {
+      resources: [
+        {
+          uri: ".evalution/playground/db.ts#db",
+          label: "db",
+          scope: "run",
+          parameters: [primitive("tenantId", "string")],
+        },
+        {
+          uri: ".evalution/playground/db.ts#db.users",
+          label: "db.users",
+          scope: "run",
+          parent: ".evalution/playground/db.ts#db",
+        },
+      ],
+      functionSlots: {},
+      executeSlots: {},
+    },
   },
 };
 
@@ -106,6 +130,53 @@ describe("handleAddField", () => {
     expect(res).toMatchObject({
       status: 201,
       body: { def: { name: "expectedTitle", type: { base: "string" } } },
+    });
+  });
+
+  it("copies a resource input's definition", async () => {
+    const { add } = await setup();
+    const from = {
+      providerId: "files",
+      promptId: "odin.ts#plan",
+      resourceUri: ".evalution/playground/db.ts#db",
+      path: "tenantId",
+    };
+    expect(await add({ from, name: "tenant" })).toMatchObject({
+      status: 201,
+      body: { def: { name: "tenant", type: { base: "string" } } },
+    });
+    expect(await add({ from })).toMatchObject({
+      status: 201,
+      body: { def: { name: "tenantId" } },
+    });
+  });
+
+  it.each([
+    ["an unknown resource", { resourceUri: "nope.ts#x", path: "tenantId" }],
+    [
+      "a value read off a resource",
+      { resourceUri: ".evalution/playground/db.ts#db.users", path: "tenantId" },
+    ],
+    [
+      "an input the resource doesn't declare",
+      { resourceUri: ".evalution/playground/db.ts#db", path: "nope" },
+    ],
+  ])("rejects a resource input from %s", async (_, from) => {
+    const { add } = await setup();
+    const res = await add({
+      from: { providerId: "files", promptId: "odin.ts#plan", ...from },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("names the resource shape when a resource input's reference is malformed", async () => {
+    const { add } = await setup();
+    const res = await add({
+      from: { providerId: "files", resourceUri: "db.ts#db", path: "tenantId" },
+    });
+    expect(res).toMatchObject({
+      status: 400,
+      body: { error: expect.stringContaining("resourceUri") },
     });
   });
 
@@ -286,12 +357,6 @@ describe("handleAddField", () => {
     expect(res.status).toBe(400);
     expect((res.body as { error: string }).error).toMatch(message);
   });
-});
-
-const primitive = (name: string, base: string): PropDefinition => ({
-  name,
-  type: { kind: "primitive", syntax: base, base: base as "string" },
-  optional: true,
 });
 
 const value = (v: string | number | boolean | null): ExecutionInput => ({

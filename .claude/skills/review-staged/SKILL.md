@@ -6,4 +6,4 @@ effort: high
 context: fork
 ---
 
-Review the staged changes for any issues and/or opportunities to make the code more elegant. If everything looks good, commit it.
+Review the staged changes for any issues and/or opportunities to make the code more elegant. Also review any spec changes with fresh eyes. If everything looks good, commit it.

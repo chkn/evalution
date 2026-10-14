@@ -135,7 +135,15 @@ export function useAnchoredPopover<T extends HTMLElement = HTMLElement>({
     document.addEventListener("keydown", handleKey);
     window.addEventListener("scroll", updatePosition, true);
     window.addEventListener("resize", updatePosition);
+    // The popover's content can change size while it's open (a menu that
+    // swaps in a form), so it's clamped again against its new box.
+    let observer: ResizeObserver | undefined;
+    if (popoverRef.current && typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(updatePosition);
+      observer.observe(popoverRef.current);
+    }
     return () => {
+      observer?.disconnect();
       document.removeEventListener("pointerdown", handleClick);
       document.removeEventListener("keydown", handleKey);
       window.removeEventListener("scroll", updatePosition, true);

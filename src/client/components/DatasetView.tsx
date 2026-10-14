@@ -568,11 +568,15 @@ function DatasetView({
   }, [channel, dataset, overview]);
 
   const linkedPrompt = dataset?.prompt ? findPrompt(dataset.prompt) : undefined;
-  // The linked prompt's resources, offered on the fields that match its
-  // parameters. Stable while their content is, so typing in the details pane
-  // doesn't remount its editors.
+  // The resources offered on the fields: those that fit a slot of the same
+  // type among the linked prompt's and the other loaded prompts'. None while
+  // the linked prompt isn't loaded, rather than every provider's: the row's
+  // resources would read as gone. Stable while their content is, so typing in
+  // the details pane doesn't remount its editors.
   const rowSources = useStructurallyStable(
-    dataset ? datasetInputSources(dataset.fields, linkedPrompt) : undefined,
+    dataset && (!dataset.prompt || linkedPrompt)
+      ? datasetInputSources(dataset.fields, linkedPrompt, prompts)
+      : undefined,
   );
 
   /** The dataset's shared column layout, fitted to its fields and rows. */

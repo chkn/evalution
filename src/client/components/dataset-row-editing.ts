@@ -10,7 +10,11 @@
  */
 
 import { committedCell } from "../../shared/dataset-cells";
-import { matchKey } from "../../shared/dataset-fields";
+import { matchKey, samePrompt } from "../../shared/dataset-fields";
+import {
+  collectInputSlots,
+  type InputSlot,
+} from "../../shared/input-references";
 import type {
   DatasetField,
   DatasetRow,
@@ -31,13 +35,13 @@ import {
   toWireResources,
 } from "./run-resources-state";
 
-/** The resources a dataset's fields can be filled from, borrowed from a prompt. */
+/** The resources a dataset's fields can be filled from, borrowed from prompts. */
 export interface DatasetInputSources {
-  /** Every resource in the prompt's scope. */
+  /** Every resource in scope for the linked prompt or any other loaded one. */
   resources: ResourceInfo[];
   /**
    * Field id → (slot path, rooted at the field's name → URIs that fit it).
-   * A field that matches no parameter has no entry.
+   * A field nothing can fill has no entry.
    */
   fieldSlots: Record<string, Record<string, string[]>>;
   /** As `PromptInputSources.resourceSlots`. */
@@ -45,42 +49,122 @@ export interface DatasetInputSources {
 }
 
 /**
+ * The sources that fit a slot of each type, from every slot of every prompt in
+ * `prompts` — function and execute parameters, and the arguments of the
+ * resources they have in scope — keyed by the slot's type syntax. The provider
+ * has already matched sources to those slots by the checker's assignability,
+ * so a field whose type reads the same is offered the same ones, wherever the
+ * slot it was copied from (if any) lives.
+ */
+function sourcesByType(
+  prompts: readonly NormalizedPrompt[],
+): Map<string, string[]> {
+  const byType = new Map<string, string[]>();
+  const add = (
+    slots: readonly InputSlot[],
+    matches: Record<string, string[]> | undefined,
+  ) => {
+    for (const slot of slots) {
+      const uris = matches?.[slot.path];
+      if (!uris?.length) continue;
+      const known = byType.get(slot.type.syntax) ?? [];
+      byType.set(slot.type.syntax, [...new Set([...known, ...uris])]);
+    }
+  };
+  for (const {
+    functionParameters,
+    executeParameters,
+    inputSources,
+  } of prompts) {
+    if (!inputSources) continue;
+    add(collectInputSlots(functionParameters), inputSources.functionSlots);
+    add(collectInputSlots(executeParameters ?? []), inputSources.executeSlots);
+    for (const resource of inputSources.resources) {
+      if (!resource.parameters) continue;
+      add(
+        collectInputSlots(resource.parameters),
+        inputSources.resourceSlots?.[resource.uri],
+      );
+    }
+  }
+  return byType;
+}
+
+/**
  * The resources `prompt` offers, mapped onto `fields`. A field takes a
  * parameter's slots when it matches that parameter by §B's rule (name and
  * type syntax), function parameters first — and since the names are equal,
- * the parameter's slot paths are the field's as they stand. `undefined`
- * without a prompt, or when the prompt has no resources at all.
+ * the parameter's slot paths are the field's as they stand. On top of that, a
+ * field is offered every source that fits a slot of its type anywhere among
+ * `prompts` (see {@link sourcesByType}), so a field added by hand can be filled
+ * from the same resources as the slot it resembles. Resources come from all
+ * of them too, the linked prompt's first. `undefined` when no prompt has
+ * resources at all.
+ *
+ * @param prompts - Other loaded prompts to borrow slots and resources from.
+ *   Only those of the linked prompt's provider are used, when it has one.
  */
 export function datasetInputSources(
   fields: readonly DatasetField[],
   prompt: NormalizedPrompt | undefined,
+  prompts: readonly NormalizedPrompt[] = [],
 ): DatasetInputSources | undefined {
-  const sources = prompt?.inputSources;
-  if (!prompt || !sources) return undefined;
+  const pool = [
+    ...(prompt ? [prompt] : []),
+    ...prompts.filter(
+      p =>
+        !samePrompt(p, prompt) &&
+        (!prompt?.providerId || p.providerId === prompt.providerId),
+    ),
+  ].filter(p => p.inputSources);
+  if (pool.length === 0) return undefined;
 
-  const halves = [
-    { defs: prompt.functionParameters, slots: sources.functionSlots },
-    { defs: prompt.executeParameters ?? [], slots: sources.executeSlots },
-  ];
+  const halves = prompt?.inputSources
+    ? [
+        {
+          defs: prompt.functionParameters,
+          slots: prompt.inputSources.functionSlots,
+        },
+        {
+          defs: prompt.executeParameters ?? [],
+          slots: prompt.inputSources.executeSlots,
+        },
+      ]
+    : [];
+  const byType = sourcesByType(pool);
   const fieldSlots: DatasetInputSources["fieldSlots"] = {};
   for (const field of fields) {
     const key = matchKey(field.def);
     const half = halves.find(h => h.defs.some(d => matchKey(d) === key));
-    if (!half) continue;
     const name = field.def.name;
-    const own = Object.fromEntries(
-      Object.entries(half.slots).filter(
-        ([path]) => path === name || path.startsWith(`${name}.`),
-      ),
-    );
-    if (Object.keys(own).length > 0) fieldSlots[field.id] = own;
+    const slots: Record<string, string[]> = half
+      ? Object.fromEntries(
+          Object.entries(half.slots).filter(
+            ([path]) => path === name || path.startsWith(`${name}.`),
+          ),
+        )
+      : {};
+    for (const slot of collectInputSlots([field.def])) {
+      const typed = byType.get(slot.type.syntax);
+      if (!typed) continue;
+      slots[slot.path] = [...new Set([...(slots[slot.path] ?? []), ...typed])];
+    }
+    if (Object.keys(slots).length > 0) fieldSlots[field.id] = slots;
   }
 
-  return {
-    resources: sources.resources,
-    fieldSlots,
-    resourceSlots: sources.resourceSlots ?? {},
-  };
+  const resources = new Map<string, ResourceInfo>();
+  const resourceSlots: DatasetInputSources["resourceSlots"] = {};
+  for (const { inputSources } of pool) {
+    for (const resource of inputSources?.resources ?? []) {
+      if (!resources.has(resource.uri)) resources.set(resource.uri, resource);
+    }
+    for (const [uri, slots] of Object.entries(
+      inputSources?.resourceSlots ?? {},
+    )) {
+      resourceSlots[uri] ??= slots;
+    }
+  }
+  return { resources: [...resources.values()], fieldSlots, resourceSlots };
 }
 
 /** A row's editor state: one selection per field id, and the row's resource instances. */

@@ -23,6 +23,7 @@ import {
   choiceFor,
   defaultFieldName,
   parameterOptionGroups,
+  resourceInputGroups,
 } from "./dataset-field-options";
 import { previewCell } from "./dataset-preview";
 import { useAnchoredPopover } from "./use-anchored-popover";
@@ -31,7 +32,10 @@ import { useAnchoredPopover } from "./use-anchored-popover";
 export interface NewFieldConfig {
   providerId: string;
   datasetId: string;
-  /** Every loaded prompt, whose parameters a field can copy the type of. */
+  /**
+   * Every loaded prompt, whose parameters — and whose resources' inputs — a
+   * field can copy the type of.
+   */
   prompts: readonly NormalizedPrompt[];
   /** The dataset's (resolved) linked prompt, whose parameters come first. */
   linked?: PromptID;
@@ -202,9 +206,9 @@ export function AddColumnMenu({
 
 /**
  * "New field": a name box and a type picker — `string`, `number`, `boolean`,
- * or the type of a prompt parameter, which the server looks up and copies. A
- * rejected add (a duplicate, say) is shown in the form. See
- * `specs/datasets.md` §P.1.
+ * or the type of a prompt parameter or a resource input, which the server
+ * looks up and copies. A rejected add (a duplicate, say) is shown in the
+ * form. See `specs/datasets.md` §P.1.
  */
 function NewFieldForm({
   providerId,
@@ -222,7 +226,8 @@ function NewFieldForm({
     () => parameterOptionGroups(prompts, linked),
     [prompts, linked],
   );
-  const choice = choiceFor(type, groups) ?? {
+  const resources = useMemo(() => resourceInputGroups(prompts), [prompts]);
+  const choice = choiceFor(type, groups, resources) ?? {
     kind: "primitive",
     type: "string",
   };
@@ -283,6 +288,18 @@ function NewFieldForm({
               <optgroup
                 key={group.key}
                 label={`Same type as a parameter of ${group.label}${group.linked ? " (linked)" : ""}`}
+              >
+                {group.options.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.def.name}: {shortSyntax(option.def.type.syntax, 40)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+            {resources.map(group => (
+              <optgroup
+                key={group.key}
+                label={`Same type as an input of resource ${group.label}`}
               >
                 {group.options.map(option => (
                   <option key={option.value} value={option.value}>

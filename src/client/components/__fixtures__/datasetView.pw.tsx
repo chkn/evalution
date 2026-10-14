@@ -933,6 +933,58 @@ test("the details pane offers the linked prompt's resources, with their argument
   });
 });
 
+test("the details pane borrows other prompts' resources without a link, but not for a link that isn't loaded", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  const blank = {
+    uri: ".evalution/playground/tasks.ts#blank",
+    label: "Blank task",
+    scope: "run" as const,
+  };
+  // Another prompt with a `Task` slot: its sources fit the `task` field.
+  const other = {
+    id: "src/other.ts#other",
+    providerId: "files",
+    name: "other",
+    functionParameters: [SUPPORT.fields[1].def],
+    inputSources: {
+      resources: [blank],
+      functionSlots: { task: [blank.uri] },
+      executeSlots: {},
+    },
+  } as unknown as NormalizedPrompt;
+  const sourceButton = async (dataset: Dataset) => {
+    await mockDataset(page, dataset, SUPPORT_ROWS, SUPPORT_SHAPE);
+    const component = await mount(
+      <DatasetViewHarness
+        providerId="local"
+        datasetId="tickets"
+        prompts={[other]}
+      />,
+    );
+    await untilRowsShown(component);
+    await clickCell(page, 40, 1, false);
+    const pane = component.getByRole("region", { name: "Row details" });
+    await expect(pane.getByText("◆ blank", { exact: true })).toBeVisible();
+    const button = pane.getByRole("button", { name: "Source for task" });
+    const count = await button.count();
+    await component.unmount();
+    return count;
+  };
+
+  expect(await sourceButton(SUPPORT)).toBe(1);
+  // Linked to a prompt that isn't loaded: the row's resources can't be told
+  // from ones that are gone, so the cell stays read-only.
+  expect(
+    await sourceButton({
+      ...SUPPORT,
+      prompt: { id: "src/support.ts#triage", providerId: "files" },
+    }),
+  ).toBe(0);
+});
+
 /** Serves one dataset, `tickets`, linked to a prompt, with a single row. */
 function mockLinkedDataset(page: Page) {
   return mockDataset(

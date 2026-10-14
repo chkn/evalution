@@ -2,13 +2,18 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import type { NormalizedPrompt, PropDefinition } from "../../shared/types";
+import type {
+  NormalizedPrompt,
+  PropDefinition,
+  ResourceInfo,
+} from "../../shared/types";
 import {
   addFieldRequest,
   choiceFor,
   defaultFieldName,
   type FieldTypeChoice,
   parameterOptionGroups,
+  resourceInputGroups,
 } from "./dataset-field-options";
 
 const param = (name: string, syntax: string): PropDefinition => ({
@@ -38,6 +43,22 @@ const PLAN = prompt(
   [param("toolsContext", "ToolsContext")],
 );
 const EMPTY = prompt("b.ts#empty", []);
+
+const resource = (
+  uri: string,
+  extra: Partial<ResourceInfo> = {},
+): ResourceInfo => ({ uri, label: uri.split("#")[1], scope: "run", ...extra });
+
+/** `base` with `resources` in scope. */
+const seeing = (
+  base: NormalizedPrompt,
+  ...resources: ResourceInfo[]
+): NormalizedPrompt => ({
+  ...base,
+  inputSources: { resources, functionSlots: {}, executeSlots: {} },
+});
+
+const DB = resource("db.ts#db", { parameters: [param("tenantId", "string")] });
 
 describe("parameterOptionGroups", () => {
   it("groups parameters by prompt, function before execute, skipping prompts with none", () => {
@@ -126,6 +147,70 @@ describe("addFieldRequest", () => {
     expect(addFieldRequest("expectedTaskId", fromTaskId)).toEqual({
       ...reference,
       name: "expectedTaskId",
+    });
+  });
+});
+
+describe("resourceInputGroups", () => {
+  it("lists a resource's inputs once, under the first prompt that sees it", () => {
+    const groups = resourceInputGroups([
+      seeing(CLASSIFY, DB),
+      seeing(PLAN, DB),
+    ]);
+    expect(groups.map(g => [g.label, g.options.map(o => o.path)])).toEqual([
+      ["db", ["tenantId"]],
+    ]);
+    expect(groups[0].options[0]).toMatchObject({
+      providerId: "files",
+      promptId: "a.ts#classify",
+      resourceUri: "db.ts#db",
+      def: param("tenantId", "string"),
+    });
+  });
+
+  it("skips resources with no inputs, an error, or a parent", () => {
+    expect(
+      resourceInputGroups([
+        seeing(
+          PLAN,
+          resource("a.ts#plain"),
+          resource("b.ts#broken", {
+            error: "boom",
+            parameters: [param("x", "string")],
+          }),
+          resource("db.ts#db.users", {
+            parent: "db.ts#db",
+            parameters: [param("x", "string")],
+          }),
+        ),
+        CLASSIFY,
+      ]),
+    ).toEqual([]);
+  });
+
+  it("is read back by choiceFor and sent as a resource reference", () => {
+    const groups = resourceInputGroups([seeing(PLAN, DB)]);
+    const [option] = groups[0].options;
+    const choice = choiceFor(
+      option.value,
+      parameterOptionGroups([PLAN]),
+      groups,
+    );
+    expect(choice).toEqual({ kind: "resource", option });
+    if (!choice) throw new Error("not found");
+    expect(defaultFieldName(choice)).toBe("tenantId");
+    const reference = {
+      from: {
+        providerId: "files",
+        promptId: "odin.ts#plan",
+        resourceUri: "db.ts#db",
+        path: "tenantId",
+      },
+    };
+    expect(addFieldRequest("", choice)).toEqual(reference);
+    expect(addFieldRequest("tenant", choice)).toEqual({
+      ...reference,
+      name: "tenant",
     });
   });
 });
