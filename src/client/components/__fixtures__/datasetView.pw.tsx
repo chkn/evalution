@@ -485,7 +485,7 @@ test("double-clicking a cell to edit it in place doesn't open the details pane",
   await expect(pane).toContainText("Row 2");
 });
 
-test("the details pane opens a row in the playground and deletes it", async ({
+test("the details pane opens a row in the playground and deletes it after confirming", async ({
   mount,
   page,
 }) => {
@@ -519,8 +519,23 @@ test("the details pane opens a row in the playground and deletes it", async ({
   await pane.getByRole("button", { name: "Open row in playground" }).click();
   await expect.poll(() => opened).toEqual(["triage: Support tickets, row 2"]);
 
+  const messages: string[] = [];
+  let accept = false;
+  page.on("dialog", dialog => {
+    messages.push(dialog.message());
+    return accept ? dialog.accept() : dialog.dismiss();
+  });
+
+  // Declined: nothing is sent, and the row stays selected.
+  await pane.getByRole("button", { name: "Delete row" }).click();
+  await expect.poll(() => messages).toEqual(["Delete row 2?"]);
+  expect(deleted).toEqual([]);
+  await expect(pane).toContainText("Row 2");
+
+  accept = true;
   await pane.getByRole("button", { name: "Delete row" }).click();
   await expect.poll(() => deleted).toEqual(["r2"]);
+  expect(messages).toEqual(["Delete row 2?", "Delete row 2?"]);
   // Clearing the selection closes the pane, which the next selection opens.
   await expect(pane).toHaveCount(0);
   await clickCell(page, -GRID.marker / 2, 0, false);

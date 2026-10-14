@@ -1376,7 +1376,8 @@ function DatasetView({
               className="dataset-row-btn dataset-row-delete"
               title="Delete row"
               aria-label="Delete row"
-              onClick={() =>
+              onClick={() => {
+                if (!window.confirm(`Delete row ${paneIndex + 1}?`)) return;
                 void act(async () => {
                   await deleteDatasetRow(providerId, datasetId, paneRow.id);
                   // A view tab's pane moves on to the row in its place.
@@ -1386,8 +1387,8 @@ function DatasetView({
                     updateDraft(undefined);
                   }
                   setReload(n => n + 1);
-                })
-              }
+                });
+              }}
             >
               <TrashIcon />
             </button>

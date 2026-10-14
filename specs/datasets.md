@@ -509,8 +509,9 @@ memory:
   it.
 - **Selecting a row opens it in the details pane** the trace view uses for spans (`DetailsPane.tsx`,
   shared): when it was added, its source, then every field in full — long text wraps, and a
-  resource shows its arguments nested beneath it. Open-in-playground and delete live there, and
-  only there — the grid has no ▶ column. "trace ↗" in the source column still opens the trace.
+  resource shows its arguments nested beneath it. Open-in-playground and delete (which asks first)
+  live there, and only there — the grid has no ▶ column. "trace ↗" in the source column still opens
+  the trace.
   Selecting a *cell* opens it after a short pause (300ms): Glide starts a cell's editor on the
   second click, so opening at once would put the pane up on the first click of a double-click, just
   as the cell is being typed into. An editor starting (double-click, Enter) on an editable cell
