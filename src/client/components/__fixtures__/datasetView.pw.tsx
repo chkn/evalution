@@ -1939,21 +1939,22 @@ test("the Columns picker hides a column, adds one from the path tree, and sets t
     added: true,
   });
 
-  await picker.getByRole("button", { name: "More for title" }).click();
-  await picker.getByRole("button", { name: "Use as row label" }).click();
+  const labelToggle = picker.getByRole("button", {
+    name: "Use title as row label",
+  });
+  await expect(labelToggle).toHaveAttribute("aria-pressed", "false");
+  await labelToggle.click();
   expect(sent.at(-1)?.rowLabel).toEqual({
     root: { field: "1" },
     keys: ["title"],
   });
-  await expect(picker.getByTitle("Row label")).toBeVisible();
+  await expect(labelToggle).toHaveAttribute("aria-pressed", "true");
 
-  await picker.getByRole("button", { name: "More for title" }).click();
-  await picker.getByRole("button", { name: "Don't use as row label" }).click();
+  await labelToggle.click();
   expect(sent.at(-1)?.rowLabel).toBeNull();
-  await expect(picker.getByTitle("Row label")).toHaveCount(0);
-  await picker.getByRole("button", { name: "More for title" }).click();
-  await picker.getByRole("button", { name: "Use as row label" }).click();
-  await expect(picker.getByTitle("Row label")).toBeVisible();
+  await expect(labelToggle).toHaveAttribute("aria-pressed", "false");
+  await labelToggle.click();
+  await expect(labelToggle).toHaveAttribute("aria-pressed", "true");
 
   // An added column can be removed, taking the row label with it; a field's
   // can only be hidden.

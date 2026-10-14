@@ -980,8 +980,8 @@ The tree is one level deep, so reordering stays simple:
 - **"Add column…"** at the bottom of the popover opens Q.2's path tree, with a "New field…" entry
   below it that adds a field (P.1). A path adds a column, appended at the top level, shown. The
   grid's "＋" opens this same menu.
-- **"Use as row label"** is in each row's overflow menu, and in the grid header's column menu. The
-  current row label is marked in both.
+- **"Use as row label"** is a tag button on each row, filled in while that column is the label, and
+  an item in the grid header's column menu, which marks the current label too.
 
 **Dragging headers in the grid does the same thing.** Glide supports it with `onColumnMoved`, and
 `onColumnProposeMove` vetoes moves that would break the tree. A key column can only land inside

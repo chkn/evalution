@@ -24,6 +24,7 @@ import {
   ChevronDownIcon,
   ColumnsIcon,
   GrabHandleIcon,
+  LabelIcon,
 } from "./trace/icons.tsx";
 import { useAnchoredPopover } from "./use-anchored-popover";
 
@@ -63,7 +64,7 @@ const slotKey = (slot: LayoutSlot) =>
  * in the layout's order, each with a grab handle, a checkbox that hides or
  * shows it, and its title. A field with keys discloses them as indented
  * rows, which reorder only within that field; an added column's row has a
- * ✕ that removes it; and each path's overflow menu sets the row label.
+ * ✕ that removes it; and each path's tag button toggles it as the row label.
  * "Add column…" at the bottom browses the rows' paths as a tree, with "New
  * field…" below it. Reordering is a live swap off the grab handle, as the
  * trace list's picker does, but written once, when the drag ends. See
@@ -89,12 +90,9 @@ export function DatasetColumnPicker({
   const [drag, setDrag] = useState<LayoutSlot | null>(null);
   /** Fields whose keys are disclosed, by id. */
   const [disclosed, setDisclosed] = useState<ReadonlySet<string>>(new Set());
-  /** The row whose overflow menu is open. */
-  const [menuFor, setMenuFor] = useState<string | null>(null);
   const close = () => {
     setOpen(false);
     setAdding(false);
-    setMenuFor(null);
   };
   const { triggerRef, popoverRef, style } =
     useAnchoredPopover<HTMLButtonElement>({
@@ -183,7 +181,6 @@ export function DatasetColumnPicker({
             e.dataTransfer.setData("text/plain", key);
             setDraft(layout);
             setDrag(slot);
-            setMenuFor(null);
           }}
           onDragEnd={endDrag}
           title="Drag to reorder"
@@ -216,14 +213,9 @@ export function DatasetColumnPicker({
           {detail && (
             <span className="dataset-column-picker-detail">{detail}</span>
           )}
-          {isLabel && (
-            <span className="dataset-column-picker-badge" title="Row label">
-              label
-            </span>
-          )}
         </label>
         {path && (
-          <span className="dataset-column-picker-more">
+          <span className="dataset-column-picker-actions">
             {removable && (
               <button
                 type="button"
@@ -237,29 +229,16 @@ export function DatasetColumnPicker({
             )}
             <button
               type="button"
-              className="dataset-column-picker-icon-btn"
-              aria-label={`More for ${title}`}
-              aria-expanded={menuFor === key}
-              onClick={() => setMenuFor(m => (m === key ? null : key))}
+              className={`dataset-column-picker-icon-btn${
+                isLabel ? " dataset-column-picker-icon-btn-on" : ""
+              }`}
+              aria-label={`Use ${title} as row label`}
+              aria-pressed={isLabel}
+              title={isLabel ? "Don't use as row label" : "Use as row label"}
+              onClick={() => onRowLabel(isLabel ? undefined : path)}
             >
-              ⋯
+              <LabelIcon filled={isLabel} />
             </button>
-            {menuFor === key && (
-              <div className="trace-header-menu dataset-column-picker-menu">
-                <button
-                  type="button"
-                  className="trace-header-menu-item"
-                  onClick={() => {
-                    setMenuFor(null);
-                    onRowLabel(isLabel ? undefined : path);
-                  }}
-                >
-                  <span className="trace-header-menu-item-label">
-                    {isLabel ? "Don't use as row label" : "Use as row label"}
-                  </span>
-                </button>
-              </div>
-            )}
           </span>
         )}
       </div>
@@ -365,10 +344,7 @@ export function DatasetColumnPicker({
                 <button
                   type="button"
                   className="trace-header-menu-item dataset-column-picker-add"
-                  onClick={() => {
-                    setMenuFor(null);
-                    setAdding(true);
-                  }}
+                  onClick={() => setAdding(true)}
                 >
                   <span className="trace-header-menu-item-label">
                     Add column…

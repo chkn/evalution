@@ -544,6 +544,32 @@ export function ColumnsIcon() {
   );
 }
 
+/** A price tag — filled when it marks a column as the row label. */
+export function LabelIcon({ filled = false }: { filled?: boolean }) {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 3h9l9 9-9 9-9-9V3z" />
+      <circle
+        cx="8"
+        cy="8"
+        r="1"
+        fill={filled ? "var(--dropdown-bg, #fff)" : "currentColor"}
+        stroke="none"
+      />
+    </svg>
+  );
+}
+
 /** A box with a drawer along its right edge — shows and hides a details pane. */
 export function SidePaneIcon() {
   return (

@@ -4156,22 +4156,13 @@ pre {
   font-size: 11px;
 }
 
-.dataset-column-picker-badge {
-  flex-shrink: 0;
-  padding: 0 5px;
-  border-radius: 4px;
-  background: var(--dropdown-option-hover);
-  color: var(--dropdown-text-muted);
-  font-size: 10.5px;
-  line-height: 16px;
-}
-
-.dataset-column-picker-more {
-  position: relative;
+.dataset-column-picker-actions {
   display: inline-flex;
 }
 
 .dataset-column-picker-icon-btn {
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
   padding: 0 4px;
   background: none;
@@ -4183,17 +4174,13 @@ pre {
   cursor: pointer;
 }
 
+.dataset-column-picker-icon-btn-on {
+  color: var(--dropdown-text);
+}
+
 .dataset-column-picker-icon-btn:hover {
   color: var(--dropdown-text);
   background: var(--dropdown-option-hover);
-}
-
-.dataset-column-picker-menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 1;
-  white-space: nowrap;
 }
 
 .dataset-column-picker-add,
