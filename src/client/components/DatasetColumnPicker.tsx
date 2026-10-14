@@ -224,6 +224,17 @@ export function DatasetColumnPicker({
         </label>
         {path && (
           <span className="dataset-column-picker-more">
+            {removable && (
+              <button
+                type="button"
+                className="dataset-column-picker-icon-btn"
+                aria-label={`Remove column ${title}`}
+                title="Remove column"
+                onClick={() => onRemove(slot.index)}
+              >
+                ✕
+              </button>
+            )}
             <button
               type="button"
               className="dataset-column-picker-icon-btn"
@@ -250,17 +261,6 @@ export function DatasetColumnPicker({
               </div>
             )}
           </span>
-        )}
-        {removable && (
-          <button
-            type="button"
-            className="dataset-column-picker-icon-btn"
-            aria-label={`Remove column ${title}`}
-            title="Remove column"
-            onClick={() => onRemove(slot.index)}
-          >
-            ✕
-          </button>
         )}
       </div>
     );

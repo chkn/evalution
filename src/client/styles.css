@@ -4241,8 +4241,10 @@ pre {
   border-color: var(--trace-text-dim);
 }
 
-.dataset-row-label {
+.dataset-row-id {
   color: var(--trace-text-dim);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 /* ── Annotation count badges (table/card annotations column) ── */
@@ -4679,6 +4681,11 @@ pre {
   margin-bottom: 6px;
 }
 
+.trace-details-pane-header-bare {
+  /* Nothing under it to space the facts from, as an id or subtitle would. */
+  margin-bottom: 14px;
+}
+
 .trace-details-pane-actions {
   display: flex;
   align-items: center;
@@ -4692,6 +4699,12 @@ pre {
   color: var(--trace-text-dim);
   font-size: 12px;
   word-break: break-all;
+}
+
+.trace-details-pane-subtitle {
+  margin-bottom: 14px;
+  color: var(--trace-text-dim);
+  font-size: 12px;
 }
 
 .trace-details-pane-title {
@@ -5582,7 +5595,8 @@ pre {
   border-bottom-color: var(--accent);
 }
 
-.trace-spans-combined-toggle {
+.trace-spans-combined-toggle,
+.dataset-pane-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5596,12 +5610,20 @@ pre {
   cursor: pointer;
 }
 
-.trace-spans-combined-toggle:hover {
+.trace-spans-combined-toggle:hover,
+.dataset-pane-toggle:hover {
   background: var(--trace-row-hover);
   color: var(--trace-text);
 }
 
-.trace-spans-combined-toggle-active {
+.dataset-pane-toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+
+.trace-spans-combined-toggle-active,
+.dataset-pane-toggle-active {
   background: var(--trace-row-hover);
   color: var(--trace-text);
 }

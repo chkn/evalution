@@ -146,6 +146,7 @@ import {
   EvalsIcon,
   MoreIcon,
   PromptLinkIcon,
+  SidePaneIcon,
   TrashIcon,
 } from "./trace/icons.tsx";
 import { useAnchoredPopover } from "./use-anchored-popover";
@@ -276,7 +277,7 @@ const HEADER_HEIGHT = 32;
 const GROUP_HEADER_HEIGHT = 26;
 
 /**
- * How long a cell must stay selected before the details pane opens for it.
+ * How long a cell must stay selected before it first opens the details pane.
  * Glide starts a cell's editor on a second click, so the first click of a
  * double-click would otherwise open the pane — shifting the grid — just as the
  * cell is being typed into. A click's pause is about this long.
@@ -472,8 +473,12 @@ function DatasetView({
   }, [tabKey]);
   /** The row a view tab shows, and the pane edits, while a view tab is active. */
   const [viewIndex, setViewIndex] = useState<number | null>(null);
-  /** Whether the details pane is open in a view tab — apart from the selection. */
-  const [viewPaneOpen, setViewPaneOpen] = useState(false);
+  /**
+   * Whether the details pane is open, in every tab — separate from the grid's
+   * selection, which only picks its row. When this is `undefined`, selecting a row in
+   * the grid opens it. Explicitly closing it sets this to `false` so it doesn't reopen.
+   */
+  const [paneOpen, setPaneOpen] = useState<boolean | undefined>();
   /** An instance a view asked to have shown in the details pane, until the pane has rendered it. */
   const [reveal, setReveal] = useState<string | null>(null);
   /** A view's unsaved changes to the row it's showing. */
@@ -690,46 +695,54 @@ function DatasetView({
     [columnsById],
   );
 
-  // The row shown in the details pane is the selected cell's, or the row
-  // selected by its marker. A selected cell stays a cell selection — not
-  // folded into its row — so it can be typed into, pasted over, and cleared.
-  const cell = selection.current?.cell;
-  const cellKey = cell ? `${cell[0]},${cell[1]}` : null;
-  // The cell whose row the pane has been opened for. A cell selected while
-  // the pane is closed waits out PANE_DELAY_MS first, which the cell's editor
-  // starting cuts short; once the pane is open it follows the selection at
-  // once.
-  const [paneCell, setPaneCell] = useState<string | null>(null);
-  const paneOpen = paneCell !== null || selection.rows.length > 0;
-  const paneOpenRef = useRef(paneOpen);
-  paneOpenRef.current = paneOpen;
-  const paneTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => {
-    clearTimeout(paneTimer.current);
-    if (cellKey === null || paneOpenRef.current) {
-      setPaneCell(cellKey);
-      return;
-    }
-    paneTimer.current = setTimeout(() => setPaneCell(cellKey), PANE_DELAY_MS);
-    return () => clearTimeout(paneTimer.current);
-  }, [cellKey]);
+  // The grid's row is the selected cell's, or the row selected by its marker.
+  // A selected cell stays a cell selection — not folded into its row — so it
+  // can be typed into, pasted over, and cleared.
   const selectedIndex =
-    (cell && cellKey === paneCell ? cell[1] : undefined) ??
-    selection.rows.first() ??
-    null;
-  const inRange = selectedIndex !== null && selectedIndex < overview.rowCount;
-  const loadedRow = inRange ? pager.get(selectedIndex) : undefined;
+    selection.current?.cell[1] ?? selection.rows.first() ?? null;
+  const gridIndex =
+    selectedIndex !== null && selectedIndex < overview.rowCount
+      ? selectedIndex
+      : null;
+  const loadedRow = gridIndex !== null ? pager.get(gridIndex) : undefined;
   // The pane keeps showing its row even once the pager drops that row's page
   // (scrolled far away) — until another row is selected.
   const shownRef = useRef<{ index: number; row: DatasetRow } | null>(null);
-  if (loadedRow && selectedIndex !== null) {
-    shownRef.current = { index: selectedIndex, row: loadedRow };
+  if (loadedRow && gridIndex !== null) {
+    shownRef.current = { index: gridIndex, row: loadedRow };
   }
-  const selectedRow =
+  const gridRow =
     loadedRow ??
-    (inRange && shownRef.current?.index === selectedIndex
+    (gridIndex !== null && shownRef.current?.index === gridIndex
       ? shownRef.current.row
       : undefined);
+
+  // A cell selected while the pane hasn't been opened or closed opens it,
+  // after waiting out PANE_DELAY_MS — which the cell's editor starting cuts
+  // short. A row selected by its marker opens it at once. Clearing the
+  // selection closes an open pane, to open again on the next one; a pane
+  // closed by hand stays closed.
+  const paneTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(paneTimer.current), []);
+  const onGridSelectionChange = useCallback(
+    (next: GridSelection) => {
+      setSelection(next);
+      clearTimeout(paneTimer.current);
+      if (!next.current && next.rows.length === 0) {
+        setPaneOpen(open => (open ? undefined : open));
+      } else if (paneOpen !== undefined) {
+        return;
+      } else if (next.rows.length > 0) {
+        setPaneOpen(true);
+      } else {
+        paneTimer.current = setTimeout(
+          () => setPaneOpen(open => open ?? true),
+          PANE_DELAY_MS,
+        );
+      }
+    },
+    [paneOpen],
+  );
 
   // #region Dataset views (`specs/dataset-views.md` §C, §D)
 
@@ -774,7 +787,7 @@ function DatasetView({
         if (!viewRow || !Object.hasOwn(viewRow.resources ?? {}, name)) {
           return `the row has no stored instance ${name}`;
         }
-        setViewPaneOpen(true);
+        setPaneOpen(true);
         setReveal(name);
         return undefined;
       }
@@ -834,8 +847,8 @@ function DatasetView({
 
   // The selected row, shared by every tab: the grid's in Grid, else the
   // view's — with the view's unsaved changes applied.
-  const contextIndex = inView ? viewIndex : selectedIndex;
-  const contextStored = inView ? viewRow : selectedRow;
+  const contextIndex = inView ? viewIndex : gridIndex;
+  const contextStored = inView ? viewRow : gridRow;
   const contextRow = useMemo(
     () =>
       contextStored && draft?.rowId === contextStored.id
@@ -864,14 +877,15 @@ function DatasetView({
   const chooseTab = (tab: string) => {
     if (tab === chosenTab || !leaveDraft()) return;
     if (tab.startsWith("view:") && !inView) {
-      // The grid's row carries over, and so does whether its pane was open.
-      setViewIndex(selectedIndex);
-      setViewPaneOpen(selectedIndex !== null && paneOpen);
+      // The grid's row carries over.
+      setViewIndex(gridIndex);
     } else if (tab === "grid" && inView && viewIndex !== null) {
+      // The view's row carries over, selected as a row the marker selects.
       setSelection({
         columns: CompactSelection.empty(),
         rows: CompactSelection.fromSingleSelection(viewIndex),
       });
+      setPaneOpen(open => open ?? true);
       const row = viewIndex;
       requestAnimationFrame(() => editorRef.current?.scrollTo(0, row));
     }
@@ -1196,7 +1210,7 @@ function DatasetView({
     void act(async () => {
       await deleteDatasetField(providerId, datasetId, field.id);
       updateLayout(layoutWithoutField(layout, field.id));
-      setSelection(NO_SELECTION);
+      onGridSelectionChange(NO_SELECTION);
       setReload(n => n + 1);
     });
   };
@@ -1284,10 +1298,9 @@ function DatasetView({
       }),
     });
 
-  // In Grid, the pane shows the selection; in a view tab, the view's row,
-  // while the pane is open.
-  const paneIndex = inView ? (viewPaneOpen ? viewIndex : null) : selectedIndex;
-  const paneRow = inView ? (viewPaneOpen ? viewRow : undefined) : selectedRow;
+  // While it's open, the pane shows the grid's row in Grid, else the view's.
+  const paneIndex = paneOpen ? (inView ? viewIndex : gridIndex) : null;
+  const paneRow = paneOpen ? (inView ? viewRow : gridRow) : undefined;
   const selectedLabel =
     paneRow && rowLabel ? rowLabelText(paneRow, rowLabel) : undefined;
 
@@ -1310,17 +1323,32 @@ function DatasetView({
       }
     });
 
+  /**
+   * Shows or hides the details pane — for good: selecting a row no longer
+   * opens it. Opened in the grid with nothing selected, it selects the row it
+   * last showed (`shownRef` outlives the selection), or the first.
+   */
+  const togglePane = () => {
+    setPaneOpen(!paneOpen);
+    if (paneOpen || inView || selectedIndex !== null) return;
+    const at = Math.min(shownRef.current?.index ?? 0, rowCount - 1);
+    setSelection({
+      columns: CompactSelection.empty(),
+      rows: CompactSelection.fromSingleSelection(at),
+    });
+    editorRef.current?.scrollTo(0, at);
+  };
+
   const rowDetails = paneRow && paneIndex !== null && (
     <>
       <DetailsPaneHeader
         title={
           <span className="trace-row-name">
             Row {paneIndex + 1}
-            {selectedLabel !== undefined && (
-              <span className="dataset-row-label"> · {selectedLabel}</span>
-            )}
+            <code className="dataset-row-id"> · {paneRow.id}</code>
           </span>
         }
+        subtitle={selectedLabel}
         actions={
           <>
             {linkedPrompt && (
@@ -1351,7 +1379,9 @@ function DatasetView({
               onClick={() =>
                 void act(async () => {
                   await deleteDatasetRow(providerId, datasetId, paneRow.id);
-                  setSelection(NO_SELECTION);
+                  // A view tab's pane moves on to the row in its place.
+                  if (inView) setSelection(NO_SELECTION);
+                  else onGridSelectionChange(NO_SELECTION);
                   if (draftRef.current?.rowId === paneRow.id) {
                     updateDraft(undefined);
                   }
@@ -1362,10 +1392,6 @@ function DatasetView({
               <TrashIcon />
             </button>
           </>
-        }
-        id={paneRow.id}
-        onClose={() =>
-          inView ? setViewPaneOpen(false) : setSelection(NO_SELECTION)
         }
       />
       {hasChanges(draft) && draft.rowId === paneRow.id && (
@@ -1565,37 +1591,35 @@ function DatasetView({
       )}
       <div className="trace-view-body dataset-view-body" ref={bodyRef}>
         <div className="trace-view-main-column">
-          {(views.tabs.length > 0 ||
-            views.problems.length > 0 ||
-            chosenTab !== "grid") && (
-            <div className="trace-view-tabs dataset-view-tabs">
-              <div className="trace-view-tab-list">
-                <button
-                  type="button"
-                  className={`trace-view-tab${inView ? "" : " trace-view-tab-active"}`}
-                  onClick={() => chooseTab("grid")}
-                >
-                  <DatasetsIcon />
-                  Grid
-                </button>
-                <ViewTabButtons
-                  tabs={views.tabs}
-                  active={views.shownUri}
-                  onSelect={uri => chooseTab(`view:${uri}`)}
-                />
-                <ViewProblemsButton problems={views.problems} />
-              </div>
-              {inView && !viewPaneOpen && viewRow && (
-                <button
-                  type="button"
-                  className="trace-view-prompt-btn"
-                  onClick={() => setViewPaneOpen(true)}
-                >
-                  Details
-                </button>
-              )}
+          <div className="trace-view-tabs dataset-view-tabs">
+            <div className="trace-view-tab-list">
+              <button
+                type="button"
+                className={`trace-view-tab${inView ? "" : " trace-view-tab-active"}`}
+                onClick={() => chooseTab("grid")}
+              >
+                <DatasetsIcon />
+                Grid
+              </button>
+              <ViewTabButtons
+                tabs={views.tabs}
+                active={views.shownUri}
+                onSelect={uri => chooseTab(`view:${uri}`)}
+              />
+              <ViewProblemsButton problems={views.problems} />
             </div>
-          )}
+            <button
+              type="button"
+              className={`dataset-pane-toggle${paneOpen ? " dataset-pane-toggle-active" : ""}`}
+              onClick={togglePane}
+              disabled={rowCount === 0}
+              title="Row details"
+              aria-label="Row details"
+              aria-pressed={!!paneOpen}
+            >
+              <SidePaneIcon />
+            </button>
+          </div>
           {draftPending && (
             <RowDraftBar
               viewLabel={viewLabel}
@@ -1649,7 +1673,7 @@ function DatasetView({
                   rangeSelect="rect"
                   columnSelect="none"
                   gridSelection={selection}
-                  onGridSelectionChange={setSelection}
+                  onGridSelectionChange={onGridSelectionChange}
                   onCellClicked={onCellClicked}
                   onCellActivated={onCellActivated}
                   onGroupHeaderClicked={onGroupHeaderClicked}

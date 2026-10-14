@@ -214,15 +214,20 @@ test("the selection survives switching to the grid and back; closing the pane ke
   await expect(page.locator(".trace-row-name")).toContainText("Row 2");
   await page.getByRole("button", { name: "Rows view" }).click();
   await expect(shown(page)).toHaveText("row r2 (beta)");
-  // The pane came along; closing it hides it but keeps the row.
+  // The pane came along; the tab bar's toggle hides it but keeps the row.
+  // A view tab's pane has no close button of its own.
+  const toggle = page.getByRole("button", { name: "Row details" });
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".trace-row-name")).toContainText("Row 2");
-  await page
-    .getByRole("button", { name: "Close", exact: false })
-    .first()
-    .click();
+  await expect(page.getByRole("button", { name: "Close details" })).toHaveCount(
+    0,
+  );
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator(".trace-row-name")).toHaveCount(0);
   await expect(shown(page)).toHaveText("row r2 (beta)");
-  await page.getByRole("button", { name: "Details" }).click();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".trace-row-name")).toContainText("Row 2");
 });
 

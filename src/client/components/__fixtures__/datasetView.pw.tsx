@@ -410,8 +410,42 @@ test("selecting a row shows it in full in the details pane", async ({
   await pane.getByRole("button", { name: "trace ↗" }).click();
   expect(traces).toEqual(["db/t1"]);
 
-  await pane.getByRole("button", { name: "Close details" }).click();
+  // The tab bar's toggle closes the pane — it has no close button of its
+  // own — and opens it again on the row it last showed.
+  await expect(pane.getByRole("button", { name: "Close details" })).toHaveCount(
+    0,
+  );
+  const toggle = component.getByRole("button", { name: "Row details" });
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await toggle.click();
   await expect(pane).toHaveCount(0);
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await toggle.click();
+  await expect(pane).toContainText("Row 1");
+
+  await clickCell(page, 40, 1, false);
+  await expect(pane).toContainText("Row 2");
+  await toggle.click();
+  await expect(pane).toHaveCount(0);
+  // Closed by hand, it stays closed as other rows are selected, by cell or
+  // by marker...
+  await clickCell(page, 40, 2, false);
+  await page.waitForTimeout(600);
+  await expect(pane).toHaveCount(0);
+  await clickCell(page, -GRID.marker / 2, 0, false);
+  await expect(pane).toHaveCount(0);
+  // ...and opens again on the grid's row.
+  await toggle.click();
+  await expect(pane).toContainText("Row 1");
+
+  // Clearing the selection closes it, and the next selection opens it again.
+  await clickCell(page, 40, 1, false);
+  await expect(pane).toContainText("Row 2");
+  await page.keyboard.press("Escape");
+  await expect(pane).toHaveCount(0);
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await clickCell(page, -GRID.marker / 2, 0, false);
+  await expect(pane).toContainText("Row 1");
 });
 
 test("double-clicking a cell to edit it in place doesn't open the details pane", async ({
@@ -487,7 +521,10 @@ test("the details pane opens a row in the playground and deletes it", async ({
 
   await pane.getByRole("button", { name: "Delete row" }).click();
   await expect.poll(() => deleted).toEqual(["r2"]);
+  // Clearing the selection closes the pane, which the next selection opens.
   await expect(pane).toHaveCount(0);
+  await clickCell(page, -GRID.marker / 2, 0, false);
+  await expect(pane).toContainText("Row 1");
 });
 
 test("DatasetView pages rows in as they scroll into view", async ({
@@ -1784,9 +1821,16 @@ test("an added column edits a referenced instance's argument inline, and can nam
   // there is named by its number alone.
   const pane = component.getByRole("region", { name: "Row details" });
   await expect(pane).toContainText("Row 2");
-  await expect(pane).not.toContainText("·");
+  await expect(pane.locator(".trace-details-pane-subtitle")).toHaveCount(0);
   await clickCell(page, 40, 0, false);
-  await expect(pane).toContainText("Row 1 · Buy oat milk");
+  await expect(pane).toContainText("Row 1");
+  // The label sits under the title; the row's id follows its number.
+  await expect(pane.locator(".trace-details-pane-subtitle")).toHaveText(
+    "Buy oat milk",
+  );
+  await expect(pane.locator(".trace-details-pane-title code")).toHaveText(
+    " · r1",
+  );
 });
 
 test("hiding an added resource column from its header menu redraws without it", async ({

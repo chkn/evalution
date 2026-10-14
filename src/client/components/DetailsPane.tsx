@@ -56,6 +56,7 @@ export function DetailsPaneHeader({
   title,
   actions,
   id,
+  subtitle,
   onClose,
 }: {
   title: React.ReactNode;
@@ -63,25 +64,35 @@ export function DetailsPaneHeader({
   actions?: React.ReactNode;
   /** A monospaced id line under the title. */
   id?: string;
-  onClose: () => void;
+  /** A dimmed line under the title, for when the id is the title itself. */
+  subtitle?: React.ReactNode;
+  /** Without it, there's no close button: the pane is closed from elsewhere. */
+  onClose?: () => void;
 }) {
   return (
     <>
-      <div className="trace-details-pane-header">
+      <div
+        className={`trace-details-pane-header${id || subtitle !== undefined ? "" : " trace-details-pane-header-bare"}`}
+      >
         <div className="trace-details-pane-title">{title}</div>
         <div className="trace-details-pane-actions">
           {actions}
-          <button
-            type="button"
-            className="trace-details-pane-close"
-            onClick={onClose}
-            aria-label="Close details"
-          >
-            ×
-          </button>
+          {onClose && (
+            <button
+              type="button"
+              className="trace-details-pane-close"
+              onClick={onClose}
+              aria-label="Close details"
+            >
+              ×
+            </button>
+          )}
         </div>
       </div>
       {id && <code className="trace-details-pane-id">{id}</code>}
+      {subtitle !== undefined && (
+        <div className="trace-details-pane-subtitle">{subtitle}</div>
+      )}
     </>
   );
 }
