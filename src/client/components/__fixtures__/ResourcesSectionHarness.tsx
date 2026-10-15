@@ -28,10 +28,15 @@ const INITIAL: InstanceSelections = {
  * server resource. Only `db` is referenced, so removing it asks first. The
  * current instance names are in `[data-testid="names"]`.
  */
-export function ResourcesSectionHarness() {
+export function ResourcesSectionHarness({
+  maxHeight,
+}: {
+  /** Wraps the section in a scroll container this tall, so a new card can start out of view. */
+  maxHeight?: number;
+}) {
   const [instances, setInstances] = useState(INITIAL);
   return (
-    <div>
+    <div style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined}>
       <ResourcesSection
         instances={instances}
         onChange={next =>

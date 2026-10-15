@@ -293,7 +293,8 @@ taskId *                                       [ ◆ root.taskId        ⋯ ]
 - **One card per instance**, then derived dependencies. A card shows the editable name, the
   resource label, scope, what references it ("→ taskId") or that nothing does, and the argument
   form. Removing an instance asks first if anything references it, then clears those references.
-  The `[⋯]` menu holds Rename, Duplicate (the quickest way to make `child2`) and Remove.
+  The `[⋯]` menu holds Rename, Duplicate (the quickest way to make `child2`) and Remove. Adding or
+  duplicating an instance scrolls its new card into view.
 - **Argument forms are `ExecutionInputEditor`s, as today**, so an argument can be a typed value, an
   output of another instance, another slot (`input`), or a column (in an eval). Instances are
   excluded from their own forms and from any form that would close a cycle, the same way

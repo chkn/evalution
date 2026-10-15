@@ -82,3 +82,19 @@ test("a click outside the open menu closes it", async ({ mount, page }) => {
   await page.mouse.click(1, 1);
   await expect(page.getByRole("menu")).toHaveCount(0);
 });
+
+test("a newly added resource is scrolled into view", async ({
+  mount,
+  page,
+}) => {
+  const component = await mount(<ResourcesSectionHarness maxHeight={120} />);
+  await expect(component.locator('[data-instance-card="db2"]')).toHaveCount(0);
+
+  await component.getByRole("button", { name: "＋ Add resource" }).click();
+  await page.getByRole("menuitem", { name: "db" }).click();
+
+  await expect(component.getByTestId("names")).toHaveText("db,cache,db2");
+  await expect(component.locator('[data-instance-card="db2"]')).toBeInViewport({
+    ratio: 0.9,
+  });
+});

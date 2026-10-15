@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { PromptInputSources, ResourceInfo } from "../../shared/types";
 import { ExecutionInputEditor } from "./ExecutionInputEditor";
@@ -117,9 +117,26 @@ export function ResourcesSection({
       ),
   );
 
+  // The host persists `instances` its own way (a dataset row's draft, say),
+  // so a new card may only render a render or two after `onChange`: remember
+  // its name and scroll once it shows up.
+  const revealRef = useRef<string | null>(null);
+  useEffect(() => {
+    const name = revealRef.current;
+    if (name === null || !Object.hasOwn(instances, name)) return;
+    revealRef.current = null;
+    scrollToInstance(name);
+  }, [instances]);
+
+  const addAndReveal = (added: {
+    instances: InstanceSelections;
+    name: string;
+  }) => {
+    revealRef.current = added.name;
+    onChange(added.instances);
+  };
   const add = (uri: string | null) => {
-    if (!uri) return;
-    onChange(addInstance(instances, uri).instances);
+    if (uri) addAndReveal(addInstance(instances, uri));
   };
 
   return (
@@ -146,6 +163,7 @@ export function ResourcesSection({
           instances={instances}
           resource={catalogByUri.get(instance.uri)}
           onChange={onChange}
+          onDuplicate={() => addAndReveal(duplicateInstance(instances, name))}
           sources={sources}
           referencedBy={referencedBy(name)}
           context={context}
@@ -224,6 +242,7 @@ function InstanceCard({
   instances,
   resource,
   onChange,
+  onDuplicate,
   sources,
   referencedBy,
   context,
@@ -232,6 +251,8 @@ function InstanceCard({
   instances: InstanceSelections;
   resource: ResourceInfo | undefined;
   onChange: Props["onChange"];
+  /** Adds a copy of this instance and scrolls to its card. */
+  onDuplicate: () => void;
   sources: PromptInputSources;
   referencedBy: string[];
   context?: SourceContext;
@@ -351,7 +372,7 @@ function InstanceCard({
                     className="trace-header-menu-item"
                     onClick={() => {
                       closeMenu();
-                      onChange(duplicateInstance(instances, name).instances);
+                      onDuplicate();
                     }}
                   >
                     <span className="trace-header-menu-item-label">
