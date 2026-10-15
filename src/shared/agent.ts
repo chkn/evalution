@@ -36,7 +36,13 @@ export interface AgentInfo {
 export type AgentContext =
   | { type: "prompt"; providerId: string; promptId: string }
   | { type: "trace"; providerId: string; traceId: string }
-  | { type: "dataset"; providerId: string; datasetId: string }
+  | {
+      type: "dataset";
+      providerId: string;
+      datasetId: string;
+      /** The rows selected in the dataset's view, when any are. */
+      rowIds?: string[];
+    }
   | { type: "eval"; providerId: string; evalId: string };
 
 /**
@@ -62,7 +68,17 @@ export function parseAgentContext(value: unknown): AgentContext | undefined {
   const id = (value as Record<string, unknown>)[idKey];
   if (typeof id !== "string") return undefined;
   // Rebuilt rather than passed through, so nothing beyond these fields rides along.
-  return { type, providerId, [idKey]: id } as AgentContext;
+  const context = { type, providerId, [idKey]: id } as AgentContext;
+  const { rowIds } = value as Record<string, unknown>;
+  if (
+    context.type === "dataset" &&
+    Array.isArray(rowIds) &&
+    rowIds.length > 0 &&
+    rowIds.every(rowId => typeof rowId === "string")
+  ) {
+    context.rowIds = rowIds;
+  }
+  return context;
 }
 
 /** The field each {@link AgentContext} type names its entity by. */

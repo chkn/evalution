@@ -394,7 +394,9 @@ fail with a message that says so.
 
 ### D.2 Scheduling
 
-Arms × rows go into one queue with a concurrency limit (default 4, set per run). Nothing extra is
+Arms × rows go into one queue with a concurrency limit (default 4, set per run). A run can be
+limited to some of the dataset's rows (`rowIds`, as the dataset view's run menu sends for the rows
+selected in its grid); each keeps its position in the whole dataset. Nothing extra is
 needed for correctness. Asgard's `db` declares `reset`, so its lease lock (`resource-arguments.md`
 §F) already serializes the runs that share it, and the queue simply waits. An eval over a prompt
 with no resettable resources runs in parallel.
@@ -514,7 +516,7 @@ eval_check_results run_id, arm_id, row_id, sample, check_id,
   to trust.
 
 **Wire.** `GET /api/eval-providers`, `GET|POST /api/evals`, `GET|PATCH|DELETE /api/evals/:p/:id`,
-`POST /api/evals/:p/:id/runs` (body: `{ arms, concurrency }`), `GET /api/evals/:p/:id/runs`,
+`POST /api/evals/:p/:id/runs` (body: `{ arms, concurrency, rowIds }`), `GET /api/evals/:p/:id/runs`,
 `GET /api/eval-runs/:p/:runId` (results included), `POST /api/eval-runs/:p/:runId/cancel`,
 `GET /api/checks` (all providers' `CheckInfo`), and
 `GET /api/traces/:p/:id/check-results`.

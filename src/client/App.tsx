@@ -1544,12 +1544,26 @@ function App() {
                                 }
                                 onDeleted={() => closeTabEverywhere(key)}
                                 onNewEval={setNewEvalSeed}
+                                evals={evals}
+                                onRunStarted={(summary, run) =>
+                                  openTab(
+                                    pane.id,
+                                    evalRunTab(
+                                      summary.providerId,
+                                      run,
+                                      summary.name,
+                                    ),
+                                  )
+                                }
                                 agents={agents}
-                                onAskAgent={agent =>
+                                onAskAgent={(agent, rowIds) =>
                                   askAgentRightOf(pane.id, agent, {
                                     type: "dataset",
                                     providerId: tab.providerId,
                                     datasetId: tab.datasetId,
+                                    ...(rowIds?.length && {
+                                      rowIds: [...rowIds],
+                                    }),
                                   })
                                 }
                               />

@@ -59,6 +59,15 @@ export function isPropValue(a: unknown): a is PropValue {
   return !!a && typeof a === "object" && "kind" in a;
 }
 
+/** Whether `value` is an array of strings with at least one in it. */
+export function isNonEmptyStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(item => typeof item === "string")
+  );
+}
+
 /** `text` parsed as JSON, or `undefined` if it isn't valid JSON. */
 export function tryParseJson(text: unknown): unknown {
   if (typeof text !== "string") return undefined;

@@ -403,6 +403,7 @@ Anything else is a 400, not a row that fails later.
 | `DELETE /api/datasets/:providerId/:id` | delete |
 | `POST /api/datasets/:providerId/:id/rows` | add rows (validated per §F) |
 | `DELETE /api/datasets/:providerId/:id/rows/:rowId` | delete a row |
+| `DELETE /api/datasets/:providerId/:id/rows` | delete rows `{ rowIds }`, all at once → `{ deleted }` |
 
 - Live updates use the **existing** hot-reload SSE stream: `SSEData` gains
   `{ type: "dataset-changed"; providerId; event: DatasetChangeEvent }`, fed by `watch`, exactly as
@@ -517,6 +518,14 @@ memory:
   as the cell is being typed into. An editor starting (double-click, Enter) on an editable cell
   cancels the pending open. Once the pane is open it follows the selection immediately, and the
   row markers open it immediately.
+- **Several rows can be selected by their markers** (shift-click a range, ⌘/Ctrl-click to add
+  one). With more than one, the details pane shows only how many ("3 rows selected") and a
+  delete button; Delete on the keyboard does the same for any marked rows. Either asks first,
+  then deletes them in one `DELETE …/rows`. The marked rows are also what the header's **Evals** menu runs ("Run *eval* on
+  N rows", sending `rowIds` — `evals.md` §D.2; with none marked, a run covers every row) and what
+  "Ask AI" tells the agent about (their ids, checked against the dataset by the server; with none
+  marked, the row the selected cell or the view tab shows). The Evals menu lists a "Run" item per
+  eval over the dataset, then "New eval…" past a separator.
 - **Expanded fields and hand-resized columns persist per dataset** in
   `localStorage` (`dataset-layout:<providerId>:<datasetId>`), as the trace list's columns do. A
   per-viewer convenience: storage that's unavailable or hand-edited falls back to the default

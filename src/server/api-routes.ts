@@ -40,6 +40,7 @@ import {
   handleDeleteDataset,
   handleDeleteField,
   handleDeleteRow,
+  handleDeleteRows,
   handleDescribePath,
   handleGetDataset,
   handleListDatasets,
@@ -936,6 +937,14 @@ export function setupRoutes({
     ),
   );
 
+  // DELETE /api/datasets/:providerId/:id/rows - Delete rows: `{ rowIds }`
+  app.delete(
+    "/api/datasets/:providerId/:id/rows",
+    datasetRoute(async (provider, { id }, c) =>
+      handleDeleteRows(provider, id, await jsonBody(c)),
+    ),
+  );
+
   // DELETE /api/datasets/:providerId/:id/rows/:rowId - Delete a row
   app.delete(
     "/api/datasets/:providerId/:id/rows/:rowId",
@@ -1024,7 +1033,7 @@ export function setupRoutes({
     evalRoute((provider, { id }) => handleDeleteEval(provider, id)),
   );
 
-  // POST /api/evals/:providerId/:id/runs - Start a run: `{ arms?, concurrency? }`
+  // POST /api/evals/:providerId/:id/runs - Start a run: `{ arms?, concurrency?, rowIds? }`
   app.post(
     "/api/evals/:providerId/:id/runs",
     runnerRoute(async (runner, provider, { id }, c) => {

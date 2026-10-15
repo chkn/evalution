@@ -831,6 +831,25 @@ export async function deleteDatasetRow(
   await throwIfError(res);
 }
 
+/**
+ * Deletes rows of a dataset, all at once. Resolves to how many there were:
+ * ids of rows already gone are passed over.
+ */
+export async function deleteDatasetRows(
+  providerId: string,
+  datasetId: string,
+  rowIds: readonly string[],
+): Promise<number> {
+  const res = await fetch(datasetUrl(providerId, datasetId, "/rows"), {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rowIds }),
+  });
+  await throwIfError(res);
+  const { deleted } = await res.json();
+  return deleted;
+}
+
 /** Every configured dataset provider. */
 export async function getDatasetProviders(): Promise<DatasetProviderInfo[]> {
   const res = await fetch("/api/dataset-providers");
@@ -934,7 +953,12 @@ export async function deleteEval(
 export async function startEvalRun(
   providerId: string,
   evalId: string,
-  options: { arms?: EvalArmSpec[]; concurrency?: number } = {},
+  options: {
+    arms?: EvalArmSpec[];
+    concurrency?: number;
+    /** Runs only these rows of the eval's dataset. Defaults to all of them. */
+    rowIds?: readonly string[];
+  } = {},
 ): Promise<EvalRun> {
   const res = await fetch(evalUrl(providerId, evalId, "/runs"), {
     method: "POST",

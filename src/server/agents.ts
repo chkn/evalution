@@ -81,7 +81,12 @@ export async function describeAgentContext(
         .get(context.providerId)
         ?.getDataset(context.datasetId);
       if (!dataset) throw notFound("dataset");
-      return `Currently viewing dataset ${JSON.stringify(dataset.name)} (dataset id ${JSON.stringify(dataset.id)}).`;
+      const viewing = `Currently viewing dataset ${JSON.stringify(dataset.name)} (dataset id ${JSON.stringify(dataset.id)})`;
+      const rowIds = await selectedRowIds(api, context);
+      if (rowIds.length === 0) return `${viewing}.`;
+      const one = rowIds.length === 1;
+      const ids = rowIds.map(id => JSON.stringify(id)).join(", ");
+      return `${viewing}, with ${rowIds.length} ${one ? "row" : "rows"} selected (row ${one ? "id" : "ids"} ${ids}).`;
     }
     case "eval": {
       const def = await api.evalProviders
@@ -91,6 +96,23 @@ export async function describeAgentContext(
       return `Currently viewing eval ${JSON.stringify(def.name)} (eval id ${JSON.stringify(def.id)}).`;
     }
   }
+}
+
+/**
+ * The ids of the rows a dataset context says are selected that the dataset
+ * has, in its order — the server's own, so nothing else the client sends
+ * reaches the agent.
+ */
+async function selectedRowIds(
+  api: ApiContext,
+  context: Extract<AgentContext, { type: "dataset" }>,
+): Promise<string[]> {
+  if (!context.rowIds?.length) return [];
+  const selected = new Set(context.rowIds);
+  const rows = await api.datasetProviders
+    .get(context.providerId)
+    ?.listRows(context.datasetId);
+  return (rows ?? []).filter(row => selected.has(row.id)).map(row => row.id);
 }
 
 /**

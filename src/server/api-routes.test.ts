@@ -954,6 +954,34 @@ describe("dataset routes", () => {
     expect(gone.status).toBe(404);
   });
 
+  it("deletes several rows at once, refusing a body without row ids", async () => {
+    const { app } = await makeDatasetApp();
+    const { body: dataset } = await create(app);
+    const rowsUrl = `/api/datasets/${DATASET_PROVIDER_ID}/${dataset.id}/rows`;
+    const added = (await (
+      await app.request(
+        rowsUrl,
+        json("POST", {
+          rows: ["a", "b", "c"].map(t => ({ cells: { "0": text(t) } })),
+        }),
+      )
+    ).json()) as { id: string }[];
+
+    for (const body of [{}, { rowIds: [] }, { rowIds: [1] }]) {
+      const refused = await app.request(rowsUrl, json("DELETE", body));
+      expect(refused.status).toBe(400);
+    }
+
+    const res = await app.request(
+      rowsUrl,
+      json("DELETE", { rowIds: [added[0].id, added[2].id, "missing"] }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ deleted: 2 });
+    const left = (await (await app.request(rowsUrl)).json()) as any[];
+    expect(left.map(r => r.id)).toEqual([added[1].id]);
+  });
+
   it("pages rows, rejecting a malformed window and an unknown dataset", async () => {
     const { app } = await makeDatasetApp();
     const { body: dataset } = await create(app);

@@ -815,6 +815,37 @@ export class RowPager {
     return page?.rows[index % this.pageSize];
   }
 
+  /**
+   * The rows at `indices`, in order: those held as they're shown, the rest
+   * fetched a page at a time — without being kept, so scrolling isn't
+   * disturbed. An index past the last row is left out.
+   */
+  async rowsAt(indices: readonly number[]): Promise<DatasetRow[]> {
+    const missing = new Set(
+      indices
+        .filter(index => !this.get(index))
+        .map(index => Math.floor(index / this.pageSize)),
+    );
+    const fetched = new Map(
+      await Promise.all(
+        Array.from(
+          missing,
+          async page =>
+            [
+              page,
+              await this.fetchRows(page * this.pageSize, this.pageSize),
+            ] as const,
+        ),
+      ),
+    );
+    return indices.flatMap(index => {
+      const row =
+        this.get(index) ??
+        fetched.get(Math.floor(index / this.pageSize))?.[index % this.pageSize];
+      return row ? [row] : [];
+    });
+  }
+
   /** Fetches whichever pages covering rows `[start, end)` aren't current. */
   ensure(start: number, end: number): void {
     if (end <= start) return;

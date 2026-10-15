@@ -31,6 +31,7 @@ import {
   parseBinding,
   parseResources,
 } from "../../shared/dataset-cells.ts";
+import { isNonEmptyStringArray } from "../../shared/helpers.ts";
 import type { ExecutionInput, PromptID } from "../../shared/types.ts";
 import { errorResult, type HandlerResult } from "./result.ts";
 
@@ -298,7 +299,7 @@ export async function handleDeleteEval(
   }
 }
 
-/** `POST /api/evals/:providerId/:id/runs` — body `{ arms?, concurrency? }`. */
+/** `POST /api/evals/:providerId/:id/runs` — body `{ arms?, concurrency?, rowIds? }`. */
 export async function handleStartRun(
   runner: EvalRunner,
   provider: EvalProvider,
@@ -308,9 +309,9 @@ export async function handleStartRun(
   try {
     const options = body === undefined ? {} : body;
     if (!isRecord(options)) {
-      throw new BadRequest("body must be { arms?, concurrency? }");
+      throw new BadRequest("body must be { arms?, concurrency?, rowIds? }");
     }
-    const { concurrency } = options;
+    const { concurrency, rowIds } = options;
     if (
       concurrency !== undefined &&
       (typeof concurrency !== "number" ||
@@ -319,10 +320,14 @@ export async function handleStartRun(
     ) {
       throw new BadRequest("concurrency must be a positive integer");
     }
+    if (rowIds !== undefined && !isNonEmptyStringArray(rowIds)) {
+      throw new BadRequest("rowIds must be a non-empty array of row ids");
+    }
     const arms = parseArms(options.arms);
     const run = await runner.start(provider, id, {
       ...(arms && { arms }),
       ...(concurrency !== undefined && { concurrency }),
+      ...(rowIds !== undefined && { rowIds }),
     });
     return { status: 201, body: run };
   } catch (err) {

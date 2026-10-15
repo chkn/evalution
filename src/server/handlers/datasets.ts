@@ -44,6 +44,7 @@ import {
   type PrimitiveFieldType,
   portableDef,
 } from "../../shared/dataset-fields.ts";
+import { isNonEmptyStringArray } from "../../shared/helpers.ts";
 import type {
   CheckInfo,
   ExecutionInput,
@@ -722,13 +723,21 @@ export async function handleDeleteRow(
   }
 }
 
-/** Deletes rows all at once — see {@link DatasetProvider.deleteRows}. */
+/**
+ * `DELETE /api/datasets/:providerId/:id/rows` — body `{ rowIds }`: deletes
+ * rows all at once (see {@link DatasetProvider.deleteRows}), answering
+ * `{ deleted }`, how many there were.
+ */
 export async function handleDeleteRows(
   provider: DatasetProvider,
   datasetId: string,
-  rowIds: readonly string[],
+  body: unknown,
 ): Promise<DatasetHandlerResult> {
   try {
+    const rowIds = isRecord(body) ? body.rowIds : undefined;
+    if (!isNonEmptyStringArray(rowIds)) {
+      throw new BadRequest("body must be { rowIds: string[] }, not empty");
+    }
     const deleted = await provider.deleteRows(datasetId, rowIds);
     return { status: 200, body: { deleted } };
   } catch (err) {

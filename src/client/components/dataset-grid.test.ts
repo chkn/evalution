@@ -533,6 +533,24 @@ describe("RowPager", () => {
     expect(pending).toHaveLength(3);
   });
 
+  it("reads rows by index, fetching only the pages it doesn't hold, without keeping them", async () => {
+    const { p, pending } = pager();
+    p.ensure(0, 5);
+    pending[0].resolve(rowsFrom(0, 10));
+    await Promise.resolve();
+
+    const read = p.rowsAt([3, 25, 21, 4, 99]);
+    expect(pending.slice(1).map(f => [f.offset, f.limit])).toEqual([
+      [20, 10],
+      [90, 10],
+    ]);
+    pending[1].resolve(rowsFrom(20, 10));
+    // The last page ends short of index 99.
+    pending[2].resolve(rowsFrom(90, 5));
+    expect((await read).map(r => r.id)).toEqual(["3", "25", "21", "4"]);
+    expect(p.get(25)).toBeUndefined();
+  });
+
   it("keeps serving stale rows after invalidate until the refetch lands", async () => {
     const { p, pending } = pager();
     p.ensure(0, 5);

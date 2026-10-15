@@ -27,6 +27,25 @@ describe("parseAgentContext", () => {
     ).toEqual({ type: "trace", providerId: "p", traceId: "t" });
   });
 
+  it("keeps a dataset's selected row ids, when they're a list of strings", () => {
+    const dataset = { type: "dataset", providerId: "p", datasetId: "d" };
+    expect(parseAgentContext({ ...dataset, rowIds: ["r1", "r2"] })).toEqual({
+      ...dataset,
+      rowIds: ["r1", "r2"],
+    });
+    for (const rowIds of [[], ["r1", 2], "r1"]) {
+      expect(parseAgentContext({ ...dataset, rowIds })).toEqual(dataset);
+    }
+    expect(
+      parseAgentContext({
+        type: "trace",
+        providerId: "p",
+        traceId: "t",
+        rowIds: ["r1"],
+      }),
+    ).toEqual({ type: "trace", providerId: "p", traceId: "t" });
+  });
+
   it("rejects an unknown type, a missing id, or a non-object", () => {
     expect(
       parseAgentContext({ type: "nope", providerId: "p" }),

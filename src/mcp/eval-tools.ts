@@ -757,11 +757,18 @@ export function registerEvalTools(
           .positive()
           .optional()
           .describe("How many rows may run at once (default 4)."),
+        rowIds: z
+          .array(z.string())
+          .min(1)
+          .optional()
+          .describe(
+            "Run only the dataset rows with these ids (default every row). Ids of rows that no longer exist are passed over.",
+          ),
         providerId: providerIdParam("eval"),
       }),
       annotations: { openWorldHint: true },
     },
-    ({ evalId, arms, concurrency, providerId }) =>
+    ({ evalId, arms, concurrency, rowIds, providerId }) =>
       guard(async () => {
         const provider = evalProvider(providerId);
         const found = evalRunnerOrRefusal(
@@ -774,6 +781,7 @@ export function registerEvalTools(
           await handleStartRun(found.runner, provider, evalId, {
             arms,
             concurrency,
+            rowIds,
           }),
         );
         return ok({

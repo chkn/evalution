@@ -8003,8 +8003,9 @@ pre {
   transform: translateY(-0.1em);
 }
 
-/* "Ask AI" in a view's header: kept on one line. */
-.ask-agent-btn {
+/* "Ask AI" and a dataset's "Evals" in a view's header: kept on one line. */
+.ask-agent-btn,
+.dataset-eval-btn {
   flex-shrink: 0;
   white-space: nowrap;
 }

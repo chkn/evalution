@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import { canEdit } from "./helpers.ts";
+import { canEdit, isNonEmptyStringArray } from "./helpers.ts";
 
 describe("canEdit", () => {
   const primitive = { kind: "primitive", value: "hi" } as const;
@@ -26,5 +26,14 @@ describe("canEdit", () => {
     expect(
       canEdit(true, { kind: "functionCall", callee: "helper", args: [] }),
     ).toBe(false);
+  });
+});
+
+describe("isNonEmptyStringArray", () => {
+  it("accepts a list of strings, refusing an empty one, a mixed one, or a non-list", () => {
+    expect(isNonEmptyStringArray(["a", "b"])).toBe(true);
+    for (const value of [[], ["a", 2], "a", undefined, { 0: "a" }]) {
+      expect(isNonEmptyStringArray(value)).toBe(false);
+    }
   });
 });

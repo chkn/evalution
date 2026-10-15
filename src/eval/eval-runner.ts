@@ -82,6 +82,12 @@ export interface StartEvalRunOptions {
   arms?: EvalArmSpec[];
   /** How many (arm, row) runs may be in flight at once. */
   concurrency?: number;
+  /**
+   * Runs only the dataset's rows with these ids, each keeping its position in
+   * the whole dataset. Ids of rows that no longer exist are passed over.
+   * Defaults to every row.
+   */
+  rowIds?: readonly string[];
 }
 
 /** Options for {@link EvalRunner}. */
@@ -216,8 +222,8 @@ export class EvalRunner {
    * Starts a run of `evalId`: checks it can run, sets up its arms, records
    * the run, and returns it — the rows run in the background.
    *
-   * @throws {EvalRunRefusedError} When the eval has problems, or its prompt
-   * or dataset is gone.
+   * @throws {EvalRunRefusedError} When the eval has problems, its prompt or
+   * dataset is gone, or none of `options.rowIds` is a row of the dataset.
    */
   async start(
     provider: EvalProvider,
@@ -253,6 +259,17 @@ export class EvalRunner {
     });
     if (problems.length > 0) throw new EvalRunRefusedError(problems);
 
+    // Each row keeps its position in the whole dataset, chosen or not.
+    const wanted = options.rowIds && new Set(options.rowIds);
+    const rows = (await datasetProvider.listRows(dataset.id))
+      .map((row, rowIndex) => ({ row, rowIndex }))
+      .filter(({ row }) => !wanted || wanted.has(row.id));
+    if (wanted && rows.length === 0) {
+      throw new EvalRunRefusedError([
+        "None of the chosen rows are in the dataset",
+      ]);
+    }
+
     const head = await promptProvider.versions?.head();
     const startVersion = head?.clean ? head.commit?.id : undefined;
     const dirty = head ? !head.clean : false;
@@ -262,7 +279,6 @@ export class EvalRunner {
       target.promptId,
       options.arms ?? [{ kind: "head" }],
     );
-    const rows = await datasetProvider.listRows(dataset.id);
     const runnable = arms.filter(
       (a): a is EvalArm & { ref: PromptRef } => !!a.ref,
     );
@@ -300,7 +316,7 @@ export class EvalRunner {
     this.active.set(run.id, active);
 
     const jobs: Job[] = runnable.flatMap(arm =>
-      rows.map((row, rowIndex) => ({ arm, row, rowIndex })),
+      rows.map(({ row, rowIndex }) => ({ arm, row, rowIndex })),
     );
     active.finished = this.runJobs(active, jobs, {
       promptProvider,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { EvalRun, EvalSummary } from "../../eval/eval-types";
 import type { AgentInfo } from "../../shared/agent";
 import { AskAgentButton, AskAgentMenuItems } from "./AskAgentButton";
 import "@glideapps/glide-data-grid/dist/index.css";
@@ -67,12 +68,15 @@ import {
   deleteDataset,
   deleteDatasetField,
   deleteDatasetRow,
+  deleteDatasetRows,
   describeDatasetPath,
+  EvalRunRefused,
   getDataset,
   getDatasetRows,
   renameDataset,
   renameDatasetField,
   setDatasetColumns,
+  startEvalRun,
   updateDatasetRows,
 } from "../api";
 import { useStructurallyStable } from "../hooks/useStructurallyStable";
@@ -81,6 +85,10 @@ import { DatasetColumnMenu } from "./DatasetColumnMenu";
 import { DatasetColumnPicker } from "./DatasetColumnPicker";
 import { DatasetRowDetails } from "./DatasetRowDetails";
 import { DetailsPane, DetailsPaneHeader, useIsWide } from "./DetailsPane";
+import {
+  DatasetEvalButton,
+  DatasetEvalMenuItems,
+} from "./dataset/DatasetEvalButton.tsx";
 import { DatasetRowList } from "./dataset/DatasetRowList.tsx";
 import { RowDraftBar } from "./dataset/RowDraftBar.tsx";
 import {
@@ -143,7 +151,6 @@ import {
   CalendarIcon,
   CopyIcon,
   DatasetsIcon,
-  EvalsIcon,
   MoreIcon,
   PromptLinkIcon,
   SidePaneIcon,
@@ -186,13 +193,20 @@ interface Props {
   onDeleted: () => void;
   /** "New eval…" — opens the dialog with this dataset and its linked prompt chosen. */
   onNewEval?: (seed: NewEvalSeed) => void;
+  /**
+   * Every loaded eval: each one over this dataset gets a "Run" item in the
+   * Evals menu. Defaults to none.
+   */
+  evals?: readonly EvalSummary[];
+  /** Called once a run started from the Evals menu is under way. */
+  onRunStarted?: (summary: EvalSummary, run: EvalRun) => void;
   /** Coding agents the "Ask" button offers. */
   agents?: readonly AgentInfo[];
   /**
-   * Launches a coding agent about this dataset. Without it (or without
-   * `agents`), there's no "Ask" button.
+   * Launches a coding agent about this dataset, told the ids of the selected
+   * rows, if any. Without it (or without `agents`), there's no "Ask" button.
    */
-  onAskAgent?: (agent: AgentInfo) => void;
+  onAskAgent?: (agent: AgentInfo, rowIds?: readonly string[]) => void;
 }
 
 /**
@@ -285,6 +299,7 @@ const GROUP_HEADER_HEIGHT = 26;
 const PANE_DELAY_MS = 300;
 
 const NO_PROMPTS: readonly NormalizedPrompt[] = [];
+const NO_EVALS: readonly EvalSummary[] = [];
 const NO_AGENTS: readonly AgentInfo[] = [];
 
 const NO_SELECTION: GridSelection = {
@@ -409,6 +424,8 @@ function DatasetView({
   onOpenTrace,
   onDeleted,
   onNewEval,
+  evals = NO_EVALS,
+  onRunStarted,
   agents = NO_AGENTS,
   onAskAgent,
 }: Props) {
@@ -752,10 +769,10 @@ function DatasetView({
 
   /** The draft, current between renders: proposals can arrive back to back. */
   const draftRef = useRef(draft);
-  const updateDraft = (next: RowDraft | undefined) => {
+  const updateDraft = useCallback((next: RowDraft | undefined) => {
     draftRef.current = next;
     setDraft(next);
-  };
+  }, []);
   const viewRow =
     viewIndex !== null && viewIndex < overview.rowCount
       ? pager.get(viewIndex)
@@ -825,6 +842,17 @@ function DatasetView({
     onAction: onViewAction,
   });
   const inView = views.shownUri !== null;
+  /**
+   * The grid's rows selected by their markers — what Delete, the Evals menu's
+   * runs, and "Ask" act on. None while a view tab hides the grid.
+   */
+  const markedRows = useMemo(
+    () =>
+      inView
+        ? []
+        : selection.rows.toArray().filter(index => index < overview.rowCount),
+    [inView, selection.rows, overview.rowCount],
+  );
   // Scroll to a requested instance once the pane has rendered its card.
   useEffect(() => {
     if (!reveal) return;
@@ -1061,9 +1089,39 @@ function DatasetView({
   );
 
   /**
-   * Delete/Backspace clears the selected cells to `null`. Handled here
-   * rather than left to Glide, which would clear a boolean to `false`, and
-   * a selected row to every one of its cells.
+   * Deletes the rows at `indices` after confirming, all at once, and clears
+   * the selection, and a view's draft of any of them. Rows not loaded are
+   * looked up first.
+   */
+  const deleteRows = useCallback(
+    async (indices: readonly number[]) => {
+      if (indices.length === 0) return;
+      const what =
+        indices.length === 1
+          ? `row ${indices[0]! + 1}`
+          : `${indices.length} rows`;
+      if (!window.confirm(`Delete ${what}?`)) return;
+      try {
+        const rowIds = (await pager.rowsAt(indices)).map(row => row.id);
+        await deleteDatasetRows(providerId, datasetId, rowIds);
+        onGridSelectionChange(NO_SELECTION);
+        const draftRowId = draftRef.current?.rowId;
+        if (draftRowId !== undefined && rowIds.includes(draftRowId)) {
+          updateDraft(undefined);
+        }
+        setReload(n => n + 1);
+      } catch (err) {
+        setError((err as Error).message);
+      }
+    },
+    [pager, providerId, datasetId, onGridSelectionChange, updateDraft],
+  );
+
+  /**
+   * Delete/Backspace clears the selected cells to `null`, or deletes the rows
+   * selected by their markers, after confirming. Handled here rather than
+   * left to Glide, which would clear a boolean to `false`, and a selected row
+   * to every one of its cells.
    */
   const onDelete = useCallback(
     (selected: GridSelection) => {
@@ -1074,10 +1132,12 @@ function DatasetView({
             pager.get(i),
           ),
         );
+      } else if (selected.rows.length > 0) {
+        void deleteRows(selected.rows.toArray());
       }
       return false;
     },
-    [columns, pager, saveEdits],
+    [columns, pager, saveEdits, deleteRows],
   );
 
   const onCellClicked = useCallback(
@@ -1246,24 +1306,65 @@ function DatasetView({
     });
   };
 
+  const newEval = () =>
+    onNewEval?.({
+      dataset: { providerId, id: datasetId },
+      ...(linkedPrompt?.providerId && {
+        prompt: { id: linkedPrompt.id, providerId: linkedPrompt.providerId },
+      }),
+    });
+
+  /** The ids of the {@link markedRows}, looking up any not loaded. */
+  const markedRowIds = async () =>
+    (await pager.rowsAt(markedRows)).map(row => row.id);
+
+  /** Starts a run of `summary`, on the marked rows when there are any. */
+  const runEval = (summary: EvalSummary) =>
+    act(async () => {
+      const rowIds = markedRows.length > 0 ? await markedRowIds() : undefined;
+      try {
+        const run = await startEvalRun(summary.providerId, summary.id, {
+          ...(rowIds && { rowIds }),
+        });
+        onRunStarted?.(summary, run);
+      } catch (err) {
+        throw err instanceof EvalRunRefused
+          ? new Error(`Can't run ${summary.name}: ${err.problems.join("; ")}`)
+          : err;
+      }
+    });
+
+  /**
+   * "Ask": tells the agent about the marked rows, or else the row the grid's
+   * selected cell or the view tab shows.
+   */
+  const askAgent = (agent: AgentInfo) =>
+    act(async () => {
+      if (markedRows.length > 0) {
+        onAskAgent?.(agent, await markedRowIds());
+      } else {
+        onAskAgent?.(agent, contextStored && [contextStored.id]);
+      }
+    });
+
+  const linkedEvals = evals.filter(
+    e => e.dataset.providerId === providerId && e.dataset.id === datasetId,
+  );
+  /** What the Evals button, and its stand-in in the ⋯ menu, offer. */
+  const evalMenu = {
+    evals: linkedEvals,
+    selectedRows: markedRows.length,
+    onRun: runEval,
+    ...(onNewEval && { onNewEval: newEval }),
+  };
+  const hasEvalMenu = linkedEvals.length > 0 || !!onNewEval;
+
   const menu =
     menuOpen &&
     createPortal(
       <div className="trace-header-menu" ref={menuRef} style={menuStyle}>
-        {onNewEval && (
-          <button
-            type="button"
-            className="trace-header-menu-item"
-            onClick={() => {
-              setMenuOpen(false);
-              newEval();
-            }}
-          >
-            <span className="trace-header-menu-item-icon">
-              <EvalsIcon size={14} />
-            </span>
-            <span className="trace-header-menu-item-label">New eval…</span>
-          </button>
+        {hasEvalMenu && (
+          <DatasetEvalMenuItems {...evalMenu} onChosen={closeMenu} />
         )}
         {onAskAgent && (
           <AskAgentMenuItems
@@ -1272,11 +1373,13 @@ function DatasetView({
             agents={agents.filter(agent => !agent.disabledReason)}
             onAsk={agent => {
               setMenuOpen(false);
-              onAskAgent(agent);
+              askAgent(agent);
             }}
           />
         )}
-        {(onNewEval || onAskAgent) && <hr className="ask-agent-menu-divider" />}
+        {(hasEvalMenu || onAskAgent) && (
+          <hr className="ask-agent-menu-divider" />
+        )}
         <button
           type="button"
           className="trace-header-menu-item dataset-menu-delete"
@@ -1293,14 +1396,6 @@ function DatasetView({
       </div>,
       document.body,
     );
-
-  const newEval = () =>
-    onNewEval?.({
-      dataset: { providerId, id: datasetId },
-      ...(linkedPrompt?.providerId && {
-        prompt: { id: linkedPrompt.id, providerId: linkedPrompt.providerId },
-      }),
-    });
 
   // While it's open, the pane shows the grid's row in Grid, else the view's.
   const paneIndex = paneOpen ? (inView ? viewIndex : gridIndex) : null;
@@ -1343,77 +1438,104 @@ function DatasetView({
     editorRef.current?.scrollTo(0, at);
   };
 
-  const rowDetails = paneRow && paneIndex !== null && (
-    <>
+  // Several rows selected by their markers: the pane says how many, and
+  // deletes them.
+  const rowDetails =
+    paneOpen && markedRows.length > 1 ? (
       <DetailsPaneHeader
         title={
           <span className="trace-row-name">
-            Row {paneIndex + 1}
-            <code className="dataset-row-id"> · {paneRow.id}</code>
+            {markedRows.length} rows selected
           </span>
         }
-        subtitle={selectedLabel}
         actions={
-          <>
-            {linkedPrompt && (
-              <button
-                type="button"
-                className="dataset-row-btn"
-                title={`Open in playground (${linkedPrompt.name})`}
-                aria-label="Open row in playground"
-                onClick={() => openInPlayground(paneIndex)}
-              >
-                ▶
-              </button>
-            )}
-            <button
-              type="button"
-              className="dataset-row-btn"
-              title="Duplicate row"
-              aria-label="Duplicate row"
-              onClick={() => void duplicateRowAt(paneRow)}
-            >
-              <CopyIcon />
-            </button>
-            <button
-              type="button"
-              className="dataset-row-btn dataset-row-delete"
-              title="Delete row"
-              aria-label="Delete row"
-              onClick={() => {
-                if (!window.confirm(`Delete row ${paneIndex + 1}?`)) return;
-                void act(async () => {
-                  await deleteDatasetRow(providerId, datasetId, paneRow.id);
-                  // A view tab's pane moves on to the row in its place.
-                  if (inView) setSelection(NO_SELECTION);
-                  else onGridSelectionChange(NO_SELECTION);
-                  if (draftRef.current?.rowId === paneRow.id) {
-                    updateDraft(undefined);
-                  }
-                  setReload(n => n + 1);
-                });
-              }}
-            >
-              <TrashIcon />
-            </button>
-          </>
+          <button
+            type="button"
+            className="dataset-row-btn dataset-row-delete"
+            title="Delete rows"
+            aria-label="Delete rows"
+            onClick={() => void deleteRows(markedRows)}
+          >
+            <TrashIcon />
+          </button>
         }
       />
-      {hasChanges(draft) && draft.rowId === paneRow.id && (
-        <div className="dataset-row-draft-banner">
-          {viewLabel} has unsaved changes to this row. Edits here are saved at
-          once, and will leave those changes stale.
-        </div>
-      )}
-      <DatasetRowDetails
-        dataset={dataset}
-        row={paneRow}
-        onOpenTrace={onOpenTrace}
-        onChangeRow={update => saveUpdates([{ rowId: paneRow.id, ...update }])}
-        sources={rowSources}
-      />
-    </>
-  );
+    ) : (
+      paneRow &&
+      paneIndex !== null && (
+        <>
+          <DetailsPaneHeader
+            title={
+              <span className="trace-row-name">
+                Row {paneIndex + 1}
+                <code className="dataset-row-id"> · {paneRow.id}</code>
+              </span>
+            }
+            subtitle={selectedLabel}
+            actions={
+              <>
+                {linkedPrompt && (
+                  <button
+                    type="button"
+                    className="dataset-row-btn"
+                    title={`Open in playground (${linkedPrompt.name})`}
+                    aria-label="Open row in playground"
+                    onClick={() => openInPlayground(paneIndex)}
+                  >
+                    ▶
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="dataset-row-btn"
+                  title="Duplicate row"
+                  aria-label="Duplicate row"
+                  onClick={() => void duplicateRowAt(paneRow)}
+                >
+                  <CopyIcon />
+                </button>
+                <button
+                  type="button"
+                  className="dataset-row-btn dataset-row-delete"
+                  title="Delete row"
+                  aria-label="Delete row"
+                  onClick={() => {
+                    if (!window.confirm(`Delete row ${paneIndex + 1}?`)) return;
+                    void act(async () => {
+                      await deleteDatasetRow(providerId, datasetId, paneRow.id);
+                      // A view tab's pane moves on to the row in its place.
+                      if (inView) setSelection(NO_SELECTION);
+                      else onGridSelectionChange(NO_SELECTION);
+                      if (draftRef.current?.rowId === paneRow.id) {
+                        updateDraft(undefined);
+                      }
+                      setReload(n => n + 1);
+                    });
+                  }}
+                >
+                  <TrashIcon />
+                </button>
+              </>
+            }
+          />
+          {hasChanges(draft) && draft.rowId === paneRow.id && (
+            <div className="dataset-row-draft-banner">
+              {viewLabel} has unsaved changes to this row. Edits here are saved
+              at once, and will leave those changes stale.
+            </div>
+          )}
+          <DatasetRowDetails
+            dataset={dataset}
+            row={paneRow}
+            onOpenTrace={onOpenTrace}
+            onChangeRow={update =>
+              saveUpdates([{ rowId: paneRow.id, ...update }])
+            }
+            sources={rowSources}
+          />
+        </>
+      )
+    );
 
   return (
     <div className="dataset-view">
@@ -1471,19 +1593,9 @@ function DatasetView({
               onFieldAdded={reloadFields}
             />
             <div className="trace-view-header-actions-full">
-              {onNewEval && (
-                <button
-                  type="button"
-                  className="trace-view-prompt-btn"
-                  onClick={newEval}
-                  title="New eval on this dataset"
-                >
-                  <EvalsIcon size={14} />
-                  New eval…
-                </button>
-              )}
+              {hasEvalMenu && <DatasetEvalButton {...evalMenu} />}
               {onAskAgent && (
-                <AskAgentButton agents={agents} onAsk={onAskAgent} />
+                <AskAgentButton agents={agents} onAsk={askAgent} />
               )}
               <button
                 type="button"
@@ -1673,8 +1785,8 @@ function DatasetView({
                   getCellContent={getCellContent}
                   onVisibleRegionChanged={onVisibleRegionChanged}
                   drawHeader={drawHeader}
-                  rowMarkers="clickable-number"
-                  rowSelect="single"
+                  rowMarkers="both"
+                  rowSelect="multi"
                   rangeSelect="rect"
                   columnSelect="none"
                   gridSelection={selection}

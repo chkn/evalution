@@ -3,6 +3,7 @@
 
 import { expect, test } from "@playwright/experimental-ct-react";
 import type { Locator, Page, Route } from "@playwright/test";
+import type { EvalSummary } from "../../../eval/eval-types";
 import type {
   Dataset,
   DatasetField,
@@ -2048,4 +2049,202 @@ test("a column of an unknown kind keeps its place as a dimmed placeholder", asyn
     path("1"),
     { kind: "source" },
   ]);
+});
+
+/** Selects rows `from` to `to` by their markers: a click, then a shift-click. */
+async function selectRows(page: Page, from: number, to: number) {
+  await clickCell(page, -GRID.marker / 2, from, false);
+  await page.keyboard.down("Shift");
+  await clickCell(page, -GRID.marker / 2, to, false);
+  await page.keyboard.up("Shift");
+}
+
+test("rows selected by their markers are deleted together, after confirming", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const deleted: unknown[] = [];
+  await page.route("**/api/datasets/local/tickets/rows", route => {
+    if (route.request().method() !== "DELETE") return route.fallback();
+    deleted.push(route.request().postDataJSON());
+    return route.fulfill({ json: { deleted: 1 } });
+  });
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await untilRowsShown(component);
+  const messages: string[] = [];
+  let accept = false;
+  page.on("dialog", dialog => {
+    messages.push(dialog.message());
+    return accept ? dialog.accept() : dialog.dismiss();
+  });
+
+  // One row selected shows in full, as ever.
+  const pane = component.getByRole("region", { name: "Row details" });
+  await clickCell(page, -GRID.marker / 2, 1, false);
+  await expect(pane).toContainText("Row 2");
+
+  // Several show only how many, and the button that deletes them.
+  await selectRows(page, 0, 2);
+  await expect(pane).toContainText("3 rows selected");
+  await expect(pane.getByRole("button")).toHaveCount(1);
+  await expect(pane.getByText("My order never arrived")).toHaveCount(0);
+  // Declined: nothing is sent, and the rows stay selected.
+  await pane.getByRole("button", { name: "Delete rows" }).click();
+  await expect.poll(() => messages).toEqual(["Delete 3 rows?"]);
+  expect(deleted).toEqual([]);
+  await expect(pane).toContainText("3 rows selected");
+
+  accept = true;
+  await pane.getByRole("button", { name: "Delete rows" }).click();
+  await expect.poll(() => deleted).toEqual([{ rowIds: ["r1", "r2", "r3"] }]);
+  // Clearing the selection closes the pane.
+  await expect(pane).toHaveCount(0);
+
+  // Delete on the keyboard deletes the selected rows too — one, here.
+  await clickCell(page, -GRID.marker / 2, 1, false);
+  await expect(pane).toContainText("Row 2");
+  // The refetch after the delete above can leave the canvas unfocused even
+  // once it's been clicked again, as with Escape in "selecting a row shows
+  // it in full…"; the keys are for the grid, so they're sent to it.
+  await page.getByTestId("data-grid-canvas").focus();
+  await page.keyboard.press("Delete");
+  await expect.poll(() => deleted).toHaveLength(2);
+  expect(deleted[1]).toEqual({ rowIds: ["r2"] });
+  expect(messages.at(-1)).toBe("Delete row 2?");
+  await expect(pane).toHaveCount(0);
+});
+
+/** An eval in the list, over the dataset `datasetId`. */
+const evalSummary = (
+  id: string,
+  name: string,
+  datasetId = "tickets",
+): EvalSummary => ({
+  providerId: "ev",
+  id,
+  name,
+  prompt: { id: "src/support.ts#triage", providerId: "files" },
+  dataset: { providerId: "local", id: datasetId },
+  checkCount: 1,
+  updatedAt: 1,
+});
+
+test("the Evals menu runs each eval over the dataset, on the selected rows when there are some", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const runs: { evalId: string; body: unknown }[] = [];
+  let refuse = false;
+  await page.route("**/api/evals/ev/*/runs", route => {
+    const evalId = route.request().url().split("/").at(-2) ?? "";
+    runs.push({ evalId, body: route.request().postDataJSON() });
+    return refuse
+      ? route.fulfill({
+          status: 400,
+          json: { error: "refused", problems: ["Input 'q' is unbound"] },
+        })
+      : route.fulfill({ status: 201, json: { id: `run${runs.length}` } });
+  });
+  const started: string[] = [];
+  const seeds: unknown[] = [];
+  const component = await mount(
+    <DatasetViewHarness
+      providerId="local"
+      datasetId="tickets"
+      evals={[
+        evalSummary("e1", "Tone check"),
+        evalSummary("e2", "Elsewhere", "other"),
+      ]}
+      onRunStarted={(summary, run) =>
+        started.push(`${summary.name}: ${run.id}`)
+      }
+      onNewEval={seed => seeds.push(seed)}
+    />,
+  );
+  await untilRowsShown(component);
+  const button = component.getByRole("button", { name: "Evals" });
+  const menu = page.getByRole("menu");
+
+  // Only the evals over this dataset, then New eval… past a separator.
+  await button.click();
+  await expect(menu.getByRole("menuitem")).toHaveText([
+    "▶Run Tone check",
+    "New eval…",
+  ]);
+  await expect(menu.locator(".ask-agent-menu-divider")).toHaveCount(1);
+  await menu.getByRole("menuitem", { name: "Run Tone check" }).click();
+  await expect.poll(() => started).toEqual(["Tone check: run1"]);
+  expect(runs).toEqual([{ evalId: "e1", body: {} }]);
+  await expect(menu).toHaveCount(0);
+
+  await selectRows(page, 0, 1);
+  await button.click();
+  await menu
+    .getByRole("menuitem", { name: "Run Tone check on 2 rows" })
+    .click();
+  await expect.poll(() => started).toHaveLength(2);
+  expect(runs[1]).toEqual({ evalId: "e1", body: { rowIds: ["r1", "r2"] } });
+
+  // A refused run says why.
+  refuse = true;
+  await button.click();
+  await menu.getByRole("menuitem", { name: /Run Tone check/ }).click();
+  await expect(component.locator(".dataset-view-action-error")).toContainText(
+    "Can't run Tone check: Input 'q' is unbound",
+  );
+  expect(started).toHaveLength(2);
+
+  await button.click();
+  await menu.getByRole("menuitem", { name: "New eval…" }).click();
+  expect(seeds).toEqual([{ dataset: { providerId: "local", id: "tickets" } }]);
+
+  // Narrow, the runs move into the ⋯ menu.
+  await page.setViewportSize({ width: 320, height: 700 });
+  await component.getByRole("button", { name: "More actions" }).click();
+  await expect(
+    page.locator(".trace-header-menu .trace-header-menu-item", {
+      hasText: "Run Tone check",
+    }),
+  ).toBeVisible();
+});
+
+test("Ask AI is told the selected rows: those marked, or else the selected cell's", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const asked: (readonly string[] | null)[] = [];
+  const component = await mount(
+    <DatasetViewHarness
+      providerId="local"
+      datasetId="tickets"
+      agents={[{ id: "claude-code", label: "Claude Code", icon: "claude" }]}
+      onAskAgent={(_agent, rowIds) => asked.push(rowIds ?? null)}
+    />,
+  );
+  await untilRowsShown(component);
+  const ask = async () => {
+    await component.getByRole("button", { name: "Ask AI" }).click();
+    await page.getByRole("menuitem", { name: "Claude Code" }).click();
+  };
+
+  await ask();
+  await expect.poll(() => asked).toEqual([null]);
+
+  await clickCell(page, 40, 1, false);
+  await ask();
+  await expect.poll(() => asked).toHaveLength(2);
+  expect(asked[1]).toEqual(["r2"]);
+
+  await selectRows(page, 0, 2);
+  await ask();
+  await expect.poll(() => asked).toHaveLength(3);
+  expect(asked[2]).toEqual(["r1", "r2", "r3"]);
 });

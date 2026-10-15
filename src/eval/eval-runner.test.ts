@@ -219,7 +219,16 @@ async function setUp(
     traceWait: { intervalMs: 5, timeoutMs: 1000 },
     ...options.runner,
   });
-  return { runner, evals, def, prompts, progress, traces };
+  return {
+    runner,
+    evals,
+    def,
+    prompts,
+    progress,
+    traces,
+    datasets,
+    datasetId: dataset.id,
+  };
 }
 
 describe("EvalRunner", () => {
@@ -255,6 +264,30 @@ describe("EvalRunner", () => {
       total: 2,
       counts: { pass: 1, fail: 1 },
     });
+  });
+
+  it("runs only the chosen rows, each at its place in the dataset", async () => {
+    const { runner, evals, def, datasets, datasetId } = await setUp();
+    const [, second] = await datasets.listRows(datasetId);
+    const run = await runner.start(evals, def.id, {
+      rowIds: [second!.id, "missing"],
+    });
+    expect(run.total).toBe(1);
+    await runner.finished(run.id);
+
+    const { rows } = await evals.listResults(run.id);
+    expect(rows).toEqual([
+      expect.objectContaining({ rowId: second!.id, rowIndex: 1 }),
+    ]);
+  });
+
+  it("refuses to run when none of the chosen rows is in the dataset", async () => {
+    const { runner, evals, def } = await setUp();
+    const refused = runner.start(evals, def.id, { rowIds: ["missing"] });
+    await expect(refused).rejects.toMatchObject({
+      problems: ["None of the chosen rows are in the dataset"],
+    });
+    expect(await evals.listRuns(def.id)).toEqual([]);
   });
 
   it("snapshots each row's own resources with its result, receipts stripped", async () => {

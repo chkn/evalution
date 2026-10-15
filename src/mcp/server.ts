@@ -1034,11 +1034,9 @@ export function createMcpServer(
     ({ datasetId, rowIds, providerId }) =>
       guard(async () =>
         relay(
-          await handleDeleteRows(
-            datasetProvider(providerId),
-            datasetId,
+          await handleDeleteRows(datasetProvider(providerId), datasetId, {
             rowIds,
-          ),
+          }),
         ),
       ),
   );

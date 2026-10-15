@@ -295,6 +295,24 @@ describe("eval routes", () => {
     ]);
   });
 
+  it.each([
+    ["an empty list", []],
+    ["a list with a non-string", ["r1", 2]],
+    ["a string", "r1"],
+  ])("refuses rowIds that are %s", async (_label, rowIds) => {
+    const { call, dataset } = await makeApp();
+    const { body: def } = await call(
+      "POST",
+      "/api/evals/ev",
+      newEval(dataset.id),
+    );
+    const res = await call("POST", `/api/evals/ev/${def.id}/runs`, {
+      rowIds,
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("rowIds must be a non-empty array of row ids");
+  });
+
   it("lists every prompt provider's checks", async () => {
     const { call } = await makeApp();
     const { body } = await call("GET", "/api/checks");
