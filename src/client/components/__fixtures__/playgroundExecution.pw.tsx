@@ -974,6 +974,46 @@ test.describe("SourcePicker (specs/resource-hierarchy.md §E)", () => {
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(400);
   });
+
+  test("a flyout submenu stays inside the viewport when its row sits near the bottom", async ({
+    mount,
+    page,
+  }) => {
+    // Regression: flyouts were only flipped horizontally — one opened from a
+    // row near the bottom of a short window ran off the bottom edge.
+    await page.setViewportSize({ width: 800, height: 600 });
+    const component = await mount(taskRefHarness());
+    await component.locator(".pg-slot-source-wrap").click();
+    const tasksRow = page.getByRole("menuitem", { name: "Tasks" });
+    const rowBox = (await tasksRow.boundingBox())!;
+    // Shrink the window to just below the row — enough that the root menu
+    // still fits (and so doesn't flip above its trigger), but the flyout,
+    // opened level with the row, has nowhere to go but off-screen unless it
+    // shifts up.
+    const viewportHeight = Math.ceil(rowBox.y + rowBox.height + 20);
+    await page.setViewportSize({ width: 800, height: viewportHeight });
+    await tasksRow.hover();
+
+    const taskARow = page.getByRole("menuitem", {
+      name: TASK_A.label,
+      exact: true,
+    });
+    await expect(taskARow).toBeVisible();
+    const flyout = page.locator(".pg-source-menu-flyout");
+    const expectInViewport = async () => {
+      const box = await flyout.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(viewportHeight);
+    };
+    await expectInViewport();
+
+    // Clicking the row whose flyout hover already opened re-anchors it —
+    // that must be clamped too, not snap back to the row's top.
+    await tasksRow.click();
+    await expect(taskARow).toBeVisible();
+    await expectInViewport();
+  });
 });
 
 test.describe("resource arguments (specs/resource-arguments.md §I, §J)", () => {

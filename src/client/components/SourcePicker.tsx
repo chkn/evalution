@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ResourceInfo } from "../../shared/types";
 import {
@@ -15,6 +15,9 @@ import { useAnchoredPopover } from "./use-anchored-popover";
 const FILTER_THRESHOLD = 8;
 
 const MENU_ITEM_SELECTOR = '[role="menuitem"]';
+
+/** Gap kept between a flyout submenu and the viewport's top/bottom edge. */
+const FLYOUT_MARGIN = 8;
 
 /**
  * A nested menu offering every resource (and declared value) that fits a
@@ -381,6 +384,7 @@ function SourceMenuRow({
   depth: number;
 }) {
   const rowRef = useRef<HTMLButtonElement>(null);
+  const flyoutRef = useRef<HTMLDivElement>(null);
   const [flyoutStyle, setFlyoutStyle] = useState<React.CSSProperties>({});
   const hasChildren = !!node.children && node.children.length > 0;
   const selected = !!node.uri && node.uri === chosen;
@@ -395,6 +399,11 @@ function SourceMenuRow({
       setFlyoutStyle({
         position: "fixed",
         top: rect.top,
+        // Capped to the viewport so a long submenu scrolls instead of
+        // running off the bottom; the layout effect below then shifts it up
+        // far enough to fit.
+        maxHeight: window.innerHeight - 2 * FLYOUT_MARGIN,
+        overflowY: "auto",
         ...(overflowsRight
           ? { right: window.innerWidth - rect.left }
           : { left: rect.right }),
@@ -403,6 +412,27 @@ function SourceMenuRow({
     }
     onOpen();
   };
+
+  // The flyout's height isn't known until it has rendered, so once it has,
+  // slide it up from the row-level top `openFlyout` anchored it at just
+  // enough to keep its bottom edge on screen. Keyed on the style itself, not
+  // just `open`: clicking a row whose flyout hover already opened re-anchors
+  // it without `open` changing, and that must be clamped too.
+  useLayoutEffect(() => {
+    const flyout = flyoutRef.current;
+    const anchorTop = flyoutStyle.top;
+    if (!open || !flyout || typeof anchorTop !== "number") return;
+    const top = Math.max(
+      FLYOUT_MARGIN,
+      Math.min(
+        anchorTop,
+        window.innerHeight -
+          FLYOUT_MARGIN -
+          flyout.getBoundingClientRect().height,
+      ),
+    );
+    if (top !== anchorTop) setFlyoutStyle({ ...flyoutStyle, top });
+  }, [open, flyoutStyle]);
 
   const handleClick = () => {
     if (hasChildren) openFlyout();
@@ -446,7 +476,11 @@ function SourceMenuRow({
       {hasChildren &&
         open &&
         createPortal(
-          <div className="pg-source-menu-flyout" style={flyoutStyle}>
+          <div
+            ref={flyoutRef}
+            className="pg-source-menu-flyout"
+            style={flyoutStyle}
+          >
             <SourceMenu
               nodes={node.children!}
               chosen={chosen}
