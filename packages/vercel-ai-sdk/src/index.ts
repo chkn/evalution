@@ -25,7 +25,10 @@ import {
   type PromptsHelperOptions,
 } from "../../../src/trace/prompt-tracer.js";
 
-const require = createRequire(import.meta.url);
+// Created lazily: `import.meta.url` is undefined in some runtimes (e.g.
+// Cloudflare Workers), where an eager `createRequire` would throw at import.
+let cachedRequire: NodeJS.Require | undefined;
+const getRequire = () => (cachedRequire ??= createRequire(import.meta.url));
 
 import type { AmazonBedrockProvider } from "@ai-sdk/amazon-bedrock";
 import type { AnthropicProvider } from "@ai-sdk/anthropic";
@@ -148,7 +151,7 @@ class LazilyImportedProviders implements Providers {
     if (this.values[key]) return this.values[key];
     const module = PROVIDER_MODULES[key] ?? `@ai-sdk/${key}`;
     return (
-      require(module)?.[key] ??
+      getRequire()(module)?.[key] ??
       (() => {
         throw new Error(`Unable to import "${key}" from "${module}"`);
       })
