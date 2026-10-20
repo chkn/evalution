@@ -442,7 +442,7 @@ test("selecting a row shows it in full in the details pane", async ({
   // Clearing the selection closes it, and the next selection opens it again.
   await clickCell(page, 40, 1, false);
   await expect(pane).toContainText("Row 2");
-  await page.keyboard.press("Escape");
+  await pressInGrid(page, "Escape");
   await expect(pane).toHaveCount(0);
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await clickCell(page, -GRID.marker / 2, 0, false);

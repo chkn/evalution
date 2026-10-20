@@ -15,3 +15,4 @@ For tests that touch files, use `MemoryFileProvider` (`src/file-provider-memory.
 When writing Playwright component tests:
 - Define any React components used by the test in a separate story file (e.g. `FooHarness.tsx`) and import them — Playwright CT does not allow components defined inside the test file itself.
 - Extract repeated browser-side logic (e.g. cursor-offset measurement) into a shared helper function rather than copy-pasting it.
+- To press a key on a Glide data grid after clicking it, use `pressInGrid` (in `datasetView.pw.tsx`) rather than `page.keyboard.press`. Glide focuses the grid a frame after a click, so a key pressed before then goes to whatever element still has focus. This passes on its own and fails only when the suite runs under load.
