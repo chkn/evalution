@@ -839,6 +839,115 @@ test("a details-pane edit is saved when the grid is clicked, on the same row or 
   });
 });
 
+test("the details pane edits a field as its parameter's type is now, not as it was when the field was made", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  /** A `toolsContext` whose one tool, `update_task`, takes `fields`. */
+  const toolsContext = (...fields: string[]): PropDefinition => ({
+    name: "toolsContext",
+    optional: false,
+    type: {
+      kind: "object",
+      syntax: "InferToolSetContext<typeof tools>",
+      properties: [
+        {
+          name: "update_task",
+          optional: false,
+          type: {
+            kind: "object",
+            syntax: "Ctx",
+            properties: fields.map(name => ({ ...TICKET, name })),
+          },
+        },
+      ],
+    },
+  });
+  await mockDataset(
+    page,
+    {
+      ...SUPPORT,
+      // Made before `update_task`'s context grew a `runId`.
+      fields: [
+        SUPPORT.fields[0]!,
+        { id: "1", def: toolsContext("workspaceId") },
+      ],
+      prompt: { id: "src/support.ts#triage", providerId: "files" },
+    },
+    [
+      {
+        id: "r1",
+        cells: {
+          "0": text("My order never arrived"),
+          "1": {
+            kind: "object",
+            properties: {
+              update_task: {
+                kind: "object",
+                properties: { workspaceId: text("ws_1") },
+              },
+            },
+          },
+        },
+        createdAt: 1,
+      },
+    ],
+  );
+  const sent = await mockUpdates(page);
+  const component = await mount(
+    <DatasetViewHarness
+      providerId="local"
+      datasetId="tickets"
+      promptName="triage"
+      linkedPrompt={{
+        functionParameters: [TICKET],
+        executeParameters: [toolsContext("workspaceId", "runId")],
+        // An object cell is editable only with resources on offer.
+        inputSources: { resources: [], functionSlots: {}, executeSlots: {} },
+      }}
+    />,
+  );
+  await untilRowsShown(component);
+
+  await clickCell(page, 40, 0, false);
+  const pane = component.getByRole("region", { name: "Row details" });
+  await expect(pane.getByText(/^runId\b/)).toBeVisible();
+
+  // And what's typed into it saves into the row's cell.
+  // The pane's textboxes: `ticket`, then `workspaceId`, then `runId`.
+  const runId = pane.getByRole("textbox").nth(2);
+  await runId.fill("run_1");
+  await runId.press("Enter");
+  await expect
+    .poll(() => sent.at(-1))
+    .toEqual({
+      updates: [
+        {
+          rowId: "r1",
+          cells: {
+            // All typed in, so it saves as one typed-in object.
+            "1": {
+              kind: "value",
+              value: {
+                kind: "object",
+                properties: {
+                  update_task: {
+                    kind: "object",
+                    properties: {
+                      workspaceId: { kind: "primitive", value: "ws_1" },
+                      runId: { kind: "primitive", value: "run_1" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+});
+
 test("the details pane offers the linked prompt's resources, with their arguments", async ({
   mount,
   page,

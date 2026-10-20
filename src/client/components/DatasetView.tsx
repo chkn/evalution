@@ -144,6 +144,7 @@ import {
   type PanelFill,
   panelFill,
   staleFields,
+  withCurrentTypes,
 } from "./named-inputs";
 import { scrollToInstance } from "./ResourcesSection";
 import { formatTimestamp, formatTimestampCompact } from "./trace/format.ts";
@@ -585,36 +586,48 @@ function DatasetView({
   }, [channel, dataset, overview]);
 
   const linkedPrompt = dataset?.prompt ? findPrompt(dataset.prompt) : undefined;
+  // The dataset as shown and edited: its fields typed as the linked prompt's
+  // parameters are now, so a property a parameter's type has grown since a
+  // field was made can be filled in. What's stored is unchanged.
+  const shownDataset = useMemo(() => {
+    if (!dataset || !linkedPrompt) return dataset;
+    const fields = withCurrentTypes(dataset.fields, linkedPrompt);
+    return fields === dataset.fields ? dataset : { ...dataset, fields };
+  }, [dataset, linkedPrompt]);
   // The resources offered on the fields: those that fit a slot of the same
   // type among the linked prompt's and the other loaded prompts'. None while
   // the linked prompt isn't loaded, rather than every provider's: the row's
   // resources would read as gone. Stable while their content is, so typing in
   // the details pane doesn't remount its editors.
   const rowSources = useStructurallyStable(
-    dataset && (!dataset.prompt || linkedPrompt)
-      ? datasetInputSources(dataset.fields, linkedPrompt, prompts)
+    shownDataset && (!shownDataset.prompt || linkedPrompt)
+      ? datasetInputSources(shownDataset.fields, linkedPrompt, prompts)
       : undefined,
   );
 
   /** The dataset's shared column layout, fitted to its fields and rows. */
   const columnLayout = useMemo(
     () =>
-      dataset
-        ? reconcileColumns(dataset.columns, dataset.fields, overview.fields)
+      shownDataset
+        ? reconcileColumns(
+            shownDataset.columns,
+            shownDataset.fields,
+            overview.fields,
+          )
         : [],
-    [dataset, overview.fields],
+    [shownDataset, overview.fields],
   );
   const columns = useMemo(
     () =>
-      dataset
+      shownDataset
         ? buildColumns({
-            fields: dataset.fields,
+            fields: shownDataset.fields,
             layout: columnLayout,
             expanded,
             shortType: syntax => shortSyntax(syntax, 24),
           })
         : [],
-    [dataset, columnLayout, expanded],
+    [shownDataset, columnLayout, expanded],
   );
   const rowLabel = dataset?.rowLabel;
 
@@ -1525,7 +1538,7 @@ function DatasetView({
             </div>
           )}
           <DatasetRowDetails
-            dataset={dataset}
+            dataset={shownDataset ?? dataset}
             row={paneRow}
             onOpenTrace={onOpenTrace}
             onChangeRow={update =>
@@ -1573,7 +1586,7 @@ function DatasetView({
           <div className="trace-view-header-actions">
             <DatasetColumnPicker
               layout={columnLayout}
-              fields={dataset.fields}
+              fields={shownDataset?.fields ?? dataset.fields}
               instances={overview.instances}
               rowLabel={rowLabel}
               onChange={next => saveColumns(next)}
@@ -1824,7 +1837,7 @@ function DatasetView({
                   portalElementRef={editorPortalRef as RefObject<HTMLElement>}
                   rightElement={
                     <DatasetAddColumn
-                      fields={dataset.fields}
+                      fields={shownDataset?.fields ?? dataset.fields}
                       instances={overview.instances}
                       describePath={describeColumnPath}
                       onPick={addColumnAt}

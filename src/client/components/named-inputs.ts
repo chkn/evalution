@@ -14,6 +14,7 @@ import {
   fieldsForDefs,
   fieldsForPrompt,
   matchKey,
+  portableDef,
 } from "../../shared/dataset-fields";
 import { instanceNames } from "../../shared/input-references";
 import { jsonToPropValue } from "../../shared/json-prop-value";
@@ -331,6 +332,38 @@ export function staleFields(
     ),
   );
   return fields.filter(f => !f.added && !keys.has(matchKey(f.def)));
+}
+
+/**
+ * `fields`, each one that still matches one of `prompt`'s parameters typed
+ * as that parameter is now. A field keeps the type it was made with, and a
+ * match is by name and the type's text, which can stay the same while what
+ * it names changes: `InferToolSetContext<typeof tools>` after a tool's
+ * context grows a `runId`. Editing a cell by the type it was made with would
+ * offer no way to fill in the new property. Fields added by hand never came
+ * from the prompt, so they keep theirs.
+ *
+ * The same array when no field changes, so it's stable to memoize on.
+ */
+export function withCurrentTypes(
+  fields: DatasetField[],
+  prompt: NormalizedPrompt,
+): DatasetField[] {
+  const params = new Map(
+    [...prompt.functionParameters, ...(prompt.executeParameters ?? [])].map(
+      p => [matchKey(p), p],
+    ),
+  );
+  let changed = false;
+  const current = fields.map(field => {
+    const param = !field.added && params.get(matchKey(field.def));
+    if (!param) return field;
+    const def = portableDef(param);
+    if (JSON.stringify(def) === JSON.stringify(field.def)) return field;
+    changed = true;
+    return { ...field, def };
+  });
+  return changed ? current : fields;
 }
 
 // ── filling the panel from outside ───────────────────────────────────────

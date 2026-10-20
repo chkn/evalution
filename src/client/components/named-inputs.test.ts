@@ -18,6 +18,7 @@ import {
   staleFields,
   toCells,
   toPanel,
+  withCurrentTypes,
 } from "./named-inputs";
 
 function def(
@@ -335,5 +336,67 @@ describe("schemas", () => {
     expect(
       staleFields([ticket, { ...expected, added: true }], prompt()),
     ).toEqual([]);
+  });
+});
+
+describe("withCurrentTypes", () => {
+  /** A `toolsContext` whose `update_task` takes exactly `fields`. */
+  const toolsContext = (...fields: string[]): PropDefinition => ({
+    name: "toolsContext",
+    optional: false,
+    type: {
+      kind: "object",
+      syntax: "InferToolSetContext<typeof tools>",
+      properties: [
+        {
+          name: "update_task",
+          optional: false,
+          type: {
+            kind: "object",
+            syntax: "Ctx",
+            properties: fields.map(f => def(f)),
+          },
+        },
+      ],
+    },
+  });
+  const linked = prompt({
+    executeParameters: [
+      {
+        ...toolsContext("db", "runId"),
+        valueSpan: { start: 1, end: 2 },
+      } as PropDefinition,
+    ],
+  });
+  const memberFields = (field: DatasetField) =>
+    field.def.type.kind === "object" &&
+    field.def.type.properties[0]?.type.kind === "object"
+      ? field.def.type.properties[0].type.properties.map(p => p.name)
+      : [];
+
+  it("types a field as its parameter is now, when the type's text is unchanged", () => {
+    const [ticket, context] = fields(def("ticket"), toolsContext("db"));
+    const current = withCurrentTypes([ticket, context], linked);
+    expect(memberFields(current[1])).toEqual(["db", "runId"]);
+    expect(current[1]).toMatchObject({ id: context.id });
+    // A dataset belongs to no file, so the source spans stay behind.
+    expect(current[1].def).not.toHaveProperty("valueSpan");
+    expect(current[0]).toBe(ticket);
+  });
+
+  it("leaves a field alone that no longer matches, or was added by hand", () => {
+    const renamed: PropDefinition = { ...toolsContext("db"), name: "ctx" };
+    const [stale, added] = fields(renamed, toolsContext("db"));
+    const current = withCurrentTypes(
+      [stale, { ...added, added: true }],
+      linked,
+    );
+    expect(current[0]).toBe(stale);
+    expect(memberFields(current[1])).toEqual(["db"]);
+  });
+
+  it("returns the same array when nothing changed", () => {
+    const fs = fields(def("ticket"));
+    expect(withCurrentTypes(fs, prompt())).toBe(fs);
   });
 });
