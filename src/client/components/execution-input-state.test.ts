@@ -2,9 +2,10 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import type { ExecutionInput } from "../../shared/types";
+import type { ExecutionInput, PropDefinition } from "../../shared/types";
 import {
   fromExecutionInput,
+  missingInputMessage,
   SELF,
   type SlotSelection,
   toExecutionInput,
@@ -92,5 +93,76 @@ describe("fromExecutionInput", () => {
       uri: "pg.ts#db",
     } as unknown as ExecutionInput;
     expect(fromExecutionInput(legacy)).toEqual({});
+  });
+});
+
+describe("missingInputMessage", () => {
+  const prop = (
+    name: string,
+    type: PropDefinition["type"],
+    optional = false,
+  ): PropDefinition => ({ name, optional, type });
+  const str = (name: string, optional = false) =>
+    prop(
+      name,
+      { kind: "primitive", syntax: "string", base: "string" },
+      optional,
+    );
+  const db = prop("db", { kind: "opaque", syntax: "Db" });
+  const toolsContext = prop("toolsContext", {
+    kind: "object",
+    syntax: "ToolsContext",
+    properties: [
+      prop("update_task", {
+        kind: "object",
+        syntax: "{ db: Db; runId: string; note?: string }",
+        properties: [db, str("runId"), str("note", true)],
+      }),
+    ],
+  });
+  const withDb = (
+    more: Record<string, ExecutionInput> = {},
+  ): ExecutionInput => ({
+    kind: "object",
+    properties: {
+      update_task: {
+        kind: "object",
+        properties: { db: { kind: "instance", name: "db" }, ...more },
+      },
+    },
+  });
+
+  it("names a required slot left empty", () => {
+    expect(missingInputMessage(str("question"), undefined, false)).toBe(
+      "Parameter 'question' is required",
+    );
+  });
+
+  it("names a required property an object input leaves out, by its path", () => {
+    expect(missingInputMessage(toolsContext, withDb(), false)).toBe(
+      "Parameter 'toolsContext.update_task.runId' is required",
+    );
+  });
+
+  it("points a missing opaque property at the resources that supply one", () => {
+    const input: ExecutionInput = {
+      kind: "object",
+      properties: {
+        update_task: { kind: "object", properties: { runId: strVal("run_1") } },
+      },
+    };
+    expect(missingInputMessage(toolsContext, input, true)).toBe(
+      "Parameter 'toolsContext.update_task.db' needs a resource — pick one from its dropdown",
+    );
+  });
+
+  it("is satisfied once every required property is bound", () => {
+    expect(
+      missingInputMessage(
+        toolsContext,
+        withDb({ runId: strVal("run_1") }),
+        false,
+      ),
+    ).toBeUndefined();
   });
 });

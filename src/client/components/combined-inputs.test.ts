@@ -9,6 +9,7 @@ import {
   expand,
   fanOutGroups,
   fanOutMembers,
+  foldIntoCombined,
   isCombinable,
   resolveLayout,
 } from "./combined-inputs";
@@ -378,6 +379,47 @@ describe("collapseLossy", () => {
       value: "ws_internal_default",
     });
     expect(overwritten.workspaceId).toEqual(["update_task"]);
+  });
+});
+
+describe("foldIntoCombined", () => {
+  it("leaves members that already agree alone", () => {
+    expect(
+      foldIntoCombined(fanOutGroups(TOOLS_CONTEXT), odinInput()),
+    ).toBeUndefined();
+  });
+
+  it("fans a row's value out to a member that gained the field", () => {
+    if (TOOLS_CONTEXT.type.kind !== "object") throw new Error("unreachable");
+    // `update_task`'s context grew a `runId`; the stored input predates it.
+    const grown: PropDefinition = {
+      ...TOOLS_CONTEXT,
+      type: {
+        ...TOOLS_CONTEXT.type,
+        properties: TOOLS_CONTEXT.type.properties.map(member =>
+          member.name === "update_task" && member.type.kind === "object"
+            ? {
+                ...member,
+                type: {
+                  ...member.type,
+                  properties: [
+                    ...member.type.properties,
+                    str("runId", "`run_${string}`"),
+                  ],
+                },
+              }
+            : member,
+        ),
+      },
+    };
+    const groups = fanOutGroups(grown);
+    const folded = foldIntoCombined(groups, odinInput());
+    // `update_task` had no `runId` to lose: it's filled, not overwritten.
+    expect(folded?.overwritten).toEqual({});
+    expect(collapse(groups, folded?.input)?.fields.runId?.value).toEqual({
+      kind: "primitive",
+      value: "run_1",
+    });
   });
 });
 

@@ -65,6 +65,7 @@ import {
   toArray,
   VercelAISDKTelemetry,
 } from "./telemetry.ts";
+import { toolsContextProblems } from "./tools-context.ts";
 
 const MODEL_KEY = "model";
 const SYSTEM_KEY = "system";
@@ -425,9 +426,24 @@ export class VercelAISDK implements SDKAdapter {
     //
     // An evaluation is traced through the same integration: `ai` sends it the
     // `experimental_onEvaluate*` events instead of the generation ones.
-    const call: Promise<unknown> = evaluation
-      ? Promise.resolve().then(() => ai.experimental_evaluate(config))
-      : ai.generateText(config);
+    //
+    // A `toolsContext` that fails a tool's schema fails the run here, before
+    // any tokens are spent, with the schema's own message — the SDK would
+    // find it only once the model calls that tool, and then lose the message
+    // serializing the context (see `toolsContextProblems`).
+    const contextProblems = evaluation
+      ? []
+      : await toolsContextProblems(config?.tools, config?.toolsContext);
+    const call: Promise<unknown> =
+      contextProblems.length > 0
+        ? Promise.reject(
+            new Error(
+              `The tools context doesn't match its tools' schemas:\n${contextProblems.join("\n")}`,
+            ),
+          )
+        : evaluation
+          ? Promise.resolve().then(() => ai.experimental_evaluate(config))
+          : ai.generateText(config);
     const done = call.then(
       async () => {
         // An `ai` release that predates evaluation telemetry (before 7.0.111)

@@ -81,10 +81,15 @@ function fakeProvider(
     variations?: PromptVariations;
     /** A check of the provider's own, at `fake#judge`. */
     judge?: PreparedCheck["run"];
+    /** The prompt's execute parameters; it has none by default. */
+    executeParameters?: PropDefinition[];
   } = {},
 ): PromptProvider & { calls: { question: string; variation?: string }[] } {
   const calls: { question: string; variation?: string }[] = [];
   const judge = options.judge;
+  const prompt: NormalizedPrompt = options.executeParameters
+    ? { ...PROMPT, executeParameters: options.executeParameters }
+    : PROMPT;
   return {
     id: "fake",
     calls,
@@ -106,10 +111,10 @@ function fakeProvider(
       },
     }),
     async getAllPrompts() {
-      return [PROMPT];
+      return [prompt];
     },
     async getPrompt() {
-      return PROMPT;
+      return prompt;
     },
     async execute(ref, [question], opts) {
       const traceId = opts!.traceId!;
@@ -164,6 +169,7 @@ async function setUp(
     rowResources?: (RunResources | undefined)[];
     checks?: EvalCheck[];
     inputs?: Record<string, ExecutionInput>;
+    executeInputs?: Record<string, ExecutionInput>;
     provider?: Parameters<typeof fakeProvider>[1];
     runner?: Partial<EvalRunnerOptions>;
   } = {},
@@ -203,7 +209,7 @@ async function setUp(
       functionInputs: options.inputs ?? {
         question: { kind: "dataset", field: "0" },
       },
-      executeInputs: {},
+      executeInputs: options.executeInputs ?? {},
     },
     checks: options.checks ?? [contains("c1", "1")],
   });
@@ -405,6 +411,62 @@ describe("EvalRunner", () => {
       error: "Row 1 has no 'question' for required input 'question'",
     });
     expect(checks.map(c => c.outcome)).toEqual(["skipped"]);
+    expect(prompts.calls).toEqual([]);
+  });
+
+  it("errors a row whose object cell leaves a required property out, running nothing", async () => {
+    const opaque = (name: string): PropDefinition => ({
+      name,
+      optional: false,
+      type: { kind: "opaque", syntax: "Db" },
+    });
+    const updateTask: PropDefinition = {
+      name: "update_task",
+      optional: false,
+      type: {
+        kind: "object",
+        syntax: "{ db: Db; runId: string }",
+        properties: [opaque("db"), string("runId")],
+      },
+    };
+    const { runner, evals, def, prompts } = await setUp({
+      provider: {
+        executeParameters: [
+          {
+            name: "toolsContext",
+            optional: false,
+            type: {
+              kind: "object",
+              syntax: "ToolsContext",
+              properties: [updateTask],
+            },
+          },
+        ],
+      },
+      executeInputs: { toolsContext: { kind: "dataset", field: "1" } },
+      rows: [
+        {
+          "0": text("cats"),
+          "1": {
+            kind: "object",
+            properties: {
+              update_task: {
+                kind: "object",
+                properties: { db: text("db") },
+              },
+            },
+          },
+        },
+      ],
+    });
+    const run = await runner.start(evals, def.id);
+    await runner.finished(run.id);
+    const { rows } = await evals.listResults(run.id);
+    expect(rows[0]).toMatchObject({
+      status: "error",
+      error:
+        "Row 1 leaves required execute input 'toolsContext.update_task.runId' unbound",
+    });
     expect(prompts.calls).toEqual([]);
   });
 

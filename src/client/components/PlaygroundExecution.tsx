@@ -23,6 +23,7 @@ import {
   expand,
   type FieldGroup,
   fanOutGroups,
+  foldIntoCombined,
   isCombinable,
   resolveLayout,
 } from "./combined-inputs";
@@ -30,6 +31,7 @@ import { ExecPanelShell } from "./ExecPanelShell";
 import { brokenResources, ExecutionInputEditor } from "./ExecutionInputEditor";
 import {
   fromExecutionInput,
+  missingInputMessage,
   paramStorageKey,
   type Selections,
   type SlotSelection,
@@ -356,6 +358,40 @@ function PlaygroundExecution({
     );
   };
 
+  // A slot shown combined over members that disagree shows each row's first
+  // value — the user chose combined, then a member's type grew a field, or a
+  // fill brought in different values. Store what's shown, as switching to
+  // combined does, so a run sends what the panel says it will.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `layoutFor` reads only the state listed.
+  useEffect(() => {
+    const fold = (
+      which: "fn" | "exec",
+      defs: readonly PropDefinition[],
+      selections: Selections,
+    ) => {
+      let next = selections;
+      for (const def of defs) {
+        const groups = fanOutGroups(def);
+        if (!isCombinable(groups)) continue;
+        if (layoutFor(which, def, groups) !== "combined") continue;
+        const folded = foldIntoCombined(
+          groups,
+          toExecutionInput(selections[def.name]),
+        );
+        if (!folded) continue;
+        next = { ...next, [def.name]: fromExecutionInput(folded.input) };
+        setOverwrittenNotes(prev =>
+          withEntry(prev, which, def.name, folded.overwritten),
+        );
+      }
+      return next;
+    };
+    const fn = fold("fn", prompt.functionParameters, functionSelections);
+    const exec = fold("exec", executeParameters, executeSelections);
+    if (fn !== functionSelections) setFunctionSelections(fn);
+    if (exec !== executeSelections) setExecuteSelections(exec);
+  }, [functionSelections, executeSelections, layoutChoices, prompt]);
+
   /**
    * Switch one slot's layout. Forcing a disagreeing slot into combined mode
    * keeps the first member's value and records what it overwrote (§D); the
@@ -415,12 +451,12 @@ function PlaygroundExecution({
     for (const param of prompt.functionParameters) {
       const input = toExecutionInput(functionSelections[param.name]);
       if (input) functionInputs[param.name] = input;
-      else if (
+      const missing =
         requireAll &&
-        !param.optional &&
-        param.defaultValue === undefined
-      ) {
-        setError(missingInputMessage(param, !!prompt.inputSources));
+        (input || (!param.optional && param.defaultValue === undefined)) &&
+        missingInputMessage(param, input, !!prompt.inputSources);
+      if (missing) {
+        setError(missing);
         return null;
       }
     }
@@ -429,8 +465,12 @@ function PlaygroundExecution({
     for (const param of executeParameters) {
       const input = toExecutionInput(executeSelections[param.name]);
       if (input) executeInputs[param.name] = input;
-      else if (requireAll && !param.optional) {
-        setError(missingInputMessage(param, !!prompt.inputSources));
+      const missing =
+        requireAll &&
+        (input || !param.optional) &&
+        missingInputMessage(param, input, !!prompt.inputSources);
+      if (missing) {
+        setError(missing);
         return null;
       }
     }
@@ -742,20 +782,6 @@ function PlaygroundExecution({
       ))}
     </ExecPanelShell>
   );
-}
-
-function missingInputMessage(
-  param: PropDefinition,
-  hasSources: boolean,
-): string {
-  if (param.type.kind !== "opaque") {
-    return `Parameter '${param.name}' is required`;
-  }
-  return hasSources
-    ? `Parameter '${param.name}' needs a resource — pick one from its dropdown`
-    : `Parameter '${param.name}' is a ${param.type.syntax}, which can't be typed in. ` +
-        `Export a resource() from a *.playground.ts beside the prompt, or from ` +
-        `.evalution/playground/, to supply one.`;
 }
 
 export default PlaygroundExecution;

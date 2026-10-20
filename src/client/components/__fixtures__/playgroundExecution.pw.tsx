@@ -6,6 +6,7 @@ import type { Locator, Page } from "@playwright/test";
 import {
   DB_RESOURCE,
   ODIN_TOOLS_CONTEXT,
+  ODIN_TOOLS_CONTEXT_GROWN,
   OPAQUE_DB,
   odinDbSlots,
   PARAMETERIZED_SEEDED_TASK,
@@ -764,6 +765,43 @@ test("typing into a combined row persists as the expanded form and restores it, 
       .locator("textarea, input")
       .first(),
   ).toHaveValue("ws_internal_default");
+});
+
+test("a slot that opens combined stores what it shows, filling a member that gained a field", async ({
+  mount,
+}) => {
+  const props = { functionParameters: [], promptId: "grown-prompt" };
+  const component = await mount(
+    <PlaygroundExecutionHarness
+      {...props}
+      executeParameters={[ODIN_TOOLS_CONTEXT]}
+    />,
+  );
+  await component.getByRole("tab", { name: "Combined" }).click();
+  await component
+    .locator(".pg-combined-row")
+    .nth(3)
+    .locator("textarea, input")
+    .first()
+    .fill("run_1");
+  await component.unmount();
+
+  // `update_task` now takes a `runId` too. The combined row shows the one
+  // stored for `post_message`, so `update_task` must get it as well.
+  const remounted = await mount(
+    <PlaygroundExecutionHarness
+      {...props}
+      executeParameters={[ODIN_TOOLS_CONTEXT_GROWN]}
+    />,
+  );
+  await expect(remounted.locator(".pg-combined-row").nth(3)).toContainText(
+    "update_task, post_message",
+  );
+  await expect(remounted.getByText(/^Overwrote/)).toHaveCount(0);
+  await remounted.getByRole("tab", { name: "Expanded" }).click();
+  await remounted.getByRole("button", { name: "Expand update_task" }).click();
+  // With only `update_task` open, its textboxes are `workspaceId`, `runId`.
+  await expect(remounted.getByRole("textbox").nth(1)).toHaveValue("run_1");
 });
 
 test("the layout toggle is absent for a slot with only one member", async ({

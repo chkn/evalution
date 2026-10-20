@@ -120,6 +120,24 @@ export const ODIN_TOOLS_CONTEXT: PropDefinition = {
   },
 };
 
+/**
+ * {@link ODIN_TOOLS_CONTEXT} after `update_task`'s context grew a `runId` —
+ * inputs stored against the old shape leave it out.
+ */
+export const ODIN_TOOLS_CONTEXT_GROWN: PropDefinition = {
+  ...ODIN_TOOLS_CONTEXT,
+  type: {
+    kind: "object",
+    syntax: "InferToolSetContext<typeof tools>",
+    properties: [
+      fanOutMember("list_tasks", ["db", "workspaceId", "rootTaskId"]),
+      fanOutMember("create_task", ["db", "workspaceId", "rootTaskId"]),
+      fanOutMember("update_task", ["db", "workspaceId", "runId"]),
+      fanOutMember("post_message", ["db", "workspaceId", "runId"]),
+    ],
+  },
+};
+
 /** `db` slots for every member of {@link ODIN_TOOLS_CONTEXT}, all offering `resource`. */
 export function odinDbSlots(resource: ResourceInfo): Record<string, string[]> {
   return Object.fromEntries(

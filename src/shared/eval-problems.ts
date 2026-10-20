@@ -59,23 +59,34 @@ function slotRefs(
  * The required slots of `params` that `bindings` leave unbound, as dotted
  * paths. An `object` binding is followed into the parameter's properties, as
  * the panel fills an object slot property by property.
+ *
+ * @param resolve - What a binding stands for, so a run can look through a
+ *   `dataset` reference into its row's cell (`undefined` when the cell is
+ *   empty). By default, each binding stands for itself.
  */
-function unboundRequired(
+export function unboundRequired(
   params: readonly PropDefinition[],
   bindings: Record<string, ExecutionInput>,
+  resolve: (binding: ExecutionInput) => ExecutionInput | undefined = b => b,
   prefix = "",
 ): string[] {
   const missing: string[] = [];
   for (const param of params) {
     const path = prefix ? `${prefix}.${param.name}` : param.name;
-    const binding = bindings[param.name];
+    const bound = bindings[param.name];
+    const binding = bound && resolve(bound);
     if (!binding) {
       if (!param.optional) missing.push(path);
       continue;
     }
     if (binding.kind === "object" && param.type.kind === "object") {
       missing.push(
-        ...unboundRequired(param.type.properties, binding.properties, path),
+        ...unboundRequired(
+          param.type.properties,
+          binding.properties,
+          resolve,
+          path,
+        ),
       );
     }
   }

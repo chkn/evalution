@@ -31,7 +31,7 @@ import type {
 } from "../prompt/prompt-provider.ts";
 import { runPrompt } from "../server/run-prompt.ts";
 import { stripReceipts } from "../shared/dataset-cells.ts";
-import { evalProblems } from "../shared/eval-problems.ts";
+import { evalProblems, unboundRequired } from "../shared/eval-problems.ts";
 import type { NormalizedPrompt, PromptRef } from "../shared/types.ts";
 import { CheckScope } from "../trace/check-scope.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
@@ -574,6 +574,20 @@ export class EvalRunner {
             "error",
           );
         }
+      }
+      // Deeper: a required property an object cell (or an object binding's
+      // cells) leaves out — a row written before the prompt's types grew it.
+      const missing = unboundRequired(params, bindings, binding =>
+        binding.kind === "dataset" ? job.row.cells[binding.field] : binding,
+      );
+      if (missing.length > 0) {
+        return this.skipped(
+          active,
+          definition,
+          job,
+          `Row ${job.rowIndex + 1} leaves required ${half === "execute" ? "execute input" : "input"} '${missing.join("', '")}' unbound`,
+          "error",
+        );
       }
     }
 

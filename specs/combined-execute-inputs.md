@@ -197,8 +197,14 @@ Written only when the toggle is used, so a stored entry always means "the user d
 and never shadows a later change to the adapter's default.
 
 **Toggling** expanded → combined with disagreeing members keeps the first member's value and
-names the ones it overwrites, in a line under the toggle. Combined → expanded is lossless: it is
-the expansion that was going to be sent anyway.
+names the ones it overwrites, in a line under the toggle (a member that had no value is filled,
+not overwritten). Combined → expanded is lossless: it is the expansion that was going to be sent
+anyway.
+
+A slot the user chose combined can still come to disagree without a toggle — a member's type
+grows a field the stored tree predates, or a fill brings in different values. It shows each row's
+first value, as toggling would, so it is folded the same way as soon as it's seen: what's stored
+(and sent) is always what the panel shows.
 
 ## E. What a row shows
 

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { MemoryTraceProvider } from "../../trace/memory-trace-provider.ts";
 import { VercelAISDK } from "./index.ts";
 import { isPerPromptTelemetry, toArray } from "./telemetry.ts";
@@ -75,6 +76,26 @@ describe("VercelAISDK", () => {
       resolveGenerate();
       await handle!.done;
       expect(settled).toBe(true);
+    });
+
+    it("doesn't call generateText when a tool's context fails its schema", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const handle = await sdk.executeConfig(
+        {
+          model: "m",
+          prompt: "hi",
+          tools: {
+            update_task: { contextSchema: z.object({ runId: z.string() }) },
+          },
+        },
+        { executeValues: { toolsContext: { update_task: {} } } },
+      );
+      await handle!.done;
+      expect(generateTextMock).not.toHaveBeenCalled();
+      expect(String(error.mock.calls[0]?.[1])).toContain(
+        "toolsContext.update_task.runId",
+      );
+      error.mockRestore();
     });
 
     // Not covered here: anything on the path where `generateText` *rejects* —

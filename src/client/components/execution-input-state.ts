@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { unboundRequired } from "../../shared/eval-problems";
 import type {
   ExecutionInput,
   InputLayout,
   NormalizedPrompt,
+  PropDefinition,
   PropValue,
   RunResources,
 } from "../../shared/types";
@@ -223,4 +225,37 @@ export function fromExecutionInput(
     ...(value ? { value } : {}),
     ...(Object.keys(resources).length > 0 ? { resources } : {}),
   };
+}
+
+/**
+ * Why `input` can't run `param`, in the panel's words: the slot left empty,
+ * or the first required property an object input leaves out (`toolsContext`
+ * missing a field its tool's context grew). `undefined` when nothing is.
+ *
+ * @param hasSources - Whether the prompt offers resources, so an opaque
+ *   property can be pointed at them.
+ */
+export function missingInputMessage(
+  param: PropDefinition,
+  input: ExecutionInput | undefined,
+  hasSources: boolean,
+): string | undefined {
+  const [path] = input
+    ? unboundRequired([param], { [param.name]: input })
+    : [param.name];
+  if (path === undefined) return undefined;
+  // The property the path ends at, for its type.
+  let prop = param;
+  for (const name of path.split(".").slice(1)) {
+    if (prop.type.kind !== "object") break;
+    prop = prop.type.properties.find(p => p.name === name) ?? prop;
+  }
+  if (prop.type.kind !== "opaque") {
+    return `Parameter '${path}' is required`;
+  }
+  return hasSources
+    ? `Parameter '${path}' needs a resource — pick one from its dropdown`
+    : `Parameter '${path}' is a ${prop.type.syntax}, which can't be typed in. ` +
+        `Export a resource() from a *.playground.ts beside the prompt, or from ` +
+        `.evalution/playground/, to supply one.`;
 }
