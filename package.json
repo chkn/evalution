@@ -44,6 +44,7 @@
   },
   "scripts": {
     "prepublishOnly": "npm run build",
+    "version": "npm version $npm_package_version --no-git-tag-version --workspaces && git add .",
     "build": "npm run build:cli && npm run build:client",
     "build:cli": "tsdown",
     "build:client": "vite build",
