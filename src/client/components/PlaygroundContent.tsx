@@ -249,6 +249,12 @@ function PlaygroundContent({
     }
   }, [prompt.providerId, prompt.style]);
 
+  // Edits sent but not yet landed. A save waits them out: sent ahead of them,
+  // it would write the unsaved edits without them.
+  const [updatesInFlight] = useState(createInFlight);
+  // Bumped per edit sent, so a landing echo can tell it's been superseded.
+  const updateSeq = useRef(0);
+
   /** Makes `landed` — where the server says the prompt now is — the tab's ref. */
   const adopt = useCallback(
     (landed: NormalizedPrompt) => {
@@ -299,11 +305,21 @@ function PlaygroundContent({
       setLoadedFor(currentRefKey);
     }
     let cancelled = false;
+    const seqAtStart = updateSeq.current;
     getPromptAt(prompt.providerId, prompt.id, ref)
       .then(read => {
         if (cancelled) return;
         if (isImmutableRead(read)) refCache.current.set(currentRefKey, read);
         setLoadedFor(currentRefKey);
+        // An edit sent since this read began (or still on its way) is newer
+        // than what was read, and its own response brings the truth: adopting
+        // this would put the old content back over it.
+        if (
+          !firstRead &&
+          (updateSeq.current !== seqAtStart || updatesInFlight.size > 0)
+        ) {
+          return;
+        }
         if (
           refPrompt &&
           promptKey(read) === promptKey(refPrompt) &&
@@ -330,12 +346,6 @@ function PlaygroundContent({
     };
   }, [currentRefKey, refreshKey, prompt.providerId, prompt.id]);
 
-  // Edits sent but not yet landed. A save waits them out: sent ahead of them,
-  // it would write the unsaved edits without them.
-  const [updatesInFlight] = useState(createInFlight);
-  // Bumped per edit sent, so a landing echo can tell it's been superseded.
-  const updateSeq = useRef(0);
-
   const applyUpdate = useCallback(
     async (updates: NormalizedPromptUpdates) => {
       const seq = ++updateSeq.current;
@@ -361,11 +371,11 @@ function PlaygroundContent({
           updates,
           atRef,
         );
+        // A later edit was sent on top of this one: its echo carries this
+        // one too, while this stale echo would put back what was edited
+        // since (and re-render mid-typing).
+        if (seq !== updateSeq.current) return;
         if (!versioned) {
-          // A later edit was sent on top of this one: its echo carries this
-          // one too, while this stale echo would overwrite (and re-render
-          // mid-typing) whatever was typed since.
-          if (seq !== updateSeq.current) return;
           if (promptKey(updated) !== promptKey(shownRef.current)) {
             shownRef.current = updated;
             onUpdate(updated);
