@@ -7,6 +7,12 @@ import { pathToFileURL } from "node:url";
 import chokidar from "chokidar";
 import { makeRe, minimatch } from "minimatch";
 import {
+  GENERATION_PARAM,
+  importGeneration,
+  isFreshImportHookRegistered,
+  markImportFailed,
+} from "./cli/fresh-import-hook.ts";
+import {
   isVariationLoaderHookRegistered,
   registerVariationSource,
   VARIATION_SOURCE_PARAM,
@@ -51,31 +57,54 @@ export class LocalFileProvider implements FileProvider {
    */
   #cacheBustingUnsupported = false;
 
+  /**
+   * With the fresh-import hook registered (see `registerFreshImportHook`),
+   * every import is made in the current generation, and a fresh one first
+   * starts a new generation if anything loaded in it has changed — so what the
+   * module imports by path is fresh too, and a plain import of a module hands
+   * back the same instance its importers got. Without the hook, a fresh import
+   * busts only the module itself.
+   */
   async import(filePath: string, { fresh }: ImportOptions = {}): Promise<any> {
     const plain = pathToFileURL(filePath).href;
-    if (!fresh || this.#cacheBustingUnsupported) return import(plain);
+    if (this.#cacheBustingUnsupported) return import(plain);
 
-    // A distinct specifier is the only way past Node's module cache. mtime
-    // rather than a counter, so an unchanged file still hits the cache. Integer
-    // nanoseconds, not the fractional `mtimeMs`: a loader that reads the
-    // extension off the whole specifier sees `?x=1.5` as a `.5` file. And not
-    // `?v=` or `?t=`, which Vite reserves and strips before its module cache.
-    const { mtimeNs } = await fs.stat(filePath, { bigint: true });
     const url = pathToFileURL(filePath);
-    url.search = `?mtime=${mtimeNs}`;
+    if (isFreshImportHookRegistered()) {
+      url.search = `?${GENERATION_PARAM}=${await importGeneration(!!fresh)}`;
+    } else if (fresh) {
+      // mtime rather than a counter, so an unchanged file still hits the
+      // cache. Integer nanoseconds, not the fractional `mtimeMs`: a loader that
+      // reads the extension off the whole specifier sees `?x=1.5` as a `.5`
+      // file. And not `?v=` or `?t=`, which Vite reserves and strips before
+      // its module cache.
+      const { mtimeNs } = await fs.stat(filePath, { bigint: true });
+      url.search = `?mtime=${mtimeNs}`;
+    } else {
+      return import(plain);
+    }
 
     try {
       return await import(url.href);
     } catch (err) {
       // Either the host can't take the query, or the module itself threw.
-      // Retrying plain tells the two apart: if it also throws, that is the
-      // real error and worth surfacing; if it succeeds, the host is the
-      // problem and this instance stops trying (at the cost of staleness,
-      // which beats not loading at all).
+      // Retrying plain tells the two apart — with the hook, nothing imports
+      // the plain URL otherwise, so this is its first evaluation rather than a
+      // cached old version: if it also throws, that is the real error; if it
+      // succeeds, the host is the problem, and this instance stops trying (at
+      // the cost of staleness, which beats not loading at all).
       const loaded = await import(plain).catch(() => {
+        // Node caches the failure along with the module: the next fresh
+        // import has to be made in a new generation to retry it.
+        markImportFailed();
         throw err;
       });
       this.#cacheBustingUnsupported = true;
+      console.warn(
+        `⚠️ ${filePath} only loads without a cache-busting query, so changes to it, ` +
+          "or to modules it imports, won't be picked up until you restart evalution:",
+        err,
+      );
       return loaded;
     }
   }
@@ -104,6 +133,14 @@ export class LocalFileProvider implements FileProvider {
     }
     const url = pathToFileURL(filePath);
     url.search = `?${VARIATION_SOURCE_PARAM}=${registerVariationSource(source)}`;
+    // In the current generation, so what the variation imports is as fresh as
+    // what the file on disk would get.
+    if (isFreshImportHookRegistered()) {
+      url.searchParams.set(
+        GENERATION_PARAM,
+        String(await importGeneration(true)),
+      );
+    }
     return import(url.href);
   }
 

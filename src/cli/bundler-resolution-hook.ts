@@ -13,7 +13,8 @@ const RESOLVABLE_EXTENSIONS = [
   ".cjs",
 ];
 
-function isFileSpecifier(specifier: string): boolean {
+/** Whether `specifier` names a file — relative, absolute, or a `file:` URL — rather than a package. */
+export function isFileSpecifier(specifier: string): boolean {
   return (
     specifier.startsWith("./") ||
     specifier.startsWith("../") ||

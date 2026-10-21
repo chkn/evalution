@@ -14,6 +14,7 @@ import {
 } from "./config-loader-hooks.ts";
 import { watchForConfigCreation } from "./config-watcher.ts";
 import { findAvailablePort } from "./find-port.ts";
+import { registerFreshImportHook } from "./fresh-import-hook.ts";
 import {
   findOrBecomeHolder,
   keepStdoutForProtocol,
@@ -45,6 +46,12 @@ registerEvalutionResolver(import.meta.url);
 // imports; Node's own loader, which runs them here, does not. Registered
 // once, up front, before any prompt file is ever imported for execution.
 registerBundlerResolutionFallback();
+
+// Prompt files and playground modules are re-imported to pick up edits, and
+// Node never evicts a module: this carries a fresh import's cache-buster down
+// to everything it imports by path, so an edited dependency is reloaded too.
+// See `./fresh-import-hook.ts`.
+registerFreshImportHook();
 
 // Prompt variations run without their patched source touching disk: it is
 // imported under the real file's URL plus `?evalution-src=<sha256>`, which

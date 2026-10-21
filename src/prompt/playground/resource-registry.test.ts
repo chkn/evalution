@@ -164,6 +164,31 @@ describe("playground module discovery", () => {
     expect(errors[0].modulePath).toBe(p("broken.playground.ts"));
     expect(errors[0].message).toContain("boom");
   });
+
+  it("keeps a module's resources from before when it fails to reload, and says so", async () => {
+    const { fileProvider, registry: reg } = registry({
+      [p("db.playground.ts")]: `${importHelper}
+        export const db = resource({ create: () => ({ value: 1 }) });`,
+    });
+    expect((await reg.all()).map(r => r.key)).toEqual(["db"]);
+
+    await fileProvider.writeFile(
+      p("db.playground.ts"),
+      `throw new Error("boom");`,
+    );
+    await reg.invalidate();
+
+    // Still usable, since the version from before still loads...
+    expect((await reg.all()).map(r => r.key)).toEqual(["db"]);
+    const lease = reg.lease();
+    expect(await acquireUri(lease, "db.playground.ts#db")).toBe(1);
+    await lease.release();
+    // ...but the panel says the edit wasn't picked up, and why.
+    const errors = await reg.errors();
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("boom");
+    expect(errors[0].message).toMatch(/previous version/);
+  });
 });
 
 describe("resource lifecycle", () => {

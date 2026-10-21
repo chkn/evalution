@@ -95,9 +95,12 @@ Measured against the real odin prompt (`TSPromptFileType.parsePrompts` over
   `createTracerForPrompt` stamps those attributes on *every* span it produces, not just the
   root as the native path does. Both matter for replay (§H).
 
-- **`LocalFileProvider.import` does not cache-bust** (`import(pathToFileURL(filePath).href)`).
-  Editing a prompt's code and re-running reuses the stale module. Resources inherit this and
-  make it far more visible (you *will* iterate on a resource and re-run).
+- **Resolved: `LocalFileProvider.import` now reloads edited code.** Every import is made as
+  `?evalution-gen=N`, and the fresh-import hook (`src/cli/fresh-import-hook.ts`) gives the
+  same `?evalution-gen=N` to every file it imports by path. A fresh import starts a new
+  generation only when a file loaded in the current one has changed (or an import in it
+  failed), so an edit to a dependency is picked up too. Packages, and files reached through
+  aliases rather than by path, keep a single instance.
 
 ---
 
@@ -558,9 +561,10 @@ Persistence reuses the existing `pg-exec-params:<globalId>` key — a slot now s
   `onSettled` option) so run-scoped resources dispose. Its fire-and-forget resolution is
   deliberate — the route returns a trace id immediately — so this is additive, not a change
   to when the HTTP response is sent.
-- Playground modules are imported with a `?v=<mtime>` cache-buster so editing one and re-running
-  picks up the edit. Prompt modules arguably deserve the same treatment; call it out but
-  scope it separately.
+- Playground and prompt modules are imported in the current `?evalution-gen=N` generation
+  (see above), so editing one, or anything it imports by path, and re-running picks up the
+  edit. If a playground module fails to reload, its previous version stays in use and the
+  panel says so.
 - **Trust:** playground-module code runs in the server process with full filesystem and network access.
   This is the same trust level the prompt file already has (it is imported and executed on
   every run), so it introduces no new boundary — but it should be documented.

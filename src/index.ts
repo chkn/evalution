@@ -2,6 +2,10 @@
 // Copyright (c) 2026 Alexander Corrado
 
 export {
+  isFreshImportHookRegistered,
+  registerFreshImportHook,
+} from "./cli/fresh-import-hook.ts";
+export {
   isVariationLoaderHookRegistered,
   registerVariationLoaderHook,
 } from "./cli/variation-loader-hook.ts";

@@ -61,12 +61,22 @@ export interface RegisteredCheck {
   check: Check;
 }
 
-/** A playground module that could not be loaded. */
+/**
+ * A playground module that could not be loaded — or could not be reloaded, in
+ * which case its previous version's resources are still in use, and `message`
+ * says so.
+ */
 export interface PlaygroundModuleError {
   /** Absolute path of the module that failed. */
   modulePath: string;
   /** The import-time failure, as a message. */
   message: string;
+}
+
+/** A playground module's exports, imported fresh and the way other modules import it (see `ResourceRegistry.scan`). */
+interface LoadedModule {
+  namespace: Record<string, unknown>;
+  shared: Record<string, unknown>;
 }
 
 /** A live instance of a resource, plus how to tear it down. */
@@ -713,6 +723,12 @@ export class ResourceRegistry {
   private identities = new Map<Resource<unknown>, RegisteredResource>();
   /** Modules that threw at import time, by absolute path. */
   private moduleErrors: PlaygroundModuleError[] = [];
+  /**
+   * Each module's exports as of the last scan that loaded it, by absolute
+   * path. Kept across {@link invalidate}: a module that fails to reload keeps
+   * running its previous version.
+   */
+  private loadedModules = new Map<string, LoadedModule>();
   /** Memoized `scope: 'server'` instances, by resource object then argument key. */
   private serverInstances = new Map<Resource<unknown>, InstancesByKey>();
   /** The scan in flight, so concurrent callers don't each re-import. */
@@ -1290,33 +1306,46 @@ export class ResourceRegistry {
     const checks = new Map<string, RegisteredCheck>();
     const identities = new Map<Resource<unknown>, RegisteredResource>();
     const errors: PlaygroundModuleError[] = [];
+    const loaded = new Map<string, LoadedModule>();
 
     for (const modulePath of await this.findModules()) {
-      let namespace: Record<string, unknown>;
+      let module: LoadedModule;
       try {
-        namespace = await this.fileProvider.import(modulePath, { fresh: true });
+        const namespace: Record<string, unknown> =
+          await this.fileProvider.import(modulePath, { fresh: true });
+        // The same module, imported the way *another module's* `import` of
+        // it resolves. Without the CLI's fresh-import hook, that's no
+        // cache-busting query: Node keys its module cache on the full
+        // specifier, so a busted import and a plain one are two evaluations
+        // producing two distinct resource objects for the same declaration,
+        // and `inputs` (which is by reference) hands over whichever one the
+        // depending module happened to bind. Mapping both onto one
+        // registration is what keeps a dependency resolvable *and* created
+        // once per run. (With the hook, both imports are the same module.)
+        // Best-effort: the busted import above is the one whose failure is
+        // worth reporting.
+        const shared: Record<string, unknown> = await this.fileProvider
+          .import(modulePath)
+          .catch(() => ({}));
+        module = { namespace, shared };
       } catch (err: any) {
         // One broken playground module must not take the others — or the
-        // server — down. It surfaces in the panel as unavailable instead.
-        const message = err?.message ?? String(err);
+        // server — down. It surfaces in the panel instead: as unavailable, or,
+        // if an earlier version loaded, as still running that one.
+        const reason = err?.message ?? String(err);
+        const previous = this.loadedModules.get(modulePath);
+        const message = previous
+          ? `Failed to reload, so the previous version is still in use: ${reason}`
+          : reason;
         console.warn(
-          `⚠️ playground module ${modulePath} failed to load: ${message}`,
+          `⚠️ playground module ${modulePath}: ${previous ? message : `Failed to load: ${reason}`}`,
         );
         errors.push({ modulePath, message });
-        continue;
+        if (!previous) continue;
+        module = previous;
       }
-
-      // The same module, imported the way *another module's* `import` of it
-      // resolves — no cache-busting query. Node keys its module cache on the
-      // full specifier, so a busted import and a plain one are two evaluations
-      // producing two distinct resource objects for the same declaration, and
-      // `inputs` (which is by reference) hands over whichever one the depending
-      // module happened to bind. Mapping both onto one registration is what
-      // keeps a dependency resolvable *and* created once per run. Best-effort:
-      // the busted import above is the one whose failure is worth reporting.
-      const shared: Record<string, unknown> = await this.fileProvider
-        .import(modulePath)
-        .catch(() => ({}));
+      loaded.set(modulePath, module);
+      const { namespace, shared } = module;
 
       const relativePath = path.relative(this.rootDir, modulePath);
       const projectScoped = !relativePath.split(path.sep).includes("..")
@@ -1353,6 +1382,7 @@ export class ResourceRegistry {
     this.checkMap = checks;
     this.identities = identities;
     this.moduleErrors = errors;
+    this.loadedModules = loaded;
   }
 
   private async findModules(): Promise<string[]> {
