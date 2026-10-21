@@ -345,9 +345,12 @@ function PlaygroundContent({
       if (promptKey(optimisticPrompt) !== promptKey(basePrompt)) {
         shownRef.current = optimisticPrompt;
         // With versions, edits land in a variation — never in head itself —
-        // so they're shown on the ref's prompt, and head stays head.
+        // so they're shown on the ref's prompt, and head stays head. The
+        // first edit to head has no variation to show it on yet (the tab has
+        // no ref until the server creates one), so it shows on head until
+        // the server's response replaces it.
         if (versioned) setRefPrompt(optimisticPrompt);
-        else onUpdate(optimisticPrompt);
+        if (!versioned || !atRef) onUpdate(optimisticPrompt);
       }
 
       setSaving(true);
