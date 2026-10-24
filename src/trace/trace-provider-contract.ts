@@ -158,6 +158,56 @@ export function runTraceProviderContractTests(
       );
     });
 
+    it("lets a retry of a failed root span reopen it, and finish it as ok", async () => {
+      const provider = await makeProvider();
+      const span = rootSpan("t1", { startTime: 1 });
+      await provider.recordSpanStart(span);
+      await provider.recordSpanEnd({
+        ...span,
+        endTime: 2,
+        status: "error",
+        errorMessage: "boom",
+      });
+      expect((await provider.getTrace("t1"))?.trace.status).toBe("error");
+
+      const events: TraceStreamEvent[] = [];
+      provider.subscribeTrace("t1", e => events.push(e));
+
+      const retry = { ...span, startTime: 10 };
+      await provider.recordSpanStart(retry);
+      const reopened = (await provider.getTrace("t1")) as any;
+      expect(reopened.trace.status).toBe("running");
+      expect(reopened.trace.endTime).toBeUndefined();
+      expect(reopened.spans[0].status).toBeUndefined();
+      expect(reopened.spans[0].errorMessage).toBeUndefined();
+
+      await provider.recordSpanEnd({ ...retry, endTime: 11, status: "ok" });
+      const loaded = (await provider.getTrace("t1")) as any;
+      expect(loaded.trace.status).toBe("ok");
+      expect(loaded.spans).toHaveLength(1);
+      expect(loaded.spans[0]).toMatchObject({ startTime: 10, endTime: 11 });
+      expect(loaded.spans[0].status).toBe("ok");
+      expect(loaded.spans[0].errorMessage).toBeUndefined();
+      expect(events.map(e => e.type)).toEqual([
+        "trace-update",
+        "span-start",
+        "span-end",
+        "trace-end",
+      ]);
+    });
+
+    it("drops a failTrace message once the trace is retried", async () => {
+      const provider = await makeProvider();
+      await provider.recordSpanStart(rootSpan("t1", { startTime: 1 }));
+      await provider.failTrace("t1", "bad model id");
+
+      await provider.recordSpanStart(rootSpan("t1", { startTime: 10 }));
+
+      const loaded = (await provider.getTrace("t1")) as any;
+      expect(loaded.trace.status).toBe("running");
+      expect(loaded.trace.attributes?.errorMessage).toBeUndefined();
+    });
+
     it("failTrace on an unknown trace id is a no-op", async () => {
       const provider = await makeProvider();
       await expect(

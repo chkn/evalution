@@ -16,9 +16,16 @@ import type { Span } from "./trace-types.ts";
  * An ended span is final: a snapshot of it after its end is a re-report of
  * what already happened (a durable workflow replaying a finished step from
  * its record, say), whose timings are the replay's, not the work's.
+ *
+ * The exception is a span that ended in error. A later report of it is the
+ * work being retried, so it replaces the failed attempt outright: carrying
+ * over the old `errorMessage`, status or attributes would describe a failure
+ * the retry may not have had.
  */
 export function mergeSpans(existing: Span, incoming: Span): Span {
-  if (existing.endTime !== undefined) return existing;
+  if (existing.endTime !== undefined) {
+    return existing.status === "error" ? incoming : existing;
+  }
   const merged = { ...existing } as Record<string, unknown>;
   for (const [key, value] of Object.entries(incoming)) {
     if (value !== undefined) merged[key] = value;

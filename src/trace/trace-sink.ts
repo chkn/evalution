@@ -209,6 +209,9 @@ export abstract class BaseTraceProvider implements TraceProvider, TraceSink {
     }
 
     const stored = await this.addOrUpdateSpan(span);
+    if (isRoot && stored.endTime === undefined) {
+      await this.reopenTrace(span.traceId);
+    }
     this.emitStream(span.traceId, { type: "span-start", span: stored });
     return stored;
   }
@@ -234,6 +237,26 @@ export abstract class BaseTraceProvider implements TraceProvider, TraceSink {
       }
     }
     return stored;
+  }
+
+  /**
+   * Marks a trace that already ended as running again: its root span has just
+   * been started anew (a failed run being retried), so the failure it recorded
+   * is no longer its state.
+   */
+  private async reopenTrace(traceId: string): Promise<void> {
+    const existing = await this.getTraceWithoutSpans(traceId);
+    if (!existing || existing.status === "running") return;
+    const { errorMessage: _failure, ...attributes } = existing.attributes ?? {};
+    const reopened: Trace = {
+      ...existing,
+      endTime: undefined,
+      status: "running",
+      attributes,
+    };
+    await this.addOrUpdateTrace(reopened);
+    this.emitStream(traceId, { type: "trace-update", trace: reopened });
+    this.emitChange({ type: "update", traceId });
   }
 
   async failTrace(traceId: string, errorMessage: string): Promise<void> {

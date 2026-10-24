@@ -949,6 +949,35 @@ describe("a replayed generation", () => {
     expect(byId(replayed)).toEqual(byId(original));
   });
 
+  it("lets a retry replace the spans of a run that failed", async () => {
+    const provider = new MemoryTraceProvider();
+    vi.spyOn(Date, "now").mockReturnValue(1000);
+    const failed = new VercelAISDKTelemetry();
+    failed.addSink(provider);
+    const integration = failed
+      .createTelemetryForPrompt({ id: "mod#plan", name: "plan" })
+      .withTraceId(traceId);
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [],
+    } as any);
+    await integration.onError?.({ callId, error: new Error("rate limited") });
+    expect((await provider.getTrace(traceId))?.trace.status).toBe("error");
+
+    await generate(provider, 9000);
+
+    const trace = await provider.getTrace(traceId);
+    expect(trace?.trace.status).toBe("ok");
+    expect(trace?.spans).toHaveLength(4);
+    for (const span of trace?.spans ?? []) {
+      expect(span.status).toBe("ok");
+      expect(span.errorMessage).toBeUndefined();
+    }
+  });
+
   it("finishes the spans a cut-off run left open", async () => {
     const provider = new MemoryTraceProvider();
     vi.spyOn(Date, "now").mockReturnValue(1000);

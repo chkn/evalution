@@ -405,6 +405,32 @@ describe("mergeSpans", () => {
     expect(mergeSpans(ended, { ...base, startTime: 90 })).toEqual(ended);
   });
 
+  it("replaces a span that ended in error with a later report of it", () => {
+    const failed: Span = {
+      ...base,
+      endTime: 5,
+      status: "error",
+      errorMessage: "boom",
+      attributes: { "at.failed": "a" },
+    };
+    const retried: Span = {
+      ...base,
+      startTime: 90,
+      attributes: { "at.retry": "b" },
+    };
+    // The retry starting reopens the span, with none of the failure left.
+    expect(mergeSpans(failed, retried)).toEqual(retried);
+    const finished: Span = { ...retried, endTime: 91, status: "ok" };
+    expect(mergeSpans(failed, finished)).toEqual(finished);
+    // A span that failed again is the retry's failure, not the first one.
+    const failedAgain: Span = {
+      ...finished,
+      status: "error",
+      errorMessage: "again",
+    };
+    expect(mergeSpans(failed, failedAgain)).toEqual(failedAgain);
+  });
+
   it("lets defined incoming fields win", () => {
     const merged = mergeSpans(base, { ...base, name: "renamed", kind: "TOOL" });
     expect(merged.name).toBe("renamed");
