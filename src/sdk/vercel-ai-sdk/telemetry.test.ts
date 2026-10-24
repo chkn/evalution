@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryTraceProvider } from "../../trace/memory-trace-provider.ts";
 import { VercelAISDKTelemetry } from "./telemetry.ts";
 
@@ -877,5 +877,100 @@ describe("evaluations", () => {
     const [trace] = await provider.getAllTraces();
     expect(trace.status).toBe("ok");
     expect(trace.name).toBe("ai.evaluate");
+  });
+});
+
+// A durable runtime (a workflow, say) re-runs a finished generation from its
+// cached results after a restart, reporting every span again from a fresh
+// isolate. Bound to the same trace id, it must land on the same spans.
+describe("a replayed generation", () => {
+  const traceId = "trace-replay";
+  const callId = "call-replay";
+  const search = { toolCallId: "t1", toolName: "search", input: { q: "x" } };
+
+  async function generate(provider: MemoryTraceProvider, now: number) {
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const evalution = new VercelAISDKTelemetry();
+    evalution.addSink(provider);
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#plan", name: "plan" })
+      .withTraceId(traceId);
+    await integration.onStart?.(startEvent(callId));
+    for (const stepNumber of [0, 1]) {
+      await integration.onStepStart?.({
+        ...startEvent(callId),
+        stepNumber,
+        steps: [],
+        messages: [{ role: "user", content: "Plan it" }],
+      } as any);
+      if (stepNumber === 0) {
+        await integration.onToolExecutionStart?.({
+          callId,
+          toolCall: search,
+          messages: [],
+          toolContext: {},
+        } as any);
+        await integration.onToolExecutionEnd?.({
+          callId,
+          toolCall: search,
+          toolOutput: { type: "tool-result", output: { hits: 1 } },
+          messages: [],
+          toolContext: {},
+        } as any);
+      }
+      await integration.onStepEnd?.({
+        ...stepEndEvent(callId, stepNumber === 0 ? "" : "Done"),
+        stepNumber,
+      });
+    }
+    await integration.onEnd?.({ callId, text: "Done" } as any);
+    return integration;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("updates the spans it recorded, rather than adding new ones", async () => {
+    const provider = new MemoryTraceProvider();
+    await generate(provider, 1000);
+    // A copy: the provider hands out its live span list.
+    const original = structuredClone(await provider.getTrace(traceId));
+    expect(original?.spans).toHaveLength(4); // root, 2 steps, 1 tool
+
+    await generate(provider, 9000);
+
+    const replayed = await provider.getTrace(traceId);
+    expect(replayed?.trace.status).toBe("ok");
+    const byId = (t: typeof original) =>
+      [...(t?.spans ?? [])].sort((a, b) => a.id.localeCompare(b.id));
+    // The same spans, timings and all: a replay reports what already
+    // happened, so what was recorded the first time stands.
+    expect(byId(replayed)).toEqual(byId(original));
+  });
+
+  it("finishes the spans a cut-off run left open", async () => {
+    const provider = new MemoryTraceProvider();
+    vi.spyOn(Date, "now").mockReturnValue(1000);
+    const cutOff = new VercelAISDKTelemetry();
+    cutOff.addSink(provider);
+    const integration = cutOff
+      .createTelemetryForPrompt({ id: "mod#plan", name: "plan" })
+      .withTraceId(traceId);
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [],
+    } as any);
+    // ... and the isolate is gone.
+
+    await generate(provider, 9000);
+
+    const trace = await provider.getTrace(traceId);
+    expect(trace?.trace.status).toBe("ok");
+    expect(trace?.spans).toHaveLength(4);
+    expect(trace?.spans.every(s => s.status === "ok")).toBe(true);
   });
 });

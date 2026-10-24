@@ -389,6 +389,22 @@ describe("mergeSpans", () => {
     expect(merged.attributes).toEqual({ "at.start": "a" });
   });
 
+  // A span is reported again only when what produced it is re-run from a
+  // record of it (a durable workflow replaying a step, say): the first report
+  // of its end is what happened.
+  it("keeps an ended span as it ended", () => {
+    const ended: Span = { ...base, endTime: 5, status: "ok" };
+    const replayed: Span = {
+      ...base,
+      startTime: 90,
+      endTime: 91,
+      status: "error",
+      attributes: { "at.replay": "c" },
+    };
+    expect(mergeSpans(ended, replayed)).toEqual(ended);
+    expect(mergeSpans(ended, { ...base, startTime: 90 })).toEqual(ended);
+  });
+
   it("lets defined incoming fields win", () => {
     const merged = mergeSpans(base, { ...base, name: "renamed", kind: "TOOL" });
     expect(merged.name).toBe("renamed");

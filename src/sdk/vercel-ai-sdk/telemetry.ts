@@ -454,7 +454,9 @@ export class VercelAISDKTelemetry
 
     const input = toSpanMessages(event.messages, event.instructions);
     const span: Span = {
-      id: crypto.randomUUID(),
+      // Derived, like the root's, so a generation replayed under the same
+      // trace id reports the same spans.
+      id: `${run.traceId}:step:${event.stepNumber}`,
       traceId: run.traceId,
       parentId: run.root.id,
       name: event.modelId,
@@ -481,7 +483,7 @@ export class VercelAISDKTelemetry
     // recently opened span" keeps parallel tool calls siblings under the step.
     const parentSpan = run.step ?? run.root;
     const span: Span = {
-      id: crypto.randomUUID(),
+      id: `${parentSpan.id}:tool:${event.toolCall.toolCallId}`,
       traceId: run.traceId,
       parentId: parentSpan.id,
       name: event.toolCall.toolName,

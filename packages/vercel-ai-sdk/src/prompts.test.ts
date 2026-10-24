@@ -8,7 +8,8 @@ import {
   isPerPromptTelemetry,
   toArray,
 } from "../../../src/sdk/vercel-ai-sdk/telemetry.ts";
-import { Evalution, type Prompt, prompts } from "./index.js";
+import { MemoryTraceProvider } from "../../../src/trace/memory-trace-provider.ts";
+import { Evalution, type Prompt, prompts, withTraceId } from "./index.js";
 
 describe("prompts() telemetry wrapping — v6 (experimental_telemetry)", () => {
   const psi = { id: "mod" };
@@ -292,5 +293,41 @@ describe("prompts() with an experimental_evaluate config", () => {
       model: "jev-latest",
       state: { message: "Charged twice" },
     });
+  });
+});
+
+describe("withTraceId", () => {
+  afterEach(() => {
+    delete globalThis.AI_SDK_TELEMETRY_INTEGRATIONS;
+  });
+
+  const build = (): Prompt =>
+    prompts({ id: "mod" }, () => ({
+      greet: (name: string) => ({ model: "m", prompt: `Hi ${name}` }),
+    }))().greet("Ada");
+
+  it("records the prompt's trace under the given id", async () => {
+    const evalution = new Evalution();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [evalution];
+
+    const config = withTraceId(build(), "trace-fixed");
+    const [integration] = toArray(config.telemetry?.integrations);
+    await integration.onStart?.({
+      callId: "call-1",
+      operationId: "ai.generateText",
+      provider: "openai",
+      modelId: "gpt-4o",
+    } as any);
+
+    const trace = await provider.getTrace("trace-fixed");
+    expect(trace?.trace.status).toBe("running");
+    expect(trace?.spans[0]?.prompt?.id).toBe("mod#greet");
+  });
+
+  it("leaves a config with no Evalution integration as it is", () => {
+    const config = build();
+    expect(withTraceId(config, "trace-fixed")).toBe(config);
   });
 });

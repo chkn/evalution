@@ -14,7 +14,9 @@ import type { experimental_evaluate, generateText, streamText } from "ai";
 import {
   VercelAISDKTelemetry as Evalution,
   type VercelAISDKTelemetryOptions as EvalutionOptions,
+  isPerPromptTelemetry,
   isVercelAISDKTelemetry,
+  type PerPromptTelemetry,
   toArray,
 } from "../../../src/sdk/vercel-ai-sdk/telemetry.js";
 import {
@@ -429,6 +431,30 @@ export const prompts = (<
     }
     return wrapped;
   }) satisfies PromptsHelper;
+
+/**
+ * Records a prompt's trace under `traceId` rather than a fresh id.
+ *
+ * Give a stable id to a call that may run again from a record of its results
+ * (a durable workflow replaying it after a restart, say): the replay's spans
+ * then update the trace the first run recorded instead of starting another.
+ * Only a config from the {@link prompts} helper carries an integration to
+ * bind; any other config is returned as it is.
+ *
+ * @example
+ * ```ts
+ * const result = streamText(withTraceId(myPrompts().plan(task), traceId));
+ * ```
+ */
+export function withTraceId<T extends Prompt>(config: T, traceId: string): T {
+  const integrations = toArray(config.telemetry?.integrations);
+  const i = integrations.findIndex(isPerPromptTelemetry);
+  if (i < 0) return config;
+  integrations[i] = (integrations[i] as PerPromptTelemetry).withTraceId(
+    traceId,
+  );
+  return { ...config, telemetry: { ...config.telemetry, integrations } };
+}
 
 /** True for plain config objects (i.e. not an `Agent` instance or nullish). */
 function isPlainConfig(value: unknown): value is Record<string, unknown> {

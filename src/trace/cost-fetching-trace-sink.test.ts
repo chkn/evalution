@@ -106,7 +106,10 @@ describe("CostFetchingTraceSink", () => {
     const provider = new MemoryTraceProvider();
     sink.addSink(provider);
 
-    await sink.recordSpanStart(llmSpan({ llm: { model: "gpt-4o" } }));
+    // A start snapshot hasn't ended (an ended span is final once stored).
+    await sink.recordSpanStart(
+      llmSpan({ endTime: undefined, llm: { model: "gpt-4o" } }),
+    );
     const stored = await sink.recordSpanEnd(llmSpan());
 
     expect(stored.llm?.cost?.prompt).toBeCloseTo(0.000005 * 1000);
