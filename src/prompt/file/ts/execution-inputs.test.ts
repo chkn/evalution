@@ -4,7 +4,7 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { PropDefinition } from "ts-proppy";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { LocalFileProvider } from "../../../file-provider-local.ts";
 import { MemoryFileProvider } from "../../../file-provider-memory.ts";
 import { VercelAISDK } from "../../../sdk/vercel-ai-sdk/index.ts";
@@ -15,6 +15,8 @@ import { TSPromptFileType } from "./ts-prompt-file-type.ts";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(__dirname, "__fixtures__");
 const fixture = (name: string) => path.join(fixturesDir, name);
+
+type PromptList = Awaited<ReturnType<FilePromptProvider["getAllPrompts"]>>;
 
 function fileType() {
   return new TSPromptFileType(new LocalFileProvider());
@@ -63,15 +65,23 @@ describe("resource-to-slot matching (§D)", () => {
    * types both refer to. Real files because both halves have to land in one
    * `ts.Program` for the checker to relate them.
    */
+  let prompts: PromptList;
   async function project() {
+    return prompts;
+  }
+
+  // Built once, for tests that only read it. The first build in this file
+  // pays for a cold `ts.Program` (about 4.5s on its own, more on a loaded CI
+  // runner), which overran the default 5s timeout when it fell inside an `it`.
+  beforeAll(async () => {
     const provider = new FilePromptProvider({
       rootDir: fixturesDir,
       includePatterns: ["opaque-param.prompt.ts"],
       playgroundIncludePatterns: ["odin.playground.ts"],
       sdk: new VercelAISDK(),
     });
-    return provider.getAllPrompts();
-  }
+    prompts = await provider.getAllPrompts();
+  }, 30_000);
 
   it("offers a resource on every slot its type fits, and only those", async () => {
     const [prompt] = await project();
