@@ -3,6 +3,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import type { ParsedPrompt, PropValue } from "../../shared/types.ts";
 import { MemoryTraceProvider } from "../../trace/memory-trace-provider.ts";
 import { VercelAISDK } from "./index.ts";
 import { isPerPromptTelemetry, toArray } from "./telemetry.ts";
@@ -24,8 +25,68 @@ vi.mock("ai", () => ({
   registerTelemetry: registerTelemetryMock,
 }));
 
+function makeParsedPrompt(props: Record<string, PropValue>): ParsedPrompt {
+  return {
+    id: "test.prompt.ts#test",
+    name: "test",
+    functionParameters: [],
+    extractedProps: {
+      definitions: Object.keys(props).map(name => ({
+        name,
+        type: { kind: "primitive" as const, syntax: "any" },
+        optional: true,
+      })),
+      values: props,
+    },
+  };
+}
+
 describe("VercelAISDK", () => {
   const sdk = new VercelAISDK();
+
+  describe("system message", () => {
+    const text = (value: string) => ({ kind: "primitive", value }) as const;
+
+    it("reads it from `instructions`, which supersedes `system`", () => {
+      const prompt = sdk.normalizePrompt(
+        makeParsedPrompt({ instructions: text("Be terse.") }),
+      );
+      expect(prompt.style === "chat" && prompt.system).toEqual(
+        text("Be terse."),
+      );
+      expect(
+        prompt.style === "chat" && prompt.modelParameters.map(p => p.def.name),
+      ).not.toContain("instructions");
+    });
+
+    it("still reads the deprecated `system`", () => {
+      const prompt = sdk.normalizePrompt(
+        makeParsedPrompt({ system: text("Be terse.") }),
+      );
+      expect(prompt.style === "chat" && prompt.system).toEqual(
+        text("Be terse."),
+      );
+    });
+
+    it("writes an edit back to `system` only where the prompt already uses it", () => {
+      const system = text("Be verbose.");
+      expect(
+        sdk.denormalizeUpdates(
+          { style: "chat", system },
+          { system: text("Be terse.") },
+        ),
+      ).toEqual({ system });
+      expect(
+        sdk.denormalizeUpdates(
+          { style: "chat", system },
+          { instructions: text("Be terse.") },
+        ),
+      ).toEqual({ instructions: system });
+      expect(sdk.denormalizeUpdates({ style: "chat", system })).toEqual({
+        instructions: system,
+      });
+    });
+  });
 
   describe("executeConfig", () => {
     beforeEach(() => generateTextMock.mockReset().mockResolvedValue(undefined));
