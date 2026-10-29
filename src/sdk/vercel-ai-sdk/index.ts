@@ -69,12 +69,18 @@ import { toolsContextProblems } from "./tools-context.ts";
 
 const MODEL_KEY = "model";
 const SYSTEM_KEY = "system";
+const INSTRUCTIONS_KEY = "instructions";
 const MESSAGES_KEY = "messages";
 const TOOLS_KEY = "tools";
 
 /** How the `toolsContext` type is labelled in the UI, resolved or not. */
 const TOOLS_CONTEXT_SYNTAX = "InferToolSetContext<typeof tools>";
-const RESERVED_KEYS = new Set([MODEL_KEY, SYSTEM_KEY, MESSAGES_KEY]);
+const RESERVED_KEYS = new Set([
+  MODEL_KEY,
+  SYSTEM_KEY,
+  INSTRUCTIONS_KEY,
+  MESSAGES_KEY,
+]);
 
 // Fallback parameter definitions for the Vercel AI SDK's `CallSettings` (from
 // the `ai` package's dist/index.d.ts). Used when the package's .d.ts cannot be
@@ -517,7 +523,7 @@ export class VercelAISDK implements SDKAdapter {
   ): NormalizedChatPrompt {
     const { definitions, values } = prompt.extractedProps;
     const modelValue = values?.[MODEL_KEY];
-    const systemValue = values?.[SYSTEM_KEY];
+    const systemValue = values?.[INSTRUCTIONS_KEY] ?? values?.[SYSTEM_KEY];
     const messagesValue = values?.[MESSAGES_KEY];
 
     const modelParameters: NormalizedParameter[] = definitions
@@ -597,7 +603,7 @@ export class VercelAISDK implements SDKAdapter {
 
   denormalizeUpdates(
     updates: NormalizedPromptUpdates,
-    _currentValues?: Record<string, PropValue>,
+    currentValues?: Record<string, PropValue>,
   ): Record<string, PropValue | null> {
     if (updates.style === "questions") {
       return denormalizeEvaluationUpdates(updates);
@@ -605,7 +611,11 @@ export class VercelAISDK implements SDKAdapter {
     assertUpdateStyle(updates, "chat");
     const out: Record<string, PropValue | null> = {};
     if (MODEL_KEY in updates) out[MODEL_KEY] = updates.model ?? null;
-    if (SYSTEM_KEY in updates) out[SYSTEM_KEY] = updates.system ?? null;
+    if (SYSTEM_KEY in updates) {
+      if (currentValues && SYSTEM_KEY in currentValues)
+        out[SYSTEM_KEY] = updates.system ?? null;
+      else out[INSTRUCTIONS_KEY] = updates.system ?? null;
+    }
     if (MESSAGES_KEY in updates) {
       out[MESSAGES_KEY] =
         updates.messages === null || updates.messages === undefined
