@@ -446,7 +446,10 @@ export const prompts = (<
  * const result = streamText(withTraceId(myPrompts().plan(task), traceId));
  * ```
  */
-export function withTraceId<T extends Prompt>(config: T, traceId: string): T {
+export function withTraceId<T extends Pick<Prompt, "telemetry">>(
+  config: T,
+  traceId: string,
+): T {
   const integrations = toArray(config.telemetry?.integrations);
   const i = integrations.findIndex(isPerPromptTelemetry);
   if (i < 0) return config;
