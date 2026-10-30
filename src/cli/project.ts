@@ -20,6 +20,7 @@ import { CheckScopeTraceSink } from "../trace/check-scope.ts";
 import { CostFetchingTraceSink } from "../trace/cost-fetching-trace-sink.ts";
 import { LocalDatabaseTraceProvider } from "../trace/local-database-trace-provider.ts";
 import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
+import { TraceEventIngestor } from "../trace/trace-event-ingestor.ts";
 import {
   PLAYGROUND_RESOURCE,
   type TraceIngestor,
@@ -80,6 +81,11 @@ export interface ProjectProviders {
    * records itself.
    */
   otlpIngestor: OtlpTraceIngestor;
+  /**
+   * The process's single trace-event ingestor, so an app's `HttpTraceSink`
+   * can send traces to the server (`POST /api/traces`).
+   */
+  traceEventIngestor: TraceEventIngestor;
 }
 
 /**
@@ -148,6 +154,11 @@ export async function setUpProject(
   const otlpIngestor = new OtlpTraceIngestor();
   ingestors.push(otlpIngestor);
 
+  // Likewise for an app whose SDK adapter sends its traces here with an
+  // `HttpTraceSink` (`POST /api/traces`).
+  const traceEventIngestor = new TraceEventIngestor();
+  ingestors.push(traceEventIngestor);
+
   // Stamp `llm.cost` on LLM spans before they reach any provider, rather
   // than in each provider, so every trace store gets costed spans for free.
   const costSink = new CostFetchingTraceSink();
@@ -169,5 +180,6 @@ export async function setUpProject(
     datasetProviders,
     evalProviders,
     otlpIngestor,
+    traceEventIngestor,
   };
 }

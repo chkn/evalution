@@ -7,6 +7,8 @@ import { VercelAISDKTelemetry } from "./telemetry.ts";
 
 afterEach(() => {
   delete (globalThis as any).AI_SDK_TELEMETRY_INTEGRATIONS;
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 function startEvent(callId: string) {
@@ -48,6 +50,87 @@ function stepEndEvent(callId: string, text: string) {
 }
 
 describe("Evalution", () => {
+  describe("endpoint", () => {
+    /** Stubs the global `fetch`, returning the URLs it's asked for. */
+    function stubFetch() {
+      const urls: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          urls.push(url);
+          return new Response("{}");
+        }),
+      );
+      return urls;
+    }
+
+    /** Records one root span start through `evalution`, and lets it send. */
+    async function startRun(evalution: VercelAISDKTelemetry) {
+      await evalution.onStart(startEvent("call"));
+      await evalution.flush();
+    }
+
+    it("flush waits until a whole run has reached the server", async () => {
+      const received: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init: RequestInit) => {
+          // A slow server: flush must wait for its answer, not just the send.
+          await new Promise(resolve => setTimeout(resolve, 20));
+          const { events } = JSON.parse(String(init.body));
+          received.push(...events.map((e: { type: string }) => e.type));
+          return new Response("{}");
+        }),
+      );
+      const evalution = new VercelAISDKTelemetry({ endpoint: "http://host" });
+
+      // Not awaited, as the SDK may not await its telemetry callbacks.
+      void evalution.onStart(startEvent("call"));
+      void evalution.onStepStart({
+        ...startEvent("call"),
+        stepNumber: 0,
+        steps: [],
+      } as any);
+      void evalution.onStepEnd(stepEndEvent("call", "Hello!"));
+      void evalution.onEnd({ callId: "call", text: "Hello!" } as any);
+      await evalution.flush();
+
+      expect(received).toEqual([
+        "span-start",
+        "span-start",
+        "span-end",
+        "span-end",
+      ]);
+    });
+
+    it("sends traces to EVALUTION_ENDPOINT by default", async () => {
+      const urls = stubFetch();
+      vi.stubEnv("EVALUTION_ENDPOINT", "http://localhost:3000");
+
+      await startRun(new VercelAISDKTelemetry());
+
+      expect(urls).toEqual(["http://localhost:3000/api/traces"]);
+    });
+
+    it("sends traces to an explicit endpoint over EVALUTION_ENDPOINT", async () => {
+      const urls = stubFetch();
+      vi.stubEnv("EVALUTION_ENDPOINT", "http://localhost:3000");
+
+      await startRun(new VercelAISDKTelemetry({ endpoint: "http://other" }));
+
+      expect(urls).toEqual(["http://other/api/traces"]);
+    });
+
+    it("sends nowhere with endpoint: false, or without EVALUTION_ENDPOINT", async () => {
+      const urls = stubFetch();
+      await startRun(new VercelAISDKTelemetry());
+      vi.stubEnv("EVALUTION_ENDPOINT", "http://localhost:3000");
+      await startRun(new VercelAISDKTelemetry({ endpoint: false }));
+
+      expect(urls).toEqual([]);
+    });
+  });
+
   it("createTelemetryForPrompt records a single-step generation with full prompt identity", async () => {
     const evalution = new VercelAISDKTelemetry();
     const provider = new MemoryTraceProvider();

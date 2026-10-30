@@ -69,6 +69,8 @@ export const PLAYGROUND_RESOURCE: Readonly<Record<string, string>> = {
 export abstract class BaseTraceIngestor implements TraceIngestor {
   protected sinks: TraceSink[] = [];
   private resource?: Record<string, unknown>;
+  /** Recordings still under way, which {@link flush} waits out. */
+  private pending = new Set<Promise<unknown>>();
 
   setResource(resource: Record<string, unknown>): void {
     this.resource = { ...resource };
@@ -91,17 +93,44 @@ export abstract class BaseTraceIngestor implements TraceIngestor {
     return prevSinks.length > newSinks.length;
   }
 
+  /**
+   * Resolves once everything recorded so far has reached every sink and been
+   * delivered by those that deliver in the background. Await it before a
+   * short-lived process (a script, a serverless function) exits, so no trace
+   * data is lost.
+   */
+  async flush(): Promise<void> {
+    // A recording still under way may yet hand the sinks more to deliver.
+    while (this.pending.size > 0) await Promise.allSettled(this.pending);
+    await Promise.all(this.sinks.map(s => s.flush?.()));
+  }
+
+  /** Registers `recording` for {@link flush} to wait out, and returns it. */
+  private track<T>(recording: Promise<T>): Promise<T> {
+    this.pending.add(recording);
+    const done = () => this.pending.delete(recording);
+    recording.then(done, done);
+    return recording;
+  }
+
+  // `async`, so a sink that throws synchronously still yields a rejection.
   protected async recordSpanStart(span: Span): Promise<void> {
     const stamped = this.withResource(span);
-    await Promise.all(this.sinks.map(s => s.recordSpanStart(stamped)));
+    await this.track(
+      Promise.all(this.sinks.map(s => s.recordSpanStart(stamped))),
+    );
   }
 
   protected async recordSpanEnd(span: Span): Promise<void> {
     const stamped = this.withResource(span);
-    await Promise.all(this.sinks.map(s => s.recordSpanEnd(stamped)));
+    await this.track(
+      Promise.all(this.sinks.map(s => s.recordSpanEnd(stamped))),
+    );
   }
 
   protected async failTrace(traceId: string, msg: string): Promise<void> {
-    await Promise.all(this.sinks.map(s => s.failTrace(traceId, msg)));
+    await this.track(
+      Promise.all(this.sinks.map(s => s.failTrace(traceId, msg))),
+    );
   }
 }

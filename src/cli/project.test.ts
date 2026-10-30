@@ -30,17 +30,20 @@ describe("setUpProject", () => {
   it("marks the runs it records itself as playground runs, but not an app's", async () => {
     const ingestor = new InProcessIngestor();
     const traces = new MemoryTraceProvider();
-    const { otlpIngestor } = await setUpProject("/project", {
-      useDotenv: false,
-      promptProviders: [
-        {
-          setupTraceIngestion: async () => ingestor,
-        } as unknown as PromptProvider,
-      ],
-      traceProviders: [traces],
-      datasetProviders: [],
-      evalProviders: [],
-    });
+    const { otlpIngestor, traceEventIngestor } = await setUpProject(
+      "/project",
+      {
+        useDotenv: false,
+        promptProviders: [
+          {
+            setupTraceIngestion: async () => ingestor,
+          } as unknown as PromptProvider,
+        ],
+        traceProviders: [traces],
+        datasetProviders: [],
+        evalProviders: [],
+      },
+    );
 
     await ingestor.record(span("ours"));
     await otlpIngestor.ingest([
@@ -55,6 +58,15 @@ describe("setUpProject", () => {
         resource: { "deployment.environment.name": "production" },
       },
     ]);
+    await traceEventIngestor.ingest([
+      {
+        type: "span-start",
+        span: {
+          ...span("sent"),
+          resource: { "deployment.environment.name": "staging" },
+        },
+      },
+    ]);
 
     expect((await traces.getTrace("ours"))?.spans[0]?.resource).toEqual({
       "service.name": "evalution",
@@ -64,6 +76,6 @@ describe("setUpProject", () => {
       Object.fromEntries(
         (await traces.getAllTraces()).map(t => [t.id, t.environment]),
       ),
-    ).toEqual({ ours: "playground", app: "production" });
+    ).toEqual({ ours: "playground", app: "production", sent: "staging" });
   });
 });

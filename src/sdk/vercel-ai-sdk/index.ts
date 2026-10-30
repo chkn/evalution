@@ -493,7 +493,9 @@ export class VercelAISDK implements SDKAdapter {
 
     if (typeof ai.registerTelemetry === "function") {
       // v7+: native telemetry, no OTel detour needed.
-      const telemetry = new VercelAISDKTelemetry();
+      // Records into this server's own sinks — never sent on to an
+      // `EVALUTION_ENDPOINT` the environment names, which may be this server.
+      const telemetry = new VercelAISDKTelemetry({ endpoint: false });
       ai.registerTelemetry(telemetry);
       return telemetry;
     }
