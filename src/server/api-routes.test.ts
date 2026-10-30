@@ -19,8 +19,10 @@ import {
 import { PromptRegistry } from "../prompt/prompt-registry.ts";
 import type { ExecuteRequest, PropType, SSEData } from "../shared/types.ts";
 import { runMigrations } from "../trace/db/migrate.ts";
+import { HttpTraceSink } from "../trace/http-trace-sink.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
+import { TraceEventIngestor } from "../trace/trace-event-ingestor.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
 import { TursoTraceProvider } from "../trace/turso-trace-provider.ts";
 import { createApiContext } from "./api-context.ts";
@@ -87,6 +89,7 @@ function makeApp(
   execute?: PromptProvider["execute"],
   otlpIngestor?: OtlpTraceIngestor,
   agents?: AgentHandlers,
+  traceEventIngestor?: TraceEventIngestor,
 ) {
   const app = new Hono();
   const promptProvider = fakeProvider(execute);
@@ -100,6 +103,7 @@ function makeApp(
     hotReloadSubscribers: new Set(),
     hasConfig: true,
     otlpIngestor,
+    traceEventIngestor,
     agents,
     context: createApiContext({
       promptProviders,
@@ -460,6 +464,104 @@ describe("POST /v1/traces (OTLP ingest)", () => {
       body: "{not json",
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/traces", () => {
+  function makeIngestingApp() {
+    const ingestor = new TraceEventIngestor();
+    const made = makeApp(undefined, undefined, undefined, ingestor);
+    ingestor.addSink(made.traceProvider);
+    return made;
+  }
+
+  function post(app: Hono, body: string) {
+    return app.request("/api/traces", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+  }
+
+  it("records what an app's HttpTraceSink sends on the server's providers", async () => {
+    const { app, traceProvider } = makeIngestingApp();
+    const sink = new HttpTraceSink({
+      endpoint: "http://localhost",
+      fetch: async (input, init) => app.request(String(input), init),
+    });
+
+    const root = {
+      id: "t:root",
+      traceId: "t",
+      name: "run",
+      kind: "AGENT" as const,
+      startTime: 1,
+    };
+    const step = {
+      ...root,
+      id: "t:step",
+      parentId: root.id,
+      kind: "LLM" as const,
+    };
+    await sink.recordSpanStart(root);
+    await sink.recordSpanStart(step);
+    await sink.recordSpanEnd({ ...step, endTime: 2, status: "ok" });
+    await sink.recordSpanEnd({ ...root, endTime: 3, status: "ok" });
+    await sink.flush();
+
+    const trace = await traceProvider.getTrace("t");
+    expect(trace?.trace.status).toBe("ok");
+    expect(trace?.trace.endTime).toBe(3);
+    expect(trace?.spans.map(s => s.id).sort()).toEqual(["t:root", "t:step"]);
+  });
+
+  it("fails a trace the app reports failed", async () => {
+    const { app, traceProvider } = makeIngestingApp();
+    const root = {
+      id: "t:root",
+      traceId: "t",
+      name: "run",
+      kind: "AGENT",
+      startTime: 1,
+    };
+
+    const res = await post(
+      app,
+      JSON.stringify({
+        events: [
+          { type: "span-start", span: root },
+          { type: "trace-fail", traceId: "t", errorMessage: "boom" },
+        ],
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const trace = await traceProvider.getTrace("t");
+    expect(trace?.trace.status).toBe("error");
+    expect(trace?.trace.attributes?.errorMessage).toBe("boom");
+  });
+
+  it("responds 404 when no trace-event ingestor is configured for the host", async () => {
+    const { app } = makeApp();
+    const res = await post(app, JSON.stringify({ events: [] }));
+    expect(res.status).toBe(404);
+  });
+
+  it.each([
+    ["malformed JSON", "{nope"],
+    ["no events array", JSON.stringify({})],
+    ["an unknown event", JSON.stringify({ events: [{ type: "what" }] })],
+    [
+      "a span without an id",
+      JSON.stringify({
+        events: [{ type: "span-start", span: { traceId: "t" } }],
+      }),
+    ],
+  ])("responds 400 for %s, recording nothing", async (_, body) => {
+    const { app, traceProvider } = makeIngestingApp();
+    const res = await post(app, body);
+    expect(res.status).toBe(400);
+    expect(await traceProvider.getAllTraces()).toEqual([]);
   });
 });
 

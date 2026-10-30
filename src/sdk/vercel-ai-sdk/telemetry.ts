@@ -18,6 +18,7 @@ type Arrayable<T> = T | T[];
 
 import { makeBrand } from "../../brand.ts";
 import { answersWithConfidence } from "../../trace/evaluation-answers.ts";
+import { HttpTraceSink } from "../../trace/http-trace-sink.ts";
 import { BaseTraceIngestor } from "../../trace/trace-ingestor.ts";
 import {
   type Span,
@@ -76,6 +77,12 @@ export interface VercelAISDKTelemetryOptions {
    * alongside OTel; `"never"` always defers.
    */
   nativeTelemetry?: "auto" | "always" | "never";
+  /**
+   * The base URL of an evalution server to send traces to, through an
+   * {@link HttpTraceSink}. Defaults to the `EVALUTION_ENDPOINT` environment
+   * variable, if set; `false` sends nowhere, whatever the environment says.
+   */
+  endpoint?: string | false;
 }
 
 function toSpanMessages(
@@ -218,6 +225,11 @@ function parseStructured(text: string): unknown {
  * per-call integration from {@link createTelemetryForPrompt} so
  * helper-defined prompts are recorded with full identity.
  *
+ * When it sends traces to an evalution server (see
+ * {@link VercelAISDKTelemetryOptions.endpoint}), they go in the background:
+ * `await` {@link flush} before a short-lived process — a script, a
+ * serverless function — exits, so none are lost.
+ *
  * When an OpenTelemetry integration is also active, this class
  * defers to it by default (see {@link VercelAISDKTelemetryOptions.nativeTelemetry}) rather
  * than emitting a duplicate, parallel trace.
@@ -237,6 +249,10 @@ export class VercelAISDKTelemetry
   constructor(options: VercelAISDKTelemetryOptions = {}) {
     super();
     this.nativeTelemetry = options.nativeTelemetry ?? "auto";
+    // `process` is absent in some runtimes (e.g. Cloudflare Workers).
+    const endpoint =
+      options.endpoint ?? globalThis.process?.env?.EVALUTION_ENDPOINT;
+    if (endpoint) this.addSink(new HttpTraceSink({ endpoint }));
     brandTelemetry(this);
   }
 

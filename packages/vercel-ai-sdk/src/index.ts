@@ -20,6 +20,10 @@ import {
   toArray,
 } from "../../../src/sdk/vercel-ai-sdk/telemetry.js";
 import {
+  HttpTraceSink,
+  type HttpTraceSinkOptions,
+} from "../../../src/trace/http-trace-sink.js";
+import {
   createTracerForPrompt,
   getPromptSpanAttributes,
   type PromptSpanInfo,
@@ -254,6 +258,8 @@ export {
   Evalution,
   type EvalutionOptions,
   getPromptSpanAttributes,
+  HttpTraceSink,
+  type HttpTraceSinkOptions,
   type PromptSpanInfo,
 };
 

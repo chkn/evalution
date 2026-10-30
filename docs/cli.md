@@ -198,8 +198,8 @@ Anything that can reach the playground's port can:
 - **Spend your API keys**: run prompts and evals with the provider keys in the
   server's environment.
 - **Add traces**: `POST /v1/traces` (and `/otel/v1/traces`) accepts OTLP
-  exports from any sender, so traces in the playground aren't necessarily
-  from your app.
+  exports, and `POST /api/traces` the traces an SDK adapter sends, from
+  any sender, so traces in the playground aren't necessarily from your app.
 - **Run commands**: the interactive terminal (`/api/terminal`) runs
   onboarding's commands (package installs, coding agent CLIs) and launches
   Claude Code or Codex in the project, forwarding keystrokes to them. That

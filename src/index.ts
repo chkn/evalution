@@ -355,6 +355,13 @@ export {
   type SqlQueryResult,
 } from "./trace/db/read-only-query.ts";
 export {
+  HttpTraceSink,
+  type HttpTraceSinkOptions,
+  TRACE_EVENTS_PATH,
+  type TraceEventsRequest,
+  type TraceSinkEvent,
+} from "./trace/http-trace-sink.ts";
+export {
   LocalDatabaseTraceProvider,
   type LocalDatabaseTraceProviderOptions,
 } from "./trace/local-database-trace-provider.ts";
@@ -385,6 +392,7 @@ export {
   SPAN_KIND_ATTRIBUTE,
 } from "./trace/prompt-tracer.ts";
 export { mergeSpans } from "./trace/span-merge.ts";
+export { TraceEventIngestor } from "./trace/trace-event-ingestor.ts";
 export {
   BaseTraceIngestor,
   PLAYGROUND_RESOURCE,

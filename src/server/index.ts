@@ -13,6 +13,7 @@ import { LocalFileProvider } from "../file-provider-local.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import type { SSEData } from "../shared/types.ts";
 import type { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
+import type { TraceEventIngestor } from "../trace/trace-event-ingestor.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
 import { buildAskAgentCommand, listAgents } from "./agents.ts";
 import { createProjectContext } from "./api-context.ts";
@@ -64,6 +65,12 @@ export interface ServerOptions {
    * `SetupRoutesOptions.otlpIngestor`.
    */
   otlpIngestor?: OtlpTraceIngestor;
+  /**
+   * The process's trace-event ingestor, if any. When set, an app's
+   * `HttpTraceSink` can send traces to this server. See
+   * `SetupRoutesOptions.traceEventIngestor`.
+   */
+  traceEventIngestor?: TraceEventIngestor;
   /** This package's version, reported to MCP clients. */
   version: string;
   /**
@@ -102,6 +109,7 @@ export async function startServer(
     hasConfig,
     terminalSessions,
     otlpIngestor,
+    traceEventIngestor,
     version,
   } = options;
   const views =
@@ -163,6 +171,7 @@ export async function startServer(
     setupTasks: { resolve: resolveSetupTasks, executeStep: executeSetupStep },
     agents,
     otlpIngestor,
+    traceEventIngestor,
     views,
   });
   // A view is rebuilt when its file, or anything it imports, changes.

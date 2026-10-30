@@ -25,7 +25,9 @@ import type {
   ViewList,
 } from "../shared/types.ts";
 import { VIEW_FRAME_PATH } from "../shared/view-surfaces.ts";
+import { TRACE_EVENTS_PATH } from "../trace/http-trace-sink.ts";
 import type { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
+import type { TraceEventIngestor } from "../trace/trace-event-ingestor.ts";
 import type { ApiContext } from "./api-context.ts";
 import {
   handleCreateAnnotation,
@@ -73,6 +75,7 @@ import {
   promptFailure,
 } from "./handlers/prompts.ts";
 import type { HandlerResult } from "./handlers/result.ts";
+import { handleTraceEvents } from "./handlers/trace-events-ingest.ts";
 import { streamTrace } from "./handlers/trace-stream.ts";
 import {
   handleDeleteTrace,
@@ -213,6 +216,12 @@ export interface SetupRoutesOptions {
    */
   otlpIngestor?: OtlpTraceIngestor;
   /**
+   * The process's trace-event ingestor, if any. When set,
+   * `POST /api/traces` accepts the events an app's `HttpTraceSink` sends and
+   * feeds them to it; otherwise that route answers 404.
+   */
+  traceEventIngestor?: TraceEventIngestor;
+  /**
    * The project's views, if the host serves them. Without one, `/api/views`
    * lists none. See `specs/trace-visualizers.md` §B.
    */
@@ -231,6 +240,7 @@ export function setupRoutes({
   setupTasks,
   agents,
   otlpIngestor,
+  traceEventIngestor,
   views,
 }: SetupRoutesOptions): void {
   const {
@@ -1115,6 +1125,15 @@ export function setupRoutes({
   };
   app.post("/v1/traces", otlpRoute);
   app.post("/otel/v1/traces", otlpRoute);
+
+  // POST /api/traces - Trace events from an app's `HttpTraceSink`
+  app.post(TRACE_EVENTS_PATH, async c => {
+    const result = await handleTraceEvents(
+      await c.req.text(),
+      traceEventIngestor,
+    );
+    return c.json(result.body as object, result.status as ContentfulStatusCode);
+  });
 
   // #region Views
 

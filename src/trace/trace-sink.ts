@@ -44,6 +44,12 @@ export interface TraceSink {
    * produced (e.g. a bad model id throws before `onStart`).
    */
   failTrace(traceId: string, errorMessage: string): Promise<void>;
+
+  /**
+   * Optional: resolves once everything recorded so far has been delivered,
+   * for a sink that records in the background (e.g. `HttpTraceSink`).
+   */
+  flush?(): Promise<void>;
 }
 
 export function isTraceSink(o: any): o is TraceSink {

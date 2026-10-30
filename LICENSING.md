@@ -58,6 +58,7 @@ permissively licensed code:
   [`src/trace/trace-types.ts`](./src/trace/trace-types.ts),
   [`src/trace/trace-sink.ts`](./src/trace/trace-sink.ts),
   [`src/trace/trace-ingestor.ts`](./src/trace/trace-ingestor.ts),
+  [`src/trace/http-trace-sink.ts`](./src/trace/http-trace-sink.ts),
   [`src/trace/evaluation-answers.ts`](./src/trace/evaluation-answers.ts), and
   [`src/sdk/vercel-ai-sdk/telemetry.ts`](./src/sdk/vercel-ai-sdk/telemetry.ts).
   Each is **dual-licensed `MIT OR AGPL-3.0-only`** (see its SPDX header),
