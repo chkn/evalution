@@ -9,15 +9,23 @@
  * that instance's details, same as a row in {@link FlameTimeline}.
  */
 
+import type { Annotation } from "../../../shared/types";
+import { AnnotationCountBadges } from "./AnnotationChip.tsx";
 import { SpanErrorIcon, SpanKindPill } from "./FlameTimeline.tsx";
 import { formatDuration } from "./format.ts";
-import { barGeometry, type GroupedRow, spanDuration } from "./rows.ts";
+import {
+  barGeometry,
+  countSpanAnnotations,
+  type GroupedRow,
+  spanDuration,
+} from "./rows.ts";
 
 export interface CombinedTimelineProps {
   groups: GroupedRow[];
   window: { start: number; end: number };
   selectedSpanId: string | null;
   onSelectSpan: (spanId: string | null) => void;
+  annotations: Annotation[];
 }
 
 export function CombinedTimeline({
@@ -25,6 +33,7 @@ export function CombinedTimeline({
   window,
   selectedSpanId,
   onSelectSpan,
+  annotations,
 }: CombinedTimelineProps) {
   return (
     <div className="trace-waterfall">
@@ -60,6 +69,9 @@ export function CombinedTimeline({
                     ×{group.spans.length}
                   </span>
                 )}
+                <AnnotationCountBadges
+                  counts={countSpanAnnotations(annotations, group.spans)}
+                />
               </div>
               <div className="trace-row-duration">
                 {formatDuration(totalSpanDuration)}

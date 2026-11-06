@@ -167,6 +167,30 @@ describe("annotation handlers against a real provider", () => {
     ]);
   });
 
+  it("tells watchers the trace changed, so its annotation counts can refresh", async () => {
+    const provider = await makeProvider();
+    const changes: unknown[] = [];
+    // A watcher alone: the trace list has no per-trace subscription.
+    provider.watch(e => changes.push(e));
+    const counts = async () =>
+      (await provider.getAllTraces())[0]?.annotationCounts;
+    const change = { type: "update", traceId: "t1" };
+
+    const { id } = (
+      await handleCreateAnnotation(provider, "t1", { kind: "note", note: "a" })
+    ).body as any;
+    expect(changes).toEqual([change]);
+    expect(await counts()).toEqual({ issue: 0, good: 0, note: 1 });
+
+    await handleUpdateAnnotation(provider, "t1", id, { kind: "issue" });
+    expect(changes).toEqual([change, change]);
+    expect(await counts()).toEqual({ issue: 1, good: 0, note: 0 });
+
+    await handleDeleteAnnotation(provider, "t1", id);
+    expect(changes).toEqual([change, change, change]);
+    expect(await counts()).toEqual({ issue: 0, good: 0, note: 0 });
+  });
+
   it("validates updates, and 404s an annotation not on this trace", async () => {
     const provider = await makeProvider();
     const annotation = (

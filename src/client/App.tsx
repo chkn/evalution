@@ -1680,6 +1680,19 @@ function App() {
                             }
                             findPrompt={findPrompt}
                             evalVersion={evalVersion}
+                            evalRun={
+                              traces.find(
+                                t =>
+                                  t.id === tab.traceId &&
+                                  t.providerId === tab.providerId,
+                              )?.evalRun
+                            }
+                            onOpenEvalRun={(providerId, run, evalName) =>
+                              openLinkedTab(
+                                pane.id,
+                                evalRunTab(providerId, run, evalName),
+                              )
+                            }
                             onDeleted={() => {
                               closeTabEverywhere(key);
                               refetchTraces();

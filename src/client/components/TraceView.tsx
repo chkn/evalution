@@ -9,6 +9,7 @@ import type {
   NormalizedPrompt,
   PromptID,
   RunResources,
+  TraceEvalRun,
   TraceLiveEvent,
 } from "../../shared/types";
 import { ViewChannel } from "../../views/host.ts";
@@ -22,6 +23,7 @@ import { fieldsForTrace, fromTrace, hasRecordedInputs } from "./named-inputs";
 import { ChatFlow } from "./trace/ChatFlow.tsx";
 import { CombinedTimeline } from "./trace/CombinedTimeline.tsx";
 import { CostTooltip } from "./trace/CostTooltip.tsx";
+import type { OpenEvalRun } from "./trace/check-runs.ts";
 import {
   FlameTimeline,
   SpanKindPill,
@@ -82,6 +84,10 @@ interface Props {
   onDeleted?: () => void;
   /** Bumped on eval changes, so the trace's check results stay current. */
   evalVersion?: number;
+  /** The eval run this trace came from, if any. */
+  evalRun?: TraceEvalRun;
+  /** Opens the eval run this trace came from, or that a check result did. */
+  onOpenEvalRun?: OpenEvalRun;
   /** Coding agents the "Ask" button offers. */
   agents?: readonly AgentInfo[];
   /**
@@ -112,6 +118,8 @@ function TraceView({
   findPrompt,
   onDeleted,
   evalVersion,
+  evalRun,
+  onOpenEvalRun,
   agents = [],
   onAskAgent,
 }: Props) {
@@ -523,6 +531,8 @@ function TraceView({
         providerId={providerId}
         traceId={traceId}
         version={evalVersion}
+        evalRun={evalRun}
+        onOpenRun={onOpenEvalRun}
       />
 
       <div className="trace-view-body" ref={bodyRef}>
@@ -575,6 +585,7 @@ function TraceView({
                     window={window}
                     selectedSpanId={selectedSpanId}
                     onSelectSpan={setSelectedSpanId}
+                    annotations={annotations}
                   />
                 ) : (
                   <FlameTimeline
@@ -592,6 +603,7 @@ function TraceView({
                   rows={rows}
                   selectedSpanId={selectedSpanId}
                   onSelectSpan={setSelectedSpanId}
+                  annotations={annotations}
                 />
               </div>
             )}

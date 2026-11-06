@@ -3,18 +3,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import type {
-  AnnotationKind,
-  TraceSummary,
-  VariationInfo,
-} from "../../shared/types";
+import type { TraceSummary, VariationInfo } from "../../shared/types";
 import { lookupVariations } from "../api";
 import {
   type SummaryColumn,
   SummaryList,
   TableModeButton,
 } from "./SummaryList";
-import { KIND_STYLES } from "./trace/AnnotationChip.tsx";
+import { AnnotationCountBadges } from "./trace/AnnotationChip.tsx";
 import {
   formatCost,
   formatDuration,
@@ -94,30 +90,6 @@ function columnIcon(key: TraceColumnKey) {
     case "variation":
       return <VariationIcon />;
   }
-}
-
-const ANNOTATION_KINDS: AnnotationKind[] = ["issue", "good", "note"];
-
-/** Small colored count-pills, one per nonzero annotation kind — empty renders as "—". Reuses `.annotation-chip-*` (`AnnotationChip.tsx`) so a count reads with the same color as the chip on the trace itself. */
-function AnnotationCountBadges({
-  counts,
-}: {
-  counts: TraceSummary["annotationCounts"];
-}) {
-  const nonzero = ANNOTATION_KINDS.filter(kind => counts[kind] > 0);
-  if (nonzero.length === 0) {
-    return <span className="trace-annotation-counts-empty">—</span>;
-  }
-  return (
-    <span className="trace-annotation-counts">
-      {nonzero.map(kind => (
-        <span key={kind} className={`annotation-chip annotation-chip-${kind}`}>
-          <span className="annotation-chip-icon">{KIND_STYLES[kind].icon}</span>
-          {counts[kind]}
-        </span>
-      ))}
-    </span>
-  );
 }
 
 /**
@@ -270,7 +242,12 @@ const COLUMN_DEFS: Record<
     sortValue: t => t.cost,
   },
   annotations: {
-    cell: t => <AnnotationCountBadges counts={t.annotationCounts} />,
+    cell: t => (
+      <AnnotationCountBadges
+        counts={t.annotationCounts}
+        empty={<span className="trace-annotation-counts-empty">—</span>}
+      />
+    ),
   },
 };
 

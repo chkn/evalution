@@ -26,7 +26,7 @@
  * CSS-token classes (`styles.css`) — see `specs/trace-workshopping.md` §D.
  */
 
-import { useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import type {
   Annotation,
   AnnotationKind,
@@ -58,6 +58,38 @@ export function annotationSourceLabel(source: AnnotationSource): string {
   if (source === "codex") return "Codex";
   if (source === "agent") return "An agent";
   return "You";
+}
+
+const ANNOTATION_KINDS: AnnotationKind[] = ["issue", "good", "note"];
+
+/**
+ * Small colored count-pills, one per nonzero annotation kind, or `empty` when
+ * there are none. Reuses `.annotation-chip-*` so a count reads with the same
+ * color as the chip on the annotation itself.
+ */
+export function AnnotationCountBadges({
+  counts,
+  empty = null,
+}: {
+  counts: Record<AnnotationKind, number>;
+  empty?: ReactNode;
+}) {
+  const nonzero = ANNOTATION_KINDS.filter(kind => counts[kind] > 0);
+  if (nonzero.length === 0) return empty;
+  return (
+    <span className="trace-annotation-counts">
+      {nonzero.map(kind => (
+        <span
+          key={kind}
+          className={`annotation-chip annotation-chip-${kind}`}
+          title={KIND_STYLES[kind].label}
+        >
+          <span className="annotation-chip-icon">{KIND_STYLES[kind].icon}</span>
+          {counts[kind]}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 /**

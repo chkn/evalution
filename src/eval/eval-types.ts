@@ -254,6 +254,8 @@ export interface TraceCheckResult extends EvalCheckResult {
   /** The check's label as the run's definition had it. */
   checkLabel: string;
   armLabel: string;
+  /** When the run started (ms). */
+  startedAt: number;
 }
 
 /** A trace an eval run produced, with the run — see `EvalProvider.listTraceRuns`. */

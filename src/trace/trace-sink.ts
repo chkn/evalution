@@ -187,6 +187,9 @@ export abstract class BaseTraceProvider implements TraceProvider, TraceSink {
     op: AnnotationEventOp,
     annotation: Annotation,
   ): void {
+    // A trace's summary carries its annotation counts, so watchers need to
+    // know even when nobody is subscribed to this trace.
+    this.emitChange({ type: "update", traceId });
     const set = this.annotationSubscribers.get(traceId);
     if (!set) return;
     const event: AnnotationEvent = { type: "annotation", op, annotation };

@@ -380,6 +380,10 @@ export interface TraceEvalRun {
   runId: string;
   /** When the run started (ms). */
   startedAt: number;
+  /** The arm of the run that produced the trace. */
+  armId: string;
+  /** That arm's label: the version it ran, as the run view names it. */
+  armLabel: string;
 }
 
 /**

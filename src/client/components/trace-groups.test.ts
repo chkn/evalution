@@ -11,6 +11,8 @@ const run = (runId: string): TraceEvalRun => ({
   evalName: "Answers",
   runId,
   startedAt: 100,
+  armId: "a1",
+  armLabel: "Working tree",
 });
 
 const trace = (

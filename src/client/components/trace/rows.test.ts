@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
+import type { Annotation, AnnotationKind } from "../../../shared/types.ts";
 import { CHECK_ATTRIBUTE } from "../../../trace/trace-types.ts";
 import {
   allProvenanceSpans,
@@ -16,11 +17,45 @@ import {
   buildRows,
   chatMessages,
   computeWindow,
+  countSpanAnnotations,
   newMessagesByTurn,
   runRows,
   spanDuration,
   toolSpanCallIds,
 } from "./rows.ts";
+
+describe("countSpanAnnotations", () => {
+  const annotation = (kind: AnnotationKind, spanId?: string): Annotation => ({
+    id: `${kind}:${spanId}`,
+    traceId: "t1",
+    kind,
+    note: "n",
+    source: "user",
+    createdAt: 1,
+    ...(spanId && { spanId }),
+  });
+
+  it("counts by kind across the given spans only, leaving out trace-level annotations", () => {
+    const annotations = [
+      annotation("issue", "a"),
+      annotation("issue", "b"),
+      annotation("note", "a"),
+      annotation("good", "other"),
+      annotation("good"),
+    ];
+
+    expect(countSpanAnnotations(annotations, [span("a"), span("b")])).toEqual({
+      issue: 2,
+      good: 0,
+      note: 1,
+    });
+    expect(countSpanAnnotations(annotations, [span("none")])).toEqual({
+      issue: 0,
+      good: 0,
+      note: 0,
+    });
+  });
+});
 
 describe("buildRows", () => {
   it("nests children under their parent, earliest first", () => {

@@ -769,6 +769,140 @@ test("creates and then deletes a trace-level annotation", async ({
   await expect(component.locator(".annotation-card")).toHaveCount(0);
 });
 
+test("a span's annotations show as count badges in the Conversation and Spans tabs", async ({
+  mount,
+  page,
+}) => {
+  const annotation = (id: string, kind: string, spanId: string) => ({
+    id,
+    traceId: "t1",
+    spanId,
+    kind,
+    note: "n",
+    source: "user",
+    createdAt: 1,
+  });
+  await mockTraceApi(page, [
+    annotation("a", "issue", "llm1"),
+    annotation("b", "issue", "llm1"),
+    annotation("c", "good", "tool1"),
+  ]);
+  const component = await mount(<TraceViewHarness />);
+  const badge = (scope: string, kind: string) =>
+    component.locator(`${scope} .annotation-chip-${kind}`);
+  const llmTurn = '.chat-turn[data-span-id="llm1"]';
+  const toolCard = '.chat-block[data-span-id="tool1"]';
+  const row = (id: string) => `.trace-row[data-span-id="${id}"]`;
+
+  await expect(badge(llmTurn, "issue")).toHaveText("!2");
+  await expect(badge(llmTurn, "issue")).toHaveAttribute("title", "issue");
+  await expect(badge(toolCard, "good")).toHaveText("✓1");
+
+  await openSpansTab(component);
+  await expect(badge(row("llm1"), "issue")).toHaveText("!2");
+  await expect(badge(row("tool1"), "good")).toHaveText("✓1");
+  await expect(
+    component.locator(`${row("root")} .annotation-chip`),
+  ).toHaveCount(0);
+
+  await component.locator(".trace-spans-combined-toggle").click();
+  await expect(
+    component
+      .locator(".trace-row", { hasText: "step: 0" })
+      .locator(".annotation-chip-issue"),
+  ).toHaveText("!2");
+
+  // Adding one from the details pane updates the row without a reload.
+  await component.locator(".trace-spans-combined-toggle").click();
+  await component.locator(`${row("llm1")} .trace-row-main`).click();
+  await component.locator(".trace-annotations-add").last().click();
+  await component.locator(".annotation-form-note").fill("fine");
+  await component.locator(".annotation-form-submit").click();
+  await expect(badge(row("llm1"), "note")).toHaveText("·1");
+});
+
+test("names a trace's eval run once above its checks, and opens the run", async ({
+  mount,
+  page,
+}) => {
+  await mockTraceApi(page);
+  const check = (checkId: string, checkLabel: string) => ({
+    providerId: "e1",
+    runId: "r1",
+    armId: "a1",
+    rowId: "row",
+    sample: 0,
+    checkId,
+    outcome: "pass",
+    evalId: "eval",
+    evalName: "Answers",
+    checkLabel,
+    armLabel: "Working tree",
+    startedAt: 5000,
+  });
+  await page.route("**/api/traces/*/*/check-results", route =>
+    route.fulfill({
+      json: [check("c1", "Mentions cats"), check("c2", "Is polite")],
+    }),
+  );
+  const opened: unknown[] = [];
+  const component = await mount(
+    <TraceViewHarness
+      onOpenEvalRun={(...args) => {
+        opened.push(args);
+      }}
+    />,
+  );
+
+  await expect(component.locator(".trace-check")).toHaveCount(2);
+  const link = component.locator(".trace-check-run-link");
+  await expect(link).toHaveCount(1);
+  await expect(link).toContainText("Answers · Working tree");
+  await expect(component.locator(".trace-check").first()).not.toContainText(
+    "Answers",
+  );
+
+  await link.click();
+  await expect
+    .poll(() => opened)
+    .toEqual([["e1", { id: "r1", startedAt: 5000 }, "Answers"]]);
+});
+
+test("links a trace from an eval run to that run even with no check results", async ({
+  mount,
+  page,
+}) => {
+  await mockTraceApi(page);
+  await page.route("**/api/traces/*/*/check-results", route =>
+    route.fulfill({ json: [] }),
+  );
+  const opened: unknown[] = [];
+  const component = await mount(
+    <TraceViewHarness
+      evalRun={{
+        providerId: "e1",
+        evalId: "eval",
+        evalName: "Answers",
+        runId: "r1",
+        startedAt: 5000,
+        armId: "a1",
+        armLabel: "Working tree",
+      }}
+      onOpenEvalRun={(...args) => {
+        opened.push(args);
+      }}
+    />,
+  );
+
+  await expect(component.locator(".trace-check")).toHaveCount(0);
+  const link = component.locator(".trace-check-run-link");
+  await expect(link).toContainText("Answers · Working tree");
+  await link.click();
+  await expect
+    .poll(() => opened)
+    .toEqual([["e1", { id: "r1", startedAt: 5000 }, "Answers"]]);
+});
+
 test("deletes the trace from the inline header button once confirmed, then reports it deleted", async ({
   mount,
   page,

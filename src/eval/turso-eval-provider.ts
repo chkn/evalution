@@ -598,7 +598,7 @@ export class TursoEvalProvider implements EvalProvider {
           .from(evalRuns)
           .where(eq(evalRuns.id, row.runId));
         if (!run) continue;
-        const { definition, arms } = rowToRun(run);
+        const { definition, arms, startedAt } = rowToRun(run);
         const checks = await this.db
           .select()
           .from(evalCheckResults)
@@ -618,6 +618,7 @@ export class TursoEvalProvider implements EvalProvider {
             evalName: definition.name,
             checkLabel: check?.label ?? check?.uri ?? c.checkId,
             armLabel: arms.find(a => a.id === row.armId)?.label ?? row.armId,
+            startedAt,
           });
         }
       }
@@ -635,6 +636,8 @@ export class TursoEvalProvider implements EvalProvider {
           evalId: evals.id,
           evalName: evals.name,
           startedAt: evalRuns.startedAt,
+          armId: evalRowResults.armId,
+          arms: evalRuns.arms,
         })
         .from(evalRowResults)
         .innerJoin(evalRuns, eq(evalRuns.id, evalRowResults.runId))
@@ -645,10 +648,13 @@ export class TursoEvalProvider implements EvalProvider {
             isNotNull(evalRowResults.traceId),
           ),
         );
-      return rows.map(row => ({
+      return rows.map(({ arms, ...row }) => ({
         ...row,
         traceProviderId: row.traceProviderId!,
         traceId: row.traceId!,
+        armLabel:
+          (JSON.parse(arms) as EvalArm[]).find(a => a.id === row.armId)
+            ?.label ?? row.armId,
       }));
     });
   }

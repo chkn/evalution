@@ -249,6 +249,8 @@ describe("eval routes", () => {
           evalName: "Answers",
           runId: started.body.id,
           startedAt: started.body.startedAt,
+          armId: started.body.arms[0].id,
+          armLabel: started.body.arms[0].label,
         },
       }),
     ]);

@@ -18,8 +18,13 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { LLMSpanDetails, SpanMessage } from "../../../shared/types";
+import type {
+  Annotation,
+  LLMSpanDetails,
+  SpanMessage,
+} from "../../../shared/types";
 import { outputMessages, spanMessages } from "../../../trace/trace-types";
+import { AnnotationCountBadges } from "./AnnotationChip.tsx";
 import { formatDuration } from "./format.ts";
 import { ChevronIcon, StopwatchIcon, WrenchIcon } from "./icons.tsx";
 import { JsonView } from "./JsonView.tsx";
@@ -28,6 +33,7 @@ import { renderOutput } from "./output-renderers.tsx";
 import type { Row } from "./rows.ts";
 import {
   chatMessages,
+  countSpanAnnotations,
   hasOutput,
   newMessagesByTurn,
   runRows,
@@ -83,6 +89,7 @@ function ChatLLMBlock({
   row,
   newMessages,
   toolCallIds,
+  annotations,
   selected,
   onSelect,
 }: {
@@ -90,6 +97,7 @@ function ChatLLMBlock({
   newMessages: SpanMessage[];
   /** The trace's `TOOL` spans' call ids, from {@link toolSpanCallIds}. */
   toolCallIds: ReadonlySet<string>;
+  annotations: Annotation[];
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -124,6 +132,9 @@ function ChatLLMBlock({
       {span.errorMessage && (
         <pre className="span-details-error">{span.errorMessage}</pre>
       )}
+      <AnnotationCountBadges
+        counts={countSpanAnnotations(annotations, [span])}
+      />
     </div>
   );
 }
@@ -138,10 +149,12 @@ function ChatLLMBlock({
  */
 function ChatToolBlock({
   row,
+  annotations,
   selected,
   onSelect,
 }: {
   row: Row;
+  annotations: Annotation[];
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -173,6 +186,9 @@ function ChatToolBlock({
           </span>
         )}
         {running && <span className="chat-block-running">running…</span>}
+        <AnnotationCountBadges
+          counts={countSpanAnnotations(annotations, [span])}
+        />
         {hasDetails && (
           <button
             type="button"
@@ -240,10 +256,12 @@ export function ChatFlow({
   rows: allRows,
   selectedSpanId,
   onSelectSpan,
+  annotations,
 }: {
   rows: Row[];
   selectedSpanId: string | null;
   onSelectSpan: (spanId: string | null) => void;
+  annotations: Annotation[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rows = runRows(allRows);
@@ -275,6 +293,7 @@ export function ChatFlow({
             row={row}
             newMessages={newMessages.get(row.span.id) ?? []}
             toolCallIds={toolCallIds}
+            annotations={annotations}
             selected={row.span.id === selectedSpanId}
             onSelect={() => onSelectSpan(row.span.id)}
           />
@@ -282,6 +301,7 @@ export function ChatFlow({
           <ChatToolBlock
             key={row.span.id}
             row={row}
+            annotations={annotations}
             selected={row.span.id === selectedSpanId}
             onSelect={() => onSelectSpan(row.span.id)}
           />

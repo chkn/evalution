@@ -147,8 +147,8 @@ interface ActiveRun {
   finished: Promise<void>;
   /** The eval's name as the run started with it. */
   evalName: string;
-  /** The traces the run's rows have produced so far. */
-  traceIds: Set<string>;
+  /** The traces the run's rows have produced so far, with the arm of each. */
+  traces: Map<string, EvalArm>;
 }
 
 /** Resolves after `ms`. */
@@ -311,7 +311,7 @@ export class EvalRunner {
       drifted: false,
       finished: Promise.resolve(),
       evalName: definition.name,
-      traceIds: new Set(),
+      traces: new Map(),
     };
     this.active.set(run.id, active);
 
@@ -384,7 +384,7 @@ export class EvalRunner {
    */
   traceRuns(): (EvalTraceRun & { providerId: string })[] {
     return Array.from(this.active.values(), active =>
-      Array.from(active.traceIds, traceId => ({
+      Array.from(active.traces, ([traceId, arm]) => ({
         providerId: active.provider.id,
         traceProviderId: this.options.traceProviderId,
         traceId,
@@ -392,6 +392,8 @@ export class EvalRunner {
         evalName: active.evalName,
         runId: active.run.id,
         startedAt: active.run.startedAt,
+        armId: arm.id,
+        armLabel: arm.label,
       })),
     ).flat();
   }
@@ -631,7 +633,7 @@ export class EvalRunner {
       settled = ran.settled;
       traceId = ran.response.traceId;
       rootSpanId = ran.response.rootSpanId;
-      active.traceIds.add(traceId);
+      active.traces.set(traceId, job.arm);
       version = ran.response.version;
       variation = ran.response.variation;
     } catch (err: any) {

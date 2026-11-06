@@ -496,6 +496,8 @@ test.describe("eval-run groups", () => {
     evalName: "Answers eval",
     runId: "r1",
     startedAt: 1_757_336_000_000,
+    armId: "a1",
+    armLabel: "Working tree",
   };
   const TRACES: TraceSummary[] = [
     {

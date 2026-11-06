@@ -8,8 +8,14 @@
  */
 
 import type { Annotation, SpanKind } from "../../../shared/types";
+import { AnnotationCountBadges } from "./AnnotationChip.tsx";
 import { formatDuration, spanDisplayStatus, statusGlyph } from "./format.ts";
-import { barGeometry, type Row, spanDuration } from "./rows.ts";
+import {
+  barGeometry,
+  countSpanAnnotations,
+  type Row,
+  spanDuration,
+} from "./rows.ts";
 
 export function SpanKindPill({ kind }: { kind: SpanKind }) {
   return <span className={`span-kind-pill span-kind-${kind}`}>{kind}</span>;
@@ -80,9 +86,6 @@ export function FlameTimeline({
         const duration = spanDuration(span);
 
         const hasError = span.status === "error";
-        const spanAnnotationCount = annotations.filter(
-          a => a.spanId === span.id,
-        ).length;
 
         return (
           <div
@@ -101,14 +104,9 @@ export function FlameTimeline({
                 <SpanErrorIcon visible={hasError} />
                 {span.kind !== "DEFAULT" && <SpanKindPill kind={span.kind} />}
                 <span className="trace-row-name">{span.name}</span>
-                {spanAnnotationCount > 0 && (
-                  <span
-                    className="trace-row-annotation-count"
-                    title={`${spanAnnotationCount} annotation(s)`}
-                  >
-                    {spanAnnotationCount}
-                  </span>
-                )}
+                <AnnotationCountBadges
+                  counts={countSpanAnnotations(annotations, [span])}
+                />
               </div>
               <div className="trace-row-duration">
                 {duration !== undefined

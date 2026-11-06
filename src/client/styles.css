@@ -4238,9 +4238,15 @@ pre {
 
 .trace-annotation-counts {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 3px;
   overflow: hidden;
+}
+
+/* In a chat turn's column, hug the badges instead of stretching them. */
+.chat-turn > .trace-annotation-counts {
+  align-self: flex-start;
 }
 
 .trace-annotation-counts-empty {
@@ -5506,7 +5512,6 @@ pre {
   white-space: nowrap;
 }
 
-.trace-row-annotation-count,
 .trace-row-count-badge {
   flex-shrink: 0;
   display: inline-flex;
@@ -7870,6 +7875,30 @@ pre {
   gap: 4px;
 }
 
+.trace-check-run {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.trace-check-run-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--trace-text-dim);
+}
+
+button.trace-check-run-link {
+  cursor: pointer;
+}
+
+button.trace-check-run-link:hover {
+  color: var(--trace-text);
+}
+
 .trace-check {
   display: flex;
   flex-wrap: wrap;
@@ -7890,10 +7919,6 @@ pre {
 .trace-check-fail .trace-check-outcome,
 .trace-check-error .trace-check-outcome {
   color: var(--annotation-issue-fg);
-}
-
-.trace-check-meta {
-  color: var(--trace-text-dim);
 }
 
 .trace-check-message {

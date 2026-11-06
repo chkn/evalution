@@ -8,6 +8,8 @@
  */
 
 import type {
+  Annotation,
+  AnnotationKind,
   LLMSpanDetails,
   Span,
   SpanKind,
@@ -18,6 +20,21 @@ import { isCheckSpan, spanMessages } from "../../../trace/trace-types";
 export interface Row {
   span: Span;
   depth: number;
+}
+
+/**
+ * Counts by kind of the annotations on any of `spans`. Trace-level annotations
+ * have no `spanId`, so they're never counted.
+ */
+export function countSpanAnnotations(
+  annotations: Annotation[],
+  spans: Span[],
+): Record<AnnotationKind, number> {
+  const counts = { issue: 0, good: 0, note: 0 };
+  for (const { kind, spanId } of annotations) {
+    if (spans.some(span => span.id === spanId)) counts[kind] += 1;
+  }
+  return counts;
 }
 
 /** All spans sharing a name, for the "Combined" tree view. */

@@ -389,6 +389,19 @@ describe("EvalRunner", () => {
     ]);
   });
 
+  it("names the same run and arm for a trace as its check results do", async () => {
+    const { runner, evals, def } = await setUp();
+    const run = await runner.start(evals, def.id);
+    await runner.finished(run.id);
+
+    const [link] = await evals.listTraceRuns();
+    const [result] = await evals.resultsForTrace("mem", link!.traceId);
+    // The trace view shows one heading per (run, arm), so these must agree.
+    const { runId, armId, armLabel, startedAt } = result!;
+    expect(link).toMatchObject({ runId, armId, armLabel, startedAt });
+    expect(armLabel).toBe(run.arms[0]!.label);
+  });
+
   it("refuses to start an eval with problems, recording nothing", async () => {
     const { runner, evals, def } = await setUp({ inputs: {} });
     const refused = runner.start(evals, def.id);
@@ -630,6 +643,8 @@ describe("EvalRunner", () => {
       evalName: "Answers",
       runId: run.id,
       startedAt: run.startedAt,
+      armId: run.arms[0]!.id,
+      armLabel: run.arms[0]!.label,
     };
     expect(runner.traceRuns()).toEqual([link]);
     expect(await evals.listTraceRuns()).toEqual([]);

@@ -152,10 +152,11 @@ export interface TraceProvider {
 
   /**
    * Notifies this trace's {@link subscribeAnnotations} subscribers of an
-   * annotation change. Called by the annotation REST handlers immediately
-   * after {@link createAnnotation}/{@link updateAnnotation}/{@link deleteAnnotation}
-   * succeeds — the
-   * provider itself never calls this on its own.
+   * annotation change, and {@link watch}ers with an `update` event, since a
+   * trace's summary carries its annotation counts. Called by the annotation
+   * REST handlers immediately after
+   * {@link createAnnotation}/{@link updateAnnotation}/{@link deleteAnnotation}
+   * succeeds — the provider itself never calls this on its own.
    */
   emitAnnotation?(
     traceId: string,

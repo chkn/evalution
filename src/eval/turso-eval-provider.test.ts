@@ -158,6 +158,7 @@ describe("TursoEvalProvider", () => {
         evalName: "Plans tasks",
         checkLabel: "evalution/checks#outputContains",
         armLabel: "Working tree",
+        startedAt: expect.any(Number),
       }),
       expect.objectContaining({ checkId: "c2", checkLabel: "Score" }),
     ]);
