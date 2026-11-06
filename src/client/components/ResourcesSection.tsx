@@ -34,15 +34,12 @@ export type InstanceEdit =
 const HIGHLIGHT_MS = 1200;
 
 /**
- * Scrolls instance `name`'s card into view and briefly flashes it — what a
- * chip naming the instance does when clicked.
+ * Scrolls `el` into view and briefly flashes it, so landing on it reads as
+ * "here it is", not just a jump. `block` is where in the scroller it comes to
+ * rest: "nearest" leaves an element that's already visible where it is.
  */
-export function scrollToInstance(name: string) {
-  const el = document.querySelector<HTMLElement>(
-    `[data-instance-card="${CSS.escape(name)}"]`,
-  );
-  if (!el) return;
-  el.scrollIntoView({ behavior: "smooth", block: "center" });
+export function scrollAndFlash(el: HTMLElement, block: ScrollLogicalPosition) {
+  el.scrollIntoView({ behavior: "smooth", block });
   // Removing the class and forcing a reflow restarts the animation, so a
   // repeat click flashes again.
   el.classList.remove("pg-row-highlight");
@@ -52,6 +49,17 @@ export function scrollToInstance(name: string) {
     () => el.classList.remove("pg-row-highlight"),
     HIGHLIGHT_MS,
   );
+}
+
+/**
+ * Scrolls instance `name`'s card into view and briefly flashes it — what a
+ * chip naming the instance does when clicked.
+ */
+export function scrollToInstance(name: string) {
+  const el = document.querySelector<HTMLElement>(
+    `[data-instance-card="${CSS.escape(name)}"]`,
+  );
+  if (el) scrollAndFlash(el, "center");
 }
 
 interface Props {

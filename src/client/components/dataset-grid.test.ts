@@ -35,6 +35,7 @@ import {
   layoutWithoutField,
   menuFieldId,
   movedLayout,
+  paneTarget,
   parseDatasetLayout,
   pathLabel,
   RowPager,
@@ -167,6 +168,39 @@ describe("menuFieldId", () => {
     expect(menuFieldId(byId(cols, "1/title"))).toBeUndefined();
     expect(menuFieldId(byId(cols, "source"))).toBeUndefined();
     expect(menuFieldId(undefined)).toBeUndefined();
+  });
+});
+
+describe("paneTarget", () => {
+  it("points a field's columns, whole or by key, at the field", () => {
+    const cols = columns(["1"]);
+    expect(paneTarget(byId(cols, "0"))).toEqual({ field: "0" });
+    expect(paneTarget(byId(cols, "1/title"))).toEqual({ field: "1" });
+  });
+
+  it("points an added column at its root: an instance, or the field its path is in", () => {
+    const layout = addColumn(
+      addColumn(
+        reconcileColumns(undefined, FIELDS, SHAPE),
+        instancePath("seededTask", ["title"]),
+      ),
+      fieldPath("1", ["nested", "deep"]),
+    );
+    const cols = buildColumns({
+      fields: FIELDS,
+      layout,
+      expanded: new Set(),
+      shortType: s => s,
+    });
+    expect(paneTarget(byId(cols, "@seededTask/title"))).toEqual({
+      instance: "seededTask",
+    });
+    expect(paneTarget(byId(cols, "1/nested/deep"))).toEqual({ field: "1" });
+  });
+
+  it("has nothing to point the source or a missing column at", () => {
+    expect(paneTarget(byId(columns(), "source"))).toBeUndefined();
+    expect(paneTarget(undefined)).toBeUndefined();
   });
 });
 

@@ -147,13 +147,19 @@ export function DetailRow({
   label,
   children,
   className,
+  "data-field-id": fieldId,
 }: {
   label: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  /** Marks the row as a dataset field's, for `scrollToField` to find. */
+  "data-field-id"?: string;
 }) {
   return (
-    <div className={`span-details-row${className ? ` ${className}` : ""}`}>
+    <div
+      className={`span-details-row${className ? ` ${className}` : ""}`}
+      data-field-id={fieldId}
+    >
       <div className="span-details-row-label">{label}</div>
       <div className="span-details-row-value">{children}</div>
     </div>

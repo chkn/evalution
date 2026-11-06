@@ -83,7 +83,7 @@ import { useStructurallyStable } from "../hooks/useStructurallyStable";
 import { DatasetAddColumn, type NewFieldConfig } from "./DatasetAddColumn";
 import { DatasetColumnMenu } from "./DatasetColumnMenu";
 import { DatasetColumnPicker } from "./DatasetColumnPicker";
-import { DatasetRowDetails } from "./DatasetRowDetails";
+import { DatasetRowDetails, scrollToField } from "./DatasetRowDetails";
 import { DetailsPane, DetailsPaneHeader, useIsWide } from "./DetailsPane";
 import {
   DatasetEvalButton,
@@ -131,6 +131,8 @@ import {
   layoutWithoutField,
   menuFieldId,
   movedLayout,
+  type PaneTarget,
+  paneTarget,
   parseDatasetLayout,
   RowPager,
   rowLabelText,
@@ -499,6 +501,11 @@ function DatasetView({
   const [paneOpen, setPaneOpen] = useState<boolean | undefined>();
   /** An instance a view asked to have shown in the details pane, until the pane has rendered it. */
   const [reveal, setReveal] = useState<string | null>(null);
+  /**
+   * What a clicked grid cell points at in the details pane, until the pane
+   * has rendered its row — which can be after a delay, or a row change.
+   */
+  const [paneFocus, setPaneFocus] = useState<PaneTarget | null>(null);
   /** A view's unsaved changes to the row it's showing. */
   const [draft, setDraft] = useState<RowDraft | undefined>();
   // What every dataset view's frame is told: this dataset, and the selected row.
@@ -872,6 +879,19 @@ function DatasetView({
     scrollToInstance(reveal);
     setReveal(null);
   }, [reveal]);
+  // While it's open, the pane shows the grid's row in Grid, else the view's.
+  const paneIndex = paneOpen ? (inView ? viewIndex : gridIndex) : null;
+  const paneRow = paneOpen ? (inView ? viewRow : gridRow) : undefined;
+  // A clicked cell scrolls the pane to its field (or instance) once the pane
+  // shows the row — in the same commit as a click on another row's cell, or a
+  // few renders later, when the click is what opens the pane.
+  const paneShownRowId = paneRow?.id;
+  useEffect(() => {
+    if (!paneFocus || paneShownRowId === undefined) return;
+    if ("field" in paneFocus) scrollToField(paneFocus.field);
+    else scrollToInstance(paneFocus.instance);
+    setPaneFocus(null);
+  }, [paneFocus, paneShownRowId]);
   const viewLabel =
     views.tabs.find(t => t.uri === views.shownUri)?.label ??
     fallbackLabel(views.shownUri ?? "");
@@ -1160,8 +1180,10 @@ function DatasetView({
       if (column?.role === "source" && source?.kind === "trace") {
         onOpenTrace(source.traceProviderId, source.traceId);
       }
+      // A pane closed by hand stays closed, so there's nothing to point at.
+      setPaneFocus(paneOpen === false ? null : (paneTarget(column) ?? null));
     },
-    [columns, pager, onOpenTrace],
+    [columns, pager, onOpenTrace, paneOpen],
   );
 
   /**
@@ -1172,6 +1194,8 @@ function DatasetView({
     ([col, row]: Item) => {
       if (editableCell(pager.get(row), columns[col])) {
         clearTimeout(paneTimer.current);
+        // Nor is the pane, if it's still waiting to open, wanted to scroll.
+        setPaneFocus(null);
       }
     },
     [columns, pager],
@@ -1410,9 +1434,6 @@ function DatasetView({
       document.body,
     );
 
-  // While it's open, the pane shows the grid's row in Grid, else the view's.
-  const paneIndex = paneOpen ? (inView ? viewIndex : gridIndex) : null;
-  const paneRow = paneOpen ? (inView ? viewRow : gridRow) : undefined;
   const selectedLabel =
     paneRow && rowLabel ? rowLabelText(paneRow, rowLabel) : undefined;
 

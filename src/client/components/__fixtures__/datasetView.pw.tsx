@@ -449,6 +449,89 @@ test("selecting a row shows it in full in the details pane", async ({
   await expect(pane).toContainText("Row 1");
 });
 
+test("clicking a cell flashes its field in the details pane", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  await mockDataset(page, SUPPORT, SUPPORT_ROWS, SUPPORT_SHAPE);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="tickets" />,
+  );
+  await untilRowsShown(component);
+  const pane = component.getByRole("region", { name: "Row details" });
+  const ticket = pane.locator('[data-field-id="0"]');
+  const task = pane.locator('[data-field-id="1"]');
+
+  // The click that opens the pane: it lands on the cell's field once the
+  // pane has rendered the row.
+  await clickCell(page, 240 + 40, 0, false);
+  await expect(pane).toContainText("Row 1");
+  await expect(task).toHaveClass(/pg-row-highlight/);
+  await expect(ticket).not.toHaveClass(/pg-row-highlight/);
+
+  // Open, the pane follows each click: to another field of the row...
+  await expect(task).not.toHaveClass(/pg-row-highlight/);
+  await clickCell(page, 40, 0, false);
+  await expect(ticket).toHaveClass(/pg-row-highlight/);
+
+  // ...and to the same field of another row.
+  await expect(ticket).not.toHaveClass(/pg-row-highlight/);
+  await clickCell(page, 40, 1, false);
+  await expect(pane).toContainText("Row 2");
+  await expect(ticket).toHaveClass(/pg-row-highlight/);
+
+  // A row selected by its marker names no field.
+  await expect(ticket).not.toHaveClass(/pg-row-highlight/);
+  await clickCell(page, -GRID.marker / 2, 0, false);
+  await expect(pane).toContainText("Row 1");
+  await page.waitForTimeout(200);
+  await expect(pane.locator(".pg-row-highlight")).toHaveCount(0);
+});
+
+test("clicking a cell scrolls the details pane to its field", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 700 });
+  // More fields than the pane has room for.
+  const many: Dataset = {
+    id: "many",
+    name: "Many fields",
+    fields: Array.from({ length: 12 }, (_, i) => ({
+      id: String(i),
+      def: { ...TICKET, name: `field${i}` },
+    })),
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const row: DatasetRow = {
+    id: "r1",
+    cells: Object.fromEntries(many.fields.map(f => [f.id, text(`v${f.id}`)])),
+    createdAt: 1,
+  };
+  await mockDataset(page, many, [row]);
+  const component = await mount(
+    <DatasetViewHarness providerId="local" datasetId="many" />,
+  );
+  await expect(inGrid(component, "gridcell", "v0")).toBeAttached();
+  const pane = component.getByRole("region", { name: "Row details" });
+  const first = pane.locator('[data-field-id="0"]');
+
+  // Selected by its marker, the row opens the pane with no field in mind;
+  // scrolled to the bottom, its first field is out of sight.
+  await clickCell(page, -GRID.marker / 2, 0, false);
+  await expect(pane).toContainText("Row 1");
+  await pane.evaluate(el => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect(first).not.toBeInViewport();
+
+  // A click on one of that field's cells brings it back.
+  await clickCell(page, 40, 0, false);
+  await expect(first).toBeInViewport({ ratio: 1 });
+});
+
 test("double-clicking a cell to edit it in place doesn't open the details pane", async ({
   mount,
   page,

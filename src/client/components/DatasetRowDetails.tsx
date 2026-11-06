@@ -36,6 +36,7 @@ import {
   type InstanceEdit,
   instanceSourceContext,
   ResourcesSection,
+  scrollAndFlash,
 } from "./ResourcesSection";
 import {
   adoptCatalogPick,
@@ -116,6 +117,18 @@ export function InputView({ input }: { input: ExecutionInput }) {
         <span className="dataset-detail-scalar">{previewCell(input)}</span>
       );
   }
+}
+
+/**
+ * Scrolls the details pane's row for field `fieldId` into view and briefly
+ * flashes it — what clicking one of the field's cells in the grid does. A
+ * no-op if the pane hasn't rendered the field.
+ */
+export function scrollToField(fieldId: string) {
+  const el = document.querySelector<HTMLElement>(
+    `[data-field-id="${CSS.escape(fieldId)}"]`,
+  );
+  if (el) scrollAndFlash(el, "nearest");
 }
 
 /** A stable stand-in for "no resources", so memos keyed on it hold. */
@@ -307,6 +320,7 @@ function RowFields({
         return (
           <DetailRow
             key={field.id}
+            data-field-id={field.id}
             label={
               <>
                 <span className="dataset-detail-field">{field.def.name}</span>

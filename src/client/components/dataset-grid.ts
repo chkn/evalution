@@ -254,6 +254,27 @@ export function columnPath(
   return column && "path" in column ? column.path : undefined;
 }
 
+/** What a clicked cell points at in the row details pane. */
+export type PaneTarget = { field: string } | { instance: string };
+
+/**
+ * The part of the row details pane a column's cells belong to: the field
+ * whose cells it shows (a key inside a field's value, or a path added from
+ * the picker, belong to their root field), or the resource instance a path
+ * is rooted at. `undefined` for the source and an unknown column, which the
+ * pane has nothing to scroll to.
+ */
+export function paneTarget(
+  column: DatasetColumn | undefined,
+): PaneTarget | undefined {
+  const path = columnPath(column);
+  if (!path) return undefined;
+  const field = pathField(path);
+  if (field !== undefined) return { field };
+  const instance = pathInstance(path);
+  return instance !== undefined ? { instance } : undefined;
+}
+
 function moved<T>(list: readonly T[], from: number, to: number): T[] {
   const next = [...list];
   const [item] = next.splice(from, 1);
