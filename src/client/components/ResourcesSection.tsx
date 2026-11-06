@@ -416,6 +416,9 @@ function InstanceCard({
           {params.map(param => (
             <div className="pg-args-row" key={param.name}>
               <span className="pg-args-name">{param.name}</span>
+              {param.description && (
+                <div className="pg-exec-param-desc">{param.description}</div>
+              )}
               <ExecutionInputEditor
                 propDef={param}
                 selection={instance.args[param.name] ?? {}}

@@ -18,7 +18,10 @@ export const seededTask = resource({
   label: "Seeded task",
   inputs: {
     title: z.string(),
-    status: z.enum(["triaged", "open", "done"]).default("triaged"),
+    status: z
+      .enum(["triaged", "open", "done"])
+      .describe("Where the task starts")
+      .default("triaged"),
   },
   outputs: { taskId: "Task ID", title: "Title" },
   create: ({ title, status }) => ({

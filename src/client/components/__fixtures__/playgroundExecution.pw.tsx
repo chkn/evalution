@@ -1147,7 +1147,7 @@ test.describe("resource arguments (specs/resource-arguments.md §I, §J)", () =>
     const form = component.locator(".pg-args-form").first();
     const titleField = form.locator("textarea, input").first();
     await titleField.fill("Todo app");
-    await form.locator("select").selectOption("open");
+    await form.locator("select").selectOption({ label: "open" });
     await expect(titleField).toHaveValue("Todo app");
 
     await component.unmount();
@@ -1156,7 +1156,9 @@ test.describe("resource arguments (specs/resource-arguments.md §I, §J)", () =>
     await expect(remountedForm.locator("textarea, input").first()).toHaveValue(
       "Todo app",
     );
-    await expect(remountedForm.locator("select")).toHaveValue("open");
+    await expect(remountedForm.locator("select option:checked")).toHaveText(
+      "open",
+    );
   });
 
   test("the nested title argument offers Title generator as a source, and picking it shows a chip", async ({

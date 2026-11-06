@@ -2,7 +2,11 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import { jsonToPropValue, propValueToJson } from "./json-prop-value.ts";
+import {
+  holdsUndefined,
+  jsonToPropValue,
+  propValueToJson,
+} from "./json-prop-value.ts";
 
 describe("jsonToPropValue", () => {
   it("wraps a primitive as a `primitive` PropValue", () => {
@@ -92,5 +96,26 @@ describe("propValueToJson", () => {
     expect(
       propValueToJson({ kind: "reference", path: ["ticket"] }),
     ).toBeUndefined();
+  });
+});
+
+describe("holdsUndefined", () => {
+  const nothing = { kind: "primitive", value: undefined } as const;
+
+  it("finds an undefined at any depth", () => {
+    expect(holdsUndefined(nothing)).toBe(true);
+    expect(holdsUndefined({ kind: "array", elements: [nothing] })).toBe(true);
+    expect(holdsUndefined({ kind: "tuple", elements: [nothing] })).toBe(true);
+    expect(
+      holdsUndefined({
+        kind: "object",
+        properties: { a: { kind: "array", elements: [nothing] } },
+      }),
+    ).toBe(true);
+  });
+
+  it("is false for plain JSON, null included", () => {
+    expect(holdsUndefined(jsonToPropValue(null))).toBe(false);
+    expect(holdsUndefined(jsonToPropValue({ a: [null, 1, "b"] }))).toBe(false);
   });
 });

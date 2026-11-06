@@ -82,7 +82,7 @@
     "minimatch": "^10.2.4",
     "protobufjs": "^7.5.3",
     "remark-breaks": "^4.0.0",
-    "ts-proppy": "0.3.2",
+    "ts-proppy": "0.3.3",
     "ws": "^8.21.0",
     "zod": "^4.6.5"
   },

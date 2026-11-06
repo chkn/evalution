@@ -212,6 +212,27 @@ describe("resource arguments (specs/resource-arguments.md §G, §H)", () => {
     expect((seededTask.parameters![0].type as any).base).toBe("string");
   });
 
+  it("describes an argument with what zod's `.describe` gave its schema", async () => {
+    const [prompt] = await project();
+    const seededTask = prompt.inputSources!.resources.find(
+      r => r.uri === "seeded-task.playground.ts#seededTask",
+    )!;
+
+    expect(seededTask.parameters?.map(p => p.description)).toEqual([
+      undefined,
+      "Where the task starts",
+    ]);
+  });
+
+  it("calls an argument optional when its schema fills in a default", async () => {
+    const [prompt] = await project();
+    const seededTask = prompt.inputSources!.resources.find(
+      r => r.uri === "seeded-task.playground.ts#seededTask",
+    )!;
+
+    expect(seededTask.parameters?.map(p => p.optional)).toEqual([false, true]);
+  });
+
   it("reports no parameters for a resource whose inputs hold only resources", async () => {
     const [prompt] = await project();
     const titleGenerator = prompt.inputSources!.resources.find(

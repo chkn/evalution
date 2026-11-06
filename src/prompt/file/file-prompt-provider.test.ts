@@ -822,6 +822,62 @@ describe("FilePromptProvider resource inputs", () => {
 });
 
 describe("listChecks", () => {
+  it("calls a parameter optional when its schema accepts undefined", async () => {
+    const helper = pathToFileURL(
+      path.join(import.meta.dirname, "../playground/check.ts"),
+    ).href;
+    const { provider } = setup({
+      [p("x.playground.ts")]:
+        `import { check } from ${JSON.stringify(helper)};\n` +
+        "const schema = accepts => ({ '~standard': { version: 1, vendor: 't', validate: v =>\n" +
+        "  v !== undefined || accepts ? { value: v } : { issues: [{ message: 'required' }] } } });\n" +
+        "const throwing = { '~standard': { version: 1, vendor: 't', validate: () => { throw new Error('no'); } } };\n" +
+        "const asynchronous = { '~standard': { version: 1, vendor: 't', validate: async v => ({ value: v }) } };\n" +
+        "export const c = check({\n" +
+        "  inputs: { required: schema(false), optional: schema(true), throwing, asynchronous },\n" +
+        "  run: () => true,\n" +
+        "});\n",
+    });
+    const checks = await provider.listChecks();
+    const { parameters } = checks.find(c => c.uri === "x.playground.ts#c")!;
+    expect(parameters.map(({ name, optional }) => [name, optional])).toEqual([
+      ["required", false],
+      ["optional", true],
+      ["throwing", false],
+      ["asynchronous", true],
+    ]);
+  });
+
+  it("describes a parameter from its schema's JSON Schema, or its own description", async () => {
+    const helper = pathToFileURL(
+      path.join(import.meta.dirname, "../playground/check.ts"),
+    ).href;
+    const { provider } = setup({
+      [p("x.playground.ts")]:
+        `import { check } from ${JSON.stringify(helper)};\n` +
+        "const validate = v => ({ value: v });\n" +
+        "const schema = (extra, props) => ({ ...props, '~standard': { version: 1, vendor: 't', validate, ...extra } });\n" +
+        "const fromJson = schema({ jsonSchema: { input: () => ({ description: 'From JSON' }), output: () => ({}) } });\n" +
+        "const unrepresentable = schema(\n" +
+        "  { jsonSchema: { input: () => { throw new Error('no'); }, output: () => ({}) } },\n" +
+        "  { description: 'From the schema' },\n" +
+        ");\n" +
+        "export const c = check({\n" +
+        "  inputs: { fromJson, unrepresentable, bare: schema() },\n" +
+        "  run: () => true,\n" +
+        "});\n",
+    });
+    const checks = await provider.listChecks();
+    const { parameters } = checks.find(c => c.uri === "x.playground.ts#c")!;
+    expect(
+      parameters.map(({ name, description }) => [name, description]),
+    ).toEqual([
+      ["fromJson", "From JSON"],
+      ["unrepresentable", "From the schema"],
+      ["bare", undefined],
+    ]);
+  });
+
   it("lists a check whose inputs are declared wrongly with its error, leaving the rest", async () => {
     const helper = pathToFileURL(
       path.join(import.meta.dirname, "../playground/check.ts"),

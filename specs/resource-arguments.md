@@ -480,8 +480,9 @@ order; a resource whose `inputs` holds only resources reports none.
 
 **Degradation is partial rather than total**, per §B: where no checker is available (the documented
 `MemoryFileProvider` mode) the schema-valued keys are still enumerable at runtime, so `parameters`
-carries the right names with unresolved types instead of being absent. The panel offers a plain
-editor per parameter and validation catches what the type would have.
+carries the right names, with their optionality and descriptions (§H), and unresolved types instead
+of being absent. The panel offers a plain editor per parameter and validation catches what the type
+would have.
 
 **`parameters`, not `inputs`, is the right name on the wire** even though these come from the
 resource's `inputs` map: the wire field carries only the schema-valued subset, because a
@@ -511,10 +512,15 @@ to compile:
 
 Fed through `resolveTypeProbes` → `buildPropTypeFromType`, that yields one `PropDefinition` per
 parameter for §G. One probe per parameter rather than one per resource — slightly more probes,
-and in exchange each parameter's optionality and description come out of its own resolution
-instead of being read back off an enclosing object type. Batched into the program build the
-provider already does for prompts; a parameter's type does not depend on the prompt, so each is
-resolved once and reused across every prompt in scope.
+and in exchange each parameter's type is resolved on its own rather than read back off an enclosing
+object type. Optionality and description come from the schema instead, and work without a checker:
+a parameter is optional if its schema validates `undefined`, since an output type can't show a
+`.default()`, and its description is read from the schema's JSON Schema, or its own `description`
+when it has no JSON form.
+
+The probes are batched into the program build the provider already does for prompts; a parameter's
+type does not depend on the prompt, so each is resolved once and reused across every prompt in
+scope.
 
 **The matches.** `resolveSlotMatches` already accepts `extraSlots` (slot name → type expression)
 for exactly this reason — execute parameters, whose types are nowhere in a signature. A

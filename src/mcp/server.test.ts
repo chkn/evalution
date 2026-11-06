@@ -857,6 +857,44 @@ describe("MCP server", () => {
       });
     });
 
+    it("round-trips a value left undefined, which plain JSON can't hold", async () => {
+      const { call } = await setup();
+      const dataset = await greetings(call);
+      const nothing = { kind: "value", value: { kind: "primitive" } };
+      const created = await call("create_eval", {
+        name: "Greets",
+        promptId: "greet",
+        datasetId: dataset.id,
+        checks: [{ ...contains, args: { text: nothing } }],
+      });
+      expect(created.checks[0].args.text).toEqual(nothing);
+
+      const updated = await call("update_eval", {
+        evalId: created.id,
+        checks: created.checks,
+      });
+      expect(updated.checks[0].args.text).toEqual(nothing);
+
+      const nested = {
+        kind: "value",
+        value: {
+          kind: "object",
+          properties: { a: { kind: "primitive" } },
+        },
+      };
+      const withNested = await call("update_eval", {
+        evalId: created.id,
+        checks: [{ ...contains, args: { text: nested } }],
+      });
+      expect(withNested.checks[0].args.text).toEqual(nested);
+
+      const withNull = await call("update_eval", {
+        evalId: created.id,
+        checks: [{ ...contains, args: { text: { json: null } } }],
+      });
+      expect(withNull.checks[0].args.text).toEqual({ json: null });
+    });
+
     it("refuses to start a run while the eval has problems", async () => {
       const { call } = await setup();
       const dataset = await greetings(call);

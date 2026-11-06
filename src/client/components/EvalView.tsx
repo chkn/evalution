@@ -699,6 +699,9 @@ function EvalView({
           </span>
         )}
       </div>
+      {param.description && (
+        <div className="pg-exec-param-desc">{param.description}</div>
+      )}
       <ExecutionInputEditor
         propDef={param}
         selection={selection}

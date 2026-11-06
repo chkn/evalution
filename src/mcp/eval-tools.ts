@@ -44,7 +44,11 @@ import {
 import { summarizeParameter } from "../server/handlers/prompts.ts";
 import { prefillBindings } from "../shared/eval-prefill.ts";
 import { evalProblems } from "../shared/eval-problems.ts";
-import { jsonToPropValue, propValueToJson } from "../shared/json-prop-value.ts";
+import {
+  holdsUndefined,
+  jsonToPropValue,
+  propValueToJson,
+} from "../shared/json-prop-value.ts";
 import type {
   CheckInfo,
   ExecutionInput,
@@ -143,6 +147,9 @@ function describeBinding(
       return column ? { column } : input;
     }
     case "value": {
+      // Shown as stored, since `{json}` can't say undefined and would come
+      // back from an update as `null`.
+      if (holdsUndefined(input.value)) return input;
       const plain = propValueToJson(input.value);
       return plain === undefined ? input : { json: plain };
     }
@@ -209,7 +216,7 @@ function checkIdFor(uri: string, taken: Set<string>): string {
 const binding = z
   .record(z.string(), z.unknown())
   .describe(
-    'How to fill a slot: {column: "<dataset field name>"} for the row\'s value (a field sharing its name with an earlier one goes by its query column, e.g. "city#3"), {json: <plain JSON>} for a fixed value, {kind: "input", half: "function" | "execute", path} for what the run bound to one of the prompt\'s own slots, {kind: "object", properties: {name: binding}} to fill an object property by property, or {kind: "instance", name, output?} for one of the eval\'s (or each row\'s) named resource instances, or an output of it.',
+    'How to fill a slot: {column: "<dataset field name>"} for the row\'s value (a field sharing its name with an earlier one goes by its query column, e.g. "city#3"), {json: <plain JSON>} for a fixed value, {kind: "value", value: {kind: "primitive"}} for a value left undefined, {kind: "input", half: "function" | "execute", path} for what the run bound to one of the prompt\'s own slots, {kind: "object", properties: {name: binding}} to fill an object property by property, or {kind: "instance", name, output?} for one of the eval\'s (or each row\'s) named resource instances, or an output of it.',
   );
 
 const bindings = z

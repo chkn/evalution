@@ -45,7 +45,10 @@ const CONTAINS: CheckInfo = {
   uri: "evalution/checks#contains",
   label: "Contains",
   group: "Built-in",
-  parameters: [string("haystack"), string("needle")],
+  parameters: [
+    string("haystack"),
+    { ...string("needle"), description: "The text to look for" },
+  ],
 };
 
 const EVAL: EvalDefinition = {
@@ -150,7 +153,7 @@ test("the inputs panel has the run's Resources above the slots, saved with the e
     uri: ".evalution/playground/tasks.ts#seededTask",
     label: "Seeded task",
     scope: "run" as const,
-    parameters: [string("title")],
+    parameters: [{ ...string("title"), description: "The task's title" }],
   };
   const withResources = {
     ...TRIAGE,
@@ -177,6 +180,7 @@ test("the inputs panel has the run's Resources above the slots, saved with the e
     .click();
   const card = resources.locator("[data-instance-card='seededTask']");
   await expect(card).toContainText("not bound to a slot");
+  await expect(card).toContainText("The task's title");
 
   // Its argument can take a column, as any slot in an eval can.
   await card.locator(".pg-slot-source-wrap").click();
@@ -210,6 +214,16 @@ test("lists an unbound check parameter as a problem, and won't run until it's bo
   await expect(problems).toContainText("'haystack' is required but unbound");
   await expect(problems).toContainText("'needle' is required but unbound");
   await expect(component.getByRole("button", { name: /Run/ })).toBeDisabled();
+});
+
+test("shows a check parameter's description", async ({ mount, page }) => {
+  await mockEval(page, {
+    ...EVAL,
+    checks: [{ id: "c1", uri: CONTAINS.uri, args: {} }],
+  });
+  const component = await mountEval(mount);
+
+  await expect(component.getByText("The text to look for")).toBeVisible();
 });
 
 test("typing into a check parameter keeps focus, character by character", async ({

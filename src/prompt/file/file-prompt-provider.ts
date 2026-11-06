@@ -31,7 +31,9 @@ import { isResource, type Resource } from "../playground/resource.ts";
 import {
   DEFAULT_PLAYGROUND_IGNORE_PATTERNS,
   DEFAULT_PLAYGROUND_INCLUDE_PATTERNS,
+  type ParameterDetails,
   type PlaygroundModuleError,
+  parameterDetails,
   type RegisteredResource,
   type RegisteredSource,
   ResourceRegistry,
@@ -93,6 +95,8 @@ interface ResourceWithParameters {
   resource: RegisteredResource;
   /** Its schema-valued input names, in declaration order. */
   names: string[];
+  /** What each of `names`' schema says of it. */
+  details: ReadonlyMap<string, ParameterDetails>;
   /** Sources in scope for its own module, excluding any that depend on it. */
   candidates: RegisteredSource[];
 }
@@ -314,6 +318,25 @@ function unresolvedParameter(name: string): PropDefinition {
 /** Whether a probe resolved to a definition (rather than factories, or nothing). */
 function isDefinition(result: ProbeResult): result is PropDefinition {
   return !!result && !Array.isArray(result);
+}
+
+/**
+ * A declared argument's definition: its probe's answer, or the unresolved
+ * fallback, with what its schema says added — the probe sees an output type
+ * alone, which can't say whether it can be left out, or what it's for.
+ */
+function parameterDefinition(
+  name: string,
+  result: ProbeResult,
+  details: ReadonlyMap<string, ParameterDetails>,
+): PropDefinition {
+  const definition = isDefinition(result) ? result : unresolvedParameter(name);
+  const { optional = false, description } = details.get(name) ?? {};
+  return {
+    ...definition,
+    optional,
+    ...(description && { description }),
+  };
 }
 
 /**
@@ -862,7 +885,8 @@ export class FilePromptProvider
       const candidates = (
         await this.resources.inScopeFor(resource.modulePath)
       ).filter(s => !dependsOn(s.resource, resource, byResource));
-      withParams.push({ resource, names, candidates });
+      const details = await parameterDetails(resource.resource);
+      withParams.push({ resource, names, details, candidates });
     }
 
     return { moduleErrors, inScope, withParams };
@@ -995,17 +1019,18 @@ export class FilePromptProvider
   ): Map<string, PropDefinition[]> {
     let cursor = 0;
     return new Map(
-      withParams.map(({ resource, names }): [string, PropDefinition[]] => {
-        const start = cursor;
-        cursor += names.length;
-        return [
-          resource.uri,
-          names.map((name, j) => {
-            const result = resolved?.[start + j];
-            return isDefinition(result) ? result : unresolvedParameter(name);
-          }),
-        ];
-      }),
+      withParams.map(
+        ({ resource, names, details }): [string, PropDefinition[]] => {
+          const start = cursor;
+          cursor += names.length;
+          return [
+            resource.uri,
+            names.map((name, j) =>
+              parameterDefinition(name, resolved?.[start + j], details),
+            ),
+          ];
+        },
+      ),
     );
   }
 
@@ -1339,8 +1364,12 @@ export class FilePromptProvider
     const resolved =
       requests.length > 0 ? await this.resolveTypes(requests, []) : {};
 
+    const details = await Promise.all(
+      withNames.map(({ registered: c }) => parameterDetails(c.check)),
+    );
+
     let cursor = 0;
-    const user = withNames.map(({ registered: c, names }): CheckInfo => {
+    const user = withNames.map(({ registered: c, names }, i): CheckInfo => {
       const start = cursor;
       cursor += names.length;
       return {
@@ -1349,10 +1378,9 @@ export class FilePromptProvider
         ...(c.check.group && { group: c.check.group }),
         ...(c.check.description && { description: c.check.description }),
         ...(c.check.runsOnError && { runsOnError: true }),
-        parameters: names.map((name, j) => {
-          const result = resolved.probes?.[start + j];
-          return isDefinition(result) ? result : unresolvedParameter(name);
-        }),
+        parameters: names.map((name, j) =>
+          parameterDefinition(name, resolved.probes?.[start + j], details[i]),
+        ),
       };
     });
     return [

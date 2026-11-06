@@ -3,7 +3,10 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path";
-import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type {
+  StandardJSONSchemaV1,
+  StandardSchemaV1,
+} from "@standard-schema/spec";
 import type { FileProvider } from "../../file-provider.ts";
 import { isValidInstanceName } from "../../shared/instance-names.ts";
 import type { ResourceInfo, ResourceScope } from "../../shared/types.ts";
@@ -147,6 +150,71 @@ export function resourceParameterNames(target: {
   label?: string;
 }): string[] {
   return partitionInputs(target).params.map(([name]) => name);
+}
+
+/** What a declared argument's schema says of it, beyond its type. */
+export interface ParameterDetails {
+  /** Whether it can be left out: see {@link parameterDetails}. */
+  optional: boolean;
+  description?: string;
+}
+
+/**
+ * The description a schema carries, if any. JSON Schema is how Standard Schema
+ * shares one, and it sees through wrappers (`.describe()` then `.optional()`).
+ * A schema with no JSON form falls back to its own `description`, as zod's
+ * `z.date()` must, which only reads what its outermost `.describe()` set.
+ */
+function schemaDescription(schema: StandardSchemaV1): string | undefined {
+  try {
+    const { jsonSchema } = schema["~standard"] as unknown as {
+      jsonSchema?: StandardJSONSchemaV1.Converter;
+    };
+    const described = jsonSchema?.input({
+      target: "draft-2020-12",
+    }).description;
+    if (typeof described === "string") return described;
+  } catch {
+    // No JSON form. Fall through.
+  }
+  const { description } = schema as { description?: unknown };
+  return typeof description === "string" ? description : undefined;
+}
+
+/**
+ * What the schemas of `target`'s declared arguments say of them, by name.
+ *
+ * An argument is optional when its schema accepts `undefined`, which is what
+ * an unbound one is validated as. Asking the schema covers what a parameter's
+ * type can't show, like a `.default()`, and needs no checker. A schema that
+ * throws is taken to require a value.
+ */
+export async function parameterDetails(target: {
+  inputs?: ResourceInputs;
+  label?: string;
+}): Promise<ReadonlyMap<string, ParameterDetails>> {
+  const accepted = async (schema: StandardSchemaV1) => {
+    try {
+      return !(await schema["~standard"].validate(undefined)).issues;
+    } catch {
+      return false;
+    }
+  };
+  const entries = await Promise.all(
+    partitionInputs(target).params.map(
+      async ([name, schema]): Promise<[string, ParameterDetails]> => {
+        const description = schemaDescription(schema);
+        return [
+          name,
+          {
+            optional: await accepted(schema),
+            ...(description && { description }),
+          },
+        ];
+      },
+    ),
+  );
+  return new Map(entries);
 }
 
 /** Why a `scope: 'server'` resource that declares arguments is rejected. See `specs/resource-arguments.md` §D. */

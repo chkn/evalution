@@ -65,3 +65,22 @@ export function propValueToJson(value: PropValue): unknown {
       return undefined;
   }
 }
+
+/**
+ * Whether a `PropValue` holds an `undefined` at any depth. JSON can't say so,
+ * and {@link propValueToJson} reads one as `null` — a different value to a
+ * schema — so whoever must preserve the difference asks here first.
+ */
+export function holdsUndefined(value: PropValue): boolean {
+  switch (value.kind) {
+    case "primitive":
+      return value.value === undefined;
+    case "array":
+    case "tuple":
+      return value.elements.some(holdsUndefined);
+    case "object":
+      return Object.values(value.properties).some(holdsUndefined);
+    default:
+      return false;
+  }
+}
