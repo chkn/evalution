@@ -66,6 +66,7 @@ describe("groupTraces", () => {
         promptVersion: "v1",
         promptVariation: "x",
         annotationCounts: { issue: 1, good: 0, note: 2 },
+        checkCounts: { pass: 1, fail: 1, error: 0, skipped: 0, scored: 0 },
       }),
       trace("b", {
         evalRun: run("r1"),
@@ -76,17 +77,26 @@ describe("groupTraces", () => {
         promptVersion: "v2",
         status: "error",
         annotationCounts: { issue: 0, good: 4, note: 0 },
+        checkCounts: { pass: 2, fail: 0, error: 1, skipped: 0, scored: 0 },
+      }),
+      // No checks recorded yet: nothing to add to the total.
+      trace("c", {
+        evalRun: run("r1"),
+        startTime: 1100,
+        endTime: 1200,
+        model: "m",
       }),
     ]);
     expect(group).toMatchObject({
       startTime: 1000,
       endTime: 3000,
       status: "error",
-      spanCount: 5,
+      spanCount: 6,
       totalTokens: 10,
       cost: 0.5,
       model: "m",
       annotationCounts: { issue: 1, good: 4, note: 2 },
+      checkCounts: { pass: 3, fail: 1, error: 1, skipped: 0, scored: 0 },
     });
     // The traces ran different versions, and only one a variation.
     expect(group).not.toHaveProperty("promptVersion");

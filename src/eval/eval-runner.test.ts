@@ -654,7 +654,9 @@ describe("EvalRunner", () => {
     await runner.finished(run.id);
     expect(runner.traceRuns()).toEqual([]);
     const { providerId: _, ...recorded } = link;
-    expect(await evals.listTraceRuns()).toEqual([recorded]);
+    expect(await evals.listTraceRuns()).toEqual([
+      { ...recorded, checkCounts: expect.any(Object) },
+    ]);
   });
 
   describe("a row that never settles", () => {

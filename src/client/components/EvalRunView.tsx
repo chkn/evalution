@@ -17,6 +17,7 @@ import {
   formatRate,
   gridRows,
   indexChecks,
+  OUTCOME_GLYPH,
   type OutcomeChange,
   summarizeArm,
 } from "./eval-summary";
@@ -41,15 +42,6 @@ interface Props {
 
 /** The least time between refetches of a run in flight. */
 const REFRESH_MS = 500;
-
-/** The glyph a cell shows for its outcome. */
-const OUTCOME_GLYPH: Record<EvalCheckResult["outcome"], string> = {
-  pass: "✓",
-  fail: "✗",
-  error: "!",
-  skipped: "–",
-  scored: "",
-};
 
 /** A cell's text: the outcome's glyph, and the score when there is one. */
 function cellText(result: EvalCheckResult | undefined): string {

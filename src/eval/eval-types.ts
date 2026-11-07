@@ -15,7 +15,13 @@ import type {
   VariationId,
   VersionId,
 } from "../shared/types.ts";
-import type { PromptID, TraceEvalRun } from "../trace/trace-types.ts";
+import type {
+  EvalCounts,
+  PromptID,
+  TraceEvalRun,
+} from "../trace/trace-types.ts";
+
+export type { EvalCounts };
 
 /** One check, as an eval uses it. See `specs/evals.md` §A. */
 export interface EvalCheck {
@@ -113,16 +119,6 @@ export interface EvalArm {
 
 /** A run's lifecycle. */
 export type EvalRunStatus = "running" | "done" | "cancelled" | "error";
-
-/** How a run's check results break down. */
-export interface EvalCounts {
-  pass: number;
-  fail: number;
-  error: number;
-  skipped: number;
-  /** Scores reported without a threshold, so neither pass nor fail. */
-  scored: number;
-}
 
 /** What `EvalProvider.createRun` takes. */
 export interface NewEvalRun {
@@ -262,6 +258,8 @@ export interface TraceCheckResult extends EvalCheckResult {
 export interface EvalTraceRun extends Omit<TraceEvalRun, "providerId"> {
   traceProviderId: string;
   traceId: string;
+  /** How the trace's check results break down, once it has any. */
+  checkCounts?: EvalCounts;
 }
 
 /** The kind of change an {@link EvalChangeEvent} describes. */

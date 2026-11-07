@@ -489,6 +489,67 @@ test.describe("row height at the smallest layout", () => {
   });
 });
 
+test("the Checks column shows a trace's outcome counts, and a group's total", async ({
+  mount,
+  page,
+}) => {
+  await page.setViewportSize({ width: 800, height: 700 });
+  await page.evaluate(() =>
+    localStorage.setItem(
+      "trace-list-columns",
+      JSON.stringify([{ key: "checks", visible: true }]),
+    ),
+  );
+  const evalRun = {
+    providerId: "ev",
+    evalId: "e1",
+    evalName: "Answers eval",
+    runId: "r1",
+    startedAt: 1_757_336_000_000,
+    armId: "a1",
+    armLabel: "Working tree",
+  };
+  const trace = (id: string, overrides: Partial<TraceSummary>) => ({
+    id,
+    providerId: "p1",
+    name: `answer ${id}`,
+    startTime: 1_757_336_000_000,
+    endTime: 1_757_336_000_500,
+    status: "ok" as const,
+    spanCount: 2,
+    annotationCounts: { issue: 0, good: 0, note: 0 },
+    ...overrides,
+  });
+  const counts = { pass: 0, fail: 0, error: 0, skipped: 0, scored: 0 };
+  const component = await mount(
+    <TraceListHarness
+      traces={[
+        trace("solo", {}),
+        trace("cats", {
+          evalRun,
+          checkCounts: { ...counts, pass: 2, fail: 1 },
+        }),
+        trace("dogs", { evalRun, checkCounts: { ...counts, pass: 1 } }),
+      ]}
+    />,
+  );
+
+  const rows = component.locator(".trace-table-row");
+  const group = rows.filter({ hasText: "Answers eval" });
+  await expect(group.locator("[title='pass']")).toHaveText("✓3");
+  await expect(group.locator("[title='fail']")).toHaveText("✗1");
+  await expect(
+    rows
+      .filter({ hasText: "answer solo" })
+      .locator(".trace-annotation-counts-empty"),
+  ).toHaveText("—");
+
+  await group.click();
+  const cats = rows.filter({ hasText: "answer cats" });
+  await expect(cats.locator("[title='pass']")).toHaveText("✓2");
+  await expect(cats.locator("[title='fail']")).toHaveText("✗1");
+});
+
 test.describe("eval-run groups", () => {
   const evalRun = {
     providerId: "ev",

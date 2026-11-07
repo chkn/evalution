@@ -106,6 +106,10 @@ describe("TursoEvalProvider", () => {
       status: "ok",
       costUsd: 0.01,
     });
+    // The row's trace is linked before its checks are recorded.
+    const [early] = await provider.listTraceRuns();
+    expect(early).toMatchObject({ traceId: "t1" });
+    expect(early).not.toHaveProperty("checkCounts");
     await provider.recordCheckResults([
       {
         runId: run.id,
@@ -163,6 +167,12 @@ describe("TursoEvalProvider", () => {
       expect.objectContaining({ checkId: "c2", checkLabel: "Score" }),
     ]);
     expect(await provider.resultsForTrace("local-db", "other")).toEqual([]);
+    expect(await provider.listTraceRuns()).toEqual([
+      expect.objectContaining({
+        traceId: "t1",
+        checkCounts: { pass: 1, fail: 1, error: 0, skipped: 0, scored: 0 },
+      }),
+    ]);
 
     // Deleting the eval removes its runs and results.
     await provider.deleteEval(evalDef.id);

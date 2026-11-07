@@ -252,6 +252,7 @@ describe("eval routes", () => {
           armId: started.body.arms[0].id,
           armLabel: started.body.arms[0].label,
         },
+        checkCounts: { pass: 1, fail: 0, error: 0, skipped: 0, scored: 0 },
       }),
     ]);
 

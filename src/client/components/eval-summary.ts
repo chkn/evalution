@@ -58,6 +58,15 @@ export function gridRows(results: EvalResults): GridRow[] {
   return [...byRow.values()].sort((a, b) => a.rowIndex - b.rowIndex);
 }
 
+/** The glyph each check outcome shows as. */
+export const OUTCOME_GLYPH: Record<EvalCheckOutcome, string> = {
+  pass: "✓",
+  fail: "✗",
+  error: "!",
+  skipped: "–",
+  scored: "",
+};
+
 /** How one cell's outcome changed from the other run to this one. */
 export interface OutcomeChange {
   rowId: string;

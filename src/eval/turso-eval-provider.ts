@@ -628,33 +628,71 @@ export class TursoEvalProvider implements EvalProvider {
 
   listTraceRuns(): Promise<EvalTraceRun[]> {
     return this.serialize(async () => {
+      // A grouped subquery joined back, as `TursoTraceProvider` counts a
+      // trace's annotations. A row with no checks yet joins to nothing, so
+      // its `checks` comes back null.
+      const c = evalCheckResults;
+      const countOf = (outcome: EvalCheckOutcome) =>
+        sql<number>`sum(case when ${c.outcome} = ${outcome} then 1 else 0 end)`.as(
+          outcome,
+        );
+      const checkCounts = this.db
+        .select({
+          runId: c.runId,
+          armId: c.armId,
+          rowId: c.rowId,
+          sample: c.sample,
+          checks: sql<number>`count(*)`.as("checks"),
+          pass: countOf("pass"),
+          fail: countOf("fail"),
+          error: countOf("error"),
+          skipped: countOf("skipped"),
+          scored: countOf("scored"),
+        })
+        .from(c)
+        .groupBy(c.runId, c.armId, c.rowId, c.sample)
+        .as("check_counts");
+      const r = evalRowResults;
       const rows = await this.db
-        .selectDistinct({
-          traceProviderId: evalRowResults.traceProviderId,
-          traceId: evalRowResults.traceId,
+        .select({
+          traceProviderId: r.traceProviderId,
+          traceId: r.traceId,
           runId: evalRuns.id,
           evalId: evals.id,
           evalName: evals.name,
           startedAt: evalRuns.startedAt,
-          armId: evalRowResults.armId,
+          armId: r.armId,
           arms: evalRuns.arms,
+          checks: checkCounts.checks,
+          counts: {
+            pass: checkCounts.pass,
+            fail: checkCounts.fail,
+            error: checkCounts.error,
+            skipped: checkCounts.skipped,
+            scored: checkCounts.scored,
+          },
         })
-        .from(evalRowResults)
-        .innerJoin(evalRuns, eq(evalRuns.id, evalRowResults.runId))
+        .from(r)
+        .innerJoin(evalRuns, eq(evalRuns.id, r.runId))
         .innerJoin(evals, eq(evals.id, evalRuns.evalId))
-        .where(
+        .leftJoin(
+          checkCounts,
           and(
-            isNotNull(evalRowResults.traceProviderId),
-            isNotNull(evalRowResults.traceId),
+            eq(checkCounts.runId, r.runId),
+            eq(checkCounts.armId, r.armId),
+            eq(checkCounts.rowId, r.rowId),
+            eq(checkCounts.sample, r.sample),
           ),
-        );
-      return rows.map(({ arms, ...row }) => ({
+        )
+        .where(and(isNotNull(r.traceProviderId), isNotNull(r.traceId)));
+      return rows.map(({ arms, checks, counts, ...row }) => ({
         ...row,
         traceProviderId: row.traceProviderId!,
         traceId: row.traceId!,
         armLabel:
           (JSON.parse(arms) as EvalArm[]).find(a => a.id === row.armId)
             ?.label ?? row.armId,
+        ...(checks !== null && { checkCounts: counts }),
       }));
     });
   }

@@ -14,6 +14,7 @@ const ALL_KEYS = [
   "model",
   "cost",
   "annotations",
+  "checks",
   "version",
   "variation",
 ] as const;
@@ -42,6 +43,7 @@ const DEFAULT_VISIBLE: Record<TraceColumnKey, boolean> = {
   model: false,
   cost: false,
   annotations: false,
+  checks: false,
   version: false,
   variation: false,
 };
@@ -134,6 +136,7 @@ export const TRACE_COLUMN_WIDTH_PX: Record<TraceColumnKey, number> = {
   model: 110,
   cost: 64,
   annotations: 90,
+  checks: 100,
   version: 120,
   variation: 110,
 };

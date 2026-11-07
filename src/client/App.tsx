@@ -454,6 +454,9 @@ function App() {
         refetchEvals();
         setEvalVersion(v => v + 1);
       } else if (data.type === "eval-run") {
+        // A row's checks are recorded after its trace ends, so no
+        // `trace-changed` says the list's check counts have moved.
+        refetchTraces();
         const { type: _, ...progress } = data;
         setEvalProgress(prev => {
           if (progress.status === "running") {

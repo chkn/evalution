@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { type EvalCounts, emptyCounts } from "../../eval/eval-types";
 import type { AnnotationKind, TraceSummary } from "../../shared/types";
 import { PLAYGROUND_ENVIRONMENT } from "../../trace/trace-types";
 
@@ -23,6 +24,19 @@ function sum(values: (number | undefined)[]): number | undefined {
   return set.length > 0 ? set.reduce((a, b) => a + b, 0) : undefined;
 }
 
+/** `counts` added up; `undefined` when none is set. */
+function sumCounts(counts: (EvalCounts | undefined)[]): EvalCounts | undefined {
+  const set = counts.filter(c => c !== undefined);
+  if (set.length === 0) return undefined;
+  const total = emptyCounts();
+  for (const c of set) {
+    for (const outcome of Object.keys(total) as (keyof EvalCounts)[]) {
+      total[outcome] += c[outcome];
+    }
+  }
+  return total;
+}
+
 /**
  * A group row standing for `traces` (non-empty): spanning from the first
  * trace's start to the last one's end, with counts summed and anything the
@@ -36,6 +50,7 @@ function summaryGroup(
   const kinds: AnnotationKind[] = ["issue", "good", "note"];
   const totalTokens = sum(traces.map(t => t.totalTokens));
   const cost = sum(traces.map(t => t.cost));
+  const checkCounts = sumCounts(traces.map(t => t.checkCounts));
   const model = shared(traces.map(t => t.model));
   const promptVersion = shared(traces.map(t => t.promptVersion));
   const promptVariation = shared(traces.map(t => t.promptVariation));
@@ -51,6 +66,7 @@ function summaryGroup(
     spanCount: traces.reduce((n, t) => n + t.spanCount, 0),
     ...(totalTokens !== undefined && { totalTokens }),
     ...(cost !== undefined && { cost }),
+    ...(checkCounts && { checkCounts }),
     ...(model !== undefined && { model }),
     ...(promptVersion !== undefined && { promptVersion }),
     ...(promptVariation !== undefined && { promptVariation }),

@@ -11,6 +11,7 @@ import {
   TableModeButton,
 } from "./SummaryList";
 import { AnnotationCountBadges } from "./trace/AnnotationChip.tsx";
+import { CheckCountBadges } from "./trace/CheckCountBadges.tsx";
 import {
   formatCost,
   formatDuration,
@@ -22,6 +23,7 @@ import {
   CalendarIcon,
   ColumnsIcon,
   CostIcon,
+  EvalsIcon,
   GrabHandleIcon,
   ModelIcon,
   SpansIcon,
@@ -65,6 +67,7 @@ const COLUMN_LABELS: Record<TraceColumnKey, string> = {
   model: "Model",
   cost: "Cost",
   annotations: "Annotations",
+  checks: "Checks",
   version: "Version",
   variation: "Variation",
 };
@@ -85,6 +88,8 @@ function columnIcon(key: TraceColumnKey) {
       return <CostIcon />;
     case "annotations":
       return <AnnotationsIcon />;
+    case "checks":
+      return <EvalsIcon />;
     case "version":
       return <VersionIcon />;
     case "variation":
@@ -206,7 +211,7 @@ function traceDuration(t: TraceSummary): number | undefined {
   return t.endTime !== undefined ? t.endTime - t.startTime : undefined;
 }
 
-/** How each {@link TraceColumnKey} renders and sorts — every column except `annotations` is sortable, since its three counts don't collapse into one value. */
+/** How each {@link TraceColumnKey} renders and sorts — every column except `annotations` and `checks` is sortable, since their counts don't collapse into one value. */
 const COLUMN_DEFS: Record<
   Exclude<TraceColumnKey, "version" | "variation">,
   Omit<SummaryColumn<TraceSummary>, "key" | "label" | "icon" | "width">
@@ -245,6 +250,14 @@ const COLUMN_DEFS: Record<
     cell: t => (
       <AnnotationCountBadges
         counts={t.annotationCounts}
+        empty={<span className="trace-annotation-counts-empty">—</span>}
+      />
+    ),
+  },
+  checks: {
+    cell: t => (
+      <CheckCountBadges
+        counts={t.checkCounts}
         empty={<span className="trace-annotation-counts-empty">—</span>}
       />
     ),

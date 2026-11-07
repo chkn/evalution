@@ -10,7 +10,7 @@
 import type { EvalProvider } from "../../eval/eval-provider.ts";
 import type { EvalRunner } from "../../eval/eval-runner.ts";
 import type { EvalTraceRun } from "../../eval/eval-types.ts";
-import type { Span, TraceEvalRun } from "../../shared/types.ts";
+import type { Span, TraceSummary } from "../../shared/types.ts";
 import type { TraceProvider } from "../../trace/trace-provider.ts";
 import { answerQuery } from "./query.ts";
 import { errorResult, type HandlerResult } from "./result.ts";
@@ -27,20 +27,28 @@ export interface TraceEvalRunSources {
   runner?: EvalRunner;
 }
 
+/** What the eval providers add to a trace's summary. */
+type TraceEvalFields = Pick<TraceSummary, "evalRun" | "checkCounts">;
+
 /**
  * Each trace an eval run produced, keyed `traceProviderId:traceId`. Never
  * throws: a provider that can't answer just leaves its traces ungrouped.
+ * A run in flight only knows its traces, so what's recorded of their checks
+ * survives it being added after the providers.
  */
 async function traceEvalRuns(
   sources: TraceEvalRunSources,
-): Promise<Map<string, TraceEvalRun>> {
-  const found = new Map<string, TraceEvalRun>();
+): Promise<Map<string, TraceEvalFields>> {
+  const found = new Map<string, TraceEvalFields>();
   const add = ({
     traceProviderId,
     traceId,
-    ...run
+    checkCounts,
+    ...evalRun
   }: EvalTraceRun & { providerId: string }) => {
-    found.set(`${traceProviderId}:${traceId}`, run);
+    const key = `${traceProviderId}:${traceId}`;
+    const counts = checkCounts ?? found.get(key)?.checkCounts;
+    found.set(key, { evalRun, ...(counts && { checkCounts: counts }) });
   };
   await Promise.all(
     Array.from(sources.providers, async provider => {
@@ -60,7 +68,7 @@ async function traceEvalRuns(
 /**
  * `GET /api/traces` — summaries of every trace across `providers`, per
  * provider newest first. With `evals`, each trace an eval run produced
- * carries its `evalRun`.
+ * carries its `evalRun` and `checkCounts`.
  */
 export async function handleListTraces(
   providers: Iterable<TraceProvider>,
@@ -75,10 +83,10 @@ export async function handleListTraces(
     if (!evalRuns?.size) return { status: 200, body: traces };
     return {
       status: 200,
-      body: traces.map(trace => {
-        const evalRun = evalRuns.get(`${trace.providerId}:${trace.id}`);
-        return evalRun ? { ...trace, evalRun } : trace;
-      }),
+      body: traces.map(trace => ({
+        ...trace,
+        ...evalRuns.get(`${trace.providerId}:${trace.id}`),
+      })),
     };
   } catch (error: any) {
     return errorResult(500, error.message);

@@ -385,6 +385,21 @@ export interface TraceSummary extends TraceBase {
    * and the runs in flight.
    */
   evalRun?: TraceEvalRun;
+  /**
+   * How the checks recorded against the trace break down, once it has any.
+   * Filled in by the server alongside {@link TraceSummary.evalRun}.
+   */
+  checkCounts?: EvalCounts;
+}
+
+/** How a run's, or a trace's, check results break down. */
+export interface EvalCounts {
+  pass: number;
+  fail: number;
+  error: number;
+  skipped: number;
+  /** Scores reported without a threshold, so neither pass nor fail. */
+  scored: number;
 }
 
 /** The eval run a trace came from — what the trace list groups by. */

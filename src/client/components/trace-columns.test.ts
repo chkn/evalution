@@ -25,6 +25,7 @@ describe("DEFAULT_TRACE_COLUMNS", () => {
       { key: "model", visible: false },
       { key: "cost", visible: false },
       { key: "annotations", visible: false },
+      { key: "checks", visible: false },
       { key: "version", visible: false },
       { key: "variation", visible: false },
     ]);
@@ -41,6 +42,7 @@ describe("parseTraceColumns", () => {
       { key: "totalTokens", visible: true },
       { key: "model", visible: false },
       { key: "annotations", visible: true },
+      { key: "checks", visible: true },
       { key: "variation", visible: true },
       { key: "version", visible: false },
     ];
@@ -79,6 +81,7 @@ describe("parseTraceColumns", () => {
       { key: "model", visible: false },
       { key: "cost", visible: false },
       { key: "annotations", visible: false },
+      { key: "checks", visible: false },
       { key: "version", visible: false },
       { key: "variation", visible: false },
     ]);
@@ -122,6 +125,7 @@ describe("toggleTraceColumn", () => {
       { key: "model", visible: false },
       { key: "cost", visible: false },
       { key: "annotations", visible: false },
+      { key: "checks", visible: false },
       { key: "version", visible: false },
       { key: "variation", visible: false },
     ]);
@@ -139,6 +143,7 @@ describe("reorderTraceColumns", () => {
       "model",
       "cost",
       "annotations",
+      "checks",
       "version",
       "variation",
     ]);
@@ -154,6 +159,7 @@ describe("reorderTraceColumns", () => {
       "model",
       "cost",
       "annotations",
+      "checks",
       "version",
       "variation",
     ]);
