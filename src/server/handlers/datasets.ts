@@ -135,7 +135,11 @@ async function parseFields(
   for (const [i, field] of value.entries()) {
     const def = isRecord(field) ? field.def : undefined;
     let parsed: PropDefinition;
-    if (def === undefined && lookupPrompt && isRecord(field)) {
+    // A field given as a name and type, or a copy of one parameter, rather
+    // than as a definition, is added by hand: it isn't stale when it matches
+    // none of the linked prompt's parameters.
+    const byHand = def === undefined && !!lookupPrompt && isRecord(field);
+    if (byHand) {
       try {
         parsed = await parseNewField(field, lookupPrompt);
       } catch (err) {
@@ -163,7 +167,7 @@ async function parseFields(
       );
     }
     seen.add(key);
-    fields.push({ def: parsed });
+    fields.push({ def: parsed, ...(byHand && { added: true as const }) });
   }
   return fields;
 }

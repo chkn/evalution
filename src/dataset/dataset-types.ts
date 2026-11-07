@@ -36,10 +36,10 @@ export interface DatasetField {
   /** Name, type, description — the checker's view of the slot this field came from. */
   def: PropDefinition;
   /**
-   * Set on a field added by hand (`DatasetProvider.addField`) rather than
-   * derived when the dataset was created. Such a field never came from the
-   * linked prompt, so it isn't flagged when it matches none of its
-   * parameters.
+   * Set on a field added by hand — through `DatasetProvider.addField`, or
+   * given as `{ name, type }` or `{ from }` when the dataset was created —
+   * rather than derived from the linked prompt. Such a field never came from
+   * that prompt, so it isn't flagged when it matches none of its parameters.
    */
   added?: true;
 }

@@ -71,6 +71,19 @@ export function runDatasetProviderContractTests(
       expect(await provider.getDataset(dataset.id)).toEqual(dataset);
     });
 
+    it("keeps the mark on a field added by hand", async () => {
+      const provider = await makeProvider();
+      const dataset = await provider.createDataset({
+        name: "Marked",
+        fields: [{ def: def("ticket") }, { def: def("label"), added: true }],
+      });
+      expect(dataset.fields).toEqual([
+        { id: "0", def: def("ticket") },
+        { id: "1", def: def("label"), added: true },
+      ]);
+      expect(await provider.getDataset(dataset.id)).toEqual(dataset);
+    });
+
     it("mints base-36 field ids", async () => {
       const provider = await makeProvider();
       const dataset = await provider.createDataset({

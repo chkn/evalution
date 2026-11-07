@@ -458,6 +458,7 @@ export class TursoDatasetProvider implements DatasetProvider {
         fields: input.fields.map((field, i) => ({
           id: fieldIdFor(i),
           def: field.def,
+          ...(field.added && { added: true as const }),
         })),
         ...(input.prompt && { prompt: input.prompt }),
         createdAt: now,

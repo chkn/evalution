@@ -409,6 +409,11 @@ describe("MCP server", () => {
       expect(
         dataset.fields.map((f: { def: { name: string } }) => f.def.name),
       ).toEqual(["name", "excited", "expected"]);
+      // Only the field given by hand is marked so, so it isn't flagged for
+      // matching none of the prompt's parameters.
+      expect(
+        dataset.fields.map((f: { added?: true }) => f.added ?? false),
+      ).toEqual([false, false, true]);
 
       const added = await call("add_rows", {
         datasetId: dataset.id,
