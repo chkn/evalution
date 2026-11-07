@@ -55,7 +55,11 @@ import { datasetKey } from "./DatasetList";
 import DraftInput from "./DraftInput";
 import { ExecPanelShell, PromptSplit } from "./ExecPanelShell";
 import { ExecutionInputEditor } from "./ExecutionInputEditor";
-import { evalProblems, prefillBindings } from "./eval-bindings";
+import {
+  evalProblems,
+  type PrefillScope,
+  prefillBindings,
+} from "./eval-bindings";
 import {
   copyOfEval,
   deleteRunQuestion,
@@ -69,6 +73,7 @@ import {
   type SlotSelection,
   toExecutionInput,
 } from "./execution-input-state";
+import { takeFreshEval } from "./fresh-evals";
 import { findEvalPrompt } from "./NewEvalDialog";
 import {
   checkParameterSources,
@@ -223,6 +228,8 @@ function EvalView({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<DatasetField[] | undefined>();
+  /** The dataset `fields` were loaded for, which lags a change of dataset. */
+  const [fieldsOf, setFieldsOf] = useState<string | undefined>();
   const [checkInfos, setCheckInfos] = useState<CheckInfo[]>([]);
   const [runs, setRuns] = useState<EvalRunSummary[]>([]);
   const [state, setState] = useState<EditorState>({
@@ -257,6 +264,21 @@ function EvalView({
   // ── Loading ────────────────────────────────────────────────────────────
 
   const loadedId = useRef<string | null>(null);
+  /**
+   * What's waiting to be pre-filled: everything when the eval was just
+   * created or its prompt or dataset was changed here, or the checks just
+   * added. Only setting something up pre-fills; opening an eval never does,
+   * so a slot left unbound on purpose stays unbound.
+   */
+  const pendingPrefill = useRef<PrefillScope | null>(null);
+  const prefillLater = (scope: PrefillScope) => {
+    const pending = pendingPrefill.current;
+    pendingPrefill.current =
+      scope === "all" || pending === "all"
+        ? "all"
+        : { checkIds: [...(pending?.checkIds ?? []), ...scope.checkIds] };
+  };
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload on the eval's own change events; the editor state is only reset the first time, so an echo of this view's own save doesn't undo typing in flight.
   useEffect(() => {
     let cancelled = false;
@@ -266,6 +288,9 @@ function EvalView({
         setDef(loaded);
         if (loadedId.current !== evalId) {
           loadedId.current = evalId;
+          pendingPrefill.current = takeFreshEval(providerId, evalId)
+            ? "all"
+            : null;
           setName(loaded.name);
           const loadedState = editorStateOf(loaded);
           stateRef.current = loadedState;
@@ -298,9 +323,18 @@ function EvalView({
   // biome-ignore lint/correctness/useExhaustiveDependencies: refetch on the dataset's change events too.
   useEffect(() => {
     if (!datasetProviderId || !datasetId) return;
+    let cancelled = false;
+    const loaded = (next: DatasetField[]) => {
+      if (cancelled) return;
+      setFields(next);
+      setFieldsOf(datasetKey({ providerId: datasetProviderId, id: datasetId }));
+    };
     getDataset(datasetProviderId, datasetId)
-      .then(d => setFields(d.dataset.fields))
-      .catch(() => setFields([]));
+      .then(d => loaded(d.dataset.fields))
+      .catch(() => loaded([]));
+    return () => {
+      cancelled = true;
+    };
   }, [datasetProviderId, datasetId, datasetVersion]);
 
   const promptProviderId = prompt?.providerId;
@@ -368,9 +402,15 @@ function EvalView({
   // ── Pre-filling (§F.1) ─────────────────────────────────────────────────
 
   const checkIdsKey = def?.checks.map(c => `${c.id}=${c.uri}`).join() ?? "";
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the prompt, the dataset, or the checks change — never overwriting a binding, so running again is harmless.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once what a pending pre-fill needs has loaded.
   useEffect(() => {
-    if (!def || !prompt || !fields) return;
+    const scope = pendingPrefill.current;
+    if (!scope || !def || !prompt || !fields) return;
+    // The fields of the dataset before a change of dataset would bind
+    // columns that don't exist in this one.
+    if (fieldsOf !== datasetKey(def.dataset)) return;
+    if (def.checks.length > 0 && checkInfos.length === 0) return;
+    pendingPrefill.current = null;
     const current = {
       inputs: foldInputs(state),
       checks: foldChecks(state, def.checks),
@@ -382,6 +422,7 @@ function EvalView({
       checks: current.checks,
       checkInfos,
       stored: readStoredInputs(prompt),
+      scope,
     });
     if (proposed.matched.length === 0) return;
     const next = editorStateOf({
@@ -392,7 +433,7 @@ function EvalView({
     stateRef.current = next;
     setState(next);
     save({ inputs: proposed.inputs, checks: proposed.checks });
-  }, [def?.id, prompt?.id, fields, checkInfos, checkIdsKey]);
+  }, [def?.id, prompt?.id, fields, fieldsOf, checkInfos, checkIdsKey]);
 
   const touch = (key: string) =>
     setMatched(prev => {
@@ -590,10 +631,9 @@ function EvalView({
 
   const addCheck = (uri: string) => {
     if (!def) return;
-    const next = [
-      ...def.checks,
-      { id: mintCheckId(def.checks), uri, args: {} },
-    ];
+    const id = mintCheckId(def.checks);
+    const next = [...def.checks, { id, uri, args: {} }];
+    prefillLater({ checkIds: [id] });
     save({ checks: foldChecks(state, next) }, true);
   };
 
@@ -844,6 +884,7 @@ function EvalView({
                   p => `${p.providerId}:${p.id}` === e.target.value,
                 );
                 if (next?.providerId) {
+                  prefillLater("all");
                   save(
                     {
                       prompt: {
@@ -883,6 +924,7 @@ function EvalView({
                   d => datasetKey(d) === e.target.value,
                 );
                 if (next) {
+                  prefillLater("all");
                   save(
                     { dataset: { providerId: next.providerId, id: next.id } },
                     true,

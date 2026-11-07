@@ -7899,6 +7899,26 @@ pre {
   gap: 4px;
 }
 
+.trace-check-run-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trace-check-run-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: var(--trace-text-dim);
+  cursor: pointer;
+}
+
+.trace-check-run-toggle:hover {
+  color: var(--trace-text);
+}
+
 .trace-check-run-link {
   padding: 0;
   border: none;

@@ -125,12 +125,20 @@ const rect = (loc: Locator) =>
     return { top, bottom, left, right };
   });
 
-test("binds a same-named column to the prompt's input, marked as matched, and saves it", async ({
+test("binds a new eval's same-named column to the prompt's input, marked as matched, and saves it", async ({
   mount,
   page,
 }) => {
   const patches = await mockEval(page, EVAL);
-  const component = await mountEval(mount);
+  const component = await mount(
+    <EvalViewHarness
+      providerId="local-evals"
+      evalId="e1"
+      prompts={[TRIAGE]}
+      datasets={[TICKETS_SUMMARY]}
+      fresh
+    />,
+  );
 
   await expect(component.locator(".eval-matched")).toHaveCount(1);
   await expect(component.locator(".pg-slot-chip-pseudo")).toContainText(
@@ -143,6 +151,66 @@ test("binds a same-named column to the prompt's input, marked as matched, and sa
       executeInputs: {},
     });
   await expect(component.getByRole("button", { name: /Run/ })).toBeEnabled();
+});
+
+test("opening an existing eval leaves a slot unbound, even with a column that matches it", async ({
+  mount,
+  page,
+}) => {
+  const patches = await mockEval(page, EVAL);
+  const component = await mountEval(mount);
+
+  await expect(
+    component.getByText(/'ticket' is required but unbound/),
+  ).toBeVisible();
+  await expect(component.locator(".eval-matched")).toHaveCount(0);
+  expect(patches).toEqual([]);
+});
+
+test("changing the dataset binds to the new dataset's own column, once it has loaded", async ({
+  mount,
+  page,
+}) => {
+  const patches = await mockEval(page, EVAL);
+  // The same column under another id, served late so the old dataset's
+  // fields are still loaded when the change lands.
+  await page.route("**/api/datasets/local/tickets-2", async route => {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    return route.fulfill({
+      json: {
+        dataset: {
+          ...TICKETS,
+          id: "tickets-2",
+          fields: [{ id: "7", def: string("ticket") }],
+        },
+        rowCount: 0,
+        fields: {},
+      },
+    });
+  });
+  const component = await mount(
+    <EvalViewHarness
+      providerId="local-evals"
+      evalId="e1"
+      prompts={[TRIAGE]}
+      datasets={[
+        TICKETS_SUMMARY,
+        { ...TICKETS_SUMMARY, id: "tickets-2", name: "More tickets" },
+      ]}
+    />,
+  );
+
+  await component.getByLabel("Dataset").selectOption({ label: "More tickets" });
+
+  await expect
+    .poll(() => patches.at(-1)?.inputs)
+    .toEqual({
+      functionInputs: { ticket: { kind: "dataset", field: "7" } },
+      executeInputs: {},
+    });
+  expect(
+    patches.some(p => (p.inputs as any)?.functionInputs?.ticket?.field === "0"),
+  ).toBe(false);
 });
 
 test("the inputs panel has the run's Resources above the slots, saved with the eval", async ({
@@ -361,6 +429,7 @@ test("Run hands the started run on, with the eval's name", async ({
       prompts={[TRIAGE]}
       datasets={[TICKETS_SUMMARY]}
       onRunStarted={(run, evalName) => started.push([run.id, evalName])}
+      fresh
     />,
   );
 
@@ -392,6 +461,7 @@ test("Duplicate, left of Delete, creates a copy of the eval and hands it on", as
       onDuplicated={({ id, name, providerId }) =>
         duplicated.push({ id, name, providerId })
       }
+      fresh
     />,
   );
 
@@ -402,7 +472,7 @@ test("Duplicate, left of Delete, creates a copy of the eval and hands it on", as
   expect((await rect(dup)).right).toBeLessThanOrEqual((await rect(del)).left);
 
   // The copy has the bindings as they are, saved or not: here, the one
-  // filled in for the user.
+  // filled in for the user when the eval was new.
   await expect(component.locator(".eval-matched")).toHaveCount(1);
   await dup.click();
   await expect

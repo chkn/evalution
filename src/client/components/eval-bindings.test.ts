@@ -126,4 +126,33 @@ describe("prefillBindings", () => {
     expect(checks[1]!.args).toEqual({});
     expect(matched).toEqual(["check:c:taskId", "check:c:expected"]);
   });
+
+  it("scoped to some checks, binds only their parameters", () => {
+    const creates = {
+      uri: "checks.ts#creates",
+      label: "Creates",
+      parameters: [def("expected")],
+    };
+    const { inputs, checks, matched } = prefillBindings({
+      prompt: { functionParameters: [def("title")] },
+      fields: [
+        { id: "0", def: def("title") },
+        { id: "1", def: def("expected") },
+      ],
+      inputs: empty,
+      checks: [
+        { id: "old", uri: creates.uri, args: {} },
+        { id: "new", uri: creates.uri, args: {} },
+      ],
+      checkInfos: [creates],
+      stored: { functionInputs: { title: text("hi") } },
+      scope: { checkIds: ["new"] },
+    });
+    expect(inputs).toEqual(empty);
+    expect(checks.map(c => c.args)).toEqual([
+      {},
+      { expected: { kind: "dataset", field: "1" } },
+    ]);
+    expect(matched).toEqual(["check:new:expected"]);
+  });
 });

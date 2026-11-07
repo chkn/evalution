@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { useState } from "react";
 import type {
   EvalDefinition,
   EvalRun,
@@ -8,6 +9,7 @@ import type {
 } from "../../../eval/eval-types";
 import type { DatasetSummary, NormalizedPrompt } from "../../../shared/types";
 import EvalView from "../EvalView";
+import { markFreshEval } from "../fresh-evals";
 
 /**
  * Mounts EvalView for one eval, with `prompts` and `datasets` loaded. Wrapped
@@ -25,6 +27,7 @@ export function EvalViewHarness({
   onRunStarted = () => {},
   onRunDeleted = () => {},
   onDuplicated = () => {},
+  fresh = false,
 }: {
   providerId: string;
   evalId: string;
@@ -37,7 +40,10 @@ export function EvalViewHarness({
   onRunStarted?: (run: EvalRun, evalName: string) => void;
   onRunDeleted?: (run: EvalRunSummary) => void;
   onDuplicated?: (created: EvalDefinition & { providerId: string }) => void;
+  /** Opens the eval as one just created, as the New eval dialog does. */
+  fresh?: boolean;
 }) {
+  useState(() => fresh && markFreshEval(providerId, evalId));
   return (
     <div style={{ width, height }}>
       <EvalView

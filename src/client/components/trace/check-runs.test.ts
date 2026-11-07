@@ -3,7 +3,11 @@
 
 import { describe, expect, it } from "vitest";
 import type { TraceEvalRun } from "../../../shared/types.ts";
-import { groupCheckRuns, type ProvidedCheckResult } from "./check-runs.ts";
+import {
+  countOutcomes,
+  groupCheckRuns,
+  type ProvidedCheckResult,
+} from "./check-runs.ts";
 
 const result = (
   checkId: string,
@@ -88,5 +92,28 @@ describe("groupCheckRuns", () => {
 
   it("is empty when no eval ran the trace", () => {
     expect(groupCheckRuns([])).toEqual([]);
+  });
+});
+
+describe("countOutcomes", () => {
+  it("counts results by outcome", () => {
+    expect(
+      countOutcomes([
+        result("c1"),
+        result("c2", { outcome: "fail" }),
+        result("c3"),
+        result("c4", { outcome: "scored", score: 0.5 }),
+      ]),
+    ).toEqual({ pass: 2, fail: 1, error: 0, skipped: 0, scored: 1 });
+  });
+
+  it("is all zeros with no results", () => {
+    expect(countOutcomes([])).toEqual({
+      pass: 0,
+      fail: 0,
+      error: 0,
+      skipped: 0,
+      scored: 0,
+    });
   });
 });

@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { TraceCheckResult } from "../../../eval/eval-types";
+import {
+  type EvalCounts,
+  emptyCounts,
+  type TraceCheckResult,
+} from "../../../eval/eval-types";
 import type { TraceEvalRun } from "../../../shared/types";
 
 /** A check result as `getTraceCheckResults` returns it. */
@@ -56,4 +60,11 @@ export function groupCheckRuns(
   if (evalRun) groupOf(evalRun);
   for (const result of results) groupOf(result).results.push(result);
   return [...runs.values()];
+}
+
+/** How a run's check results break down by outcome. */
+export function countOutcomes(results: ProvidedCheckResult[]): EvalCounts {
+  const counts = emptyCounts();
+  for (const r of results) counts[r.outcome] += 1;
+  return counts;
 }

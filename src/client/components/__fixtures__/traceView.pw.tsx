@@ -898,6 +898,83 @@ test("names a trace's eval run once above its checks, and opens the run", async 
     .toEqual([["e1", { id: "r1", startedAt: 5000 }, "Answers"]]);
 });
 
+test("collapses a run's checks to its link and outcome chips", async ({
+  mount,
+  page,
+}) => {
+  await mockTraceApi(page);
+  const check = (checkId: string, outcome: string) => ({
+    providerId: "e1",
+    runId: "r1",
+    armId: "a1",
+    rowId: "row",
+    sample: 0,
+    checkId,
+    outcome,
+    evalId: "eval",
+    evalName: "Answers",
+    checkLabel: checkId,
+    armLabel: "Working tree",
+    startedAt: 5000,
+  });
+  await page.route("**/api/traces/*/*/check-results", route =>
+    route.fulfill({
+      json: [check("c1", "pass"), check("c2", "pass"), check("c3", "fail")],
+    }),
+  );
+  const component = await mount(<TraceViewHarness />);
+
+  const header = component.locator(".trace-check-run-header");
+  await expect(component.locator(".trace-check")).toHaveCount(3);
+
+  await component.getByRole("button", { name: "Collapse checks" }).click();
+  await expect(component.locator(".trace-check")).toHaveCount(0);
+  await expect(header.locator(".trace-check-run-link")).toContainText(
+    "Answers · Working tree",
+  );
+  await expect(header.locator(".annotation-chip-good")).toHaveText("✓2");
+  await expect(header.locator(".annotation-chip-issue")).toHaveText("✗1");
+
+  await component.getByRole("button", { name: "Expand checks" }).click();
+  await expect(component.locator(".trace-check")).toHaveCount(3);
+});
+
+test("remembers a collapsed run across mounts", async ({ mount, page }) => {
+  await mockTraceApi(page);
+  await page.route("**/api/traces/*/*/check-results", route =>
+    route.fulfill({
+      json: [
+        {
+          providerId: "e1",
+          runId: "r1",
+          armId: "a1",
+          rowId: "row",
+          sample: 0,
+          checkId: "c1",
+          outcome: "pass",
+          evalId: "eval",
+          evalName: "Answers",
+          checkLabel: "c1",
+          armLabel: "Working tree",
+          startedAt: 5000,
+        },
+      ],
+    }),
+  );
+  const first = await mount(<TraceViewHarness />);
+  await expect(first.locator(".trace-check")).toHaveCount(1);
+  await first.getByRole("button", { name: "Collapse checks" }).click();
+  await expect(first.locator(".trace-check")).toHaveCount(0);
+  await first.unmount();
+
+  const second = await mount(<TraceViewHarness />);
+  await expect(second.locator(".trace-check-run-link")).toBeVisible();
+  await expect(second.locator(".trace-check")).toHaveCount(0);
+  await expect(
+    second.getByRole("button", { name: "Expand checks" }),
+  ).toBeVisible();
+});
+
 test("links a trace from an eval run to that run even with no check results", async ({
   mount,
   page,

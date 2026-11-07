@@ -10,6 +10,7 @@
 export {
   type Prefilled,
   type PrefillInput,
+  type PrefillScope,
   prefillBindings,
 } from "../../shared/eval-prefill";
 export { evalProblems } from "../../shared/eval-problems";

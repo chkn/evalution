@@ -513,7 +513,9 @@ eval_check_results run_id, arm_id, row_id, sample, check_id,
 - **Trace view:** a trace that belongs to an eval result gets a **Checks** section in the details
   pane (`resultsForTrace`). Results aren't written as annotations. Annotations are human judgment
   and are editable. Check results are machine output tied to a run. Mixing them makes both harder
-  to trust.
+  to trust. Each run's checks sit under a heading that names the eval and version and links to the
+  run. A run collapses to that heading and a count per outcome. Which runs are collapsed is
+  remembered, in the browser, for the last 50 traces opened.
 
 **Wire.** `GET /api/eval-providers`, `GET|POST /api/evals`, `GET|PATCH|DELETE /api/evals/:p/:id`,
 `POST /api/evals/:p/:id/runs` (body: `{ arms, concurrency, rowIds }`), `GET /api/evals/:p/:id/runs`,
@@ -547,9 +549,12 @@ parameter). It adds a field to the dataset with the slot's own `PropDefinition` 
 §P.1) and binds to it. That's how `expectedTitle` and `threadMsgs` would normally come to exist:
 from the eval editor, with the types already right.
 
-Pre-filling runs when the eval is created, and again for newly unbound slots whenever the prompt,
-the dataset, or a check changes. It's pure (`src/client/components/eval-bindings.ts`), takes the
-prompt, the dataset, the checks, and the stored panel state, and is unit-tested on its own.
+Pre-filling runs only when something is set up: when the eval is created, when its prompt or
+dataset is changed in the editor, and for a check's parameters when the check is added. Opening an
+eval never pre-fills, so a slot left unbound on purpose stays unbound. After a change of dataset it
+waits for that dataset's fields, so it can't bind a column of the previous one. It's pure
+(`src/client/components/eval-bindings.ts`), takes the prompt, the dataset, the checks, the stored
+panel state, and what to fill, and is unit-tested on its own.
 Pre-filled bindings show a subtle "matched" mark until they're touched, so it's clear which choices
 were made for the user.
 

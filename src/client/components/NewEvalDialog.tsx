@@ -9,6 +9,7 @@ import type {
 } from "../../shared/types";
 import { createEval } from "../api";
 import { datasetKey } from "./DatasetList";
+import { markFreshEval } from "./fresh-evals";
 
 /**
  * The loaded prompt `ref` names: by its `globalId` (what an eval stores, so
@@ -108,6 +109,7 @@ function NewEvalDialog({
         inputs: { functionInputs: {}, executeInputs: {} },
         checks: [],
       });
+      markFreshEval(created.providerId, created.id);
       onCreated(created);
     } catch (err: any) {
       setError(err.message);

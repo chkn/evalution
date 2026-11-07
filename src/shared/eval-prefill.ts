@@ -41,7 +41,15 @@ export interface PrefillInput {
     /** The playground's resource instances, which its inputs may reference. */
     resources?: RunResources;
   };
+  /** What to fill: everything (the default), or only the checks named. */
+  scope?: PrefillScope;
 }
+
+/**
+ * What {@link prefillBindings} fills: the prompt's slots and every check, or
+ * only the checks named — those just added.
+ */
+export type PrefillScope = "all" | { checkIds: readonly string[] };
 
 /** What {@link prefillBindings} proposes. */
 export interface Prefilled {
@@ -160,8 +168,10 @@ function withReferencedInstances(
 }
 
 /**
- * Proposes bindings for every unbound slot and check parameter, never
- * touching one already set (`specs/evals.md` §F.1):
+ * Proposes bindings for every unbound slot and check parameter in `scope`,
+ * never touching one already set (`specs/evals.md` §F.1). Meant for setting
+ * an eval up, not for every time it's opened: a slot left unbound on purpose
+ * would be bound again.
  *
  * - A prompt slot takes a column that matches it by name and type, else
  *   what the playground last ran it with.
@@ -172,8 +182,9 @@ function withReferencedInstances(
  * that fits": a confident wrong binding is worse than an obvious empty one.
  */
 export function prefillBindings(input: PrefillInput): Prefilled {
-  const { prompt, fields, stored } = input;
+  const { prompt, fields, stored, scope = "all" } = input;
   const matched: string[] = [];
+  const checkIds = scope === "all" ? undefined : new Set(scope.checkIds);
 
   const fillHalf = (
     params: readonly PropDefinition[],
@@ -196,28 +207,33 @@ export function prefillBindings(input: PrefillInput): Prefilled {
     return out;
   };
 
-  const inputs: EvalInputs = {
-    functionInputs: fillHalf(
-      prompt.functionParameters,
-      input.inputs.functionInputs,
-      stored?.functionInputs,
-      "fn",
-    ),
-    executeInputs: fillHalf(
-      prompt.executeParameters ?? [],
-      input.inputs.executeInputs,
-      stored?.executeInputs,
-      "exec",
-    ),
-  };
-  const resources = withReferencedInstances(
-    inputs,
-    input.inputs.resources,
-    stored?.resources,
-  );
-  if (resources) inputs.resources = resources;
+  const inputs: EvalInputs = checkIds
+    ? input.inputs
+    : {
+        functionInputs: fillHalf(
+          prompt.functionParameters,
+          input.inputs.functionInputs,
+          stored?.functionInputs,
+          "fn",
+        ),
+        executeInputs: fillHalf(
+          prompt.executeParameters ?? [],
+          input.inputs.executeInputs,
+          stored?.executeInputs,
+          "exec",
+        ),
+      };
+  if (!checkIds) {
+    const resources = withReferencedInstances(
+      inputs,
+      input.inputs.resources,
+      stored?.resources,
+    );
+    if (resources) inputs.resources = resources;
+  }
 
   const checks = input.checks.map(check => {
+    if (checkIds && !checkIds.has(check.id)) return check;
     const info = input.checkInfos.find(c => c.uri === check.uri);
     if (!info) return check;
     const args = { ...check.args };
