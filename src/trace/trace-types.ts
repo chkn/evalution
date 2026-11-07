@@ -127,6 +127,17 @@ export interface SpanToolResultPart {
   isError?: boolean;
 }
 
+/**
+ * The reasoning (thinking) a model produced ahead of its answer, within a
+ * multi-part {@link SpanMessage} content — how a conversation's earlier
+ * assistant turns carry theirs. The turn a span records keeps its own in
+ * {@link LLMSpanDetails.reasoning}.
+ */
+export interface SpanReasoningPart {
+  type: "reasoning";
+  text: string;
+}
+
 export type SpanMessageRole =
   | "user"
   | "assistant"
@@ -139,7 +150,8 @@ export type SpanContentPart =
   | SpanTextPart
   | SpanImagePart
   | SpanToolCallPart
-  | SpanToolResultPart;
+  | SpanToolResultPart
+  | SpanReasoningPart;
 
 /**
  * A single message within an LLM span's input/output.
@@ -181,6 +193,11 @@ export interface LLMSpanDetails {
    * output and for any model whose answer is data rather than prose.
    */
   output?: unknown;
+  /**
+   * The reasoning the model produced on the way to {@link output}, kept apart
+   * from it so an output stays the answer that checks and agents read.
+   */
+  reasoning?: string;
 
   // -- usage info --
   /** Input tokens, counting any read from or written to a prompt cache. */

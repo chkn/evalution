@@ -143,7 +143,7 @@ function readFinishReason(
  * Converts a raw message `content` value (a string, or an array of
  * OTel/Vercel-style content parts) into a {@link SpanMessage.content}. Image
  * (and image-bearing `file`) parts are kept rather than dropped — see §A.5 in
- * `specs/trace-workshopping.md` — as are tool calls and tool results.
+ * `specs/trace-workshopping.md` — as are tool calls, tool results and reasoning.
  */
 function toMessageContent(
   content: unknown,
@@ -158,6 +158,10 @@ function toMessageContent(
     if (part.type === "text") {
       const text = str(part.text);
       if (text) parts.push({ type: "text", text });
+    } else if (part.type === "reasoning") {
+      // `text` is the AI SDK's name for it, `content` the OTel GenAI semconv's.
+      const text = str(part.text) ?? str(part.content);
+      if (text) parts.push({ type: "reasoning", text });
     } else if (part.type === "image") {
       const image = str(part.image) ?? str(part.url);
       if (image) {
@@ -273,6 +277,26 @@ function readOutputToolCalls(
   return Array.isArray(parts) ? parts.filter(isToolCall) : [];
 }
 
+/**
+ * The reasoning a model response carried, from `gen_ai.output.messages`
+ * (reasoning content parts) or the Vercel AI SDK's `ai.response.reasoning`,
+ * which it records from 6.0.74 on.
+ */
+function readOutputReasoning(
+  attributes: Record<string, unknown>,
+): string | undefined {
+  const parts = (
+    parseMessages(attributes["gen_ai.output.messages"]) ?? []
+  ).flatMap(m =>
+    typeof m.content === "string"
+      ? []
+      : m.content.flatMap(p => (p.type === "reasoning" ? [p.text] : [])),
+  );
+  return (
+    parts.join("") || str(attributes["ai.response.reasoning"]) || undefined
+  );
+}
+
 /** A JSON-string attribute holding an object or array, or `undefined`. */
 function parseJsonObject(
   v: unknown,
@@ -360,6 +384,7 @@ export function readLLM(
     parseOutput(attributes["gen_ai.output.messages"]) ??
     str(attributes["ai.response.text"]);
   const toolCalls = readOutputToolCalls(attributes);
+  const reasoning = readOutputReasoning(attributes);
   // `gen_ai.output.type` says the model produced data, not prose, so its text
   // is that data's JSON encoding. Kept as text if it doesn't parse.
   const output =
@@ -390,6 +415,7 @@ export function readLLM(
     !completionTokens &&
     !input &&
     (output === undefined || output === "") &&
+    !reasoning &&
     !modelParameters
   ) {
     return undefined;
@@ -401,6 +427,7 @@ export function readLLM(
     ...(finishReason && { finishReason }),
     ...(input && { input }),
     ...(output !== undefined && output !== "" && { output }),
+    ...(reasoning && { reasoning }),
     ...(promptTokens !== undefined && { promptTokens }),
     ...(completionTokens !== undefined && { completionTokens }),
     ...(totalTokens !== undefined && { totalTokens }),

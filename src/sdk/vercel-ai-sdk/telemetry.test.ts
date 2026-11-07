@@ -452,6 +452,78 @@ describe("Evalution", () => {
     ]);
   });
 
+  it("records a step's reasoning apart from its output, and keeps earlier turns' in its input", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-reasoning";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#agent", name: "agent" })
+      .withTraceId(traceId);
+    const callId = "call-reasoning";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "Earlier thought." },
+            { type: "reasoning", text: "" },
+            { type: "text", text: "Earlier answer." },
+          ],
+        },
+      ],
+    } as any);
+    await integration.onStepEnd?.({
+      ...stepEndEvent(callId, "Hello!"),
+      reasoningText: "They said hi.",
+    });
+    await integration.onEnd?.({ callId, text: "Hello!" } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.kind === "LLM");
+    expect(step?.llm?.output).toBe("Hello!");
+    expect(step?.llm?.reasoning).toBe("They said hi.");
+    expect(step?.llm?.input).toEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Earlier thought." },
+          { type: "text", text: "Earlier answer." },
+        ],
+      },
+    ]);
+  });
+
+  it("records no reasoning for a step without any", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-no-reasoning";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#agent", name: "agent" })
+      .withTraceId(traceId);
+    const callId = "call-no-reasoning";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [],
+    } as any);
+    await integration.onStepEnd?.(stepEndEvent(callId, "Hello!"));
+    await integration.onEnd?.({ callId, text: "Hello!" } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.kind === "LLM");
+    expect(step?.llm).not.toHaveProperty("reasoning");
+  });
+
   it("correlates parallel tool calls by toolCallId", async () => {
     const evalution = new VercelAISDKTelemetry();
     const provider = new MemoryTraceProvider();

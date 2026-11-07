@@ -23,6 +23,7 @@ import {
   TokensIcon,
 } from "./icons.tsx";
 import { JsonView } from "./JsonView.tsx";
+import { Markdown } from "./Markdown.tsx";
 import { MessageList } from "./MessageList.tsx";
 import { renderOutput } from "./output-renderers.tsx";
 import { hasOutput } from "./rows.ts";
@@ -127,6 +128,12 @@ export function SpanDetails({
       ) : (
         <JsonView data={llm.input} />
       ),
+    });
+  }
+  if (llm?.reasoning) {
+    rows.push({
+      label: "Reasoning",
+      value: <Markdown>{llm.reasoning}</Markdown>,
     });
   }
   if (hasOutput(llm)) {

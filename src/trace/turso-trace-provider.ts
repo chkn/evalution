@@ -90,6 +90,7 @@ function spanToRow(span: Span) {
     llmInput: span.llm?.input ? JSON.stringify(span.llm.input) : null,
     llmOutput:
       span.llm?.output !== undefined ? JSON.stringify(span.llm.output) : null,
+    llmReasoning: span.llm?.reasoning ?? null,
     llmParameters: span.llm?.modelParameters
       ? JSON.stringify(span.llm.modelParameters)
       : null,
@@ -133,6 +134,7 @@ function rowToSpan(row: typeof spans.$inferSelect): Span {
       input: parseJson<NonNullable<LLMSpanDetails["input"]>>(row.llmInput),
     }),
     ...(row.llmOutput != null && { output: parseJson(row.llmOutput) }),
+    ...(row.llmReasoning && { reasoning: row.llmReasoning }),
     ...(row.llmParameters && {
       modelParameters: parseJson<Record<string, unknown>>(row.llmParameters),
     }),

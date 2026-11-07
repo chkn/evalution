@@ -658,6 +658,36 @@ test("chat section keeps a tool call's arguments/result collapsed by default, bu
   await expect(details).toContainText("cats");
 });
 
+test("reasoning stays collapsed in the conversation, opens without selecting the span, and shows in the details pane", async ({
+  mount,
+  page,
+}) => {
+  await mockTraceApi(page, [], {
+    ...TRACE,
+    spans: TRACE.spans.map(span =>
+      span.id === "llm1"
+        ? { ...span, llm: { ...span.llm, reasoning: "They said hello." } }
+        : span,
+    ),
+  });
+  const component = await mount(<TraceViewHarness />);
+  await openConversationTab(component);
+
+  const turn = component.locator('.chat-turn[data-span-id="llm1"]');
+  const reasoning = turn.locator(".message-reasoning");
+  await expect(reasoning.getByText("They said hello.")).toBeHidden();
+
+  await reasoning.locator("summary").click();
+  await expect(reasoning.getByText("They said hello.")).toBeVisible();
+  await expect(turn).not.toHaveClass(/chat-turn-selected/);
+
+  await turn.getByText("Hi there!").click();
+  await expect(turn).toHaveClass(/chat-turn-selected/);
+  await expect(component.locator(".trace-details-pane")).toContainText(
+    "They said hello.",
+  );
+});
+
 test("chat section does not repeat an earlier turn's messages in a later turn", async ({
   mount,
   page,

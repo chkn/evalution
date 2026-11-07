@@ -144,7 +144,7 @@ export function hasOutput(llm: LLMSpanDetails | undefined): boolean {
  * turns — not just their `messages`, but also their `output`, which the next
  * turn's `messages` folds back in as an assistant message once the
  * conversation continues. This trims that repeated prefix, counting a prior
- * turn's `output` (if any) as one extra already-shown message.
+ * turn's `output` or `reasoning` (if any) as one extra already-shown message.
  */
 export function newMessagesByTurn(rows: Row[]): Map<string, SpanMessage[]> {
   const result = new Map<string, SpanMessage[]>();
@@ -155,7 +155,8 @@ export function newMessagesByTurn(rows: Row[]): Map<string, SpanMessage[]> {
     result.set(row.span.id, allMessages.slice(shownCount));
     shownCount = Math.max(
       shownCount,
-      allMessages.length + (hasOutput(row.span.llm) ? 1 : 0),
+      allMessages.length +
+        (hasOutput(row.span.llm) || row.span.llm?.reasoning ? 1 : 0),
     );
   }
   return result;

@@ -5,7 +5,8 @@
  * Renders an LLM span's `messages`, markdown-formatted, with image content
  * parts rendered as actual images (validated via `./imageSrc.ts`) rather than
  * dropped or shown as a placeholder — see `specs/trace-workshopping.md` §A.5/§D.
- * Tool calls and tool results render as their tool's name over their JSON.
+ * Tool calls and tool results render as their tool's name over their JSON,
+ * reasoning as a collapsed {@link ReasoningBlock}.
  */
 
 import type { SpanContentPart, SpanMessage } from "../../../shared/types";
@@ -45,10 +46,26 @@ function MessageToolPart({
   );
 }
 
+/**
+ * A model's reasoning, collapsed so it doesn't bury the answer it led to.
+ * Opening it stops at the toggle, as a `TOOL` card's chevron does: inside a
+ * `ChatFlow` turn a click would otherwise select the span too.
+ */
+export function ReasoningBlock({ text }: { text: string }) {
+  return (
+    <details className="message-reasoning">
+      <summary onClick={e => e.stopPropagation()}>Reasoning</summary>
+      <Markdown>{text}</Markdown>
+    </details>
+  );
+}
+
 function MessagePart({ part }: { part: SpanContentPart }) {
   switch (part.type) {
     case "text":
       return <Markdown>{part.text}</Markdown>;
+    case "reasoning":
+      return <ReasoningBlock text={part.text} />;
     case "image":
       return <MessageImage part={part} />;
     case "tool-call":

@@ -314,6 +314,66 @@ describe("readLLM input and output", () => {
     ).toEqual(expected);
   });
 
+  it("reads a response's reasoning apart from its text", () => {
+    const llm = readLLM({
+      "gen_ai.output.messages": JSON.stringify([
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "They said hi. " },
+            { type: "reasoning", content: "Greet them." },
+            { type: "text", text: "Hello!" },
+          ],
+        },
+      ]),
+    });
+    expect(llm?.output).toBe("Hello!");
+    expect(llm?.reasoning).toBe("They said hi. Greet them.");
+  });
+
+  it("reads the reasoning the Vercel AI SDK records on a response", () => {
+    const llm = readLLM({
+      "ai.response.text": "Hello!",
+      "ai.response.reasoning": "They said hi.",
+    });
+    expect(llm?.output).toBe("Hello!");
+    expect(llm?.reasoning).toBe("They said hi.");
+  });
+
+  it("records a response that is only reasoning", () => {
+    expect(
+      readLLM({
+        "gen_ai.output.messages": JSON.stringify([
+          { content: [{ type: "reasoning", text: "Hmm." }] },
+        ]),
+      }),
+    ).toEqual({ reasoning: "Hmm." });
+  });
+
+  it("keeps reasoning in the assistant turns of a prompt", () => {
+    expect(
+      readLLM({
+        "ai.prompt.messages": JSON.stringify([
+          {
+            role: "assistant",
+            content: [
+              { type: "reasoning", text: "Earlier thought." },
+              { type: "text", text: "Earlier answer." },
+            ],
+          },
+        ]),
+      })?.input,
+    ).toEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Earlier thought." },
+          { type: "text", text: "Earlier answer." },
+        ],
+      },
+    ]);
+  });
+
   it("keeps a tool-calling turn's text alongside its calls", () => {
     const output = readLLM({
       "ai.response.text": "Looking it up.",

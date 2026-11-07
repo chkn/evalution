@@ -38,6 +38,7 @@ export type {
   SpanKind,
   SpanMessage,
   SpanMessageRole,
+  SpanReasoningPart,
   SpanTextPart,
   SpanToolCallPart,
   SpanToolResultPart,

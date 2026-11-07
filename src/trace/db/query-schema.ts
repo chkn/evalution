@@ -50,6 +50,7 @@ CREATE TABLE spans (
   llm_cost_cache_write  REAL,           -- USD, the part of llm_cost_prompt spent on cache writes
   llm_input             TEXT,           -- JSON: an array of messages {role, content}, or any JSON object
   llm_output            TEXT,           -- JSON: always encoded, so a text output is a JSON string
+  llm_reasoning         TEXT,           -- the model's reasoning for this turn, as plain text
   llm_parameters        TEXT,           -- JSON object of model parameters (temperature, ...)
   attributes            TEXT,           -- JSON object of free-form attributes; "evalution.check" is set on spans an eval check recorded while judging the trace (its CHECK span and everything under it), which aren't part of the run
   resource              TEXT,           -- JSON object: the OTel resource that produced the span ("service.name", "deployment.environment.name" = 'playground' for runs evalution made, ...)

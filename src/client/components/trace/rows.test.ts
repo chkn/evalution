@@ -146,6 +146,27 @@ describe("barGeometry", () => {
 });
 
 describe("newMessagesByTurn", () => {
+  it("counts a turn that only reasoned as already shown", () => {
+    const thought = {
+      role: "assistant",
+      content: [{ type: "reasoning" as const, text: "Hmm." }],
+    };
+    const user = { role: "user", content: "go on" };
+    const rows = buildRows([
+      span("turn1", {
+        kind: "LLM",
+        startTime: 0,
+        llm: { input: [user], reasoning: "Hmm." },
+      }),
+      span("turn2", {
+        kind: "LLM",
+        startTime: 1,
+        llm: { input: [user, thought, user] },
+      }),
+    ]);
+    expect(newMessagesByTurn(rows).get("turn2")).toEqual([user]);
+  });
+
   it("only returns the messages appended since the previous LLM turn", () => {
     const rows = buildRows([
       span("turn1", {

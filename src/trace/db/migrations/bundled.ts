@@ -54,5 +54,14 @@ export const bundledMigrations: MigrationMeta[] = [
       "\nALTER TABLE `spans` ADD `llm_cost_cache_read` real;",
       "\nALTER TABLE `spans` ADD `llm_cost_cache_write` real;\n"
     ]
+  },
+  {
+    "name": "20261106230751_lively_blue_blade",
+    "hash": "c7d45b4019aa84ada631942bcc1ce84dff0cc1d1e9902681f1c49f1ab7179dc9",
+    "folderMillis": 1794006471000,
+    "bps": true,
+    "sql": [
+      "-- SPDX\u002DLicense-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nALTER TABLE `spans` ADD `llm_reasoning` text;"
+    ]
   }
 ];

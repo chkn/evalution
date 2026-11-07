@@ -5144,6 +5144,23 @@ pre {
   color: var(--trace-error-text);
 }
 
+.message-reasoning {
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--trace-border);
+  color: var(--trace-text-dim);
+}
+
+.message-reasoning > summary {
+  cursor: pointer;
+  font-size: 11px;
+  user-select: none;
+}
+
+.message-reasoning[open] > summary {
+  margin-bottom: 2px;
+}
+
 /* ── Markdown (streamdown) ── */
 
 .markdown {

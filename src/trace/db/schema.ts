@@ -90,6 +90,7 @@ export const spans = sqliteTable(
      * so a string output and an object output read back unambiguously.
      */
     llmOutput: text("llm_output"),
+    llmReasoning: text("llm_reasoning"),
     /** JSON `Record<string, unknown>`. */
     llmParameters: text("llm_parameters"),
 

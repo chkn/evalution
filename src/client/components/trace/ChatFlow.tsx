@@ -28,7 +28,7 @@ import { AnnotationCountBadges } from "./AnnotationChip.tsx";
 import { formatDuration } from "./format.ts";
 import { ChevronIcon, StopwatchIcon, WrenchIcon } from "./icons.tsx";
 import { JsonView } from "./JsonView.tsx";
-import { MessageList } from "./MessageList.tsx";
+import { MessageList, ReasoningBlock } from "./MessageList.tsx";
 import { renderOutput } from "./output-renderers.tsx";
 import type { Row } from "./rows.ts";
 import {
@@ -126,6 +126,7 @@ function ChatLLMBlock({
       {visibleMessages.length > 0 && (
         <MessageList messages={visibleMessages} variant="bubble" />
       )}
+      {span.llm?.reasoning && <ReasoningBlock text={span.llm.reasoning} />}
       {hasOutput(span.llm) && (
         <OutputBubble llm={span.llm} toolCallIds={toolCallIds} />
       )}

@@ -220,6 +220,7 @@ describe("TursoTraceProvider row round-tripping", () => {
           },
         ],
         output: "It's a cat.",
+        reasoning: "It has whiskers.",
         modelParameters: { temperature: 0.5 },
       },
       prompt: { id: "mod#greet", providerId: "fs" },
@@ -272,6 +273,7 @@ describe("TursoTraceProvider row round-tripping", () => {
         },
       ],
       output: "It's a cat.",
+      reasoning: "It has whiskers.",
       modelParameters: { temperature: 0.5 },
     });
     expect(root?.prompt).toEqual({ id: "mod#greet", providerId: "fs" });

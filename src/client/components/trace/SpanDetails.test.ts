@@ -21,6 +21,29 @@ const render = (span: Span) =>
   );
 
 describe("SpanDetails", () => {
+  it("shows an LLM span's reasoning ahead of its output, and an earlier turn's collapsed", () => {
+    const html = render(
+      makeSpan("step", {
+        kind: "LLM",
+        llm: {
+          input: [
+            {
+              role: "assistant",
+              content: [{ type: "reasoning", text: "Earlier thought." }],
+            },
+          ],
+          reasoning: "They said hi.",
+          output: "Hello!",
+        },
+      }),
+    );
+    expect(html).toContain(">Reasoning<");
+    expect(html.indexOf("They said hi.")).toBeLessThan(html.indexOf("Hello!"));
+    expect(html).toMatch(
+      /<details class="message-reasoning">.*Earlier thought\./s,
+    );
+  });
+
   it("shows an LLM span's input messages, tool calls and results included, and its output", () => {
     const html = render(
       makeSpan("step", {

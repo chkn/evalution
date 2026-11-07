@@ -110,6 +110,8 @@ function toSpanMessages(
     for (const c of content) {
       if (c.type === "text") {
         if (c.text) parts.push({ type: "text", text: c.text });
+      } else if (c.type === "reasoning") {
+        if (c.text) parts.push({ type: "reasoning", text: c.text });
       } else if (c.type === "image") {
         const image =
           typeof c.image === "string" ? c.image : c.image?.toString();
@@ -572,6 +574,7 @@ export class VercelAISDKTelemetry
             : run.structuredOutput
               ? parseStructured(event.text)
               : event.text,
+        ...(event.reasoningText && { reasoning: event.reasoningText }),
         promptTokens: event.usage.inputTokens,
         completionTokens: event.usage.outputTokens,
         totalTokens: event.usage.totalTokens,
