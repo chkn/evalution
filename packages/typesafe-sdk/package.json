@@ -1,6 +1,6 @@
 {
   "name": "@evalution/typesafe-sdk",
-  "version": "1.0.8",
+  "version": "2.0.0",
   "description": "Helpers for integrating TypeSafe System One prompts with Evalution",
   "type": "module",
   "exports": {
@@ -46,7 +46,7 @@
     }
   },
   "dependencies": {
-    "@evalution/sdk": "1.0.8"
+    "@evalution/sdk": "2.0.0"
   },
   "keywords": [
     "evalution",

@@ -1,6 +1,6 @@
 {
   "name": "evalution",
-  "version": "1.0.8",
+  "version": "2.0.0",
   "description": "TypeScript AI Prompt Playground - Edit and execute AI prompts with live preview",
   "type": "module",
   "exports": {
@@ -66,7 +66,7 @@
     "db:bundle": "node scripts/generate-migration-bundle.ts src/trace/db/migrations && node scripts/generate-migration-bundle.ts src/dataset/db/migrations && node scripts/generate-migration-bundle.ts src/prompt/variations/db/migrations && node scripts/generate-migration-bundle.ts src/eval/db/migrations"
   },
   "dependencies": {
-    "@evalution/sdk": "1.0.8",
+    "@evalution/sdk": "2.0.0",
     "@hono/node-server": "^2.0.4",
     "@lydell/node-pty": "^1.2.0-beta.12",
     "@modelcontextprotocol/client": "^2.2.0",
@@ -93,9 +93,9 @@
     "typescript": ">=5.3.3-0 <7.0.0-0",
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0",
-    "@evalution/vercel-ai-sdk": ">=1.0.8 <3",
-    "@evalution/typesafe-sdk": ">=1.0.8 <3",
-    "@evalution/gemini-interactions-sdk": ">=1.0.8 <3"
+    "@evalution/vercel-ai-sdk": "^2.0.0",
+    "@evalution/typesafe-sdk": "^2.0.0",
+    "@evalution/gemini-interactions-sdk": "^2.0.0"
   },
   "peerDependenciesMeta": {
     "react": {

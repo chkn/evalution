@@ -1,6 +1,6 @@
 {
   "name": "@evalution/gemini-interactions-sdk",
-  "version": "1.0.8",
+  "version": "2.0.0",
   "description": "Run Gemini Interactions API prompts in Evalution",
   "type": "module",
   "files": [
@@ -19,7 +19,7 @@
     }
   },
   "dependencies": {
-    "@evalution/sdk": "1.0.8"
+    "@evalution/sdk": "2.0.0"
   },
   "peerDependencies": {
     "@google/genai": ">=2.0.0-0",
