@@ -20,6 +20,7 @@ import {
   serveMcpHolder,
 } from "./mcp.ts";
 import { openBrowser } from "./open-browser.ts";
+import { resolvePublicUrl } from "./portkit.ts";
 import { findRootDir, loadConfig, setUpProject } from "./project.ts";
 import {
   claimServerInfo,
@@ -68,14 +69,14 @@ async function startConfiguredServer(
   hasConfig: boolean,
   port: number,
   host: string | undefined,
+  publicUrl: string | undefined,
   terminalSessions: TerminalSessionRegistry,
 ) {
   return startServer({
     ...(await setUpProject(rootDir, config)),
     port,
     hostname: host,
-    // When run under portless, the playground is opened through its proxy, over HTTPS.
-    publicUrl: process.env.PORTLESS_URL,
+    publicUrl,
     rootPath: rootDir,
     hasConfig,
     terminalSessions,
@@ -181,6 +182,9 @@ async function ui(
     port = await findAvailablePort(3000, host);
   }
 
+  // Behind a local HTTPS proxy, the playground is opened through it.
+  const publicUrl = await resolvePublicUrl(rootDir, port);
+
   // Open the browser once the first server is listening. Subsequent restarts
   // (after a config file appears) reuse the same URL, so we don't reopen.
   // `EVALUTION_NO_OPEN` opts out (CI, remote/headless hosts).
@@ -201,6 +205,7 @@ async function ui(
       true,
       port,
       host,
+      publicUrl,
       terminalSessions,
     );
     await writeServerInfo(rootDir, handle.url, "ui");
@@ -217,6 +222,7 @@ async function ui(
     false,
     port,
     host,
+    publicUrl,
     terminalSessions,
   );
   await writeServerInfo(rootDir, server.url, "ui");
@@ -239,6 +245,7 @@ async function ui(
       true,
       port,
       host,
+      publicUrl,
       terminalSessions,
     );
   });

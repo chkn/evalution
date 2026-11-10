@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { Evalution } from "@evalution/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryTraceProvider } from "../../../src/trace/memory-trace-provider.ts";
 import { VercelAISDKTelemetry } from "./telemetry.ts";
@@ -82,7 +83,9 @@ describe("Evalution", () => {
           return new Response("{}");
         }),
       );
-      const evalution = new VercelAISDKTelemetry({ endpoint: "http://host" });
+      const evalution = new VercelAISDKTelemetry({
+        client: new Evalution({ endpoint: "http://host" }),
+      });
 
       // Not awaited, as the SDK may not await its telemetry callbacks.
       void evalution.onStart(startEvent("call"));
@@ -112,20 +115,24 @@ describe("Evalution", () => {
       expect(urls).toEqual(["http://localhost:3000/api/traces"]);
     });
 
-    it("sends traces to an explicit endpoint over EVALUTION_ENDPOINT", async () => {
+    it("sends traces through an explicit client over EVALUTION_ENDPOINT", async () => {
       const urls = stubFetch();
       vi.stubEnv("EVALUTION_ENDPOINT", "http://localhost:3000");
 
-      await startRun(new VercelAISDKTelemetry({ endpoint: "http://other" }));
+      await startRun(
+        new VercelAISDKTelemetry({
+          client: new Evalution({ endpoint: "http://other" }),
+        }),
+      );
 
       expect(urls).toEqual(["http://other/api/traces"]);
     });
 
-    it("sends nowhere with endpoint: false, or without EVALUTION_ENDPOINT", async () => {
+    it("sends nowhere with client: false, or with nothing configured", async () => {
       const urls = stubFetch();
       await startRun(new VercelAISDKTelemetry());
       vi.stubEnv("EVALUTION_ENDPOINT", "http://localhost:3000");
-      await startRun(new VercelAISDKTelemetry({ endpoint: false }));
+      await startRun(new VercelAISDKTelemetry({ client: false }));
 
       expect(urls).toEqual([]);
     });

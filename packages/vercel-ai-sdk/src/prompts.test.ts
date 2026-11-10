@@ -5,8 +5,12 @@ import type { Tracer } from "@opentelemetry/api";
 import type { Telemetry } from "ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryTraceProvider } from "../../../src/trace/memory-trace-provider.ts";
-import { Evalution, type Prompt, prompts, withTraceId } from "./index.js";
-import { isPerPromptTelemetry, toArray } from "./telemetry.ts";
+import { type Prompt, prompts, withTraceId } from "./index.js";
+import {
+  isPerPromptTelemetry,
+  toArray,
+  VercelAISDKTelemetry,
+} from "./telemetry.ts";
 
 describe("prompts() telemetry wrapping — v6 (experimental_telemetry)", () => {
   const psi = { id: "mod" };
@@ -115,7 +119,7 @@ describe("prompts() telemetry wrapping — v7 (native Telemetry integrations)", 
   }
 
   it("no OTel: swaps in a per-call Evalution integration", () => {
-    const evalution = new Evalution();
+    const evalution = new VercelAISDKTelemetry();
     globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [evalution];
 
     const config = buildConfig();
@@ -152,7 +156,7 @@ describe("prompts() telemetry wrapping — v7 (native Telemetry integrations)", 
         return integ;
       },
     };
-    expect(foreign instanceof Evalution).toBe(false);
+    expect(foreign instanceof VercelAISDKTelemetry).toBe(false);
     globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [foreign as any];
 
     const config = buildConfig();
@@ -174,7 +178,7 @@ describe("prompts() telemetry wrapping — v7 (native Telemetry integrations)", 
       }
     }
     it('OTel present, "auto" (default): defers — drops Evalution, wraps OTel for enrichment, no per-call integration built', () => {
-      const evalution = new Evalution();
+      const evalution = new VercelAISDKTelemetry();
       const otel = new OpenTelemetry();
       globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [evalution, otel];
 
@@ -195,7 +199,7 @@ describe("prompts() telemetry wrapping — v7 (native Telemetry integrations)", 
     });
 
     it('"always": both the per-call Evalution integration and the enriched OTel proxy are present', () => {
-      const evalution = new Evalution({ nativeTelemetry: "always" });
+      const evalution = new VercelAISDKTelemetry({ nativeTelemetry: "always" });
       const otel = new OpenTelemetry();
       globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [evalution, otel];
 
@@ -217,7 +221,7 @@ describe("prompts() telemetry wrapping — v7 (native Telemetry integrations)", 
       onStart?: undefined;
       // no enrichSpan
     }
-    const evalution = new Evalution();
+    const evalution = new VercelAISDKTelemetry();
     const otel = new OpenTelemetry();
     globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [evalution, otel];
 
@@ -233,7 +237,7 @@ describe("prompts() telemetry wrapping — v7 (native Telemetry integrations)", 
   });
 
   it('"never": always defers, even with no OTel integration present', () => {
-    const evalution = new Evalution({ nativeTelemetry: "never" });
+    const evalution = new VercelAISDKTelemetry({ nativeTelemetry: "never" });
     globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [evalution];
 
     const config = buildConfig();
@@ -243,10 +247,14 @@ describe("prompts() telemetry wrapping — v7 (native Telemetry integrations)", 
   });
 
   it("honors an upstream config.telemetry.integrations list over the global one", () => {
-    const globalEvalution = new Evalution({ nativeTelemetry: "never" });
+    const globalEvalution = new VercelAISDKTelemetry({
+      nativeTelemetry: "never",
+    });
     globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [globalEvalution];
 
-    const localEvalution = new Evalution({ nativeTelemetry: "always" });
+    const localEvalution = new VercelAISDKTelemetry({
+      nativeTelemetry: "always",
+    });
     const config = buildConfig({
       telemetry: { integrations: [localEvalution] },
     });
@@ -276,7 +284,7 @@ describe("prompts() with an experimental_evaluate config", () => {
   }));
 
   it("swaps in a per-call integration, which evaluate reads from `telemetry`", () => {
-    globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [new Evalution()];
+    globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [new VercelAISDKTelemetry()];
     const config: Prompt = build().triage("Charged twice");
     const integrations = toArray(config.telemetry?.integrations);
     expect(integrations).toHaveLength(1);
@@ -304,7 +312,7 @@ describe("withTraceId", () => {
     }))().greet("Ada");
 
   it("records the prompt's trace under the given id", async () => {
-    const evalution = new Evalution();
+    const evalution = new VercelAISDKTelemetry();
     const provider = new MemoryTraceProvider();
     evalution.addSink(provider);
     globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [evalution];

@@ -7,6 +7,7 @@
  * @module @evalution/sdk
  */
 export * from "./brand.ts";
+export * from "./client.ts";
 export * from "./evaluation-answers.ts";
 export * from "./http-trace-sink.ts";
 export * from "./prompt-tracer.ts";

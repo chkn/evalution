@@ -9,7 +9,7 @@ type Arrayable<T> = T | T[];
 import {
   answersWithConfidence,
   BaseTraceIngestor,
-  HttpTraceSink,
+  Evalution,
   makeBrand,
   type Span,
   type SpanContentPart,
@@ -68,11 +68,11 @@ export interface VercelAISDKTelemetryOptions {
    */
   nativeTelemetry?: "auto" | "always" | "never";
   /**
-   * The base URL of an evalution server to send traces to, through an
-   * {@link HttpTraceSink}. Defaults to the `EVALUTION_ENDPOINT` environment
-   * variable, if set; `false` sends nowhere, whatever the environment says.
+   * The client to send traces through. Defaults to a new {@link Evalution}
+   * configured from the environment; `false` sends nowhere, whatever the
+   * environment says.
    */
-  endpoint?: string | false;
+  client?: Evalution | false;
 }
 
 function toSpanMessages(
@@ -210,15 +210,15 @@ function parseStructured(text: string): unknown {
  * Native v7 AI SDK `Telemetry` integration that records evalution traces
  * without going through OpenTelemetry.
  *
- * When your app starts, register this globally via `registerTelemetry(new Evalution())` to capture
+ * When your app starts, register this globally via `registerTelemetry(new VercelAISDKTelemetry())` to capture
  * every `generateText`/`streamText` call as a fallback (events are keyed by
  * `callId`, so concurrent calls stay correctly separated, though the fallback
  * lacks prompt identity). The `prompts()` helper additionally swaps in a
  * per-call integration from {@link createTelemetryForPrompt} so
  * helper-defined prompts are recorded with full identity.
  *
- * When it sends traces to an evalution server (see
- * {@link VercelAISDKTelemetryOptions.endpoint}), they go in the background:
+ * When it sends traces through a client (see
+ * {@link VercelAISDKTelemetryOptions.client}), they go in the background:
  * `await` {@link flush} before a short-lived process — a script, a
  * serverless function — exits, so none are lost.
  *
@@ -241,10 +241,8 @@ export class VercelAISDKTelemetry
   constructor(options: VercelAISDKTelemetryOptions = {}) {
     super();
     this.nativeTelemetry = options.nativeTelemetry ?? "auto";
-    // `process` is absent in some runtimes (e.g. Cloudflare Workers).
-    const endpoint =
-      options.endpoint ?? globalThis.process?.env?.EVALUTION_ENDPOINT;
-    if (endpoint) this.addSink(new HttpTraceSink({ endpoint }));
+    const client = options.client ?? new Evalution();
+    if (client) this.addSink(client);
     brandTelemetry(this);
   }
 

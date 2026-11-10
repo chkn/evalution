@@ -18,8 +18,6 @@ import {
 } from "@evalution/sdk";
 import type { experimental_evaluate, generateText, streamText } from "ai";
 import {
-  VercelAISDKTelemetry as Evalution,
-  type VercelAISDKTelemetryOptions as EvalutionOptions,
   isPerPromptTelemetry,
   isVercelAISDKTelemetry,
   type PerPromptTelemetry,
@@ -256,8 +254,6 @@ class LazilyImportedProviders implements Providers {
 
 export {
   createTracerForPrompt,
-  Evalution,
-  type EvalutionOptions,
   getPromptSpanAttributes,
   HttpTraceSink,
   type HttpTraceSinkOptions,
@@ -268,7 +264,7 @@ export {
  * Wraps an `@ai-sdk/otel` `OpenTelemetry` integration so its (TS-private,
  * runtime-accessible) `enrichSpan` also carries prompt attributes — v7
  * dropped `telemetry.metadata`, so this is how identity reaches OTel spans
- * when `Evalution` defers to OTel. Best-effort: a `Proxy` is fine as long as
+ * when `VercelAISDKTelemetry` defers to OTel. Best-effort: a `Proxy` is fine as long as
  * the target has no real `#private` state.
  */
 function withEnrichedSpan<T extends object>(

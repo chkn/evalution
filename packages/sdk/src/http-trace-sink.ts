@@ -22,15 +22,37 @@ export interface TraceEventsRequest {
   events: TraceSinkEvent[];
 }
 
+/** Where an {@link HttpTraceSink} sends, once it's known. */
+export interface HttpTraceTarget {
+  /** The server's base URL. */
+  endpoint: string;
+  /** Sent with every request, e.g. `authorization`. */
+  headers?: Record<string, string>;
+  /** Overrides {@link HttpTraceSinkOptions.fetch}. */
+  fetch?: typeof fetch;
+}
+
 /** Options for {@link HttpTraceSink}. */
 export interface HttpTraceSinkOptions {
   /**
    * The evalution server's base URL, e.g. `http://localhost:3000`. Events are
    * posted to {@link TRACE_EVENTS_PATH} under it.
+   *
+   * May instead be a function that finds out where to send, which is called
+   * once, when the first event is recorded. Events wait in the queue until it
+   * settles; if it finds nowhere, or throws, they and all later ones are
+   * dropped.
    */
-  endpoint: string;
+  endpoint: string | (() => Promise<HttpTraceTarget | undefined>);
   /** The `fetch` to send with. Defaults to the global one. */
   fetch?: typeof fetch;
+}
+
+/** An {@link HttpTraceTarget} with its defaults applied. */
+interface ResolvedTraceTarget {
+  url: string;
+  headers?: Record<string, string>;
+  fetch: typeof fetch;
 }
 
 /**
@@ -46,16 +68,34 @@ export interface HttpTraceSinkOptions {
  * everything was sent.
  */
 export class HttpTraceSink implements TraceSink {
-  private readonly url: string;
-  private readonly fetch: typeof fetch;
+  private readonly options: HttpTraceSinkOptions;
+  private target?: Promise<ResolvedTraceTarget | undefined>;
+  /** Set once it's known there's nowhere to send, so events aren't queued. */
+  private disabled = false;
   private queue: TraceSinkEvent[] = [];
   private sending?: Promise<void>;
   /** Whether the last request failed, so a down server is reported once. */
   private failing = false;
 
   constructor(options: HttpTraceSinkOptions) {
-    this.url = options.endpoint.replace(/\/+$/, "") + TRACE_EVENTS_PATH;
-    this.fetch = options.fetch ?? ((...args) => globalThis.fetch(...args));
+    this.options = options;
+  }
+
+  private resolveTarget(): Promise<ResolvedTraceTarget | undefined> {
+    this.target ??= this.lookUpTarget().catch(() => undefined);
+    return this.target;
+  }
+
+  private async lookUpTarget(): Promise<ResolvedTraceTarget | undefined> {
+    const { endpoint, fetch: send } = this.options;
+    const target =
+      typeof endpoint === "function" ? await endpoint() : { endpoint };
+    if (!target) return undefined;
+    return {
+      url: target.endpoint.replace(/\/+$/, "") + TRACE_EVENTS_PATH,
+      headers: target.headers,
+      fetch: target.fetch ?? send ?? ((...args) => globalThis.fetch(...args)),
+    };
   }
 
   async recordSpanStart(span: Span): Promise<Span> {
@@ -78,6 +118,7 @@ export class HttpTraceSink implements TraceSink {
   }
 
   private enqueue(event: TraceSinkEvent): void {
+    if (this.disabled) return;
     this.queue.push(event);
     this.sending ??= this.drain();
   }
@@ -86,20 +127,28 @@ export class HttpTraceSink implements TraceSink {
     // Wait a macrotask, so events recorded in quick succession — even one
     // awaited call after another — share the first batch.
     await new Promise(resolve => setTimeout(resolve));
-    while (this.queue.length > 0) {
+    const target = await this.resolveTarget();
+    if (!target) {
+      this.disabled = true;
+      this.queue = [];
+    }
+    while (target && this.queue.length > 0) {
       const events = this.queue;
       this.queue = [];
-      await this.send(events);
+      await this.send(target, events);
     }
     this.sending = undefined;
   }
 
-  private async send(events: TraceSinkEvent[]): Promise<void> {
+  private async send(
+    target: ResolvedTraceTarget,
+    events: TraceSinkEvent[],
+  ): Promise<void> {
     try {
       const body: TraceEventsRequest = { events };
-      const res = await this.fetch(this.url, {
+      const res = await target.fetch(target.url, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...target.headers },
         body: JSON.stringify(body),
       });
       if (!res.ok) {
@@ -109,7 +158,7 @@ export class HttpTraceSink implements TraceSink {
     } catch (err) {
       if (!this.failing) {
         console.warn(
-          `[evalution] Couldn't send traces to ${this.url}:`,
+          `[evalution] Couldn't send traces to ${target.url}:`,
           err instanceof Error ? err.message : err,
         );
       }

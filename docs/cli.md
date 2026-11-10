@@ -96,6 +96,38 @@ Why use portless:
 Note that sharing a playground through portless's `--tailscale` or `--ngrok` options isn't
 supported.
 
+### HTTPS with portkit
+
+If portkit is installed, Evalution registers itself with it on
+start, as `<directory>.evalution`, and opens the playground at
+`https://<directory>.evalution.localhost`. The registration lasts as long as the server runs. If
+portkit isn't installed or refuses the name, Evalution starts as usual on its local port.
+
+## Sending traces from your app
+
+The `Evalution` client from `@evalution/sdk` sends your app's traces. Integrations use one
+configured from the environment unless you pass your own:
+
+```ts
+import { registerTelemetry } from "ai";
+import { VercelAISDKTelemetry } from "@evalution/vercel-ai-sdk";
+
+registerTelemetry(new VercelAISDKTelemetry());
+```
+
+It picks one destination, the first time a trace is sent:
+
+1. The `endpoint` passed to `new Evalution({ ... })`, or nowhere if it's `false`.
+2. The cloud, if the API key (the `apiKey` option or `EVALUTION_API_KEY`) is an ingest key
+   (`evl_ingest_…`).
+3. The local instance at `EVALUTION_ENDPOINT`.
+4. On Node, the instance portkit is running for this directory or a parent of it.
+5. Nowhere: tracing does nothing.
+
+A personal key (`evl_user_…`) never sends traces to the cloud, so with one set your development
+traces still go to your local instance. Before a script or serverless function exits, `await` the
+integration's `flush()` so no traces are lost.
+
 ## MCP server
 
 `evalution mcp` lets a coding agent work with your prompts, traces, datasets,
@@ -166,6 +198,9 @@ Start the playground before your agents when you use both: while an agent's
 | --- | --- |
 | `PORT` | Port for the local server. When set, it's used as-is. When unset, Evalution uses `3000`, falling back to the next free port if it's already taken. |
 | `EVALUTION_NO_OPEN` | When set to any value, Evalution does **not** open the playground in your browser on start — useful for CI and remote or headless hosts. |
+| `EVALUTION_ENDPOINT` | In your app: the base URL of a local Evalution instance to send traces to. See [Sending traces from your app](#sending-traces-from-your-app). |
+| `EVALUTION_API_KEY` | In your app: an ingest key sends its traces to Evalution Cloud. |
+| `EVALUTION_API_URL` | Replaces `https://api.evalut.io` as the cloud's address, e.g. for staging. |
 | `EVALUTION_NO_COST_ESTIMATES` | By default, the first time a trace records an LLM call with token usage, Evalution downloads model prices from Vercel AI Gateway's public catalog (`https://ai-gateway.vercel.sh/v1/models`), or from OpenRouter's (`https://openrouter.ai/api/v1/models`) if that fails, to show estimated costs. When set to any value, those requests are never made and traces show no costs — useful for offline or air-gapped hosts. |
 
 ### Provider API keys
@@ -225,7 +260,7 @@ on a loopback port.
 - **Other websites are refused.** Both servers answer 403 to every request,
   WebSocket handshakes included, unless:
   - its `Host` is `localhost`, a `*.localhost` name (which only resolves to
-    loopback), an IP address, the name given to `--host`, or portless's URL;
+    loopback), an IP address, the name given to `--host`, or portless's or portkit's URL;
     and
   - if it has an `Origin` (a browser sent it on a page's behalf), that page
     is on a loopback host, on one of those names, or on the host the request
