@@ -9,7 +9,7 @@ import {
   findSetupStep as findAgentSetupStep,
 } from "../agent/registry.ts";
 import {
-  AI_SDK_REGISTRY,
+  AI_SDK_SETUP_TASKS,
   findSetupStep as findSdkSetupStep,
 } from "../sdk/registry.ts";
 import {
@@ -60,7 +60,7 @@ export interface ExecuteSetupStepResult {
  * `taskId`/`stepId`.
  *
  * The client only sends ids; the step definition (file contents, command, ...)
- * comes entirely from {@link AI_SDK_REGISTRY}, so a request can never write
+ * comes entirely from {@link AI_SDK_SETUP_TASKS}, so a request can never write
  * arbitrary files or run arbitrary commands.
  *
  * @param rootPath - Absolute path to the project root.
@@ -111,7 +111,7 @@ export function resolveSetupTasks(rootPath: string): ResolvedSetupTasks {
   });
   return {
     agent: AGENT_REGISTRY.map(resolve),
-    sdk: AI_SDK_REGISTRY.map(cls => resolve(cls.setupTask)),
+    sdk: AI_SDK_SETUP_TASKS.map(resolve),
   };
 }
 

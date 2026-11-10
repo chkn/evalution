@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { VercelAISDK } from "../sdk/vercel-ai-sdk/index.ts";
+import { findSetupTask } from "../sdk/registry.ts";
 import { CONFIG_FILE_RELATIVE_PATH } from "../shared/setup-task.ts";
 import {
   executeSetupStep,
@@ -15,13 +15,10 @@ import {
   SetupStepNotFoundError,
 } from "./setup-tasks.ts";
 
-const TASK_ID = VercelAISDK.setupTask.id;
-const CONFIG_STEP = VercelAISDK.setupTask.steps.find(
-  s => s.kind === "create_config",
-)!;
-const INSTALL_STEP = VercelAISDK.setupTask.steps.find(
-  s => s.kind === "install_package",
-)!;
+const TASK = findSetupTask("vercel-ai-sdk")!;
+const TASK_ID = TASK.id;
+const CONFIG_STEP = TASK.steps.find(s => s.kind === "create_config")!;
+const INSTALL_STEP = TASK.steps.find(s => s.kind === "install_package")!;
 const STEP_ID = CONFIG_STEP.id;
 const CONFIG_CONTENTS = (CONFIG_STEP as { contents: string }).contents;
 

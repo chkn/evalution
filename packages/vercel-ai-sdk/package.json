@@ -5,8 +5,14 @@
   "type": "module",
   "exports": {
     ".": {
+      "evalution-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./config": {
+      "evalution-source": "./src/config.ts",
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js"
     }
   },
   "files": [
@@ -48,7 +54,9 @@
     "@ai-sdk/vercel": "*",
     "@ai-sdk/xai": "*",
     "@opentelemetry/api": "^1.9.0",
-    "ai": ">=3.4.0-0"
+    "ai": ">=3.4.0-0",
+    "typescript": ">=5.3.3-0 <7.0.0-0",
+    "ts-proppy": "0.3.3"
   },
   "peerDependenciesMeta": {
     "@ai-sdk/amazon-bedrock": {
@@ -137,6 +145,12 @@
     },
     "@ai-sdk/xai": {
       "optional": true
+    },
+    "typescript": {
+      "optional": true
+    },
+    "ts-proppy": {
+      "optional": true
     }
   },
   "devDependencies": {
@@ -176,7 +190,12 @@
     "@types/json-schema": "^7.0.15",
     "ai": "^7.0.112",
     "tsdown": "^0.22.1",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "ts-proppy": "0.3.3",
+    "@standard-schema/spec": "^1.1.0"
+  },
+  "dependencies": {
+    "@evalution/sdk": "1.0.8"
   },
   "keywords": [
     "evalution",

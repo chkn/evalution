@@ -2,6 +2,43 @@
 // Copyright (c) 2026 Alexander Corrado
 
 export {
+  BaseTraceIngestor,
+  CHECK_ATTRIBUTE,
+  createTracerForPrompt,
+  DEPLOYMENT_ENVIRONMENT_ATTRIBUTE,
+  getPromptSpanAttributes,
+  HttpTraceSink,
+  type HttpTraceSinkOptions,
+  isCheckSpan,
+  mergePromptIdentity,
+  PLAYGROUND_ENVIRONMENT,
+  PLAYGROUND_RESOURCE,
+  PROMPT_ID_ATTRIBUTE,
+  PROMPT_INPUTS_ATTRIBUTE,
+  PROMPT_NAME_ATTRIBUTE,
+  PROMPT_PROVIDER_ID_ATTRIBUTE,
+  PROMPT_VARIATION_ATTRIBUTE,
+  PROMPT_VERSION_ATTRIBUTE,
+  type PromptSpanInfo,
+  type PromptsFactory,
+  type PromptsHelper,
+  type PromptsHelperOptions,
+  SERVICE_NAME_ATTRIBUTE,
+  SPAN_KIND_ATTRIBUTE,
+  spanMessages,
+  TRACE_EVENTS_PATH,
+  type TraceEventsRequest,
+  type TraceIngestor,
+  type TraceSink,
+  type TraceSinkEvent,
+} from "@evalution/sdk";
+export {
+  assertUpdateStyle,
+  type ExecuteConfigOptions,
+  type ExecutionHandle,
+  type SDKAdapter,
+} from "@evalution/sdk/adapter";
+export {
   isFreshImportHookRegistered,
   registerFreshImportHook,
 } from "./cli/fresh-import-hook.ts";
@@ -232,30 +269,6 @@ export type {
   VersionHistoryOptions,
   VersioningAdapter,
 } from "./prompt/versioning/versioning-adapter.ts";
-export { GeminiInteractionsSDK } from "./sdk/gemini-interactions-sdk.ts";
-export {
-  assertUpdateStyle,
-  type ExecuteConfigOptions,
-  type ExecutionHandle,
-  type SDKAdapter,
-} from "./sdk/sdk-adapter.ts";
-export {
-  TypeSafeSDK,
-  type TypeSafeSDKOptions,
-} from "./sdk/typesafe-sdk/index.ts";
-export {
-  PROMPT_IDENTITY,
-  type SystemOneCallOptions,
-  type SystemOneCallRecord,
-  TypeSafeTelemetry,
-} from "./sdk/typesafe-sdk/telemetry.ts";
-export { VercelAISDK } from "./sdk/vercel-ai-sdk/index.ts";
-export {
-  type PerPromptTelemetry,
-  type PerTraceTelemetry,
-  VercelAISDKTelemetry,
-  type VercelAISDKTelemetryOptions,
-} from "./sdk/vercel-ai-sdk/telemetry.ts";
 export type {
   ColumnPath,
   DatasetColumnSpec,
@@ -341,6 +354,7 @@ export type {
   VersionId,
   VersionInfo,
 } from "./shared/types.ts";
+export { BaseTraceProvider } from "./trace/base-trace-provider.ts";
 export {
   createLocalTursoClient,
   type LocalTursoClientOptions,
@@ -356,13 +370,6 @@ export {
   type SqlQueryResult,
 } from "./trace/db/read-only-query.ts";
 export {
-  HttpTraceSink,
-  type HttpTraceSinkOptions,
-  TRACE_EVENTS_PATH,
-  type TraceEventsRequest,
-  type TraceSinkEvent,
-} from "./trace/http-trace-sink.ts";
-export {
   LocalDatabaseTraceProvider,
   type LocalDatabaseTraceProviderOptions,
 } from "./trace/local-database-trace-provider.ts";
@@ -376,37 +383,7 @@ export {
 } from "./trace/otlp/normalize.ts";
 export { decodeOtlpProtobuf } from "./trace/otlp/otlp-protobuf.ts";
 export { OtlpTraceIngestor } from "./trace/otlp-trace-ingestor.ts";
-export {
-  createTracerForPrompt,
-  getPromptSpanAttributes,
-  mergePromptIdentity,
-  PROMPT_ID_ATTRIBUTE,
-  PROMPT_INPUTS_ATTRIBUTE,
-  PROMPT_NAME_ATTRIBUTE,
-  PROMPT_PROVIDER_ID_ATTRIBUTE,
-  PROMPT_VARIATION_ATTRIBUTE,
-  PROMPT_VERSION_ATTRIBUTE,
-  type PromptSpanInfo,
-  type PromptsFactory,
-  type PromptsHelper,
-  type PromptsHelperOptions,
-  SPAN_KIND_ATTRIBUTE,
-} from "./trace/prompt-tracer.ts";
 export { mergeSpans } from "./trace/span-merge.ts";
 export { TraceEventIngestor } from "./trace/trace-event-ingestor.ts";
-export {
-  BaseTraceIngestor,
-  PLAYGROUND_RESOURCE,
-  type TraceIngestor,
-} from "./trace/trace-ingestor.ts";
 export type { TraceProvider } from "./trace/trace-provider.ts";
-export { BaseTraceProvider, type TraceSink } from "./trace/trace-sink.ts";
-export {
-  CHECK_ATTRIBUTE,
-  DEPLOYMENT_ENVIRONMENT_ATTRIBUTE,
-  isCheckSpan,
-  PLAYGROUND_ENVIRONMENT,
-  SERVICE_NAME_ATTRIBUTE,
-  spanMessages,
-} from "./trace/trace-types.ts";
 export { TursoTraceProvider } from "./trace/turso-trace-provider.ts";

@@ -171,7 +171,7 @@ export default prompts({ id: "support-triage" }, () => ({
 
 Use a `type` alias rather than an `interface` for data you put in the state: the SDK types state as JSON, and TypeScript only checks an alias's properties against that.
 
-Configure the provider with `sdk: new TypeSafeSDK()`, and set `TYPESAFE_API_KEY` to run prompts. The playground edits the state and the questions directly — each question through the SDK's own question types, with `${…}` completion from the prompt's parameters — and shows each run's answers as charts.
+Configure the provider with `sdk: new TypeSafeSDK()`, imported from `@evalution/typesafe-sdk/config`, and set `TYPESAFE_API_KEY` to run prompts. The playground edits the state and the questions directly — each question through the SDK's own question types, with `${…}` completion from the prompt's parameters — and shows each run's answers as charts.
 
 At run time, wrap your client with `instrument()` so calls made with these prompts are traced and linked back to them. Answer types are still inferred from each prompt's questions:
 

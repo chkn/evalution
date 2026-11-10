@@ -1,0 +1,47 @@
+{
+  "name": "@evalution/sdk",
+  "version": "1.0.8",
+  "description": "The base of Evalution's SDK packages: the trace model and API client",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "prepare": "npm run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "exports": {
+    ".": {
+      "evalution-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./adapter": {
+      "evalution-source": "./src/adapter.ts",
+      "types": "./dist/adapter.d.ts",
+      "import": "./dist/adapter.js"
+    }
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "ts-proppy": "0.3.3"
+  },
+  "peerDependenciesMeta": {
+    "ts-proppy": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "ts-proppy": "0.3.3",
+    "tsdown": "^0.22.1",
+    "typescript": "^5.3.3"
+  },
+  "keywords": [
+    "evalution",
+    "ai",
+    "prompt"
+  ],
+  "license": "MIT"
+}

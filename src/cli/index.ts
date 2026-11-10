@@ -8,10 +8,7 @@ import { startServer } from "../server/index.ts";
 import { TerminalSessionRegistry } from "../server/terminal.ts";
 import { type CliArgs, parseCliArgs, USAGE } from "./args.ts";
 import { registerBundlerResolutionFallback } from "./bundler-resolution-hook.ts";
-import {
-  registerEvalutionResolver,
-  registerPeerDependencyResolver,
-} from "./config-loader-hooks.ts";
+import { registerEvalutionResolver } from "./config-loader-hooks.ts";
 import { watchForConfigCreation } from "./config-watcher.ts";
 import { findAvailablePort } from "./find-port.ts";
 import { registerFreshImportHook } from "./fresh-import-hook.ts";
@@ -101,14 +98,6 @@ async function main() {
 
   const startDir = pathArg ? path.resolve(pathArg) : process.cwd();
   const { rootDir, hasConfig } = await findRootDir(startDir);
-
-  // Let the lazily-imported optional peer deps (`ai`, `@google/genai`) fall
-  // back to the served project's node_modules. Under `npx` they are absent
-  // from the CLI's own install — npm never installs optional peer deps — so
-  // without this the first `import('ai')` crashes the CLI at startup even
-  // though the project has `ai` installed. Registered before any config or
-  // prompt module is imported.
-  registerPeerDependencyResolver(rootDir);
 
   // Prompt and config modules resolve relative paths against the project.
   process.chdir(rootDir);

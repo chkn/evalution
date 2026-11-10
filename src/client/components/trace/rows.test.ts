@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { CHECK_ATTRIBUTE } from "@evalution/sdk";
 import { describe, expect, it } from "vitest";
 import type { Annotation, AnnotationKind } from "../../../shared/types.ts";
-import { CHECK_ATTRIBUTE } from "../../../trace/trace-types.ts";
 import {
   allProvenanceSpans,
   nativeSpan,

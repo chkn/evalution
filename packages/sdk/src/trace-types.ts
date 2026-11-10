@@ -1,0 +1,529 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Alexander Corrado
+
+/**
+ * A reference to a prompt.
+ *
+ * `id` is interpreted as a globally-unique prompt ID unless `providerId` is
+ * present, in which case `id` is scoped to that specific prompt provider. This
+ * mirrors the OpenTelemetry attributes `evalution.prompt.id` (always present)
+ * and `evalution.prompt.provider.id` (optional, scoping).
+ */
+export interface PromptID {
+  /** The prompt ID — global unless {@link providerId} scopes it. */
+  id: string;
+  /** When set, {@link id} is scoped to this prompt provider. */
+  providerId?: string;
+  /** Positional arguments the prompt function was called with. */
+  functionParameters?: unknown[];
+  /**
+   * The unresolved inputs the run was launched with — the recipe, not the
+   * resolution.
+   *
+   * Replaying them is only exactly faithful for the `value` kind. A `resource`
+   * re-runs its `create()`, producing an *equivalent* value rather than the
+   * same one — a fresh handle, a newly seeded row — so a UI must present it as
+   * something that will be re-created, never as a restored value.
+   */
+  functionInputs?: unknown[];
+  /** The unresolved execute-parameter inputs, keyed by parameter name. */
+  executeInputs?: Record<string, unknown>;
+  /**
+   * The run's named resource instances, by name, with the receipt each
+   * `create()` produced. See `specs/resource-instances.md` §F.
+   */
+  resources?: Record<string, unknown>;
+  /**
+   * The prompt's parameter definitions as they stood when the run was
+   * launched, so a replay can diff them against today's signature rather than
+   * guess whether the recorded inputs still fit.
+   */
+  parameterDefinitions?: unknown[];
+  /**
+   * The prompt's execute-parameter definitions as they stood when the run was
+   * launched — the types of {@link executeInputs}, as
+   * {@link parameterDefinitions} is for {@link functionInputs}.
+   */
+  executeParameterDefinitions?: unknown[];
+  /** The version the run executed against. */
+  version?: string;
+  /** The variation applied on top of {@link version}, if any. */
+  variation?: string;
+}
+
+/**
+ * Classification of a {@link Span}. See also:
+ * - `lmnr.span.type` from https://laminar.sh/docs/tracing/otel
+ * - `mlflow.spanType` from https://mlflow.org/docs/latest/genai/tracing/opentelemetry/attribute-mapping/#translated-span-attributes
+ *
+ * Mapped from `gen_ai.operation.name`. `CHECK` is evalution's own: an eval
+ * check that traced something while judging the run — see
+ * {@link CHECK_ATTRIBUTE}.
+ */
+export type SpanKind =
+  | "LLM"
+  | "TOOL"
+  | "AGENT"
+  | "EMBEDDING"
+  | "CHECK"
+  | "DEFAULT";
+
+/**
+ * Span attribute naming the eval check (by its id within the eval) that
+ * recorded the span while judging the trace — set on the check's `CHECK` span
+ * and on everything under it. Those spans aren't part of the run being
+ * judged, so the trace's rollups and chat view leave them out.
+ */
+export const CHECK_ATTRIBUTE = "evalution.check";
+
+/** Whether `span` was recorded by a check judging its trace, not by the run. */
+export function isCheckSpan(span: Pick<Span, "attributes">): boolean {
+  return span.attributes?.[CHECK_ATTRIBUTE] !== undefined;
+}
+
+/** A text segment within a multi-part {@link SpanMessage} content. */
+export interface SpanTextPart {
+  type: "text";
+  text: string;
+}
+
+/** An image segment within a multi-part {@link SpanMessage} content. */
+export interface SpanImagePart {
+  type: "image";
+  /** A URL, or base64/data-URI image data. */
+  image: string;
+  /** MIME type (e.g. `image/png`), when known. */
+  mediaType?: string;
+}
+
+/**
+ * A tool call the assistant made, within a multi-part {@link SpanMessage}
+ * content. Matched to its {@link SpanToolResultPart} by `toolCallId`.
+ */
+export interface SpanToolCallPart {
+  type: "tool-call";
+  toolCallId: string;
+  toolName: string;
+  /** The arguments the model passed, as JSON. */
+  input: unknown;
+}
+
+/**
+ * A tool's result fed back to the model, within a multi-part
+ * {@link SpanMessage} content (usually a `tool` message).
+ */
+export interface SpanToolResultPart {
+  type: "tool-result";
+  toolCallId: string;
+  toolName: string;
+  /** What the tool returned, unwrapped from the SDK's output envelope. */
+  output: unknown;
+  /** Whether the result reports a failure (an error, or a denied call). */
+  isError?: boolean;
+}
+
+/**
+ * The reasoning (thinking) a model produced ahead of its answer, within a
+ * multi-part {@link SpanMessage} content — how a conversation's earlier
+ * assistant turns carry theirs. The turn a span records keeps its own in
+ * {@link LLMSpanDetails.reasoning}.
+ */
+export interface SpanReasoningPart {
+  type: "reasoning";
+  text: string;
+}
+
+export type SpanMessageRole =
+  | "user"
+  | "assistant"
+  | "system"
+  | "tool"
+  | (string & {});
+
+/** One segment of a multi-part {@link SpanMessage} content. */
+export type SpanContentPart =
+  | SpanTextPart
+  | SpanImagePart
+  | SpanToolCallPart
+  | SpanToolResultPart
+  | SpanReasoningPart;
+
+/**
+ * A single message within an LLM span's input/output.
+ *
+ * `content` is a plain string for the common text-only case. It is an array
+ * of {@link SpanContentPart} when the message carries non-text content (e.g.
+ * an image, or a tool call or result) — the `string` form stays in the union so existing consumers and
+ * already-stored rows keep working unchanged.
+ */
+export interface SpanMessage {
+  role: SpanMessageRole;
+  content: string | SpanContentPart[];
+}
+
+/** LLM-specific attributes attached to `LLM` spans. */
+export interface LLMSpanDetails {
+  // -- model info --
+  provider?: string;
+  model?: string;
+  /** Model parameters (temperature, max_tokens, …). */
+  modelParameters?: Record<string, unknown>;
+  /**
+   * Why the model stopped generating, as the provider or SDK reports it
+   * (`stop`, `length`, `tool-calls`, …). Not normalized across providers.
+   */
+  finishReason?: string;
+
+  // -- prompt info --
+  /**
+   * What the model was given: a message list for a chat model, or any JSON
+   * for a model that takes something else (a System One call records
+   * `{ state, questions }`). Array-ness is the discriminant — see
+   * {@link spanMessages}.
+   */
+  input?: SpanMessage[] | { [key: string]: unknown };
+  /**
+   * What it returned: text for a chat model, the assistant message of a turn
+   * that called tools (see `toolCallingOutput`), or JSON for structured
+   * output and for any model whose answer is data rather than prose.
+   */
+  output?: unknown;
+  /**
+   * The reasoning the model produced on the way to {@link output}, kept apart
+   * from it so an output stays the answer that checks and agents read.
+   */
+  reasoning?: string;
+
+  // -- usage info --
+  /** Input tokens, counting any read from or written to a prompt cache. */
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  /** How many of {@link promptTokens} were read from a prompt cache. */
+  cacheReadTokens?: number;
+  /** How many of {@link promptTokens} were written to a prompt cache. */
+  cacheWriteTokens?: number;
+  /**
+   * Dollar cost of the call, broken down by token type, if known. The total
+   * cost is `cost.prompt + cost.completion`; `cost.prompt` includes cache
+   * reads and writes, each at its own price.
+   */
+  cost?: {
+    prompt: number;
+    completion: number;
+    /** The part of `prompt` spent on {@link cacheReadTokens}. */
+    cacheRead?: number;
+    /** The part of `prompt` spent on {@link cacheWriteTokens}. */
+    cacheWrite?: number;
+  };
+}
+
+/**
+ * The message list of a chat call, or `undefined` for any other input.
+ *
+ * A chat call's {@link LLMSpanDetails.input} is always a message list, and
+ * anything else is wrapped in an object, so being an array is what makes it
+ * one.
+ */
+export function spanMessages(
+  llm: LLMSpanDetails | undefined,
+): SpanMessage[] | undefined {
+  return Array.isArray(llm?.input) ? llm.input : undefined;
+}
+
+/**
+ * The output of a turn that called tools: its text (if any) and the calls, as
+ * the one assistant message the next turn's input repeats. Without the calls
+ * such a turn would record no output at all, its text being empty.
+ */
+export function toolCallingOutput(
+  text: string | undefined,
+  toolCalls: SpanToolCallPart[],
+): SpanMessage[] {
+  return [
+    {
+      role: "assistant",
+      content: [
+        ...(text ? [{ type: "text" as const, text }] : []),
+        ...toolCalls,
+      ],
+    },
+  ];
+}
+
+/**
+ * An LLM span's output as a message list: text as the assistant message it
+ * is, a turn that called tools as the message it recorded. `undefined` for
+ * structured output, which can be an array too: every element must look like
+ * a message.
+ */
+export function outputMessages(
+  llm: LLMSpanDetails | undefined,
+): SpanMessage[] | undefined {
+  const output = llm?.output;
+  if (typeof output === "string")
+    return [{ role: "assistant", content: output }];
+  return Array.isArray(output) &&
+    output.length > 0 &&
+    output.every(
+      m =>
+        m &&
+        typeof m === "object" &&
+        typeof m.role === "string" &&
+        (typeof m.content === "string" || Array.isArray(m.content)),
+    )
+    ? (output as SpanMessage[])
+    : undefined;
+}
+
+export interface ToolSpanDetails {
+  toolName: string;
+  /**
+   * The id the model gave this call, when the integration reports it — the
+   * same id as the {@link SpanToolCallPart} that requested it.
+   */
+  toolCallId?: string;
+  input: unknown;
+  output?: unknown;
+}
+
+/**
+ * A span in a {@link Trace}. Spans form a tree via {@link parentId}.
+ * Durations are derived from `startTime` and `endTime`; an in-progress span has
+ * no `endTime` yet.
+ */
+export interface Span {
+  id: string;
+  traceId: string;
+  /** `undefined` for the root span of the trace. */
+  parentId?: string;
+  name: string;
+  kind: SpanKind;
+  /** Start timestamp in milliseconds since epoch. */
+  startTime: number;
+  /** End timestamp in milliseconds since epoch, or `undefined` while running. */
+  endTime?: number;
+  status?: "ok" | "error";
+  /** Error message if `status` is `'error'`. */
+  errorMessage?: string;
+  /** Free-form attributes to show in the span's details pane. */
+  attributes?: Record<string, unknown>;
+  /**
+   * The OpenTelemetry resource that produced the span: attributes describing
+   * the process or service it ran in rather than the span itself
+   * (`service.name`, `deployment.environment.name`, …).
+   */
+  resource?: Record<string, unknown>;
+  /** LLM-specific details (present for `chat`/`completion`/`embedding` spans). */
+  llm?: LLMSpanDetails;
+  /**
+   * The prompt this span is attributed to, if any.
+   *
+   * Stored as emitted (`evalution.prompt.id` plus optional
+   * `evalution.prompt.provider.id`): a {@link PromptID} whose `id` is global
+   * unless `providerId` is set. The server resolves it against the prompt
+   * registry to a provider-scoped reference when a trace is served.
+   */
+  prompt?: PromptID;
+  tool?: ToolSpanDetails;
+}
+
+interface TraceBase {
+  id: string;
+  providerId?: string;
+  name: string;
+  /** Start timestamp (ms). */
+  startTime: number;
+  /** End timestamp (ms), or `undefined` while the trace is still running. */
+  endTime?: number;
+  status: "running" | "ok" | "error";
+}
+
+/**
+ * Top-level trace for a single invocation (e.g. one prompt execution).
+ */
+export interface Trace extends TraceBase {
+  /** Free-form attributes (e.g. prompt ID, function params). */
+  attributes?: Record<string, unknown>;
+}
+
+/** Compact trace entry for listings (sidebar / `GET /api/traces`). */
+export interface TraceSummary extends TraceBase {
+  providerId: string;
+  /** Number of spans currently associated with the trace. */
+  spanCount: number;
+  /**
+   * Sum of every LLM span's token usage (`llm.totalTokens`, falling back to
+   * `promptTokens + completionTokens` per span the way `SpanDetails` does).
+   * `undefined` if no span in the trace reports any token usage.
+   */
+  totalTokens?: number;
+  /** Sum of every LLM span's `llm.cost` (prompt + completion). `undefined` if no span reports a cost. */
+  cost?: number;
+  /** The model name, if every LLM span that reports one reports the same one. */
+  model?: string;
+  /** The prompt version the run executed against (`PromptID.version`). */
+  promptVersion?: string;
+  /** The prompt variation the run applied (`PromptID.variation`). */
+  promptVariation?: string;
+  /**
+   * The deployment environment the run happened in: its root span's
+   * resource's `deployment.environment.name` — `"playground"` for a run
+   * evalution itself made.
+   */
+  environment?: string;
+  /** How many annotations of each kind are attached to the trace (trace-level or on any of its spans). */
+  annotationCounts: Record<AnnotationKind, number>;
+  /**
+   * The eval run that produced the trace, if any. Trace providers never set
+   * it — the server fills it in when listing, from the eval providers' results
+   * and the runs in flight.
+   */
+  evalRun?: TraceEvalRun;
+  /**
+   * How the checks recorded against the trace break down, once it has any.
+   * Filled in by the server alongside {@link TraceSummary.evalRun}.
+   */
+  checkCounts?: EvalCounts;
+}
+
+/** How a run's, or a trace's, check results break down. */
+export interface EvalCounts {
+  pass: number;
+  fail: number;
+  error: number;
+  skipped: number;
+  /** Scores reported without a threshold, so neither pass nor fail. */
+  scored: number;
+}
+
+/** The eval run a trace came from — what the trace list groups by. */
+export interface TraceEvalRun {
+  /** The eval provider the run is recorded on. */
+  providerId: string;
+  evalId: string;
+  /** The eval's name. */
+  evalName: string;
+  runId: string;
+  /** When the run started (ms). */
+  startedAt: number;
+  /** The arm of the run that produced the trace. */
+  armId: string;
+  /** That arm's label: the version it ran, as the run view names it. */
+  armLabel: string;
+}
+
+/**
+ * The OpenTelemetry semantic-convention resource attribute naming the
+ * service that produced a span.
+ */
+export const SERVICE_NAME_ATTRIBUTE = "service.name";
+
+/**
+ * The OpenTelemetry semantic-convention resource attribute naming the
+ * deployment environment a span was produced in.
+ */
+export const DEPLOYMENT_ENVIRONMENT_ATTRIBUTE = "deployment.environment.name";
+
+/** {@link DEPLOYMENT_ENVIRONMENT_ATTRIBUTE}'s value on a run evalution itself made. */
+export const PLAYGROUND_ENVIRONMENT = "playground";
+
+/** A trace together with all of its spans. */
+export interface TraceWithSpans {
+  trace: Trace;
+  spans: Span[];
+}
+
+/**
+ * Where an {@link Annotation} came from: the user, a coding agent we know by
+ * name, or any other agent (an MCP client that isn't Claude Code or Codex).
+ */
+export type AnnotationSource = "user" | "claude-code" | "codex" | "agent";
+
+/** What kind of note an {@link Annotation} records. */
+export type AnnotationKind = "issue" | "good" | "note";
+
+/**
+ * A note attached to a trace, or to one specific span within it — e.g. a
+ * reviewer flagging a bad tool call, or an agent leaving a note about a run
+ * it just replayed.
+ */
+export interface Annotation {
+  id: string;
+  traceId: string;
+  /** The span this annotation is attached to, or `undefined` for a trace-level annotation. */
+  spanId?: string;
+  kind: AnnotationKind;
+  note: string;
+  source: AnnotationSource;
+  /** Creation timestamp (ms). */
+  createdAt: number;
+}
+
+/** The fields of an {@link Annotation} that can be changed after it's made. */
+export type AnnotationChanges = Partial<Pick<Annotation, "kind" | "note">>;
+
+/** The kind of change that occurred to a trace. */
+export type TraceChangeType = "add" | "update" | "remove";
+
+/** Describes a single change emitted by `TraceProvider.watch`. */
+export interface TraceChangeEvent {
+  type: TraceChangeType;
+  traceId: string;
+}
+
+/** Real-time event pushed over the per-trace SSE subscription. */
+export type TraceStreamEvent =
+  | { type: "span-start"; span: Span }
+  | { type: "span-end"; span: Span }
+  | { type: "span-update"; span: Span }
+  | { type: "trace-update"; trace: Trace }
+  | { type: "trace-end"; trace: Trace };
+
+/** The change an annotation event describes. */
+export type AnnotationEventOp = "insert" | "update" | "delete";
+
+/** The event a per-trace annotation subscription delivers. */
+export interface AnnotationEvent {
+  type: "annotation";
+  op: AnnotationEventOp;
+  annotation: Annotation;
+}
+
+/**
+ * Real-time event pushed over the per-trace SSE subscription, broadened
+ * beyond span/trace lifecycle to also carry annotation changes — so a client
+ * holding one `EventSource` open on a trace sees both without a second
+ * connection. See `specs/trace-workshopping.md` §C.2.
+ */
+export type TraceLiveEvent = TraceStreamEvent | AnnotationEvent;
+
+/** Information about a registered trace provider, returned by `GET /api/trace-providers`. */
+export interface TraceProviderInfo {
+  id: string;
+  displayName?: string;
+  description?: string;
+}
+
+/**
+ * A tool result's output as the tool returned it. The AI SDK wraps a result
+ * in a typed envelope (`{ type: "json", value }`, `{ type: "error-text",
+ * value }`, `{ type: "execution-denied", reason }`, …); this unwraps it and
+ * notes whether it reports a failure. Anything else is kept as is.
+ */
+export function unwrapToolResultOutput(
+  output: unknown,
+): Pick<SpanToolResultPart, "output" | "isError"> {
+  if (!output || typeof output !== "object" || Array.isArray(output)) {
+    return { output };
+  }
+  const envelope = output as { type?: unknown; value?: unknown };
+  const { type } = envelope;
+  if (type === "execution-denied") {
+    return { output: (output as { reason?: unknown }).reason, isError: true };
+  }
+  if (typeof type !== "string" || !("value" in envelope)) return { output };
+  return type.startsWith("error-")
+    ? { output: envelope.value, isError: true }
+    : { output: envelope.value };
+}

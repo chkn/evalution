@@ -12,6 +12,7 @@
  * @module evalution/views
  */
 
+export type { Span, Trace, TraceWithSpans } from "@evalution/sdk";
 export type {
   Dataset,
   DatasetRow,
@@ -23,7 +24,6 @@ export type {
   ResourceInstanceInput,
   RunResources,
 } from "../shared/types.ts";
-export type { Span, Trace, TraceWithSpans } from "../trace/trace-types.ts";
 export {
   type FrameMessage,
   type HostMessage,

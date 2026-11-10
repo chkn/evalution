@@ -7,6 +7,7 @@
  * variations. See `specs/evals.md`.
  */
 
+import type { EvalCounts, PromptID, TraceEvalRun } from "@evalution/sdk";
 import type {
   ExecutionInput,
   PromptRef,
@@ -15,11 +16,6 @@ import type {
   VariationId,
   VersionId,
 } from "../shared/types.ts";
-import type {
-  EvalCounts,
-  PromptID,
-  TraceEvalRun,
-} from "../trace/trace-types.ts";
 
 export type { EvalCounts };
 

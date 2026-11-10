@@ -6,11 +6,8 @@
  * Conversation and Spans. See `specs/trace-visualizers.md` §A.1.
  */
 
+import type { TraceStreamEvent, TraceWithSpans } from "@evalution/sdk";
 import { applyStreamEvent } from "../../shared/trace-stream.ts";
-import type {
-  TraceStreamEvent,
-  TraceWithSpans,
-} from "../../trace/trace-types.ts";
 import type { Surface } from "../surface.ts";
 import {
   defineView,

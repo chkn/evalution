@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { Span, TraceLiveEvent } from "@evalution/sdk";
 import { describe, expect, it } from "vitest";
 import { MemoryTraceProvider } from "../../trace/memory-trace-provider.ts";
-import type { Span, TraceLiveEvent } from "../../trace/trace-types.ts";
 import { type SSEWriter, streamTrace } from "./trace-stream.ts";
 
 function rootSpan(traceId: string, overrides: Partial<Span> = {}): Span {

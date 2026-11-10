@@ -8,19 +8,6 @@
  * `specs/trace-workshopping.md` §B.
  */
 
-import type { Database } from "@tursodatabase/sync";
-import { desc, eq, type SQL, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/tursodatabase-sync";
-import { TRACE_QUERY_SCHEMA } from "./db/query-schema.ts";
-import {
-  type ReadOnlyQueryRunner,
-  runReadOnlyQuery,
-  type SqlQueryOptions,
-  type SqlQueryResult,
-} from "./db/read-only-query.ts";
-import { annotations, spans, traces } from "./db/schema.ts";
-import { mergeSpans } from "./span-merge.ts";
-import { BaseTraceProvider } from "./trace-sink.ts";
 import {
   type Annotation,
   type AnnotationChanges,
@@ -30,7 +17,20 @@ import {
   type SpanKind,
   type Trace,
   type TraceSummary,
-} from "./trace-types.ts";
+} from "@evalution/sdk";
+import type { Database } from "@tursodatabase/sync";
+import { desc, eq, type SQL, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/tursodatabase-sync";
+import { BaseTraceProvider } from "./base-trace-provider.ts";
+import { TRACE_QUERY_SCHEMA } from "./db/query-schema.ts";
+import {
+  type ReadOnlyQueryRunner,
+  runReadOnlyQuery,
+  type SqlQueryOptions,
+  type SqlQueryResult,
+} from "./db/read-only-query.ts";
+import { annotations, spans, traces } from "./db/schema.ts";
+import { mergeSpans } from "./span-merge.ts";
 
 function parseJson<T>(v: string | null): T | undefined {
   return v == null ? undefined : (JSON.parse(v) as T);

@@ -10,13 +10,13 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CHECK_ATTRIBUTE } from "@evalution/sdk";
 import type { Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { afterEach, describe, expect, it } from "vitest";
 import { createLocalTursoClient } from "./db/local-turso-client.ts";
 import { runMigrations } from "./db/migrate.ts";
 import { runTraceProviderContractTests } from "./trace-provider-contract.ts";
-import { CHECK_ATTRIBUTE } from "./trace-types.ts";
 import { TursoTraceProvider } from "./turso-trace-provider.ts";
 
 const dirs: string[] = [];

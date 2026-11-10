@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { describe, expect, it } from "vitest";
-import { GeminiInteractionsSDK } from "./gemini-interactions-sdk.ts";
+import { GeminiInteractionsSDK } from "@evalution/gemini-interactions-sdk/config";
 import {
   assertUpdateStyle,
   isMissingPackage,
   missingPackageMessage,
-} from "./sdk-adapter.ts";
-import { VercelAISDK } from "./vercel-ai-sdk/index.ts";
+} from "@evalution/sdk/adapter";
+import { VercelAISDK } from "@evalution/vercel-ai-sdk/config";
+import { describe, expect, it } from "vitest";
 
 /** The error Node throws when a bare specifier resolves to nothing. */
 function moduleNotFound(message: string): Error {

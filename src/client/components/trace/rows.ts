@@ -7,6 +7,7 @@
  * {@link Row} list linearly.
  */
 
+import { isCheckSpan, spanMessages } from "@evalution/sdk";
 import type {
   Annotation,
   AnnotationKind,
@@ -15,7 +16,6 @@ import type {
   SpanKind,
   SpanMessage,
 } from "../../../shared/types";
-import { isCheckSpan, spanMessages } from "../../../trace/trace-types";
 
 export interface Row {
   span: Span;

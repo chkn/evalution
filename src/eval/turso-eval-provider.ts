@@ -7,11 +7,11 @@
  * bootstrap. See `specs/evals.md` §E.
  */
 
+import type { PromptID } from "@evalution/sdk";
 import type { Database } from "@tursodatabase/sync";
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import type { ExecutionInput, RunResources } from "../shared/types.ts";
-import type { PromptID } from "../trace/trace-types.ts";
 import {
   evalCheckResults,
   evalRowResults,

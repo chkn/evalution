@@ -53,7 +53,7 @@ export const spans = sqliteTable(
     id: text("id").primaryKey(),
     /**
      * Deliberately *not* a foreign key: {@link BaseTraceProvider.recordSpanStart}
-     * (see `trace-sink.ts`) can persist a non-root span before its trace row
+     * (see `base-trace-provider.ts`) can persist a non-root span before its trace row
      * exists (out-of-order arrival) — a `NOT NULL` FK here would reject that
      * insert. Cascade-on-delete is instead enforced by the
      * `trg_spans_cascade_delete_trace` trigger (see the initial migration).

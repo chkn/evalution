@@ -5,12 +5,18 @@
  * Helpers for integrating Vercel AI SDK prompts with Evalution.
  * @module @evalution/vercel-ai-sdk
  */
-import { createRequire } from "node:module";
-import type { experimental_evaluate, generateText, streamText } from "ai";
 
-// The following are bundled in by tsdown to pull in just these
-// symbols without taking a runtime dependency on the rest of the
-// `evalution` package.
+import { createRequire } from "node:module";
+import {
+  createTracerForPrompt,
+  getPromptSpanAttributes,
+  HttpTraceSink,
+  type HttpTraceSinkOptions,
+  type PromptSpanInfo,
+  type PromptsHelper,
+  type PromptsHelperOptions,
+} from "@evalution/sdk";
+import type { experimental_evaluate, generateText, streamText } from "ai";
 import {
   VercelAISDKTelemetry as Evalution,
   type VercelAISDKTelemetryOptions as EvalutionOptions,
@@ -18,18 +24,13 @@ import {
   isVercelAISDKTelemetry,
   type PerPromptTelemetry,
   toArray,
-} from "../../../src/sdk/vercel-ai-sdk/telemetry.js";
-import {
-  HttpTraceSink,
-  type HttpTraceSinkOptions,
-} from "../../../src/trace/http-trace-sink.js";
-import {
-  createTracerForPrompt,
-  getPromptSpanAttributes,
-  type PromptSpanInfo,
-  type PromptsHelper,
-  type PromptsHelperOptions,
-} from "../../../src/trace/prompt-tracer.js";
+} from "./telemetry.ts";
+
+export {
+  type PerTraceTelemetry,
+  VercelAISDKTelemetry,
+  type VercelAISDKTelemetryOptions,
+} from "./telemetry.ts";
 
 // Created lazily: `import.meta.url` is undefined in some runtimes (e.g.
 // Cloudflare Workers), where an eager `createRequire` would throw at import.
@@ -331,7 +332,7 @@ export type Prompt = GenerateTextConfig | StreamTextConfig | EvaluateConfig; // 
 /**
  * Helper for defining Evalution prompt modules using the Vercel AI SDK.
  *
- * The first argument is a {@link PromptsHelperOptions} containing an `id` that,
+ * The first argument is a `PromptsHelperOptions` containing an `id` that,
  * combined with each prompt's name, forms a globally-unique prompt ID. This ID is
  * attached to every span the prompt produces so runtime traces can be resolved
  * back to the prompt. Choose a stable, unique value for this `id` and do not change it.

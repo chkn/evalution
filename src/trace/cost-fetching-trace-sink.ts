@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { TraceSink } from "./trace-sink.ts";
-import type { LLMSpanDetails, Span } from "./trace-types.ts";
+import type { LLMSpanDetails, Span, TraceSink } from "@evalution/sdk";
 
 /**
  * A model's prices, in $/token. A cache price the catalog doesn't list is

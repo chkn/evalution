@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { TraceIngestor } from "@evalution/sdk";
 import type { Span, Trace, TraceSummary } from "../shared/types.ts";
+import { BaseTraceProvider } from "./base-trace-provider.ts";
 import { mergeSpans } from "./span-merge.ts";
 import { rollupSpans } from "./span-rollup.ts";
-import type { TraceIngestor } from "./trace-ingestor.ts";
-import { BaseTraceProvider } from "./trace-sink.ts";
 
 /**
  * In-memory {@link TraceProvider}, populated by one or more

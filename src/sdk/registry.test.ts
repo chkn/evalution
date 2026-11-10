@@ -2,7 +2,11 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import { AI_SDK_REGISTRY, findSetupStep, findSetupTask } from "./registry.ts";
+import {
+  AI_SDK_SETUP_TASKS,
+  findSetupStep,
+  findSetupTask,
+} from "./registry.ts";
 
 describe("AI SDK registry", () => {
   it("offers the Vercel AI SDK with a config-creating step", () => {
@@ -14,6 +18,7 @@ describe("AI SDK registry", () => {
     if (step?.kind === "create_config") {
       expect(step.path).toBe(".evalution/config.ts");
       expect(step.contents).toContain("VercelAISDK");
+      expect(step.contents).toContain("@evalution/vercel-ai-sdk/config");
     }
 
     const install = task?.steps.find(s => s.kind === "install_package");
@@ -44,11 +49,11 @@ describe("AI SDK registry", () => {
   });
 
   it("gives every task a unique id with unique step ids", () => {
-    const taskIds = AI_SDK_REGISTRY.map(c => c.setupTask.id);
+    const taskIds = AI_SDK_SETUP_TASKS.map(task => task.id);
     expect(new Set(taskIds).size).toBe(taskIds.length);
 
-    for (const cls of AI_SDK_REGISTRY) {
-      const stepIds = cls.setupTask.steps.map(s => s.id);
+    for (const task of AI_SDK_SETUP_TASKS) {
+      const stepIds = task.steps.map(s => s.id);
       expect(new Set(stepIds).size).toBe(stepIds.length);
     }
   });

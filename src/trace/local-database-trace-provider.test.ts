@@ -11,6 +11,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import type { Span, TraceChangeEvent, TraceStreamEvent } from "@evalution/sdk";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createLocalTursoClient } from "./db/local-turso-client.ts";
@@ -21,11 +22,6 @@ import {
   resolveDbPath,
 } from "./local-database-trace-provider.ts";
 import { runTraceProviderContractTests } from "./trace-provider-contract.ts";
-import type {
-  Span,
-  TraceChangeEvent,
-  TraceStreamEvent,
-} from "./trace-types.ts";
 
 const contractDirs: string[] = [];
 

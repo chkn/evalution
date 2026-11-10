@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { CHECK_ATTRIBUTE, type Span } from "@evalution/sdk";
 import { describe, expect, it } from "vitest";
 import { CheckScope, CheckScopeTraceSink } from "./check-scope.ts";
 import { MemoryTraceProvider } from "./memory-trace-provider.ts";
-import { CHECK_ATTRIBUTE, type Span } from "./trace-types.ts";
 
 /** A judged trace, already over, and a sink feeding its provider. */
 async function setUp() {

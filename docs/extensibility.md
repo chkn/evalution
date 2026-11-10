@@ -30,8 +30,8 @@ prompts from a different source, such as a database or an API.
 
 An [`SDKAdapter`](/docs/extensibility/api/interfaces/SDKAdapter.html) maps a
 normalized prompt onto a concrete model SDK. Evalution ships
-[`VercelAISDK`](/docs/extensibility/api/classes/VercelAISDK.html) (the default) and
-[`GeminiInteractionsSDK`](/docs/extensibility/api/classes/GeminiInteractionsSDK.html) (currently experimental).
+[`VercelAISDK`](/docs/extensibility/api/classes/_evalution_vercel-ai-sdk_config.VercelAISDK.html) (the default) and
+[`GeminiInteractionsSDK`](/docs/extensibility/api/classes/_evalution_gemini-interactions-sdk_config.GeminiInteractionsSDK.html) (currently experimental).
 Implement your own [`SDKAdapter`](/docs/extensibility/api/interfaces/SDKAdapter.html) to work with a different
 AI SDK.
 

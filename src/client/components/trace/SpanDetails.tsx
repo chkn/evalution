@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { outputMessages, spanMessages } from "@evalution/sdk";
 import { useState } from "react";
 import type { Annotation, AnnotationKind, Span } from "../../../shared/types";
-import { outputMessages, spanMessages } from "../../../trace/trace-types";
 import { DetailRow, type Fact, FactGroup, FactsGrid } from "../DetailsPane.tsx";
 import { AnnotationChip } from "./AnnotationChip.tsx";
 import {

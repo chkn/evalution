@@ -15,7 +15,8 @@ It should contain a default export of type [`EvalutionConfig`](/docs/extensibili
 ```ts
 // .evalution/config.ts
 import type { EvalutionConfig } from 'evalution';
-import { FilePromptProvider, VercelAISDK } from 'evalution';
+import { FilePromptProvider } from 'evalution';
+import { VercelAISDK } from '@evalution/vercel-ai-sdk/config';
 
 export default {
   promptProviders: [

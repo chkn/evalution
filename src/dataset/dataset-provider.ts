@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { PromptID } from "@evalution/sdk";
 import type { ColumnPath, DatasetColumnSpec } from "../shared/column-paths.ts";
 import type { PropDefinition } from "../shared/types.ts";
 import type {
   SqlQueryOptions,
   SqlQueryResult,
 } from "../trace/db/read-only-query.ts";
-import type { PromptID } from "../trace/trace-types.ts";
 import type {
   Dataset,
   DatasetChangeEvent,

@@ -1,0 +1,1160 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Alexander Corrado
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryTraceProvider } from "../../../src/trace/memory-trace-provider.ts";
+import { VercelAISDKTelemetry } from "./telemetry.ts";
+
+afterEach(() => {
+  delete (globalThis as any).AI_SDK_TELEMETRY_INTEGRATIONS;
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
+function startEvent(callId: string) {
+  return {
+    callId,
+    operationId: "ai.generateText",
+    provider: "openai",
+    modelId: "gpt-4o",
+    tools: undefined,
+    toolChoice: undefined,
+    activeTools: [],
+    toolOrder: [],
+    maxRetries: 1,
+    timeout: undefined,
+    headers: undefined,
+    providerOptions: undefined,
+    output: undefined,
+    toolsContext: {},
+    runtimeContext: {},
+    instructions: undefined,
+    messages: [],
+  } satisfies Parameters<VercelAISDKTelemetry["onStart"]>[0];
+}
+
+function stepEndEvent(callId: string, text: string) {
+  return {
+    callId,
+    stepNumber: 0,
+    model: { provider: "openai", modelId: "gpt-4o" },
+    text,
+    usage: {
+      inputTokens: 5,
+      outputTokens: 3,
+      totalTokens: 8,
+      inputTokenDetails: {} as any,
+      outputTokenDetails: {} as any,
+    },
+  } as any;
+}
+
+describe("Evalution", () => {
+  describe("endpoint", () => {
+    /** Stubs the global `fetch`, returning the URLs it's asked for. */
+    function stubFetch() {
+      const urls: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          urls.push(url);
+          return new Response("{}");
+        }),
+      );
+      return urls;
+    }
+
+    /** Records one root span start through `evalution`, and lets it send. */
+    async function startRun(evalution: VercelAISDKTelemetry) {
+      await evalution.onStart(startEvent("call"));
+      await evalution.flush();
+    }
+
+    it("flush waits until a whole run has reached the server", async () => {
+      const received: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init: RequestInit) => {
+          // A slow server: flush must wait for its answer, not just the send.
+          await new Promise(resolve => setTimeout(resolve, 20));
+          const { events } = JSON.parse(String(init.body));
+          received.push(...events.map((e: { type: string }) => e.type));
+          return new Response("{}");
+        }),
+      );
+      const evalution = new VercelAISDKTelemetry({ endpoint: "http://host" });
+
+      // Not awaited, as the SDK may not await its telemetry callbacks.
+      void evalution.onStart(startEvent("call"));
+      void evalution.onStepStart({
+        ...startEvent("call"),
+        stepNumber: 0,
+        steps: [],
+      } as any);
+      void evalution.onStepEnd(stepEndEvent("call", "Hello!"));
+      void evalution.onEnd({ callId: "call", text: "Hello!" } as any);
+      await evalution.flush();
+
+      expect(received).toEqual([
+        "span-start",
+        "span-start",
+        "span-end",
+        "span-end",
+      ]);
+    });
+
+    it("sends traces to EVALUTION_ENDPOINT by default", async () => {
+      const urls = stubFetch();
+      vi.stubEnv("EVALUTION_ENDPOINT", "http://localhost:3000");
+
+      await startRun(new VercelAISDKTelemetry());
+
+      expect(urls).toEqual(["http://localhost:3000/api/traces"]);
+    });
+
+    it("sends traces to an explicit endpoint over EVALUTION_ENDPOINT", async () => {
+      const urls = stubFetch();
+      vi.stubEnv("EVALUTION_ENDPOINT", "http://localhost:3000");
+
+      await startRun(new VercelAISDKTelemetry({ endpoint: "http://other" }));
+
+      expect(urls).toEqual(["http://other/api/traces"]);
+    });
+
+    it("sends nowhere with endpoint: false, or without EVALUTION_ENDPOINT", async () => {
+      const urls = stubFetch();
+      await startRun(new VercelAISDKTelemetry());
+      vi.stubEnv("EVALUTION_ENDPOINT", "http://localhost:3000");
+      await startRun(new VercelAISDKTelemetry({ endpoint: false }));
+
+      expect(urls).toEqual([]);
+    });
+  });
+
+  it("createTelemetryForPrompt records a single-step generation with full prompt identity", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+
+    const traceId = "trace-1";
+    const integration = evalution
+      .createTelemetryForPrompt({
+        id: "mod#greet",
+        name: "greet",
+        functionParameters: ["Ada"],
+      })
+      .withTraceId(traceId);
+
+    const callId = "call-1";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [{ role: "user", content: "Hi Ada" }],
+    } as any);
+    await integration.onStepEnd?.(stepEndEvent(callId, "Hello!"));
+    await integration.onEnd?.({ callId, text: "Hello!" } as any);
+
+    const trace = await provider.getTrace(traceId);
+    expect(trace?.trace.status).toBe("ok");
+    expect(trace?.spans).toHaveLength(2); // root + step
+    const root = trace?.spans.find(s => !s.parentId);
+    expect(root?.prompt?.id).toBe("mod#greet");
+    expect(root?.prompt?.functionParameters).toEqual(["Ada"]);
+    const step = trace?.spans.find(s => s.parentId);
+    expect(step?.llm?.input).toEqual([{ role: "user", content: "Hi Ada" }]);
+    expect(step?.llm?.totalTokens).toBe(8);
+  });
+
+  it("records a step's cache read and write tokens", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-cache";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#greet", name: "greet" })
+      .withTraceId(traceId);
+    const callId = "call-cache";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [{ role: "user", content: "Hi" }],
+    } as any);
+    const stepEnd = stepEndEvent(callId, "Hello!");
+    await integration.onStepEnd?.({
+      ...stepEnd,
+      usage: {
+        ...stepEnd.usage,
+        inputTokenDetails: {
+          noCacheTokens: 1,
+          cacheReadTokens: 3,
+          cacheWriteTokens: 1,
+        },
+      },
+    });
+    await integration.onEnd?.({ callId, text: "Hello!" } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.parentId);
+    expect(step?.llm?.promptTokens).toBe(5);
+    expect(step?.llm?.cacheReadTokens).toBe(3);
+    expect(step?.llm?.cacheWriteTokens).toBe(1);
+  });
+
+  it("keeps image content parts instead of dropping image-only messages", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-image";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#see", name: "see" })
+      .withTraceId(traceId);
+    const callId = "call-image";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "What is this?" },
+            {
+              type: "image",
+              image: "https://example.com/cat.png",
+              mediaType: "image/png",
+            },
+          ],
+        },
+      ],
+    } as any);
+    await integration.onStepEnd?.(stepEndEvent(callId, "A cat."));
+    await integration.onEnd?.({ callId, text: "A cat." } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.parentId);
+    expect(step?.llm?.input).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "What is this?" },
+          {
+            type: "image",
+            image: "https://example.com/cat.png",
+            mediaType: "image/png",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("carries the unresolved inputs onto the root span", async () => {
+    // The recipe, not the resolution: one of a run's resolved arguments can be
+    // a live database handle, which serializes into a span as a useless blob
+    // and is not what a replay needs anyway.
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-inputs";
+    const functionInputs = [
+      { kind: "value", value: { kind: "primitive", value: "Ada" } },
+      { kind: "resource", uri: ".evalution/playground/db.ts#db" },
+    ];
+    const integration = evalution
+      .createTelemetryForPrompt({
+        id: "mod#greet",
+        name: "greet",
+        functionInputs,
+        executeInputs: { toolsContext: { kind: "resource", uri: "pg.ts#ctx" } },
+        executeParameterDefinitions: [
+          { name: "toolsContext", type: { kind: "opaque", syntax: "Ctx" } },
+        ],
+      })
+      .withTraceId(traceId);
+
+    const callId = "call-inputs";
+    await integration.onStart?.({ callId, operationId: "generateText" } as any);
+
+    const root = (await provider.getTrace(traceId))?.spans.find(
+      s => !s.parentId,
+    );
+    expect(root?.prompt?.functionInputs).toEqual(functionInputs);
+    expect(root?.prompt?.executeInputs).toEqual({
+      toolsContext: { kind: "resource", uri: "pg.ts#ctx" },
+    });
+    // Without these an execute input has a name but no type.
+    expect(root?.prompt?.executeParameterDefinitions).toEqual([
+      { name: "toolsContext", type: { kind: "opaque", syntax: "Ctx" } },
+    ]);
+  });
+
+  it("records a tool call nested under the current step", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-tool";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#agent", name: "agent" })
+      .withTraceId(traceId);
+    const callId = "call-tool";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [],
+    } as any);
+    await integration.onToolExecutionStart?.({
+      callId,
+      toolCall: { toolCallId: "t1", toolName: "search", input: { q: "x" } },
+      messages: [],
+      toolContext: {},
+    } as any);
+    await integration.onToolExecutionEnd?.({
+      callId,
+      toolCall: { toolCallId: "t1", toolName: "search", input: { q: "x" } },
+      toolOutput: { type: "tool-result", output: { hits: 1 } },
+      toolExecutionMs: 12,
+      messages: [],
+      toolContext: {},
+    } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const tool = trace?.spans.find(s => s.kind === "TOOL");
+    expect(tool?.status).toBe("ok");
+    expect(tool?.name).toContain("search");
+    expect(tool?.tool?.toolCallId).toBe("t1");
+    const root = trace?.spans.find(s => !s.parentId);
+    expect(root?.kind).toBe("AGENT");
+  });
+
+  it("keeps tool calls and results in a step's input messages", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-seeded";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#agent", name: "agent" })
+      .withTraceId(traceId);
+    const callId = "call-seeded";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      // A tool call and its result seeded into the conversation, as if an
+      // earlier step had made them.
+      messages: [
+        { role: "user", content: "Plan task `t-1`." },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "seed",
+              toolName: "get_task",
+              input: { taskId: "t-1" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "seed",
+              toolName: "get_task",
+              output: { type: "json", value: { ok: true, title: "Ship" } },
+            },
+          ],
+        },
+      ],
+    } as any);
+    await integration.onStepEnd?.(stepEndEvent(callId, "Done."));
+    await integration.onEnd?.({ callId, text: "Done." } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.kind === "LLM");
+    expect(step?.llm?.input).toEqual([
+      { role: "user", content: "Plan task `t-1`." },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "seed",
+            toolName: "get_task",
+            input: { taskId: "t-1" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "seed",
+            toolName: "get_task",
+            output: { ok: true, title: "Ship" },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("records the tool calls of a step that only calls tools as its output", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-tool-step";
+    const integration = evalution
+      .createTelemetryForPrompt()
+      .withTraceId(traceId);
+    const callId = "call-tool-step";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [{ role: "user", content: "Look up t-1" }],
+    } as any);
+    await integration.onStepEnd?.({
+      ...stepEndEvent(callId, ""),
+      finishReason: "tool-calls",
+      toolCalls: [{ toolCallId: "t1", toolName: "search", input: { q: "x" } }],
+    });
+    await integration.onEnd?.({ callId, text: "" } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.kind === "LLM");
+    expect(step?.llm?.output).toEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "t1",
+            toolName: "search",
+            input: { q: "x" },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("records a step's reasoning apart from its output, and keeps earlier turns' in its input", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-reasoning";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#agent", name: "agent" })
+      .withTraceId(traceId);
+    const callId = "call-reasoning";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "Earlier thought." },
+            { type: "reasoning", text: "" },
+            { type: "text", text: "Earlier answer." },
+          ],
+        },
+      ],
+    } as any);
+    await integration.onStepEnd?.({
+      ...stepEndEvent(callId, "Hello!"),
+      reasoningText: "They said hi.",
+    });
+    await integration.onEnd?.({ callId, text: "Hello!" } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.kind === "LLM");
+    expect(step?.llm?.output).toBe("Hello!");
+    expect(step?.llm?.reasoning).toBe("They said hi.");
+    expect(step?.llm?.input).toEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Earlier thought." },
+          { type: "text", text: "Earlier answer." },
+        ],
+      },
+    ]);
+  });
+
+  it("records no reasoning for a step without any", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-no-reasoning";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#agent", name: "agent" })
+      .withTraceId(traceId);
+    const callId = "call-no-reasoning";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [],
+    } as any);
+    await integration.onStepEnd?.(stepEndEvent(callId, "Hello!"));
+    await integration.onEnd?.({ callId, text: "Hello!" } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.kind === "LLM");
+    expect(step?.llm).not.toHaveProperty("reasoning");
+  });
+
+  it("correlates parallel tool calls by toolCallId", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-parallel-tools";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#agent", name: "agent" })
+      .withTraceId(traceId);
+    const callId = "call-parallel";
+
+    const alpha = { toolCallId: "ta", toolName: "alpha", input: { n: 1 } };
+    const beta = { toolCallId: "tb", toolName: "beta", input: { n: 2 } };
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [],
+    } as any);
+
+    // Two tools run concurrently: both starts arrive before either end.
+    await integration.onToolExecutionStart?.({
+      callId,
+      toolCall: alpha,
+      messages: [],
+      toolContext: {},
+    } as any);
+    await integration.onToolExecutionStart?.({
+      callId,
+      toolCall: beta,
+      messages: [],
+      toolContext: {},
+    } as any);
+    await integration.onToolExecutionEnd?.({
+      callId,
+      toolCall: alpha,
+      toolOutput: { type: "tool-result", output: { r: "A" } },
+      messages: [],
+      toolContext: {},
+    } as any);
+    await integration.onToolExecutionEnd?.({
+      callId,
+      toolCall: beta,
+      toolOutput: { type: "tool-result", output: { r: "B" } },
+      messages: [],
+      toolContext: {},
+    } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.kind === "LLM");
+    const tools = trace?.spans.filter(s => s.kind === "TOOL") ?? [];
+    expect(tools).toHaveLength(2);
+
+    // Every tool span is parented to the step, never to a sibling tool.
+    for (const t of tools) expect(t.parentId).toBe(step?.id);
+
+    // Each tool span carries its own output, not a sibling's.
+    const alphaSpan = tools.find(t => t.name.includes("alpha"));
+    const betaSpan = tools.find(t => t.name.includes("beta"));
+    expect(alphaSpan?.tool?.output).toEqual({ r: "A" });
+    expect(betaSpan?.tool?.output).toEqual({ r: "B" });
+  });
+
+  it("marks a step span as error when its finishReason is error", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-step-err";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#x", name: "x" })
+      .withTraceId(traceId);
+    const callId = "call-step-err";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [],
+    } as any);
+    await integration.onStepEnd?.({
+      ...stepEndEvent(callId, ""),
+      finishReason: "error",
+    });
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.kind === "LLM");
+    expect(step?.status).toBe("error");
+    expect(step?.llm?.finishReason).toBe("error");
+  });
+
+  it("fail() ends still-open child spans as error, not just the trace", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-fail-leak";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#x", name: "x" })
+      .withTraceId(traceId);
+    const callId = "call-fail-leak";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [],
+    } as any);
+
+    // generateText rejects mid-flight (after a step opened): fail() must end the
+    // dangling step span, not leave it hanging in `running`.
+    await integration.fail("boom");
+
+    const trace = await provider.getTrace(traceId);
+    expect(trace?.trace.status).toBe("error");
+    const step = trace?.spans.find(s => s.kind === "LLM");
+    expect(step?.status).toBe("error");
+    expect(step?.endTime).toBeDefined();
+  });
+
+  it("marks a tool span as error when toolOutput.type is tool-error", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-tool-err";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#agent", name: "agent" })
+      .withTraceId(traceId);
+    const callId = "call-tool-err";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [],
+    } as any);
+    await integration.onToolExecutionStart?.({
+      callId,
+      toolCall: { toolCallId: "t1", toolName: "search", input: {} },
+      messages: [],
+      toolContext: {},
+    } as any);
+    await integration.onToolExecutionEnd?.({
+      callId,
+      toolCall: { toolCallId: "t1", toolName: "search", input: {} },
+      toolOutput: { type: "tool-error", error: new Error("boom") },
+      messages: [],
+      toolContext: {},
+    } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const tool = trace?.spans.find(s => s.kind === "TOOL");
+    expect(tool?.status).toBe("error");
+  });
+
+  it("root onStart lazily creates the running trace and emits span-start", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-pre";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#x", name: "x" })
+      .withTraceId(traceId);
+
+    // No pre-creation: the trace does not exist until the root span starts.
+    expect(await provider.hasTrace(traceId)).toBe(false);
+
+    const events: string[] = [];
+    provider.subscribeTrace(traceId, e => events.push(e.type));
+
+    await integration.onStart?.(startEvent("call-pre"));
+
+    expect(events).toContain("span-start");
+    expect((await provider.getTrace(traceId))?.trace.name).toBe("mod#x");
+    expect((await provider.getTrace(traceId))?.trace.status).toBe("running");
+  });
+
+  it("abort finishes the trace as error", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-abort";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#x", name: "x" })
+      .withTraceId(traceId);
+    const callId = "call-abort";
+
+    await integration.onStart?.(startEvent(callId));
+    await integration.onAbort?.({
+      callId,
+      steps: [],
+      reason: "aborted",
+    } as any);
+
+    const trace = await provider.getTrace(traceId);
+    expect(trace?.trace.status).toBe("error");
+  });
+
+  it("two concurrent createTelemetryForPrompt integrations stay in separate traces", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceIdA = "trace-concurrent-a";
+    const traceIdB = "trace-concurrent-b";
+    const a = evalution
+      .createTelemetryForPrompt({ id: "mod#a", name: "a" })
+      .withTraceId(traceIdA);
+    const b = evalution
+      .createTelemetryForPrompt({ id: "mod#b", name: "b" })
+      .withTraceId(traceIdB);
+
+    expect(traceIdA).not.toBe(traceIdB);
+
+    await Promise.all([
+      a.onStart?.(startEvent("call-a")),
+      b.onStart?.(startEvent("call-b")),
+    ]);
+    await Promise.all([
+      a.onEnd?.({ callId: "call-a" } as any),
+      b.onEnd?.({ callId: "call-b" } as any),
+    ]);
+
+    const traceA = await provider.getTrace(traceIdA);
+    const traceB = await provider.getTrace(traceIdB);
+    expect(traceA?.trace.status).toBe("ok");
+    expect(traceB?.trace.status).toBe("ok");
+    expect(traceA?.spans.length).toBeGreaterThan(0);
+    expect(traceB?.spans.length).toBeGreaterThan(0);
+  });
+
+  it("fans out to every added sink and stops after removeSink", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const sinkA = new MemoryTraceProvider({ id: "a" });
+    const sinkB = new MemoryTraceProvider({ id: "b" });
+    evalution.addSink(sinkA);
+    evalution.addSink(sinkB);
+
+    const traceId1 = "trace-fanout-1";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#x", name: "x" })
+      .withTraceId(traceId1);
+    await integration.onStart?.(startEvent("call-fanout"));
+
+    expect(await sinkA.hasTrace(traceId1)).toBe(true);
+    expect(await sinkB.hasTrace(traceId1)).toBe(true);
+
+    expect(evalution.removeSink(sinkB)).toBe(true);
+    const traceId2 = "trace-fanout-2";
+    const integration2 = evalution
+      .createTelemetryForPrompt({ id: "mod#y", name: "y" })
+      .withTraceId(traceId2);
+    await integration2.onStart?.(startEvent("call-fanout-2"));
+
+    expect(await sinkA.hasTrace(traceId2)).toBe(true);
+    expect(await sinkB.hasTrace(traceId2)).toBe(false);
+  });
+
+  it('global fallback onStart is a no-op when nativeTelemetry is "never"', async () => {
+    const evalution = new VercelAISDKTelemetry({ nativeTelemetry: "never" });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+
+    await evalution.onStart(startEvent("call-never"));
+
+    expect(await provider.getAllTraces()).toHaveLength(0);
+  });
+
+  it('global fallback onStart defers ("auto") when a sibling OpenTelemetry integration is registered', async () => {
+    class OpenTelemetry {}
+    (globalThis as any).AI_SDK_TELEMETRY_INTEGRATIONS = [new OpenTelemetry()];
+
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+
+    await evalution.onStart(startEvent("call-auto-defer"));
+
+    expect(await provider.getAllTraces()).toHaveLength(0);
+  });
+
+  it("global fallback records without prompt identity when not deferring", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+
+    await evalution.onStart(startEvent("call-fallback"));
+    await evalution.onEnd({ callId: "call-fallback" } as any);
+
+    const traces = await provider.getAllTraces();
+    expect(traces).toHaveLength(1);
+    const trace = await provider.getTrace(traces[0].id);
+    expect(trace?.spans[0].prompt).toBeUndefined();
+  });
+
+  it.each([
+    [
+      "an object",
+      { name: "object" },
+      '{"sentiment":"positive"}',
+      { sentiment: "positive" },
+    ],
+    ["an array", { name: "array" }, "[1,2]", [1, 2]],
+    [
+      "text",
+      { name: "text" },
+      '{"looks":"like json"}',
+      '{"looks":"like json"}',
+    ],
+    [
+      "no output spec",
+      undefined,
+      '{"looks":"like json"}',
+      '{"looks":"like json"}',
+    ],
+    ["unparseable structured text", { name: "object" }, "{ trunc", "{ trunc"],
+  ])("records step output for %s", async (_, outputSpec, text, expected) => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-structured";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#classify", name: "classify" })
+      .withTraceId(traceId);
+    const callId = "call-structured";
+
+    await integration.onStart?.({
+      ...startEvent(callId),
+      output: outputSpec,
+    } as any);
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [{ role: "user", content: "Classify this" }],
+    } as any);
+    await integration.onStepEnd?.(stepEndEvent(callId, text));
+    await integration.onEnd?.({ callId, text } as any);
+
+    const trace = await provider.getTrace(traceId);
+    const step = trace?.spans.find(s => s.parentId);
+    expect(step?.llm?.output).toEqual(expected);
+  });
+});
+
+function evaluateStartEvent(callId: string) {
+  return {
+    callId,
+    operationId: "ai.evaluate",
+    runtimeContext: {},
+    provider: "typesafe.evaluation",
+    modelId: "jev-latest",
+    state: { message: "I was charged twice." },
+    questions: {
+      department: {
+        type: "choice",
+        instructions: "Which team should handle this?",
+        criteria: { billing: null, technical: null },
+      },
+      requestsRefund: {
+        type: "boolean",
+        instructions: "Is the customer requesting money back?",
+      },
+    },
+    maxRetries: 2,
+    headers: undefined,
+    providerOptions: {},
+  } satisfies Parameters<
+    VercelAISDKTelemetry["experimental_onEvaluateStart"]
+  >[0];
+}
+
+function evaluateEndEvent(callId: string) {
+  return {
+    ...evaluateStartEvent(callId),
+    answers: {
+      department: {
+        type: "choice",
+        choice: "billing",
+        probabilities: { billing: 0.93, technical: 0.07 },
+      },
+      requestsRefund: { type: "boolean", probability: 0.88 },
+    },
+    usage: { inputTokens: 40, outputTokens: 2, totalTokens: 42 },
+    warnings: [],
+    rounding: { probabilityDecimals: 2 },
+    providerMetadata: { typesafe: { confidence: { department: 0.81 } } },
+    response: { timestamp: new Date(), modelId: "jev-2026-09-01" },
+  } satisfies Parameters<VercelAISDKTelemetry["experimental_onEvaluateEnd"]>[0];
+}
+
+describe("evaluations", () => {
+  it("records an evaluation as one LLM span: state and questions in, answers out", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "triage#route", name: "route" })
+      .withTraceId("t-eval");
+
+    await integration.experimental_onEvaluateStart?.(evaluateStartEvent("e1"));
+    expect(integration.wasStarted()).toBe(true);
+    await integration.experimental_onEvaluateEnd?.(evaluateEndEvent("e1"));
+
+    const trace = await provider.getTrace("t-eval");
+    expect(trace?.trace.status).toBe("ok");
+    expect(trace?.spans).toHaveLength(1);
+    const [span] = trace!.spans;
+    expect(span).toMatchObject({
+      kind: "LLM",
+      name: "triage#route",
+      status: "ok",
+      prompt: { id: "triage#route" },
+      llm: {
+        provider: "typesafe.evaluation",
+        // The version the alias resolved to, not the alias.
+        model: "jev-2026-09-01",
+        input: {
+          state: { message: "I was charged twice." },
+          questions: { department: { type: "choice" } },
+        },
+        promptTokens: 40,
+        completionTokens: 2,
+        totalTokens: 42,
+      },
+    });
+    // Confidence comes back as provider metadata; it's recorded on its answer.
+    expect(span.llm?.output).toEqual({
+      department: {
+        type: "choice",
+        choice: "billing",
+        probabilities: { billing: 0.93, technical: 0.07 },
+        confidence: 0.81,
+      },
+      requestsRefund: { type: "boolean", probability: 0.88 },
+    });
+  });
+
+  it("closes an evaluation's span as an error on onError, which sends no onEnd", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const integration = evalution
+      .createTelemetryForPrompt()
+      .withTraceId("t-err");
+
+    await integration.experimental_onEvaluateStart?.(evaluateStartEvent("e2"));
+    await integration.onError?.({
+      callId: "e2",
+      error: new Error("422: criteria must not be empty"),
+    });
+
+    const trace = await provider.getTrace("t-err");
+    expect(trace?.trace.status).toBe("error");
+    expect(trace?.spans[0]).toMatchObject({
+      status: "error",
+      errorMessage: "422: criteria must not be empty",
+    });
+
+    // The run's rejection then reaches `fail()`, which mustn't rewrite the
+    // trace's error with its own.
+    await integration.fail("a different message");
+    expect(
+      (await provider.getTrace("t-err"))?.trace.attributes?.errorMessage,
+    ).not.toBe("a different message");
+  });
+
+  it("closes a generation's spans on onError too", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const integration = evalution
+      .createTelemetryForPrompt()
+      .withTraceId("t-gen");
+
+    await integration.onStart?.(startEvent("g1"));
+    await integration.onError?.({ callId: "g1", error: new Error("boom") });
+
+    expect((await provider.getTrace("t-gen"))?.trace.status).toBe("error");
+  });
+
+  it("ignores onError for a call it isn't recording", async () => {
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    await evalution.onError({ callId: "unknown", error: new Error("x") });
+    expect(await provider.getAllTraces()).toHaveLength(0);
+  });
+
+  it("reports whether the SDK ever started the run", () => {
+    const integration = new VercelAISDKTelemetry()
+      .createTelemetryForPrompt()
+      .withTraceId("t-none");
+    expect(integration.wasStarted()).toBe(false);
+  });
+
+  it("records evaluations through the global fallback, without identity", async () => {
+    const evalution = new VercelAISDKTelemetry({ nativeTelemetry: "always" });
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+
+    await evalution.experimental_onEvaluateStart(evaluateStartEvent("e3"));
+    await evalution.experimental_onEvaluateEnd(evaluateEndEvent("e3"));
+
+    const [trace] = await provider.getAllTraces();
+    expect(trace.status).toBe("ok");
+    expect(trace.name).toBe("ai.evaluate");
+  });
+});
+
+// A durable runtime (a workflow, say) re-runs a finished generation from its
+// cached results after a restart, reporting every span again from a fresh
+// isolate. Bound to the same trace id, it must land on the same spans.
+describe("a replayed generation", () => {
+  const traceId = "trace-replay";
+  const callId = "call-replay";
+  const search = { toolCallId: "t1", toolName: "search", input: { q: "x" } };
+
+  async function generate(provider: MemoryTraceProvider, now: number) {
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const evalution = new VercelAISDKTelemetry();
+    evalution.addSink(provider);
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#plan", name: "plan" })
+      .withTraceId(traceId);
+    await integration.onStart?.(startEvent(callId));
+    for (const stepNumber of [0, 1]) {
+      await integration.onStepStart?.({
+        ...startEvent(callId),
+        stepNumber,
+        steps: [],
+        messages: [{ role: "user", content: "Plan it" }],
+      } as any);
+      if (stepNumber === 0) {
+        await integration.onToolExecutionStart?.({
+          callId,
+          toolCall: search,
+          messages: [],
+          toolContext: {},
+        } as any);
+        await integration.onToolExecutionEnd?.({
+          callId,
+          toolCall: search,
+          toolOutput: { type: "tool-result", output: { hits: 1 } },
+          messages: [],
+          toolContext: {},
+        } as any);
+      }
+      await integration.onStepEnd?.({
+        ...stepEndEvent(callId, stepNumber === 0 ? "" : "Done"),
+        stepNumber,
+      });
+    }
+    await integration.onEnd?.({ callId, text: "Done" } as any);
+    return integration;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("updates the spans it recorded, rather than adding new ones", async () => {
+    const provider = new MemoryTraceProvider();
+    await generate(provider, 1000);
+    // A copy: the provider hands out its live span list.
+    const original = structuredClone(await provider.getTrace(traceId));
+    expect(original?.spans).toHaveLength(4); // root, 2 steps, 1 tool
+
+    await generate(provider, 9000);
+
+    const replayed = await provider.getTrace(traceId);
+    expect(replayed?.trace.status).toBe("ok");
+    const byId = (t: typeof original) =>
+      [...(t?.spans ?? [])].sort((a, b) => a.id.localeCompare(b.id));
+    // The same spans, timings and all: a replay reports what already
+    // happened, so what was recorded the first time stands.
+    expect(byId(replayed)).toEqual(byId(original));
+  });
+
+  it("lets a retry replace the spans of a run that failed", async () => {
+    const provider = new MemoryTraceProvider();
+    vi.spyOn(Date, "now").mockReturnValue(1000);
+    const failed = new VercelAISDKTelemetry();
+    failed.addSink(provider);
+    const integration = failed
+      .createTelemetryForPrompt({ id: "mod#plan", name: "plan" })
+      .withTraceId(traceId);
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [],
+    } as any);
+    await integration.onError?.({ callId, error: new Error("rate limited") });
+    expect((await provider.getTrace(traceId))?.trace.status).toBe("error");
+
+    await generate(provider, 9000);
+
+    const trace = await provider.getTrace(traceId);
+    expect(trace?.trace.status).toBe("ok");
+    expect(trace?.spans).toHaveLength(4);
+    for (const span of trace?.spans ?? []) {
+      expect(span.status).toBe("ok");
+      expect(span.errorMessage).toBeUndefined();
+    }
+  });
+
+  it("finishes the spans a cut-off run left open", async () => {
+    const provider = new MemoryTraceProvider();
+    vi.spyOn(Date, "now").mockReturnValue(1000);
+    const cutOff = new VercelAISDKTelemetry();
+    cutOff.addSink(provider);
+    const integration = cutOff
+      .createTelemetryForPrompt({ id: "mod#plan", name: "plan" })
+      .withTraceId(traceId);
+    await integration.onStart?.(startEvent(callId));
+    await integration.onStepStart?.({
+      ...startEvent(callId),
+      stepNumber: 0,
+      steps: [],
+      messages: [],
+    } as any);
+    // ... and the isolate is gone.
+
+    await generate(provider, 9000);
+
+    const trace = await provider.getTrace(traceId);
+    expect(trace?.trace.status).toBe("ok");
+    expect(trace?.spans).toHaveLength(4);
+    expect(trace?.spans.every(s => s.status === "ok")).toBe(true);
+  });
+});

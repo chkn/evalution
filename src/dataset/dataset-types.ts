@@ -6,6 +6,7 @@
  * to exercise prompts. See `specs/datasets.md`.
  */
 
+import type { PromptID } from "@evalution/sdk";
 import type { ColumnPath, DatasetColumnSpec } from "../shared/column-paths.ts";
 import type {
   ExecutionInput,
@@ -13,7 +14,6 @@ import type {
   ResourceInstanceInput,
   RunResources,
 } from "../shared/types.ts";
-import type { PromptID } from "../trace/trace-types.ts";
 
 /**
  * One column of a {@link Dataset}.

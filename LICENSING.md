@@ -14,8 +14,7 @@ those files win.
 | Distribute a modified evalution                                           | AGPL-3.0: ship your source under the AGPL.                |
 | **Host** evalution as a network service (SaaS)                            | AGPL-3.0 §13: offer the full source — **including any providers loaded through its config** — to your users. |
 | Write a provider/extension and distribute it separately                   | Free. License it however you like (see below).            |
-| Use `@evalution/vercel-ai-sdk` in your own project                        | MIT. Use it anywhere, including closed-source.             |
-| Use `@evalution/typesafe-sdk` in your own project                         | MIT. Use it anywhere, including closed-source.             |
+| Use any `@evalution/*` package in your own project                        | MIT. Use it anywhere, including closed-source.             |
 
 ## The core: AGPL-3.0-only + a section 7 addendum
 
@@ -42,48 +41,31 @@ The net effect, by design: provider authors stay free; people self-hosting for
 themselves stay free; only operators turning evalution + providers into a
 network service take on the source-sharing obligation.
 
-## The Vercel AI SDK adapter: MIT
+## The SDK packages: MIT
 
-[`packages/vercel-ai-sdk`](./packages/vercel-ai-sdk) (`@evalution/vercel-ai-sdk`)
-is **MIT** ([`LICENSE`](./packages/vercel-ai-sdk/LICENSE)) so it can be imported
-into any project, including closed-source ones, without AGPL obligations.
+Everything under [`packages/`](./packages) is **MIT**, so it can be imported into
+any project, including closed-source ones, without AGPL obligations:
 
-For that promise to be real, the package's published `dist` must contain only
-permissively licensed code:
+- [`@evalution/sdk`](./packages/sdk), the base the others build on: the trace
+  model, the sinks and ingestors, and the contract an SDK adapter implements.
+- [`@evalution/vercel-ai-sdk`](./packages/vercel-ai-sdk),
+  [`@evalution/typesafe-sdk`](./packages/typesafe-sdk) and
+  [`@evalution/gemini-interactions-sdk`](./packages/gemini-interactions-sdk), the
+  integrations with each AI SDK.
 
-- The package takes **no runtime dependency** on the AGPL core — only
-  `peerDependencies` on `ai` and the `@ai-sdk/*` packages.
-- It does bundle a handful of files from the core, via the build:
-  [`src/trace/prompt-tracer.ts`](./src/trace/prompt-tracer.ts),
-  [`src/trace/trace-types.ts`](./src/trace/trace-types.ts),
-  [`src/trace/trace-sink.ts`](./src/trace/trace-sink.ts),
-  [`src/trace/trace-ingestor.ts`](./src/trace/trace-ingestor.ts),
-  [`src/trace/http-trace-sink.ts`](./src/trace/http-trace-sink.ts),
-  [`src/trace/evaluation-answers.ts`](./src/trace/evaluation-answers.ts), and
-  [`src/sdk/vercel-ai-sdk/telemetry.ts`](./src/sdk/vercel-ai-sdk/telemetry.ts).
-  Each is **dual-licensed `MIT OR AGPL-3.0-only`** (see its SPDX header),
-  so the bytes that land in the MIT package are genuinely MIT.
-- Those files must stay **self-contained** — only `@opentelemetry/api`, a
-  type-only `ai` import, and each other. If any of them ever imports from
-  elsewhere in the core, the bundler would pull AGPL-only code into the MIT
-  artifact and break this guarantee. (The AGPL-only `BaseTraceProvider`,
-  `OTelTraceIngestor`, `MemoryTraceProvider`, and `span-merge.ts` stay on the
-  core side of that boundary, even though `BaseTraceProvider` lives in the
-  same dual-licensed `trace-sink.ts` file as the `TraceSink` interface — it
-  has no AGPL-only dependencies of its own, so this holds without further
-  bookkeeping.)
+For that promise to be real, the published packages must contain only permissively
+licensed code, so **nothing under `packages/` may import the AGPL core**. The core
+depends on the SDK packages, never the reverse, and `src/license-boundary.test.ts`
+enforces it. (Test files are exempt: they aren't published.) Where an adapter needs
+something only the core can do, the core passes it in at run time.
 
-## The TypeSafe adapter: MIT
+## Files derived from MIT-licensed code
 
-[`packages/typesafe-sdk`](./packages/typesafe-sdk) (`@evalution/typesafe-sdk`)
-is **MIT** ([`LICENSE`](./packages/typesafe-sdk/LICENSE)) on the same terms as
-the Vercel AI SDK adapter above: no runtime dependency on the core
-(`peerDependencies` on `@typesafe-ai/sdk` and `@opentelemetry/api` only), and
-the only core files it bundles —
-[`src/trace/prompt-tracer.ts`](./src/trace/prompt-tracer.ts) and
-[`src/sdk/typesafe-sdk/telemetry.ts`](./src/sdk/typesafe-sdk/telemetry.ts),
-with the dual-licensed `src/trace/` files the latter imports — are
-**dual-licensed `MIT OR AGPL-3.0-only`** and self-contained.
+A few files in the core derive from third-party MIT-licensed code and carry that
+code's notice, so they are **dual-licensed `MIT OR AGPL-3.0-only`**:
+[`src/trace/otlp/otlp-protobuf.ts`](./src/trace/otlp/otlp-protobuf.ts) and, under
+`src/client/components/trace/`, `imageSrc.ts`, `JsonView.tsx` and
+`AnnotationChip.tsx`.
 
 ## Contributing
 

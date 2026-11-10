@@ -3,10 +3,10 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { VercelAISDK } from "@evalution/vercel-ai-sdk/config";
 import { valueToSourceText } from "ts-proppy";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryFileProvider } from "../../file-provider-memory.ts";
-import { VercelAISDK } from "../../sdk/vercel-ai-sdk/index.ts";
 import type {
   NormalizedChatPrompt,
   NormalizedPrompt,

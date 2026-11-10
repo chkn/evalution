@@ -7,8 +7,8 @@
  * unit-tested without a browser (see `CLAUDE.md`).
  */
 
+import { isCheckSpan } from "@evalution/sdk";
 import type { Span } from "../../../shared/types";
-import { isCheckSpan } from "../../../trace/trace-types";
 
 /** Aggregate token/cost/model usage across a trace's spans, for the trace header. */
 export interface UsageSummary {

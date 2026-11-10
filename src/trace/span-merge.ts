@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { Span } from "./trace-types.ts";
+import type { Span } from "@evalution/sdk";
 
 /**
  * Merges a later snapshot of a span into an earlier one.

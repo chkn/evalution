@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { CHECK_ATTRIBUTE, type Span } from "@evalution/sdk";
 import { describe, expect, it } from "vitest";
 import { rollupSpans } from "./span-rollup.ts";
-import { CHECK_ATTRIBUTE, type Span } from "./trace-types.ts";
 
 function llmSpan(id: string, llm: Span["llm"]): Span {
   return {

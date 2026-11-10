@@ -9,6 +9,7 @@
  * @module evalution/checks
  */
 
+import type { Span, TraceWithSpans } from "@evalution/sdk";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import {
   type Check,
@@ -17,7 +18,6 @@ import {
 } from "../prompt/playground/check.ts";
 import { sameJson } from "../shared/same-json.ts";
 import type { CheckInfo, PropDefinition } from "../shared/types.ts";
-import type { Span, TraceWithSpans } from "../trace/trace-types.ts";
 
 export type { CheckRun };
 

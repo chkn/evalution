@@ -13,8 +13,8 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { TraceSink } from "./trace-sink.ts";
-import { CHECK_ATTRIBUTE, type Span } from "./trace-types.ts";
+import type { TraceSink } from "@evalution/sdk";
+import { CHECK_ATTRIBUTE, type Span } from "@evalution/sdk";
 
 const scopes = new AsyncLocalStorage<CheckScope>();
 

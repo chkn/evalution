@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { Span } from "@evalution/sdk";
+import { BaseTraceIngestor } from "@evalution/sdk";
 import { describe, expect, it } from "vitest";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
-import { BaseTraceIngestor } from "../trace/trace-ingestor.ts";
-import type { Span } from "../trace/trace-types.ts";
-import { setUpProject } from "./project.ts";
+import { movedExportError, setUpProject } from "./project.ts";
 
 /** An in-process ingestor, as an SDK adapter's `setupTraceIngestion` returns one. */
 class InProcessIngestor extends BaseTraceIngestor {
@@ -77,5 +77,43 @@ describe("setUpProject", () => {
         (await traces.getAllTraces()).map(t => [t.id, t.environment]),
       ),
     ).toEqual({ ours: "playground", app: "production", sent: "staging" });
+  });
+});
+
+describe("movedExportError", () => {
+  it("says where an export that left `evalution` went", () => {
+    const err = new SyntaxError(
+      "The requested module 'evalution' does not provide an export named 'VercelAISDK'",
+    );
+    expect(movedExportError(err)?.message).toContain(
+      "import it from '@evalution/vercel-ai-sdk/config'",
+    );
+  });
+
+  it.each([
+    ["VercelAISDKTelemetry", "@evalution/vercel-ai-sdk"],
+    ["TypeSafeSDK", "@evalution/typesafe-sdk/config"],
+    ["TypeSafeTelemetry", "@evalution/typesafe-sdk"],
+    ["GeminiInteractionsSDK", "@evalution/gemini-interactions-sdk/config"],
+  ])("sends %s to %s", (name, target) => {
+    const err = new SyntaxError(
+      `The requested module 'evalution' does not provide an export named '${name}'`,
+    );
+    expect(movedExportError(err)?.message).toContain(`'${target}'`);
+  });
+
+  it("leaves another module's missing export alone", () => {
+    const err = new SyntaxError(
+      "The requested module './mine.ts' does not provide an export named 'VercelAISDK'",
+    );
+    expect(movedExportError(err)).toBeUndefined();
+  });
+
+  it("leaves any other missing export alone", () => {
+    const err = new SyntaxError(
+      "The requested module 'evalution' does not provide an export named 'Nope'",
+    );
+    expect(movedExportError(err)).toBeUndefined();
+    expect(movedExportError(new Error("boom"))).toBeUndefined();
   });
 });

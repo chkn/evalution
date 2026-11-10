@@ -4,8 +4,13 @@
     "src/views/index.ts",
     "src/views/react/index.tsx",
     "src/views/datasets/index.ts",
+    "packages/sdk/src/index.ts",
+    "packages/sdk/src/adapter.ts",
     "packages/vercel-ai-sdk/src/index.ts",
-    "packages/typesafe-sdk/src/index.ts"
+    "packages/vercel-ai-sdk/src/config.ts",
+    "packages/typesafe-sdk/src/index.ts",
+    "packages/typesafe-sdk/src/config.ts",
+    "packages/gemini-interactions-sdk/src/config.ts"
   ],
   "out": "docs/extensibility/api",
   "tsconfig": "tsconfig.typedoc.json",

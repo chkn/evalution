@@ -13,10 +13,9 @@ your acceptance as described in [`CLA.md`](./CLA.md).
 ## Licensing
 
 How the code is licensed — AGPL-3.0 core, the section 7 Provider addendum, and
-the MIT `@evalution/vercel-ai-sdk` adapter — is explained in
-[`LICENSING.md`](./LICENSING.md). If you touch
-[`src/trace/prompt-tracer.ts`](./src/trace/prompt-tracer.ts), note its
-dual-license header and keep it self-contained.
+the MIT packages under `packages/` — is explained in
+[`LICENSING.md`](./LICENSING.md). Nothing published from `packages/` may import
+the core.
 
 ## Development
 

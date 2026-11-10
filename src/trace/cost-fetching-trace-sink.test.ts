@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { Span } from "@evalution/sdk";
 import { describe, expect, it, vi } from "vitest";
 import { CostFetchingTraceSink } from "./cost-fetching-trace-sink.ts";
 import { MemoryTraceProvider } from "./memory-trace-provider.ts";
-import type { Span } from "./trace-types.ts";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

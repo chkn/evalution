@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { TRACE_EVENTS_PATH } from "@evalution/sdk";
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -25,7 +26,6 @@ import type {
   ViewList,
 } from "../shared/types.ts";
 import { VIEW_FRAME_PATH } from "../shared/view-surfaces.ts";
-import { TRACE_EVENTS_PATH } from "../trace/http-trace-sink.ts";
 import type { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import type { TraceEventIngestor } from "../trace/trace-event-ingestor.ts";
 import type { ApiContext } from "./api-context.ts";

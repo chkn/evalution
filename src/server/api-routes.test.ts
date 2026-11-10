@@ -4,6 +4,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { HttpTraceSink } from "@evalution/sdk";
 import { trace } from "@opentelemetry/api";
 import { connect, type Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
@@ -19,7 +20,6 @@ import {
 import { PromptRegistry } from "../prompt/prompt-registry.ts";
 import type { ExecuteRequest, PropType, SSEData } from "../shared/types.ts";
 import { runMigrations } from "../trace/db/migrate.ts";
-import { HttpTraceSink } from "../trace/http-trace-sink.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import { TraceEventIngestor } from "../trace/trace-event-ingestor.ts";

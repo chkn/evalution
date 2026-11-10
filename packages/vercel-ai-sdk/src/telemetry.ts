@@ -1,0 +1,658 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Alexander Corrado
+
+import { mergePromptIdentity, type PromptSpanInfo } from "@evalution/sdk";
+import type { Instructions, ModelMessage, Telemetry } from "ai"; // type-only: keeps `ai` an optional peer dep
+
+type Arrayable<T> = T | T[];
+
+import {
+  answersWithConfidence,
+  BaseTraceIngestor,
+  HttpTraceSink,
+  makeBrand,
+  type Span,
+  type SpanContentPart,
+  type SpanMessage,
+  type SpanToolCallPart,
+  toolCallingOutput,
+  unwrapToolResultOutput,
+} from "@evalution/sdk";
+
+export interface PerPromptTelemetry extends Telemetry {
+  /**
+   * Returns a new instance that will use the given trace ID.
+   *
+   * @param runIdentity - What the caller knows about this run that the
+   *   integration's own identity doesn't — the playground's inputs and the
+   *   version it ran — filled in wherever the integration's identity is unset.
+   */
+  withTraceId(traceId: string, runIdentity?: PromptSpanInfo): PerTraceTelemetry;
+}
+const { brand: brandPerPrompt, isBranded: isPerPromptTelemetry } =
+  makeBrand<PerPromptTelemetry>(
+    Symbol.for("evalution.VercelAISDKTelemetry.PerPromptTelemetry"),
+  );
+
+export { isPerPromptTelemetry };
+
+export interface PerTraceTelemetry extends PerPromptTelemetry {
+  /**
+   * Marks this run's trace as failed. Used by `executeConfig` to surface a
+   * `generateText` rejection that happens before `onStart` fires (e.g. a
+   * bad model id) — without this, the trace pre-created for the route's
+   * synchronous response would otherwise hang in `running` forever. If spans
+   * were already opened before the rejection, they are closed as `error` too.
+   * Does nothing if `onError` already closed the run.
+   */
+  fail(message: string): Promise<void>;
+  /**
+   * Whether the SDK has reported this run's start. An `ai` release too old to
+   * send an operation's events never will, which `executeConfig` checks so
+   * the trace doesn't hang in `running`.
+   */
+  wasStarted(): boolean;
+}
+
+const { brand: brandTelemetry, isBranded: isVercelAISDKTelemetry } =
+  makeBrand<VercelAISDKTelemetry>(Symbol.for("evalution.VercelAISDKTelemetry"));
+
+export { isVercelAISDKTelemetry };
+
+export interface VercelAISDKTelemetryOptions {
+  /**
+   * Native telemetry collection: `"auto"` (default) collects natively unless
+   * an OpenTelemetry integration is also active for the call, in which case
+   * it defers to OTel; `"always"` forces native telemetry collection, even
+   * alongside OTel; `"never"` always defers.
+   */
+  nativeTelemetry?: "auto" | "always" | "never";
+  /**
+   * The base URL of an evalution server to send traces to, through an
+   * {@link HttpTraceSink}. Defaults to the `EVALUTION_ENDPOINT` environment
+   * variable, if set; `false` sends nowhere, whatever the environment says.
+   */
+  endpoint?: string | false;
+}
+
+function toSpanMessages(
+  messages: ModelMessage[],
+  instructions?: Instructions,
+): SpanMessage[] | undefined {
+  let combinedMessages: ModelMessage[];
+  if (instructions) {
+    const systemMessages: ModelMessage[] =
+      typeof instructions === "string"
+        ? [{ role: "system", content: instructions }]
+        : Array.isArray(instructions)
+          ? instructions
+          : [instructions];
+    combinedMessages = [...systemMessages, ...messages];
+  } else {
+    combinedMessages = messages;
+  }
+  return combinedMessages.map(msg => {
+    const role = msg.role;
+    const content = msg.content;
+    if (typeof content === "string") return { role, content };
+
+    const parts: SpanContentPart[] = [];
+    for (const c of content) {
+      if (c.type === "text") {
+        if (c.text) parts.push({ type: "text", text: c.text });
+      } else if (c.type === "reasoning") {
+        if (c.text) parts.push({ type: "reasoning", text: c.text });
+      } else if (c.type === "image") {
+        const image =
+          typeof c.image === "string" ? c.image : c.image?.toString();
+        if (image) {
+          parts.push({
+            type: "image",
+            image,
+            ...(c.mediaType && { mediaType: c.mediaType }),
+          });
+        }
+      } else if (c.type === "file" && c.mediaType?.startsWith("image/")) {
+        const data = typeof c.data === "string" ? c.data : c.data?.toString();
+        if (data)
+          parts.push({ type: "image", image: data, mediaType: c.mediaType });
+      } else if (c.type === "tool-call") {
+        parts.push({
+          type: "tool-call",
+          toolCallId: c.toolCallId,
+          toolName: c.toolName,
+          input: c.input,
+        });
+      } else if (c.type === "tool-result") {
+        parts.push({
+          type: "tool-result",
+          toolCallId: c.toolCallId,
+          toolName: c.toolName,
+          ...unwrapToolResultOutput(c.output),
+        });
+      }
+    }
+    // Collapse an all-text part list back to a plain string — the common
+    // case, and keeps existing string-content consumers working unchanged.
+    if (parts.length > 0 && parts.every(p => p.type === "text")) {
+      return {
+        role,
+        content: parts.map(p => (p as { text: string }).text).join(""),
+      };
+    }
+    return { role, content: parts };
+  });
+}
+
+export function toArray<T>(v: Arrayable<T> | undefined) {
+  return v === undefined ? [] : Array.isArray(v) ? [...v] : [v];
+}
+
+type Callbacks = Required<Telemetry>;
+
+type EvaluateStartEvent = Parameters<
+  Callbacks["experimental_onEvaluateStart"]
+>[0];
+
+/** An `onError` event: the call that failed, and why. */
+interface ErrorEvent {
+  callId?: string;
+  error?: unknown;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Per-call run state, keyed by the v7 event `callId`. Holds the open spans of
+ * one in-flight generation so lifecycle events can be matched to the span they
+ * close — tools by `toolCallId` (they may run in parallel), the step and root
+ * by position.
+ */
+interface RunState {
+  readonly traceId: string;
+  /** The root span; closed by `onEnd`. */
+  readonly root: Span;
+  /** The current step span, if one is open; closed by `onStepEnd`. */
+  step?: Span;
+  /** Open tool spans keyed by `toolCallId`, so concurrent tools stay distinct. */
+  readonly tools: Map<string, Span>;
+  /** Whether the call declared a structured output, so step text is JSON. */
+  readonly structuredOutput: boolean;
+}
+
+/**
+ * Whether a call's `onStart` event declares a structured output
+ * (`Output.object`, `Output.array`, …) rather than the default text. The event
+ * shape varies across operations, so this reads it defensively.
+ */
+function isStructuredOutput(event: unknown): boolean {
+  const output = (event as { output?: unknown } | undefined)?.output;
+  if (!output || typeof output !== "object") return false;
+  const name = (output as { name?: unknown }).name;
+  return typeof name === "string" && name !== "text";
+}
+
+/**
+ * A step's text as the data it encodes, when the call declared a structured
+ * output. Text that doesn't parse (a truncated response, say) is kept as is.
+ */
+function parseStructured(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Native v7 AI SDK `Telemetry` integration that records evalution traces
+ * without going through OpenTelemetry.
+ *
+ * When your app starts, register this globally via `registerTelemetry(new Evalution())` to capture
+ * every `generateText`/`streamText` call as a fallback (events are keyed by
+ * `callId`, so concurrent calls stay correctly separated, though the fallback
+ * lacks prompt identity). The `prompts()` helper additionally swaps in a
+ * per-call integration from {@link createTelemetryForPrompt} so
+ * helper-defined prompts are recorded with full identity.
+ *
+ * When it sends traces to an evalution server (see
+ * {@link VercelAISDKTelemetryOptions.endpoint}), they go in the background:
+ * `await` {@link flush} before a short-lived process — a script, a
+ * serverless function — exits, so none are lost.
+ *
+ * When an OpenTelemetry integration is also active, this class
+ * defers to it by default (see {@link VercelAISDKTelemetryOptions.nativeTelemetry}) rather
+ * than emitting a duplicate, parallel trace.
+ */
+export class VercelAISDKTelemetry
+  extends BaseTraceIngestor
+  implements Telemetry
+{
+  /**
+   * This instance's configured {@link VercelAISDKTelemetryOptions.nativeTelemetry}.
+   * Read by the `prompts()` helper to decide whether to defer to a sibling
+   * OpenTelemetry integration for a given call.
+   */
+  readonly nativeTelemetry: "auto" | "always" | "never";
+  private readonly runs = new Map<string, RunState>();
+
+  constructor(options: VercelAISDKTelemetryOptions = {}) {
+    super();
+    this.nativeTelemetry = options.nativeTelemetry ?? "auto";
+    // `process` is absent in some runtimes (e.g. Cloudflare Workers).
+    const endpoint =
+      options.endpoint ?? globalThis.process?.env?.EVALUTION_ENDPOINT;
+    if (endpoint) this.addSink(new HttpTraceSink({ endpoint }));
+    brandTelemetry(this);
+  }
+
+  private shouldDeferGlobally(): boolean {
+    if (this.nativeTelemetry === "always") return false;
+    if (this.nativeTelemetry === "never") return true;
+    // ensure we update if other cases are added in the future
+    const _auto: "auto" = this.nativeTelemetry;
+    const integrations = toArray(globalThis.AI_SDK_TELEMETRY_INTEGRATIONS);
+    return integrations.some(i => i?.constructor?.name === "OpenTelemetry");
+  }
+
+  // ── Telemetry interface: global fallback (no prompt identity) ──────────
+
+  onStart: Callbacks["onStart"] = event =>
+    this.shouldDeferGlobally() ? undefined : this.handleStart(event);
+  onStepStart: Callbacks["onStepStart"] = event => this.handleStepStart(event);
+  onToolExecutionStart: Callbacks["onToolExecutionStart"] = event =>
+    this.handleToolExecutionStart(event);
+  onToolExecutionEnd: Callbacks["onToolExecutionEnd"] = event =>
+    this.handleToolExecutionEnd(event);
+  onStepEnd: Callbacks["onStepEnd"] = event => this.handleStepEnd(event);
+  onEnd: Callbacks["onEnd"] = event => this.handleEnd(event);
+  onAbort: Callbacks["onAbort"] = event => this.handleAbort(event);
+  onError: Callbacks["onError"] = async event => {
+    await this.handleError(event);
+  };
+  experimental_onEvaluateStart: Callbacks["experimental_onEvaluateStart"] =
+    event =>
+      this.shouldDeferGlobally() ? undefined : this.handleEvaluateStart(event);
+  experimental_onEvaluateEnd: Callbacks["experimental_onEvaluateEnd"] = event =>
+    this.handleEvaluateEnd(event);
+
+  /**
+   * Mints a `PerPromptTelemetry` integration bound to the given prompt identity.
+   * Used by the `prompts()` helper so a helper-defined prompt is recorded with
+   * full identity. Called with no `identity` (e.g. by the playground for a raw,
+   * non-helper config) it still binds a trace id but records without prompt
+   * identity — the same data the global fallback would, just under a known id.
+   */
+  createTelemetryForPrompt(identity?: PromptSpanInfo): PerPromptTelemetry {
+    const perPromptTelemetry: PerPromptTelemetry = brandPerPrompt({
+      onStart: event => this.handleStart(event, { identity }),
+      onStepStart: event => this.handleStepStart(event),
+      onToolExecutionStart: event => this.handleToolExecutionStart(event),
+      onToolExecutionEnd: event => this.handleToolExecutionEnd(event),
+      onStepEnd: event => this.handleStepEnd(event),
+      onEnd: event => this.handleEnd(event),
+      onAbort: event => this.handleAbort(event),
+      onError: async event => {
+        await this.handleError(event);
+      },
+      experimental_onEvaluateStart: event =>
+        this.handleEvaluateStart(event, { identity }),
+      experimental_onEvaluateEnd: event => this.handleEvaluateEnd(event),
+      // The brand is non-enumerable, so the spread below drops it — the result
+      // is re-branded by `brandPerPrompt`.
+      withTraceId: (traceId, runIdentity) => {
+        const merged = mergePromptIdentity(identity, runIdentity);
+        let started = false;
+        let errored = false;
+        return brandPerPrompt({
+          ...perPromptTelemetry,
+          onStart: event => {
+            started = true;
+            return this.handleStart(event, { identity: merged, traceId });
+          },
+          experimental_onEvaluateStart: event => {
+            started = true;
+            return this.handleEvaluateStart(event, {
+              identity: merged,
+              traceId,
+            });
+          },
+          onError: async event => {
+            if (await this.handleError(event)) errored = true;
+          },
+          // `onError` already closed the run (and so failed the trace); a
+          // second failure would only rewrite it.
+          fail: message =>
+            errored ? Promise.resolve() : this.handleFail(traceId, message),
+          wasStarted: () => started,
+        });
+      },
+    });
+    return perPromptTelemetry;
+  }
+
+  // ── Shared event handlers ───────────────────────────────────────────────
+
+  private async handleStart(
+    event: Parameters<Callbacks["onStart"]>[0],
+    {
+      identity,
+      traceId = crypto.randomUUID(),
+    }: { identity?: PromptSpanInfo; traceId?: string } = {},
+  ): Promise<void> {
+    const startTime = Date.now();
+    const name = identity?.id ?? event.operationId ?? "generation";
+
+    const span: Span = {
+      id: `${traceId}:root`,
+      traceId,
+      name,
+      kind: "AGENT",
+      startTime,
+      llm: {
+        provider: event.provider,
+        model: event.modelId,
+      },
+      prompt: identity?.id
+        ? {
+            id: identity.id,
+            functionParameters: identity.functionParameters,
+            functionInputs: identity.functionInputs,
+            executeInputs: identity.executeInputs,
+            resources: identity.resources,
+            parameterDefinitions: identity.parameterDefinitions,
+            executeParameterDefinitions: identity.executeParameterDefinitions,
+            version: identity.version,
+            variation: identity.variation,
+          }
+        : undefined,
+    };
+
+    this.runs.set(event.callId, {
+      traceId,
+      root: span,
+      tools: new Map(),
+      // Anything but the default text output means the model's text is the
+      // JSON encoding of data (`Output.object`, `Output.array`, …).
+      structuredOutput: isStructuredOutput(event),
+    });
+
+    // The root span's `recordSpanStart` creates the `running` trace; no
+    // separate pre-creation step is needed.
+    await this.recordSpanStart(span);
+  }
+
+  /**
+   * An `experimental_evaluate` call: one `LLM` span, since there are no steps
+   * or tools — the model answers every question in one call. Its input is the
+   * state and the questions, recorded as they were asked.
+   */
+  private async handleEvaluateStart(
+    event: EvaluateStartEvent,
+    {
+      identity,
+      traceId = crypto.randomUUID(),
+    }: { identity?: PromptSpanInfo; traceId?: string } = {},
+  ): Promise<void> {
+    const span: Span = {
+      id: `${traceId}:root`,
+      traceId,
+      name: identity?.id ?? event.operationId,
+      kind: "LLM",
+      startTime: Date.now(),
+      llm: {
+        provider: event.provider,
+        model: event.modelId,
+        input: { state: event.state, questions: event.questions },
+      },
+      prompt: identity?.id
+        ? {
+            id: identity.id,
+            functionParameters: identity.functionParameters,
+            functionInputs: identity.functionInputs,
+            executeInputs: identity.executeInputs,
+            resources: identity.resources,
+            parameterDefinitions: identity.parameterDefinitions,
+            version: identity.version,
+            variation: identity.variation,
+          }
+        : undefined,
+    };
+    this.runs.set(event.callId, {
+      traceId,
+      root: span,
+      tools: new Map(),
+      structuredOutput: false,
+    });
+    await this.recordSpanStart(span);
+  }
+
+  private async handleEvaluateEnd(
+    event: Parameters<Callbacks["experimental_onEvaluateEnd"]>[0],
+  ): Promise<void> {
+    const run = this.runs.get(event.callId);
+    if (!run) return;
+    this.runs.delete(event.callId);
+
+    const { inputTokens, outputTokens, totalTokens } = event.usage;
+    await this.recordSpanEnd({
+      ...run.root,
+      endTime: Date.now(),
+      status: "ok",
+      llm: {
+        ...run.root.llm,
+        // The model that actually answered: an alias like `jev-latest`
+        // resolves to a version.
+        model: event.response?.modelId ?? event.modelId,
+        output: answersWithConfidence(event.answers, event.providerMetadata),
+        ...(inputTokens !== undefined && { promptTokens: inputTokens }),
+        ...(outputTokens !== undefined && { completionTokens: outputTokens }),
+        ...(totalTokens !== undefined && { totalTokens }),
+      },
+    });
+  }
+
+  private async handleStepStart(
+    event: Parameters<Callbacks["onStepStart"]>[0],
+  ): Promise<void> {
+    const run = this.runs.get(event.callId);
+    if (!run) return;
+
+    const input = toSpanMessages(event.messages, event.instructions);
+    const span: Span = {
+      // Derived, like the root's, so a generation replayed under the same
+      // trace id reports the same spans.
+      id: `${run.traceId}:step:${event.stepNumber}`,
+      traceId: run.traceId,
+      parentId: run.root.id,
+      name: event.modelId,
+      kind: "LLM",
+      startTime: Date.now(),
+      llm: {
+        provider: event.provider,
+        model: event.modelId,
+        input,
+      },
+    };
+    run.step = span;
+    await this.recordSpanStart(span);
+  }
+
+  private async handleToolExecutionStart(
+    event: Parameters<Callbacks["onToolExecutionStart"]>[0],
+  ): Promise<void> {
+    const run = this.runs.get(event.callId);
+    if (!run) return;
+
+    // Tools belong to the current step (or the root, if a tool is somehow
+    // reported outside a step). Parenting to `run.step` rather than "the most
+    // recently opened span" keeps parallel tool calls siblings under the step.
+    const parentSpan = run.step ?? run.root;
+    const span: Span = {
+      id: `${parentSpan.id}:tool:${event.toolCall.toolCallId}`,
+      traceId: run.traceId,
+      parentId: parentSpan.id,
+      name: event.toolCall.toolName,
+      kind: "TOOL",
+      startTime: Date.now(),
+      tool: {
+        toolName: event.toolCall.toolName,
+        toolCallId: event.toolCall.toolCallId,
+        input: event.toolCall.input,
+      },
+    };
+    run.tools.set(event.toolCall.toolCallId, span);
+    await this.recordSpanStart(span);
+  }
+
+  private async handleToolExecutionEnd(
+    event: Parameters<Callbacks["onToolExecutionEnd"]>[0],
+  ): Promise<void> {
+    const run = this.runs.get(event.callId);
+    if (!run) return;
+
+    // Correlate by `toolCallId` so the right span is closed even when tools
+    // execute (and therefore finish) in parallel.
+    const startSpan = run.tools.get(event.toolCall.toolCallId);
+    if (!startSpan) return;
+    run.tools.delete(event.toolCall.toolCallId);
+
+    const isError = event.toolOutput.type === "tool-error";
+    const span: Span = {
+      ...startSpan,
+      endTime: Date.now(),
+      status: isError ? "error" : "ok",
+      errorMessage: isError ? String(event.toolOutput.error) : undefined,
+      tool: {
+        toolName: event.toolCall.toolName,
+        toolCallId: event.toolCall.toolCallId,
+        input: event.toolCall.input,
+        output: isError ? undefined : event.toolOutput?.output,
+      },
+    };
+    await this.recordSpanEnd(span);
+  }
+
+  private async handleStepEnd(
+    event: Parameters<Callbacks["onStepEnd"]>[0],
+  ): Promise<void> {
+    const run = this.runs.get(event.callId);
+    if (!run?.step) return;
+
+    const startSpan = run.step;
+    run.step = undefined;
+    const toolCalls: SpanToolCallPart[] = (event.toolCalls ?? []).map(c => ({
+      type: "tool-call",
+      toolCallId: c.toolCallId,
+      toolName: c.toolName,
+      input: c.input,
+    }));
+    const span: Span = {
+      ...startSpan,
+      endTime: Date.now(),
+      status: event.finishReason === "error" ? "error" : "ok",
+      llm: {
+        ...(startSpan.llm ?? {}),
+        provider: event.model.provider,
+        model: event.model.modelId,
+        finishReason: event.finishReason,
+        output:
+          toolCalls.length > 0
+            ? toolCallingOutput(event.text, toolCalls)
+            : run.structuredOutput
+              ? parseStructured(event.text)
+              : event.text,
+        ...(event.reasoningText && { reasoning: event.reasoningText }),
+        promptTokens: event.usage.inputTokens,
+        completionTokens: event.usage.outputTokens,
+        totalTokens: event.usage.totalTokens,
+        cacheReadTokens: event.usage.inputTokenDetails.cacheReadTokens,
+        cacheWriteTokens: event.usage.inputTokenDetails.cacheWriteTokens,
+      },
+    };
+    await this.recordSpanEnd(span);
+  }
+
+  private async handleEnd(
+    event: Parameters<Callbacks["onEnd"]>[0],
+  ): Promise<void> {
+    const run = this.runs.get(event.callId);
+    if (!run) return;
+    this.runs.delete(event.callId);
+
+    if (run.step || run.tools.size > 0) {
+      console.warn("[VercelAISDKTelemetry] spans left over in onEnd!");
+    }
+
+    const span: Span = {
+      ...run.root,
+      endTime: Date.now(),
+      status: "ok",
+    };
+    await this.recordSpanEnd(span);
+  }
+
+  private async handleAbort(
+    event: Parameters<Callbacks["onAbort"]>[0],
+  ): Promise<void> {
+    const run = this.runs.get(event.callId);
+    if (!run) return;
+    this.runs.delete(event.callId);
+    await this.endOpenSpansAsError(run, String(event.reason));
+  }
+
+  /**
+   * Closes a run's still-open spans (tools, then step, then root) as `error`.
+   * Ending the root finalizes the trace as `error`. Used by both `onAbort` and
+   * the `fail()` path so a mid-flight rejection doesn't leave spans hanging in
+   * `running`.
+   */
+  private async endOpenSpansAsError(
+    run: RunState,
+    message: string,
+  ): Promise<void> {
+    const open = [
+      ...run.tools.values(),
+      ...(run.step ? [run.step] : []),
+      run.root,
+    ];
+    for (const startSpan of open) {
+      await this.recordSpanEnd({
+        ...startSpan,
+        endTime: Date.now(),
+        status: "error",
+        errorMessage: message,
+      });
+    }
+  }
+
+  /**
+   * The SDK's report that a call failed. Nothing else closes its spans: a
+   * failed operation sends no `onEnd`. Returns whether it closed a run.
+   */
+  private async handleError(event: unknown): Promise<boolean> {
+    const { callId, error } = (event ?? {}) as ErrorEvent;
+    const run = callId === undefined ? undefined : this.runs.get(callId);
+    if (!run) return false;
+    this.runs.delete(callId!);
+    await this.endOpenSpansAsError(run, errorMessage(error));
+    return true;
+  }
+
+  private async handleFail(traceId: string, message: string): Promise<void> {
+    // Find the in-flight run for this trace (the `fail()` caller only knows the
+    // traceId). If onStart already opened spans, close them as error — which
+    // also finalizes the trace. If the rejection beat onStart, there are no
+    // spans yet, so just fail the trace the route pre-created.
+    const entry = [...this.runs].find(([, run]) => run.traceId === traceId);
+    if (entry) {
+      const [callId, run] = entry;
+      this.runs.delete(callId);
+      await this.endOpenSpansAsError(run, message);
+    } else {
+      await this.failTrace(traceId, message);
+    }
+  }
+}

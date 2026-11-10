@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { PLAYGROUND_RESOURCE } from "@evalution/sdk";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it } from "vitest";
@@ -8,7 +9,6 @@ import type { Span, TraceStreamEvent } from "../shared/types.ts";
 import { MemoryTraceProvider } from "./memory-trace-provider.ts";
 import { OTelTraceIngestor } from "./otel-trace-ingestor.ts";
 import { mergeSpans } from "./span-merge.ts";
-import { PLAYGROUND_RESOURCE } from "./trace-ingestor.ts";
 import {
   PROMPT_ID_ATTRIBUTE,
   PROMPT_INPUTS_ATTRIBUTE,

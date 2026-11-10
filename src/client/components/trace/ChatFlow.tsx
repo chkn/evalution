@@ -17,13 +17,13 @@
  * arrives. See `specs/trace-workshopping.md` §D.
  */
 
+import { outputMessages, spanMessages } from "@evalution/sdk";
 import { useEffect, useRef, useState } from "react";
 import type {
   Annotation,
   LLMSpanDetails,
   SpanMessage,
 } from "../../../shared/types";
-import { outputMessages, spanMessages } from "../../../trace/trace-types";
 import { AnnotationCountBadges } from "./AnnotationChip.tsx";
 import { formatDuration } from "./format.ts";
 import { ChevronIcon, StopwatchIcon, WrenchIcon } from "./icons.tsx";

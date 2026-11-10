@@ -8,9 +8,8 @@
  * `specs/trace-workshopping.md` "Verification" ("Provider parity").
  */
 
+import type { Span, TraceSink, TraceStreamEvent } from "@evalution/sdk";
 import { afterAll, describe, expect, it } from "vitest";
-import type { TraceSink } from "./trace-sink.ts";
-import type { Span, TraceStreamEvent } from "./trace-types.ts";
 
 /** Minimal surface every `BaseTraceProvider` subclass exposes. */
 export interface ContractProvider extends TraceSink {

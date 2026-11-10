@@ -1,0 +1,49 @@
+{
+  "name": "@evalution/gemini-interactions-sdk",
+  "version": "1.0.8",
+  "description": "Run Gemini Interactions API prompts in Evalution",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "prepare": "npm run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "exports": {
+    "./config": {
+      "evalution-source": "./src/config.ts",
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js"
+    }
+  },
+  "dependencies": {
+    "@evalution/sdk": "1.0.8"
+  },
+  "peerDependencies": {
+    "@google/genai": ">=2.0.0-0",
+    "typescript": ">=5.3.3-0 <7.0.0-0",
+    "ts-proppy": "0.3.3"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    },
+    "ts-proppy": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "ts-proppy": "0.3.3",
+    "tsdown": "^0.22.1",
+    "typescript": "^5.3.3"
+  },
+  "keywords": [
+    "evalution",
+    "gemini",
+    "ai",
+    "prompt"
+  ],
+  "license": "MIT"
+}

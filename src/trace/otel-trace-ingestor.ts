@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { Span } from "@evalution/sdk";
+import { BaseTraceIngestor, type TraceIngestor } from "@evalution/sdk";
 import type { HrTime } from "@opentelemetry/api";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type {
@@ -9,8 +11,6 @@ import type {
   SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import { llmAndPrompt, mapStatus, readKind } from "./otel-attributes.ts";
-import { BaseTraceIngestor, type TraceIngestor } from "./trace-ingestor.ts";
-import type { Span } from "./trace-types.ts";
 
 function hrTimeToMs(time: HrTime): number {
   return time[0] * 1000 + time[1] / 1e6;

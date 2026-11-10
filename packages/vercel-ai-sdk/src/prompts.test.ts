@@ -4,12 +4,9 @@
 import type { Tracer } from "@opentelemetry/api";
 import type { Telemetry } from "ai";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  isPerPromptTelemetry,
-  toArray,
-} from "../../../src/sdk/vercel-ai-sdk/telemetry.ts";
 import { MemoryTraceProvider } from "../../../src/trace/memory-trace-provider.ts";
 import { Evalution, type Prompt, prompts, withTraceId } from "./index.js";
+import { isPerPromptTelemetry, toArray } from "./telemetry.ts";
 
 describe("prompts() telemetry wrapping — v6 (experimental_telemetry)", () => {
   const psi = { id: "mod" };

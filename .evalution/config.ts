@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { VercelAISDK } from "@evalution/vercel-ai-sdk/config";
 import type { EvalutionConfig } from "evalution";
-import { FilePromptProvider, VercelAISDK } from "evalution";
+import { FilePromptProvider } from "evalution";
 
 export default {
   promptProviders: [

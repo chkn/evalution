@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { PLAYGROUND_ENVIRONMENT } from "@evalution/sdk";
 import { type EvalCounts, emptyCounts } from "../../eval/eval-types";
 import type { AnnotationKind, TraceSummary } from "../../shared/types";
-import { PLAYGROUND_ENVIRONMENT } from "../../trace/trace-types";
 
 /**
  * One trace-list entry: a trace, or a group of traces gathered under one row

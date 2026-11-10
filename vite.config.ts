@@ -59,6 +59,8 @@ export default defineConfig({
     // A symlinked (`npm link`-style) ts-proppy has its own node_modules/react;
     // dedupe so there's only ever one copy of React.
     dedupe: ["react", "react-dom"],
+    // Workspace packages resolve to their TypeScript source, not a build.
+    conditions: ["evalution-source"],
     alias: {
       "@shared": path.resolve(__dirname, "./src/shared"),
     },

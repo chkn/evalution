@@ -36,23 +36,25 @@
     "LICENSING.md"
   ],
   "workspaces": [
+    "packages/sdk",
     "packages/vercel-ai-sdk",
-    "packages/typesafe-sdk"
+    "packages/typesafe-sdk",
+    "packages/gemini-interactions-sdk"
   ],
   "engines": {
     "node": ">=22.18.0"
   },
   "scripts": {
     "prepublishOnly": "npm run build",
-    "version": "npm version $npm_package_version --no-git-tag-version --workspaces && git add .",
+    "version": "npm version $npm_package_version --no-git-tag-version --workspaces && node scripts/pin-workspace-deps.ts && npm install --package-lock-only && git add .",
     "build": "npm run build:cli && npm run build:client",
     "build:cli": "tsdown",
     "build:client": "vite build",
     "dev": "concurrently 'npm run dev:server' 'npm run dev:client'",
-    "dev:server": "node src/cli/index.ts",
-    "dev:server:debug": "node --inspect src/cli/index.ts",
+    "dev:server": "node --conditions=evalution-source src/cli/index.ts",
+    "dev:server:debug": "node --inspect --conditions=evalution-source src/cli/index.ts",
     "dev:client": "vite --mode development",
-    "typecheck": "concurrently 'tsc --noEmit' 'tsc --noEmit -p tsconfig.client.json' 'tsc --noEmit -p packages/vercel-ai-sdk' 'tsc --noEmit -p packages/typesafe-sdk'",
+    "typecheck": "concurrently 'tsc --noEmit' 'tsc --noEmit -p tsconfig.client.json' 'tsc --noEmit -p packages/sdk' 'tsc --noEmit -p packages/vercel-ai-sdk' 'tsc --noEmit -p packages/typesafe-sdk' 'tsc --noEmit -p packages/gemini-interactions-sdk'",
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run",
@@ -64,6 +66,7 @@
     "db:bundle": "node scripts/generate-migration-bundle.ts src/trace/db/migrations && node scripts/generate-migration-bundle.ts src/dataset/db/migrations && node scripts/generate-migration-bundle.ts src/prompt/variations/db/migrations && node scripts/generate-migration-bundle.ts src/eval/db/migrations"
   },
   "dependencies": {
+    "@evalution/sdk": "1.0.8",
     "@hono/node-server": "^2.0.4",
     "@lydell/node-pty": "^1.2.0-beta.12",
     "@modelcontextprotocol/client": "^2.2.0",
@@ -87,27 +90,27 @@
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@google/genai": ">=2.0.0-0",
-    "@typesafe-ai/sdk": ">=0.6.0-0",
-    "ai": ">=3.4.0-0",
     "typescript": ">=5.3.3-0 <7.0.0-0",
     "react": ">=18.0.0",
-    "react-dom": ">=18.0.0"
+    "react-dom": ">=18.0.0",
+    "@evalution/vercel-ai-sdk": ">=1.0.8 <3",
+    "@evalution/typesafe-sdk": ">=1.0.8 <3",
+    "@evalution/gemini-interactions-sdk": ">=1.0.8 <3"
   },
   "peerDependenciesMeta": {
-    "ai": {
-      "optional": true
-    },
-    "@google/genai": {
-      "optional": true
-    },
-    "@typesafe-ai/sdk": {
-      "optional": true
-    },
     "react": {
       "optional": true
     },
     "react-dom": {
+      "optional": true
+    },
+    "@evalution/vercel-ai-sdk": {
+      "optional": true
+    },
+    "@evalution/typesafe-sdk": {
+      "optional": true
+    },
+    "@evalution/gemini-interactions-sdk": {
       "optional": true
     }
   },

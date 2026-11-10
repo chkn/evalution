@@ -9,8 +9,8 @@ The model pickers offer curated presets with friendly names. They are polish, no
 
 | File | Scope | Shape |
 |---|---|---|
-| `src/sdk/vercel-ai-sdk/model-definition.ts` | OpenAI + Anthropic + Google | `CURATED_MODELS`, via `model(provider, label, modelId)` |
-| `src/sdk/gemini-interactions-sdk.ts` | Google only, via the Interactions API | `CURATED_MODELS` and `CURATED_AGENTS`, `{ label, id }` entries |
+| `packages/vercel-ai-sdk/src/model-definition.ts` | OpenAI + Anthropic + Google | `CURATED_MODELS`, via `model(provider, label, modelId)` |
+| `packages/gemini-interactions-sdk/src/config.ts` | Google only, via the Interactions API | `CURATED_MODELS` and `CURATED_AGENTS`, `{ label, id }` entries |
 
 ## Rule: only official provider docs
 
@@ -51,7 +51,7 @@ Shared conventions:
 
 ```bash
 npm run typecheck
-npx vitest run src/sdk/vercel-ai-sdk/model-definition.test.ts src/sdk/gemini-interactions-sdk.test.ts src/server/service-worker.test.ts
+npx vitest run packages/vercel-ai-sdk/src/model-definition.test.ts packages/gemini-interactions-sdk/src/config.test.ts src/server/service-worker.test.ts
 ```
 
 No new test is needed for a pure data-table refresh — the existing tests cover the shape. A change to the `model()` helper or the definition *structure* does need one.

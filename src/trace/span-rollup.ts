@@ -14,7 +14,7 @@ import {
   DEPLOYMENT_ENVIRONMENT_ATTRIBUTE,
   isCheckSpan,
   type Span,
-} from "./trace-types.ts";
+} from "@evalution/sdk";
 
 /** Token/cost/model rollup across a trace's spans, as carried by `TraceSummary`. */
 export interface SpanRollup {

@@ -3,7 +3,17 @@
 
 import { access, constants } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import type {
+  Annotation,
+  AnnotationChanges,
+  Span,
+  Trace,
+  TraceStreamEvent,
+  TraceSummary,
+  TraceWithSpans,
+} from "@evalution/sdk";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
+import { BaseTraceProvider } from "./base-trace-provider.ts";
 import { createLocalTursoClient } from "./db/local-turso-client.ts";
 import { runMigrations } from "./db/migrate.ts";
 import { TRACE_QUERY_SCHEMA } from "./db/query-schema.ts";
@@ -15,16 +25,6 @@ import {
 } from "./db/read-only-query.ts";
 import { mkdirSelfIgnoring } from "./db/self-ignoring-dir.ts";
 import type { TraceProvider } from "./trace-provider.ts";
-import { BaseTraceProvider } from "./trace-sink.ts";
-import type {
-  Annotation,
-  AnnotationChanges,
-  Span,
-  Trace,
-  TraceStreamEvent,
-  TraceSummary,
-  TraceWithSpans,
-} from "./trace-types.ts";
 import { TursoTraceProvider } from "./turso-trace-provider.ts";
 
 /** Default path (relative to CWD), matching {@link LocalDatabaseTraceProviderOptions.path}'s default. */

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { TraceSinkEvent } from "./http-trace-sink.ts";
-import { BaseTraceIngestor } from "./trace-ingestor.ts";
+import type { TraceSinkEvent } from "@evalution/sdk";
+import { BaseTraceIngestor } from "@evalution/sdk";
 
 /**
  * {@link TraceIngestor} populated by the {@link TraceSinkEvent}s an app's

@@ -61,7 +61,7 @@ export function findAgent(agentId: string): CodingAgent | undefined {
  * order — each is a {@link SetupTask} whose lone {@link SetupStep} runs the
  * agent's CLI with the setup prompt queued up in an interactive terminal.
  *
- * Mirrors {@link AI_SDK_REGISTRY} in `../sdk/registry.ts`, but agents have no
+ * Mirrors {@link AI_SDK_SETUP_TASKS} in `../sdk/registry.ts`, but agents have no
  * adapter class, so they're derived here from {@link CODING_AGENTS}.
  */
 export const AGENT_REGISTRY: readonly SetupTask[] = CODING_AGENTS.map(

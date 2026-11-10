@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { CHECK_ATTRIBUTE } from "@evalution/sdk";
 import { trace } from "@opentelemetry/api";
 import { connect, type Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
@@ -22,7 +23,6 @@ import type {
 } from "../shared/types.ts";
 import { CheckScopeTraceSink } from "../trace/check-scope.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
-import { CHECK_ATTRIBUTE } from "../trace/trace-types.ts";
 import { runEvalMigrations } from "./db/migrate.ts";
 import {
   EvalRunner,

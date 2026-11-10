@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { VercelAISDK } from "@evalution/vercel-ai-sdk/config";
 import { connect, type Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryFileProvider } from "../../file-provider-memory.ts";
-import { VercelAISDK } from "../../sdk/vercel-ai-sdk/index.ts";
 import type {
   NormalizedChatPrompt,
   PropValue,

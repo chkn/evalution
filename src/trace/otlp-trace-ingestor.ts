@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { Span } from "@evalution/sdk";
+import { BaseTraceIngestor } from "@evalution/sdk";
 import { llmAndPrompt, readKind } from "./otel-attributes.ts";
 import type {
   NormalizedOtlpEvent,
   NormalizedOtlpSpan,
 } from "./otlp/normalize.ts";
-import { BaseTraceIngestor } from "./trace-ingestor.ts";
-import type { Span } from "./trace-types.ts";
 
 function eventErrorMessage(
   events: NormalizedOtlpEvent[] | undefined,

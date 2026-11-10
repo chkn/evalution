@@ -3,8 +3,8 @@
 
 import { getDiscriminatedUnionInfo, type PropDefinition } from "ts-proppy";
 import { describe, expect, it } from "vitest";
-import { TYPESAFE_FALLBACK } from "../../sdk/typesafe-sdk/fallback.ts";
-import { VERCEL_EVALUATION_FALLBACK } from "../../sdk/vercel-ai-sdk/evaluation-fallback.ts";
+import { TYPESAFE_FALLBACK } from "../../../packages/typesafe-sdk/src/fallback.ts";
+import { VERCEL_EVALUATION_FALLBACK } from "../../../packages/vercel-ai-sdk/src/evaluation-fallback.ts";
 import {
   entryMembers,
   isNullableEntryRecord,

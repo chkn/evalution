@@ -7,6 +7,7 @@
  * the prompt registry. See `specs/evals.md` §C and §D.
  */
 
+import type { PromptID, TraceWithSpans } from "@evalution/sdk";
 import type { Tracer } from "@opentelemetry/api";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import {
@@ -35,7 +36,6 @@ import { evalProblems, unboundRequired } from "../shared/eval-problems.ts";
 import type { NormalizedPrompt, PromptRef } from "../shared/types.ts";
 import { CheckScope } from "../trace/check-scope.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
-import type { PromptID, TraceWithSpans } from "../trace/trace-types.ts";
 import type { EvalProvider } from "./eval-provider.ts";
 import type {
   EvalArm,

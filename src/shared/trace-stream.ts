@@ -7,7 +7,7 @@
  * the trace from the same events (`specs/trace-visualizers.md` §C.1).
  */
 
-import type { Span, Trace, TraceStreamEvent } from "../trace/trace-types.ts";
+import type { Span, Trace, TraceStreamEvent } from "@evalution/sdk";
 
 /** A trace as far as it's known: `trace` is `null` until it's loaded. */
 export interface TraceState<T extends Trace | null = Trace | null> {

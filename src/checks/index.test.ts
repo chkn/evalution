@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { Span, TraceWithSpans } from "@evalution/sdk";
 import { describe, expect, it } from "vitest";
 import type { CheckRun } from "../prompt/playground/check.ts";
-import type { Span, TraceWithSpans } from "../trace/trace-types.ts";
 import {
   builtinCheck,
   builtinCheckInfos,

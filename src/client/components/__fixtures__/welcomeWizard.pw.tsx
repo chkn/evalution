@@ -52,7 +52,7 @@ const SDK_TASKS = [
         id: "create-config",
         path: ".evalution/config.ts",
         contents:
-          "import { FilePromptProvider, VercelAISDK } from 'evalution';\n",
+          "import { FilePromptProvider } from 'evalution';\nimport { VercelAISDK } from '@evalution/vercel-ai-sdk/config';\n",
         completed: false,
       },
     ],

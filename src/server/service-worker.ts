@@ -13,10 +13,10 @@
  * @module
  */
 
+import { VercelAISDK } from "@evalution/vercel-ai-sdk/config";
 import { Hono } from "hono";
 import { MemoryFileProvider } from "../file-provider-memory.ts";
 import { FilePromptProvider } from "../prompt/file/file-prompt-provider.ts";
-import { VercelAISDK } from "../sdk/vercel-ai-sdk/index.ts";
 import type { SSEData } from "../shared/types.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { createProjectContext } from "./api-context.ts";

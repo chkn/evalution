@@ -2,10 +2,11 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import path from "node:path";
+import type { PromptSpanInfo } from "@evalution/sdk";
+import type { SDKAdapter } from "@evalution/sdk/adapter";
 import { builtinCheck, builtinCheckInfos } from "../../checks/index.ts";
 import type { FileProvider } from "../../file-provider.ts";
 import { LocalFileProvider } from "../../file-provider-local.ts";
-import type { SDKAdapter } from "../../sdk/sdk-adapter.ts";
 import { isEditable } from "../../shared/helpers.ts";
 import type {
   AddPromptContext,
@@ -18,7 +19,7 @@ import type {
   PropDefinition,
   RunResources,
 } from "../../shared/types.ts";
-import type { PromptSpanInfo } from "../../trace/prompt-tracer.ts";
+import { setupGlobalOTelPipeline } from "../../trace/otel-global-pipeline.ts";
 import {
   collectInputSlots,
   type InputSource,
@@ -1513,7 +1514,7 @@ export class FilePromptProvider
   }
 
   async setupTraceIngestion() {
-    return this.sdkAdapter.setupTraceIngestion?.();
+    return this.sdkAdapter.setupTraceIngestion?.({ setupGlobalOTelPipeline });
   }
 
   async renamePrompt(

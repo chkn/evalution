@@ -13,7 +13,7 @@
     "resolveJsonModule": true,
     "declaration": true,
     "outDir": "./dist",
-    "rootDir": "./src",
+    "customConditions": ["evalution-source"],
     "types": ["node", "vitest/globals"]
   },
   // Typecheck everything under src/ except the client and views (which

@@ -22,7 +22,7 @@ export {
   PROMPT_VARIATION_ATTRIBUTE,
   PROMPT_VERSION_ATTRIBUTE,
   SPAN_KIND_ATTRIBUTE,
-} from "./prompt-tracer.ts";
+} from "@evalution/sdk";
 
 /**
  * A read-only store of execution traces that the playground can display and

@@ -8,6 +8,7 @@
  * for the local one-file-per-dataset layout. See `specs/datasets.md` §E.
  */
 
+import type { PromptID } from "@evalution/sdk";
 import type { Database } from "@tursodatabase/sync";
 import { and, asc, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
@@ -34,7 +35,6 @@ import {
   type SqlQueryOptions,
   type SqlQueryResult,
 } from "../trace/db/read-only-query.ts";
-import type { PromptID } from "../trace/trace-types.ts";
 import {
   fieldIdFor,
   mintRowId,

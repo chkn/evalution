@@ -5,6 +5,13 @@
  * Helpers for integrating TypeSafe System One prompts with Evalution.
  * @module @evalution/typesafe-sdk
  */
+
+import {
+  createTracerForPrompt,
+  type PromptSpanInfo,
+  type PromptsHelper,
+  type PromptsHelperOptions,
+} from "@evalution/sdk";
 import { type Span, SpanStatusCode, type Tracer } from "@opentelemetry/api";
 import type {
   Questions,
@@ -12,23 +19,19 @@ import type {
   SystemOneResult,
   TypeSafeClient,
 } from "@typesafe-ai/sdk";
-
-// Bundled in by tsdown, so the package takes no runtime dependency on the
-// rest of `evalution`.
 import {
   PROMPT_IDENTITY,
   promptIdentityOf,
   systemOneErrorMessage,
   systemOneRequestAttributes,
   systemOneResultAttributes,
-} from "../../../src/sdk/typesafe-sdk/telemetry.js";
-import {
-  createTracerForPrompt,
-  type PromptSpanInfo,
-  type PromptsHelper,
-  type PromptsHelperOptions,
-} from "../../../src/trace/prompt-tracer.js";
+} from "./telemetry.ts";
 
+export {
+  type SystemOneCallOptions,
+  type SystemOneCallRecord,
+  TypeSafeTelemetry,
+} from "./telemetry.ts";
 export { PROMPT_IDENTITY, type PromptSpanInfo };
 
 /** A prompt function: builds a System One request from its arguments. */

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { useState } from "react";
-import { VERCEL_EVALUATION_FALLBACK } from "../../../sdk/vercel-ai-sdk/evaluation-fallback";
+import { VERCEL_EVALUATION_FALLBACK } from "../../../../packages/vercel-ai-sdk/src/evaluation-fallback.ts";
 import type {
   NormalizedPromptUpdates,
   NormalizedQuestionsPrompt,

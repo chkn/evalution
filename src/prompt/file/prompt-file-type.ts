@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type {
+  ProbeResult,
+  ProbeResults,
+  TypeProbe,
+} from "@evalution/sdk/adapter";
 import type { PropDefinition, ValueFactory } from "ts-proppy";
 import type { FileProvider } from "../../file-provider.ts";
 import type {
@@ -9,6 +14,14 @@ import type {
   PropValue,
 } from "../../shared/types.ts";
 import type { TSPromptFileType } from "./ts/ts-prompt-file-type.ts";
+
+export type {
+  FactoriesProbe,
+  ProbeResult,
+  ProbeResults,
+  TypeExpressionProbe,
+  TypeProbe,
+} from "@evalution/sdk/adapter";
 
 /** Metadata attached to prompts that originate from a file on disk. */
 export interface FilePromptMetadata {
@@ -50,101 +63,6 @@ export interface ParsePromptsOptions {
    */
   companionFiles?: readonly string[];
 }
-
-/**
- * A type question for a {@link PromptFileType} to answer on an
- * {@link SDKAdapter}'s behalf.
- *
- * Neither side can answer alone. Knowing that a Vercel AI SDK config's tools
- * imply a `toolsContext` is SDK semantics; *evaluating* that mapping is a
- * TypeScript capability. So the adapter says what to look for and the file
- * type contributes the checker.
- */
-export type TypeProbe = TypeExpressionProbe | FactoriesProbe;
-
-/** A probe that resolves a type expression to a {@link PropDefinition}. */
-export interface TypeExpressionProbe {
-  kind: "type";
-  /**
-   * The name the result is reported under — for an execute parameter, its
-   * name, and the name of the resolved {@link PropDefinition}.
-   */
-  name: string;
-  /**
-   * Source text of a type expression, in the file type's
-   * {@link PromptFileType.language}, that resolves to the type.
-   *
-   * In a prompt probe, the token `$config` stands for the type of whatever the
-   * prompt returns, and the file type substitutes a way to name it — which
-   * shape a prompt file uses is the file type's knowledge, not the adapter's.
-   * A project probe has no prompt, so `$config` resolves to `never` there.
-   *
-   * Write it defensively: a probe that cannot find what it is looking for
-   * should resolve to `never` (which means "there is no such thing"), never
-   * fail to compile. That is what lets an adapter emit a probe without first
-   * inspecting the parse result.
-   *
-   * For instance, the Vercel AI SDK derives its `toolsContext` from whichever
-   * of a config's tools declare a `contextSchema`, with the `never` branch
-   * covering a config that has no tools at all:
-   *
-   * ```ts
-   * "$config extends { tools: infer T extends ToolSet } ? InferToolSetContext<T> : never"
-   * ```
-   */
-  expression: string;
-  /**
-   * How to label the resolved type in the UI, when the checker's own spelling
-   * would be unreadable — a deeply-instantiated mapped type is accurate and
-   * useless as a label. The resolved *shape* is unaffected.
-   */
-  syntax?: string;
-  /** Documentation shown beside the resolved definition in the UI. */
-  description?: string;
-}
-
-/**
- * A probe that resolves to the {@link ValueFactory}s among some modules'
- * exports: every export that can be called to produce a value assignable to
- * {@link produces}.
- *
- * The adapter says *what* to look for; the file type knows *how* to ask in its
- * language. A module that isn't installed contributes nothing rather than
- * failing the probe.
- */
-export interface FactoriesProbe {
-  kind: "factories";
-  /** The name the result is reported under. */
-  name: string;
-  /** Module specifiers whose exports to consider, e.g. `"@ai-sdk/openai"`. */
-  modules: string[];
-  /**
-   * A type expression, in the file type's language, naming what a factory's
-   * call must produce, e.g. `import("ai").LanguageModel`.
-   */
-  produces: string;
-  /**
-   * Consider a method of each export rather than the export itself: with
-   * `"evaluationModel"`, an exported provider object `typeSafeAi` whose
-   * `evaluationModel(…)` produces the type is found as the factory
-   * `typeSafeAi.evaluationModel`, still bound to the import of `typeSafeAi`.
-   */
-  member?: string;
-}
-
-/**
- * What one probe resolved to: a {@link PropDefinition} for a `type` probe or
- * the {@link ValueFactory}s found by a `factories` probe; `null` for a definite
- * "no such thing" (the expression evaluated to `never`); or `undefined` for
- * "could not be evaluated".
- */
-export type ProbeResult = PropDefinition | ValueFactory[] | null | undefined;
-
-/**
- * Project probe results, keyed by probe name. See
- * {@link SDKAdapter.getProjectProbes}.
- */
-export type ProbeResults = Record<string, ProbeResult>;
 
 /** The project-scoped half of a {@link TypeResolutionRequest}. */
 export interface ProjectProbeRequest {

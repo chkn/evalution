@@ -10,6 +10,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  isTraceSink,
+  PLAYGROUND_RESOURCE,
+  type TraceIngestor,
+} from "@evalution/sdk";
 import type { EvalutionConfig } from "../config.ts";
 import type { DatasetProvider } from "../dataset/dataset-provider.ts";
 import { LocalDirectoryDatasetProvider } from "../dataset/local-directory-dataset-provider.ts";
@@ -21,12 +26,7 @@ import { CostFetchingTraceSink } from "../trace/cost-fetching-trace-sink.ts";
 import { LocalDatabaseTraceProvider } from "../trace/local-database-trace-provider.ts";
 import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import { TraceEventIngestor } from "../trace/trace-event-ingestor.ts";
-import {
-  PLAYGROUND_RESOURCE,
-  type TraceIngestor,
-} from "../trace/trace-ingestor.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
-import { isTraceSink } from "../trace/trace-sink.ts";
 
 export async function findRootDir(
   startDir: string,
@@ -48,9 +48,42 @@ export async function findRootDir(
 
 export async function loadConfig(rootDir: string): Promise<EvalutionConfig> {
   const configPath = path.join(rootDir, ".evalution", "config.ts");
-  const mod = await import(pathToFileURL(configPath).href);
+  let mod: { default?: EvalutionConfig };
+  try {
+    mod = await import(pathToFileURL(configPath).href);
+  } catch (err) {
+    throw movedExportError(err) ?? err;
+  }
   console.log(`⚙️ Loaded config from ${configPath}`);
   return mod.default ?? {};
+}
+
+/** Exports that left `evalution` in 2.0, and the package each is now in. */
+const MOVED_EXPORTS: Record<string, string> = {
+  VercelAISDK: "@evalution/vercel-ai-sdk/config",
+  VercelAISDKTelemetry: "@evalution/vercel-ai-sdk",
+  TypeSafeSDK: "@evalution/typesafe-sdk/config",
+  TypeSafeTelemetry: "@evalution/typesafe-sdk",
+  GeminiInteractionsSDK: "@evalution/gemini-interactions-sdk/config",
+};
+
+/**
+ * If `err` is a config importing something that has moved out of `evalution`,
+ * the error telling the user where it went.
+ */
+export function movedExportError(err: unknown): Error | undefined {
+  if (!(err instanceof SyntaxError)) return undefined;
+  const name =
+    /module 'evalution' does not provide an export named '(\w+)'/.exec(
+      err.message,
+    )?.[1];
+  const target = name && MOVED_EXPORTS[name];
+  if (!target) return undefined;
+  return new Error(
+    `\`${name}\` is no longer exported from 'evalution'. In .evalution/config.ts, ` +
+      `import it from '${target}' instead, and install that package.`,
+    { cause: err },
+  );
 }
 
 export function applyDotenv(rootDir: string): void {

@@ -3,11 +3,11 @@
 
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { VercelAISDK } from "@evalution/vercel-ai-sdk/config";
 import type { PropDefinition } from "ts-proppy";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { LocalFileProvider } from "../../../file-provider-local.ts";
 import { MemoryFileProvider } from "../../../file-provider-memory.ts";
-import { VercelAISDK } from "../../../sdk/vercel-ai-sdk/index.ts";
 import { FilePromptProvider } from "../file-prompt-provider.ts";
 import * as promptProgram from "./prompt-program.ts";
 import { TSPromptFileType } from "./ts-prompt-file-type.ts";

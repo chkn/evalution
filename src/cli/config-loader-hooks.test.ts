@@ -73,55 +73,58 @@ async function makeFixture(
 }
 
 /**
- * Builds a fixture mirroring `npx evalution` pointed at a project: a fake
- * `evalution` package whose lazy `import('ai')` cannot resolve from its own
- * install, and a project that does have `ai` in `node_modules`.
+ * Builds a fixture mirroring `npx evalution` with an adapter package installed
+ * in the project: the adapter's imports are the ones under test.
  */
-async function makePeerDepFixture(
-  withHook: boolean,
-): Promise<{ runner: string; cwd: string }> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "evalution-peer-"));
+async function makeAdapterFixture(adapterSource: string): Promise<{
+  runner: string;
+  cwd: string;
+  writePackage: (
+    dir: "cli" | "project",
+    name: string,
+    body: string,
+  ) => Promise<void>;
+}> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "evalution-adapter-"));
   tmpDirs.push(root);
-
-  // The CLI's own install, in a location with no `ai` anywhere above it.
-  const cliDir = path.join(root, "npx-install", "node_modules", "evalution");
-  await fs.mkdir(cliDir, { recursive: true });
-  await fs.writeFile(
-    path.join(cliDir, "package.json"),
-    JSON.stringify({ name: "evalution", type: "module" }),
-  );
-  await fs.writeFile(
-    path.join(cliDir, "bundle.js"),
-    "export const load = async () => (await import('ai')).marker;\n",
-  );
-
-  // The served project, with `ai` installed the way the user's project has it.
   const cwd = path.join(root, "project");
-  const aiDir = path.join(cwd, "node_modules", "ai");
-  await fs.mkdir(aiDir, { recursive: true });
-  await fs.writeFile(
-    path.join(aiDir, "package.json"),
-    JSON.stringify({ name: "ai", type: "module", exports: "./index.js" }),
-  );
-  await fs.writeFile(
-    path.join(aiDir, "index.js"),
-    "export const marker = 'project-ai';\n",
-  );
+  const cliModules = path.join(root, "npx-install", "node_modules");
 
-  const register = withHook
-    ? `import { registerPeerDependencyResolver } from ${JSON.stringify(hookUrl)};\n` +
-      `registerPeerDependencyResolver(${JSON.stringify(cwd)});\n`
-    : "";
+  const writePackage = async (
+    dir: "cli" | "project",
+    name: string,
+    body: string,
+  ) => {
+    const pkgDir = path.join(
+      dir === "cli" ? cliModules : path.join(cwd, "node_modules"),
+      name,
+    );
+    await fs.mkdir(pkgDir, { recursive: true });
+    await fs.writeFile(
+      path.join(pkgDir, "package.json"),
+      JSON.stringify({ name, type: "module", exports: "./index.js" }),
+    );
+    await fs.writeFile(path.join(pkgDir, "index.js"), body);
+  };
 
+  await writePackage("cli", "evalution", "export {};\n");
+  await writePackage("project", "adapter", adapterSource);
+
+  const anchor = pathToFileURL(
+    path.join(cliModules, "evalution", "index.js"),
+  ).href;
+  const entry = pathToFileURL(
+    path.join(cwd, "node_modules", "adapter", "index.js"),
+  ).href;
   const runner = path.join(root, "runner.mjs");
   await fs.writeFile(
     runner,
-    register +
-      `const { load } = await import(${JSON.stringify(pathToFileURL(path.join(cliDir, "bundle.js")).href)});\n` +
-      `console.log(await load());\n`,
+    `import { registerEvalutionResolver } from ${JSON.stringify(hookUrl)};\n` +
+      `registerEvalutionResolver(${JSON.stringify(anchor)});\n` +
+      `const { value } = await import(${JSON.stringify(entry)});\n` +
+      `console.log(value);\n`,
   );
-
-  return { runner, cwd };
+  return { runner, cwd, writePackage };
 }
 
 describe("config-loader-hooks", () => {
@@ -141,50 +144,63 @@ describe("config-loader-hooks", () => {
     ).toThrow(/Cannot find package 'evalution'/);
   });
 
-  it("resolves `ai` from the served project when the CLI can't see it", async () => {
-    const { runner, cwd } = await makePeerDepFixture(true);
-    const out = execFileSync(process.execPath, [runner], {
+  const run = (runner: string, cwd: string) =>
+    execFileSync(process.execPath, [runner], {
       cwd,
       encoding: "utf8",
-    });
-    expect(out.trim()).toBe("project-ai");
-  });
+      stdio: "pipe",
+    }).trim();
 
-  it("fails without the peer-dep hook, reproducing the npx crash", async () => {
-    const { runner, cwd } = await makePeerDepFixture(false);
-    expect(() =>
-      execFileSync(process.execPath, [runner], { cwd, stdio: "pipe" }),
-    ).toThrow(/Cannot find package 'ai'/);
-  });
-
-  it("reports the original error when the project has no copy either", async () => {
-    const { runner, cwd } = await makePeerDepFixture(true);
-    // Remove the project's `ai`, so neither resolution can succeed.
-    await fs.rm(path.join(cwd, "node_modules"), { recursive: true });
-    let stderr = "";
-    try {
-      execFileSync(process.execPath, [runner], { cwd, stdio: "pipe" });
-      expect.unreachable("expected the import to fail");
-    } catch (err: any) {
-      stderr = String(err.stderr);
-    }
-    expect(stderr).toMatch(/Cannot find package 'ai'/);
-    // The reported importer is the real one, not the retry's synthetic anchor.
-    expect(stderr).toContain("bundle.js");
-    expect(stderr).not.toContain("[evalution-peer-resolver]");
-  });
-
-  it("leaves non-peer specifiers to normal resolution", async () => {
-    const { runner, cwd } = await makePeerDepFixture(true);
-    // `node:path` is not a peer dep; the hook must not touch it.
-    await fs.appendFile(
-      runner,
-      "console.log(typeof (await import('node:path')).join);\n",
+  it("binds an adapter's @evalution/sdk to the CLI's copy, not the project's", async () => {
+    const { runner, cwd, writePackage } = await makeAdapterFixture(
+      "export { value } from '@evalution/sdk';\n",
     );
-    const out = execFileSync(process.execPath, [runner], {
-      cwd,
-      encoding: "utf8",
-    });
-    expect(out.trim().split("\n").at(-1)).toBe("function");
+    await writePackage(
+      "cli",
+      "@evalution/sdk",
+      "export const value = 'cli';\n",
+    );
+    await writePackage(
+      "project",
+      "@evalution/sdk",
+      "export const value = 'project';\n",
+    );
+    expect(run(runner, cwd)).toBe("cli");
+  });
+
+  it("falls back to the CLI's ts-proppy when the project has none", async () => {
+    const { runner, cwd, writePackage } = await makeAdapterFixture(
+      "export { value } from 'ts-proppy';\n",
+    );
+    await writePackage("cli", "ts-proppy", "export const value = 'cli';\n");
+    expect(run(runner, cwd)).toBe("cli");
+  });
+
+  it("prefers the project's own typescript over the CLI's", async () => {
+    const { runner, cwd, writePackage } = await makeAdapterFixture(
+      "export { value } from 'typescript';\n",
+    );
+    await writePackage("cli", "typescript", "export const value = 'cli';\n");
+    await writePackage(
+      "project",
+      "typescript",
+      "export const value = 'project';\n",
+    );
+    expect(run(runner, cwd)).toBe("project");
+  });
+
+  it("reports the original error when neither side has the package", async () => {
+    const { runner, cwd } = await makeAdapterFixture(
+      "export { value } from 'ts-proppy';\n",
+    );
+    expect(() => run(runner, cwd)).toThrow(/Cannot find package 'ts-proppy'/);
+  });
+
+  it("leaves other specifiers to normal resolution", async () => {
+    const { runner, cwd, writePackage } = await makeAdapterFixture(
+      "export { value } from 'other';\n",
+    );
+    await writePackage("cli", "other", "export const value = 'cli';\n");
+    expect(() => run(runner, cwd)).toThrow(/Cannot find package 'other'/);
   });
 });

@@ -12,26 +12,17 @@
  * events rather than an OTel attribute bag.
  */
 
-import type { SpanStatus } from "@opentelemetry/api";
-import { SpanStatusCode } from "@opentelemetry/api";
 import {
-  otelOperationToSpanKind,
-  parseJsonOrRaw,
-  tryParseJson,
-} from "../shared/helpers.ts";
-import { answersWithConfidence } from "./evaluation-answers.ts";
-import {
+  answersWithConfidence,
+  type LLMSpanDetails,
   PROMPT_ID_ATTRIBUTE,
   PROMPT_INPUTS_ATTRIBUTE,
   PROMPT_NAME_ATTRIBUTE,
   PROMPT_PROVIDER_ID_ATTRIBUTE,
   PROMPT_VARIATION_ATTRIBUTE,
   PROMPT_VERSION_ATTRIBUTE,
-  SPAN_KIND_ATTRIBUTE,
-} from "./prompt-tracer.ts";
-import {
-  type LLMSpanDetails,
   type PromptID,
+  SPAN_KIND_ATTRIBUTE,
   type Span,
   type SpanContentPart,
   type SpanKind,
@@ -40,7 +31,14 @@ import {
   type ToolSpanDetails,
   toolCallingOutput,
   unwrapToolResultOutput,
-} from "./trace-types.ts";
+} from "@evalution/sdk";
+import type { SpanStatus } from "@opentelemetry/api";
+import { SpanStatusCode } from "@opentelemetry/api";
+import {
+  otelOperationToSpanKind,
+  parseJsonOrRaw,
+  tryParseJson,
+} from "../shared/helpers.ts";
 
 const KNOWN_KINDS: readonly SpanKind[] = [
   "LLM",

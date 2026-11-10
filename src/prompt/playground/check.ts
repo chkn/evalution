@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import type { TraceWithSpans } from "@evalution/sdk";
 import type { DatasetRow } from "../../dataset/dataset-types.ts";
-import type { TraceWithSpans } from "../../trace/trace-types.ts";
 import type { ResolvedResourceInputs, ResourceInputs } from "./resource.ts";
 
 /**

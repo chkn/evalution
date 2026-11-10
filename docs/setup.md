@@ -60,7 +60,8 @@ Then create `.evalution/config.ts` at your project root:
 ```ts
 // .evalution/config.ts
 import type { EvalutionConfig } from 'evalution';
-import { FilePromptProvider, VercelAISDK } from 'evalution';
+import { FilePromptProvider } from 'evalution';
+import { VercelAISDK } from '@evalution/vercel-ai-sdk/config';
 
 export default {
   promptProviders: [
@@ -71,7 +72,7 @@ export default {
 } satisfies EvalutionConfig;
 ```
 
-By default, the [`FilePromptProvider`](/docs/extensibility/api/classes/FilePromptProvider.html) scans your project for `**/*.prompt.ts` files. The [`VercelAISDK`](/docs/extensibility/api/classes/VercelAISDK.html) adapter tells it how to read, run, and edit the prompts inside them.
+By default, the [`FilePromptProvider`](/docs/extensibility/api/classes/FilePromptProvider.html) scans your project for `**/*.prompt.ts` files. The [`VercelAISDK`](/docs/extensibility/api/classes/_evalution_vercel-ai-sdk_config.VercelAISDK.html) adapter tells it how to read, run, and edit the prompts inside them.
 
 See [Configuration](/docs/config) for the full option set.
 

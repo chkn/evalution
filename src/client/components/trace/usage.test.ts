@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { CHECK_ATTRIBUTE } from "@evalution/sdk";
 import { describe, expect, it } from "vitest";
-import { CHECK_ATTRIBUTE } from "../../../trace/trace-types.ts";
 import { nativeSpan, otelSpan, toolSpan } from "./__fixtures__/spans.ts";
 import { computeCostBreakdown, summarizeUsage } from "./usage.ts";
 

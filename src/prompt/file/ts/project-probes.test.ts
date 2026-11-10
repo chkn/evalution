@@ -8,11 +8,11 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { VercelAISDK } from "@evalution/vercel-ai-sdk/config";
 import type { PropDefinition, ValueFactory } from "ts-proppy";
 import { getOpenStringUnionInfo } from "ts-proppy";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalFileProvider } from "../../../file-provider-local.ts";
-import { VercelAISDK } from "../../../sdk/vercel-ai-sdk/index.ts";
 import type { ParsedPrompt } from "../../../shared/types.ts";
 import { FilePromptProvider } from "../file-prompt-provider.ts";
 import type {

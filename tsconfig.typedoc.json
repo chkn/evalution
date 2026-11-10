@@ -16,7 +16,9 @@
     "src/views/index.ts",
     "src/views/react/index.tsx",
     "src/views/datasets/index.ts",
-    "packages/**/index.ts"
+    "packages/**/index.ts",
+    "packages/**/adapter.ts",
+    "packages/**/config.ts"
   ],
   // Not tsconfig.json's, which leaves the browser-only `src/views` out.
   "exclude": ["node_modules", "dist"]
