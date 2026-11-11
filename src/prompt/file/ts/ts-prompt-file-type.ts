@@ -932,6 +932,10 @@ function moduleFingerprint(
     }
   }
 
+  // Outside Node (the marketing site's in-browser demo) TypeScript has no
+  // file system to look in, and nothing gets installed either.
+  const { sys } = ts;
+  if (!sys) return "";
   const parts: string[] = [];
   for (const specifier of [...specifiers].sort()) {
     if (specifier.startsWith(".")) continue;
@@ -942,8 +946,8 @@ function moduleFingerprint(
     let found = "missing";
     for (let dir = rootDir; ; dir = path.dirname(dir)) {
       const manifest = path.join(dir, "node_modules", pkg, "package.json");
-      if (ts.sys.fileExists(manifest)) {
-        found = `${manifest}@${ts.sys.getModifiedTime?.(manifest)?.getTime() ?? 0}`;
+      if (sys.fileExists(manifest)) {
+        found = `${manifest}@${sys.getModifiedTime?.(manifest)?.getTime() ?? 0}`;
         break;
       }
       if (path.dirname(dir) === dir) break;

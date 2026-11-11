@@ -67,6 +67,9 @@ function isImmutable(fileName: string): boolean {
  * `moduleResolution` settings resolve the way they do for the user's own build.
  */
 function compilerOptionsFor(fromPath: string): ts.CompilerOptions {
+  // Outside Node (the marketing site's in-browser demo) there's no file
+  // system to find one in.
+  if (!ts.sys) return FALLBACK_OPTIONS;
   const configPath = ts.findConfigFile(
     path.dirname(fromPath),
     ts.sys.fileExists,
