@@ -23,17 +23,17 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: pnpm/setup@v3
         with:
-          node-version: 26
-          cache: npm
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
+          runtime: node@26
+          cache: true
+          require-lockfile: true
+      - run: pnpm run lint
+      - run: pnpm run typecheck
       # Every exported type must have a doc comment (CLAUDE.md), which
       # TypeDoc reports as a warning.
-      - run: npm run docs -- --treatWarningsAsErrors
-      - run: npm run build
+      - run: pnpm run docs --treatWarningsAsErrors
+      - run: pnpm run build
 
   test:
     name: Unit tests (Node ${{ matrix.node }})
@@ -46,12 +46,12 @@ jobs:
         node: ["22.18.0", 26]
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: pnpm/setup@v3
         with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci
-      - run: npm test
+          runtime: node@${{ matrix.node }}
+          cache: true
+          require-lockfile: true
+      - run: pnpm test
 
   test-ui:
     name: UI tests
@@ -59,14 +59,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: pnpm/setup@v3
         with:
-          node-version: 26
-          cache: npm
-      - run: npm ci
+          runtime: node@26
+          cache: true
+          require-lockfile: true
       # All three: the view-sandboxing tests run in Firefox and WebKit too.
-      - run: npx playwright install --with-deps chromium firefox webkit
-      - run: npm run test:ui -- --trace retain-on-failure
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - run: pnpm run test:ui --trace retain-on-failure
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

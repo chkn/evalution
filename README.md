@@ -30,21 +30,21 @@ See the [documentation](https://evalut.io/n/docs) for more detailed guidance.
 
 ## Development
 
-1. Install dependencies: `npm install`
-2. Run server and client against the evalution check out: `npm run dev`
+1. Install dependencies: `pnpm install`
+2. Run server and client against the evalution check out: `pnpm run dev`
 3. Run against a different path:
 
 ```sh
-npm run dev:server -- ui <path>
-npm run dev:client
+pnpm run dev:server ui <path>
+pnpm run dev:client
 ```
 Other useful commands:
 
-- `npm test` — run unit tests (`npm run test:coverage` for coverage)
-- `npm run test:ui` — run Playwright component tests
-- `npm run typecheck` — type-check the project
-- `npm run docs` — regenerate the API reference
-- `npm run build` — build the server and client
+- `pnpm test` — run unit tests (`pnpm run test:coverage` for coverage)
+- `pnpm run test:ui` — run Playwright component tests
+- `pnpm run typecheck` — type-check the project
+- `pnpm run docs` — regenerate the API reference
+- `pnpm run build` — build the server and client
 
 ## License
 

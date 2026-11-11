@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "build": "tsdown",
-    "prepare": "npm run build",
+    "prepare": "pnpm run build",
     "typecheck": "tsc --noEmit"
   },
   "exports": {
@@ -19,7 +19,7 @@
     }
   },
   "dependencies": {
-    "@evalution/sdk": "2.0.0"
+    "@evalution/sdk": "workspace:*"
   },
   "peerDependencies": {
     "@google/genai": ">=2.0.0-0",
@@ -45,5 +45,13 @@
     "ai",
     "prompt"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "exports": {
+      "./config": {
+        "types": "./dist/config.d.ts",
+        "import": "./dist/config.js"
+      }
+    }
+  }
 }

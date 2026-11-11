@@ -50,8 +50,8 @@ Shared conventions:
 ## Verify
 
 ```bash
-npm run typecheck
-npx vitest run packages/vercel-ai-sdk/src/model-definition.test.ts packages/gemini-interactions-sdk/src/config.test.ts src/server/service-worker.test.ts
+pnpm run typecheck
+pnpm exec vitest run packages/vercel-ai-sdk/src/model-definition.test.ts packages/gemini-interactions-sdk/src/config.test.ts src/server/service-worker.test.ts
 ```
 
 No new test is needed for a pure data-table refresh — the existing tests cover the shape. A change to the `model()` helper or the definition *structure* does need one.

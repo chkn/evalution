@@ -21,10 +21,10 @@ the core.
 
 See [`README.md`](./README.md) for the day-to-day workflow. In short:
 
-- `npm run typecheck` — type-check (runs the client tsconfig too; use this, not `tsc`).
-- `npm test` — unit tests (vitest). Run regularly.
-- `npm run test:ui` — Playwright component tests, for behaviour that needs a real browser.
-- `npm run docs` — regenerate docs after changing public APIs; fix any warnings.
+- `pnpm run typecheck` — type-check (runs the client tsconfig too; use this, not `tsc`).
+- `pnpm test` — unit tests (vitest). Run regularly.
+- `pnpm run test:ui` — Playwright component tests, for behaviour that needs a real browser.
+- `pnpm run docs` — regenerate docs after changing public APIs; fix any warnings.
 
 Every new feature and every bug fix should ship with a test — prefer fast unit
 tests, and reach for Playwright component tests only when the behaviour can't be

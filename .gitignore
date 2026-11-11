@@ -10,7 +10,7 @@ coverage/
 .env.local
 
 # Hand-written docs under docs/ are committed; only the generated TypeDoc API
-# reference (built into docs/extensibility/api by `npm run docs`) is ignored.
+# reference (built into docs/extensibility/api by `pnpm run docs`) is ignored.
 docs/extensibility/api/
 
 # Playwright

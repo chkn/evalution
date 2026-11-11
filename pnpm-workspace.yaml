@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Alexander Corrado
+
+packages:
+  - packages/sdk
+  - packages/vercel-ai-sdk
+  - packages/typesafe-sdk
+  - packages/gemini-interactions-sdk
+
+# Dependencies allowed to run install scripts. esbuild's sets up its platform
+# binary; the others' are a no-op (@google/genai) or a version-scheme warning
+# (protobufjs).
+allowBuilds:
+  esbuild: true
+  "@google/genai": false
+  protobufjs: false

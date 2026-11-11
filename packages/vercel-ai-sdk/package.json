@@ -20,7 +20,7 @@
   ],
   "scripts": {
     "build": "tsdown",
-    "prepare": "npm run build",
+    "prepare": "pnpm run build",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
@@ -195,7 +195,7 @@
     "@standard-schema/spec": "^1.1.0"
   },
   "dependencies": {
-    "@evalution/sdk": "2.0.0"
+    "@evalution/sdk": "workspace:*"
   },
   "keywords": [
     "evalution",
@@ -203,5 +203,17 @@
     "ai",
     "prompt"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./config": {
+        "types": "./dist/config.d.ts",
+        "import": "./dist/config.js"
+      }
+    }
+  }
 }

@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "build": "tsdown",
-    "prepare": "npm run build",
+    "prepare": "pnpm run build",
     "typecheck": "tsc --noEmit"
   },
   "exports": {
@@ -43,5 +43,17 @@
     "ai",
     "prompt"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./adapter": {
+        "types": "./dist/adapter.d.ts",
+        "import": "./dist/adapter.js"
+      }
+    }
+  }
 }

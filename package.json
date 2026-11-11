@@ -35,22 +35,16 @@
     "LICENSE.addendum",
     "LICENSING.md"
   ],
-  "workspaces": [
-    "packages/sdk",
-    "packages/vercel-ai-sdk",
-    "packages/typesafe-sdk",
-    "packages/gemini-interactions-sdk"
-  ],
   "engines": {
     "node": ">=22.18.0"
   },
   "scripts": {
-    "prepublishOnly": "npm run build",
-    "version": "npm version $npm_package_version --no-git-tag-version --workspaces && node scripts/pin-workspace-deps.ts && npm install --package-lock-only && git add .",
-    "build": "npm run build:cli && npm run build:client",
+    "prepublishOnly": "pnpm run build",
+    "version": "node scripts/pin-workspace-deps.ts && pnpm install --lockfile-only && git add .",
+    "build": "pnpm run build:cli && pnpm run build:client",
     "build:cli": "tsdown",
     "build:client": "vite build",
-    "dev": "concurrently 'npm run dev:server' 'npm run dev:client'",
+    "dev": "concurrently 'pnpm run dev:server' 'pnpm run dev:client'",
     "dev:server": "node --conditions=evalution-source src/cli/index.ts",
     "dev:server:debug": "node --inspect --conditions=evalution-source src/cli/index.ts",
     "dev:client": "vite --mode development",
@@ -66,7 +60,7 @@
     "db:bundle": "node scripts/generate-migration-bundle.ts src/trace/db/migrations && node scripts/generate-migration-bundle.ts src/dataset/db/migrations && node scripts/generate-migration-bundle.ts src/prompt/variations/db/migrations && node scripts/generate-migration-bundle.ts src/eval/db/migrations"
   },
   "dependencies": {
-    "@evalution/sdk": "2.0.0",
+    "@evalution/sdk": "workspace:*",
     "@hono/node-server": "^2.0.4",
     "@lydell/node-pty": "^1.2.0-beta.12",
     "@modelcontextprotocol/client": "^2.2.0",
@@ -90,12 +84,12 @@
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "typescript": ">=5.3.3-0 <7.0.0-0",
+    "@evalution/gemini-interactions-sdk": "^2.0.0",
+    "@evalution/typesafe-sdk": "^2.0.0",
+    "@evalution/vercel-ai-sdk": "^2.0.0",
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0",
-    "@evalution/vercel-ai-sdk": "^2.0.0",
-    "@evalution/typesafe-sdk": "^2.0.0",
-    "@evalution/gemini-interactions-sdk": "^2.0.0"
+    "typescript": ">=5.3.3-0 <7.0.0-0"
   },
   "peerDependenciesMeta": {
     "react": {
@@ -115,8 +109,15 @@
     }
   },
   "devDependencies": {
+    "@ai-sdk/anthropic": "^4.0.61",
+    "@ai-sdk/elevenlabs": "^3.0.47",
+    "@ai-sdk/google": "^4.0.78",
+    "@ai-sdk/openai": "^4.0.73",
     "@ai-sdk/typesafe-ai": "^3.0.5",
     "@biomejs/biome": "^2.5.0",
+    "@evalution/gemini-interactions-sdk": "workspace:*",
+    "@evalution/typesafe-sdk": "workspace:*",
+    "@evalution/vercel-ai-sdk": "workspace:*",
     "@glideapps/glide-data-grid": "6.0.4-alpha24",
     "@google/genai": "^2.9.0",
     "@playwright/experimental-ct-react": "^1.58.2",
@@ -145,13 +146,6 @@
     "vite": "^5.0.10",
     "vitest": "^1.1.0"
   },
-  "overrides": {
-    "@playwright/experimental-ct-core": {
-      "vite": {
-        "esbuild": "0.25.12"
-      }
-    }
-  },
   "keywords": [
     "ai",
     "prompt",
@@ -165,5 +159,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chkn/evalution.git"
-  }
+  },
+  "packageManager": "pnpm@12.18.0"
 }
