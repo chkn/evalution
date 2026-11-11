@@ -33,11 +33,32 @@ const FALLBACK_OPTIONS: ts.CompilerOptions = {
 /** Parsed declaration files that are stable for the lifetime of the process. */
 const immutableSourceFiles = new Map<string, ts.SourceFile>();
 
-const TS_LIB_DIR = path.dirname(ts.getDefaultLibFilePath({}));
+/**
+ * Where TypeScript's own `lib.*.d.ts` files are, once asked for, or `null`
+ * where TypeScript can't say. It can't outside Node, where it throws: this
+ * module also runs in the marketing site's in-browser demo, so it isn't asked
+ * at module scope.
+ */
+let tsLibDir: string | null | undefined;
+
+function libDir(): string | null {
+  if (tsLibDir === undefined) {
+    try {
+      tsLibDir = path.dirname(ts.getDefaultLibFilePath({}));
+    } catch {
+      tsLibDir = null;
+    }
+  }
+  return tsLibDir;
+}
 
 /** Whether `fileName` names a file that will not change while we run. */
 function isImmutable(fileName: string): boolean {
-  return fileName.startsWith(TS_LIB_DIR) || fileName.includes("/node_modules/");
+  const lib = libDir();
+  return (
+    (lib !== null && fileName.startsWith(lib)) ||
+    fileName.includes("/node_modules/")
+  );
 }
 
 /**
