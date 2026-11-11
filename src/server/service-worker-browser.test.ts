@@ -52,8 +52,7 @@ export default prompts({ id: "demo" }, ({ openai }) => ({
     const res = await app.request("/api/prompts");
 
     expect(res.status).toBe(200);
-    expect((await res.json()).map((p: { name: string }) => p.name)).toEqual([
-      "weatherAgent",
-    ]);
+    const prompts = (await res.json()) as { name: string }[];
+    expect(prompts.map(p => p.name)).toEqual(["weatherAgent"]);
   });
 });
