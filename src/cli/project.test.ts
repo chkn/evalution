@@ -4,6 +4,7 @@
 import type { Span } from "@evalution/sdk";
 import { BaseTraceIngestor } from "@evalution/sdk";
 import { describe, expect, it } from "vitest";
+import type { EvalutionConfig } from "../config.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { movedExportError, setUpProject } from "./project.ts";
@@ -77,6 +78,42 @@ describe("setUpProject", () => {
         (await traces.getAllTraces()).map(t => [t.id, t.environment]),
       ),
     ).toEqual({ ours: "playground", app: "production", sent: "staging" });
+  });
+
+  describe("with Evalution Cloud", () => {
+    const base = {
+      useDotenv: false,
+      traceProviders: [new MemoryTraceProvider()],
+      datasetProviders: [],
+      evalProviders: [],
+    };
+    const providerIds = async (
+      config: EvalutionConfig,
+      env: NodeJS.ProcessEnv,
+    ) =>
+      (await setUpProject("/project", config, { env })).traceProviders.map(
+        p => p.id,
+      );
+
+    it("adds the linked project's production traces", async () => {
+      const ids = await providerIds(
+        { ...base, cloud: { project: "prj_1" } },
+        { EVALUTION_API_KEY: "evl_user_x" },
+      );
+      expect(ids).toEqual(["memory", "cloud"]);
+    });
+
+    it.each([
+      ["no key", {}, { project: "prj_1" }],
+      [
+        "an ingest key",
+        { EVALUTION_API_KEY: "evl_ingest_x" },
+        { project: "prj_1" },
+      ],
+      ["no linked project", { EVALUTION_API_KEY: "evl_user_x" }, undefined],
+    ])("adds nothing with %s", async (_name, env, cloud) => {
+      expect(await providerIds({ ...base, cloud }, env)).toEqual(["memory"]);
+    });
   });
 });
 

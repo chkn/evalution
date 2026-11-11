@@ -168,6 +168,17 @@ A personal key (`evl_user_…`) never sends traces to the cloud, so with one set
 traces still go to your local instance. Before a script or serverless function exits, `await` the
 integration's `flush()` so no traces are lost.
 
+Any OpenTelemetry exporter can send to the cloud as well: set
+`OTEL_EXPORTER_OTLP_ENDPOINT=https://api.evalut.io` and
+`OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer evl_ingest_…`.
+
+### Production traces in the playground
+
+In a [linked project](#project-url), a playground started with a personal key lists the
+project's production traces under **Production**, next to its own. They're read from the cloud:
+the most recent 200 of the last week. While the playground is open it checks for new ones every
+15 seconds. They're read-only: annotations and SQL queries work on local traces only.
+
 ## MCP server
 
 `evalution mcp` lets a coding agent work with your prompts, traces, datasets,

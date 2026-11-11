@@ -22,11 +22,13 @@ import type { EvalProvider } from "../eval/eval-provider.ts";
 import { LocalEvalProvider } from "../eval/local-eval-provider.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import { CheckScopeTraceSink } from "../trace/check-scope.ts";
+import { CloudTraceProvider } from "../trace/cloud-trace-provider.ts";
 import { CostFetchingTraceSink } from "../trace/cost-fetching-trace-sink.ts";
 import { LocalDatabaseTraceProvider } from "../trace/local-database-trace-provider.ts";
 import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import { TraceEventIngestor } from "../trace/trace-event-ingestor.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
+import { linkedCloudClient } from "./cloud.ts";
 
 export async function findRootDir(
   startDir: string,
@@ -125,11 +127,14 @@ export interface ProjectProviders {
  * Stands up the providers `config` names — or the defaults, a local trace
  * database, dataset directory, and eval database under `<rootDir>/.evalution`
  * — and wires
- * every prompt provider's trace ingestion into the trace stores.
+ * every prompt provider's trace ingestion into the trace stores. When the
+ * project is linked to Evalution Cloud and there's a personal key, its
+ * production traces are added as one more trace provider.
  */
 export async function setUpProject(
   rootDir: string,
   config: EvalutionConfig,
+  { env = process.env }: { env?: NodeJS.ProcessEnv } = {},
 ): Promise<ProjectProviders> {
   if (config.useDotenv !== false) {
     applyDotenv(rootDir);
@@ -146,6 +151,18 @@ export async function setUpProject(
       path: path.join(rootDir, ".evalution", "traces", "local.db"),
     });
     traceProviders = [provider];
+  }
+
+  // Quietly: `evalution ui` hints at linking when it registers the instance.
+  const cloud = linkedCloudClient(config, {
+    env,
+    log: { log() {}, warn() {} },
+  });
+  if (cloud) {
+    traceProviders = [
+      ...traceProviders,
+      new CloudTraceProvider({ client: cloud }),
+    ];
   }
 
   // As for traces: `rootDir`-relative, not the provider's CWD-relative default.

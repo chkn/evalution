@@ -8,6 +8,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./ingest": {
+      "types": "./dist/ingest.d.ts",
+      "import": "./dist/ingest.js"
+    },
     "./checks": {
       "types": "./dist/checks/index.d.ts",
       "import": "./dist/checks/index.js"

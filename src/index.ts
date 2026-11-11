@@ -359,6 +359,11 @@ export type {
 } from "./shared/types.ts";
 export { BaseTraceProvider } from "./trace/base-trace-provider.ts";
 export {
+  type CloudTraceClient,
+  CloudTraceProvider,
+  type CloudTraceProviderOptions,
+} from "./trace/cloud-trace-provider.ts";
+export {
   createLocalTursoClient,
   type LocalTursoClientOptions,
 } from "./trace/db/local-turso-client.ts";

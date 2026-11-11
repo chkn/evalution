@@ -5,7 +5,12 @@ import { defineConfig } from "tsdown";
 
 export default defineConfig([
   {
-    entry: ["src/cli/index.ts", "src/index.ts", "src/checks/index.ts"],
+    entry: [
+      "src/cli/index.ts",
+      "src/index.ts",
+      "src/checks/index.ts",
+      "src/ingest.ts",
+    ],
     format: "esm",
     outDir: "dist",
     dts: true,

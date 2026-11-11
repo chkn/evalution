@@ -4,6 +4,7 @@
 import type { TraceSinkEvent } from "@evalution/sdk";
 import type { TraceEventIngestor } from "../../trace/trace-event-ingestor.ts";
 
+/** What {@link handleTraceEvents} answers: an HTTP status and a JSON body. */
 export interface TraceEventsIngestResult {
   status: number;
   body: unknown;

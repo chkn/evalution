@@ -22,6 +22,7 @@ import { DEFAULT_HOST, serverUrl } from "./listen-address.ts";
 import { mountMcp } from "./mcp-route.ts";
 import { requestGuard } from "./request-guard.ts";
 import { executeSetupStep, resolveSetupTasks } from "./setup-tasks.ts";
+import { SubscriberSet } from "./subscriber-set.ts";
 import {
   registerTerminalRoute,
   resolveSetupStepCommand,
@@ -128,9 +129,15 @@ export async function startServer(
       rootDir: rootPath,
     });
 
+  let watchTraces = () => {};
+  let unwatchTraces = () => {};
   // Hot-reload SSE subscribers. Each `/api/events` connection registers a
-  // writer here; `broadcast` fans an event out to all of them.
-  const hotReloadSubscribers = new Set<(data: SSEData) => void>();
+  // writer here; `broadcast` fans an event out to all of them. Trace
+  // providers are watched only while there's one (see below).
+  const hotReloadSubscribers = new SubscriberSet<(data: SSEData) => void>({
+    onFirst: () => watchTraces(),
+    onEmpty: () => unwatchTraces(),
+  });
   const broadcast = (data: SSEData) => {
     for (const send of hotReloadSubscribers) send(data);
   };
@@ -224,14 +231,24 @@ export async function startServer(
   });
   app.get("*", serveStatic({ root: clientRoot }));
 
-  // Forward trace change events to SSE clients
-  for (const [providerId, provider] of context.traceProviders) {
-    if (provider.watch) {
-      provider.watch(event => {
+  // Forward trace change events to SSE clients, while there are any: with
+  // nobody to tell, there's no reason to watch, and a provider that polls
+  // (`CloudTraceProvider`) would poll for nothing. A client that connects
+  // lists the traces afresh, so it misses nothing from before.
+  let unwatchers: (() => void)[] = [];
+  watchTraces = () => {
+    for (const [providerId, provider] of context.traceProviders) {
+      const unwatch = provider.watch?.(event => {
         broadcast({ type: "trace-changed", providerId, event });
       });
+      if (unwatch) unwatchers.push(unwatch);
     }
-  }
+  };
+  unwatchTraces = () => {
+    for (const unwatch of unwatchers) unwatch();
+    unwatchers = [];
+  };
+  if (hotReloadSubscribers.size > 0) watchTraces();
 
   // Start server. `noServer: true` lets @hono/node-server own the HTTP upgrade
   // handshake and hand matching requests to the WebSocket routes above.

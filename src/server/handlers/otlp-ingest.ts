@@ -13,6 +13,7 @@ import type { OtlpTraceIngestor } from "../../trace/otlp-trace-ingestor.ts";
  */
 export type AuthCtx = Record<string, unknown>;
 
+/** What {@link handleOtlpTraces} needs from its host. */
 export interface OtlpIngestDeps {
   /**
    * Picks which {@link OtlpTraceIngestor} a batch should be recorded through.
@@ -28,14 +29,19 @@ export interface OtlpIngestDeps {
   }): OtlpTraceIngestor | undefined;
 }
 
+/** One OTLP export request, as {@link handleOtlpTraces} takes it. */
 export interface OtlpIngestRequest {
   /** The request's `content-type` header, e.g. `application/x-protobuf`. */
   contentType: string;
+  /** The request body, decompressed. */
   body: ArrayBuffer;
+  /** The request's headers, with lowercase names. */
   headers: Record<string, string>;
+  /** What the host authenticated the request as, if it did. */
   auth?: AuthCtx;
 }
 
+/** What {@link handleOtlpTraces} answers: an HTTP status and a JSON body. */
 export interface OtlpIngestResult {
   status: number;
   body: unknown;

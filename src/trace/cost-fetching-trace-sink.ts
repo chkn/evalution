@@ -161,9 +161,13 @@ export class CostFetchingTraceSink implements TraceSink {
   private prices: Promise<PriceTable> | undefined;
 
   constructor(options: CostFetchingTraceSinkOptions = {}) {
-    this.fetchImpl = options.fetch ?? fetch;
+    // Not the bare global: Workers reject a `fetch` called as a method of
+    // something else ("Illegal invocation").
+    this.fetchImpl = options.fetch ?? ((...args) => globalThis.fetch(...args));
+    // `process` is absent in some runtimes (e.g. Cloudflare Workers).
     this.fetchPricing =
-      options.fetchPricing ?? !process.env.EVALUTION_NO_COST_ESTIMATES;
+      options.fetchPricing ??
+      !globalThis.process?.env?.EVALUTION_NO_COST_ESTIMATES;
   }
 
   /** Add a downstream sink. May be called multiple times. */

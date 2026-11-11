@@ -1,6 +1,7 @@
 {
   "entryPoints": [
     "src/index.ts",
+    "src/ingest.ts",
     "src/views/index.ts",
     "src/views/react/index.tsx",
     "src/views/datasets/index.ts",
