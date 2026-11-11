@@ -7,6 +7,7 @@ import {
   portkitServiceName,
   type RunCommand,
   resolvePublicUrl,
+  startedOnDemand,
 } from "./portkit.ts";
 
 const adopted = (url = "https://app.evalution.localhost") =>
@@ -82,11 +83,41 @@ describe("adoptIntoPortkit", () => {
   });
 });
 
+describe("startedOnDemand", () => {
+  const onDemand = {
+    url: "https://app.evalution.localhost",
+    mode: "on_demand",
+  };
+
+  it("is when portkit started it for a visit", () => {
+    expect(
+      startedOnDemand(onDemand, {
+        PORTKIT_URL: "https://app.evalution.localhost",
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["run by hand while an on-demand record waits", onDemand, {}],
+    [
+      "started in another mode",
+      { url: "https://app.evalution.localhost", mode: "foreground" },
+      { PORTKIT_URL: "https://app.evalution.localhost" },
+    ],
+    ["without portkit", undefined, {}],
+  ])("isn't when %s", (_name, adoption, env) => {
+    expect(startedOnDemand(adoption, env)).toBe(false);
+  });
+});
+
 describe("resolvePublicUrl", () => {
   it("is portkit's URL once adopted", async () => {
     await expect(
       resolvePublicUrl("/work/app", 4100, { env: {}, run: adopted() }),
-    ).resolves.toBe("https://app.evalution.localhost");
+    ).resolves.toEqual({
+      url: "https://app.evalution.localhost",
+      mode: "adopted",
+    });
   });
 
   it("is undefined without portkit or portless", async () => {
@@ -103,7 +134,7 @@ describe("resolvePublicUrl", () => {
         env: { PORTKIT_URL: "https://named.localhost" },
         run,
       }),
-    ).resolves.toBe("https://named.localhost");
+    ).resolves.toEqual({ url: "https://named.localhost", mode: "adopted" });
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -113,6 +144,6 @@ describe("resolvePublicUrl", () => {
         env: { PORTLESS_URL: "https://less.localhost" },
         run: adopted(),
       }),
-    ).resolves.toBe("https://less.localhost");
+    ).resolves.toMatchObject({ url: "https://less.localhost" });
   });
 });

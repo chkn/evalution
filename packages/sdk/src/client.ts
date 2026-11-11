@@ -71,6 +71,8 @@ export interface CloudProject {
   id: string;
   slug: string;
   name: string;
+  /** The slug of the organization it belongs to. */
+  orgSlug: string;
 }
 
 /** What {@link Evalution.whoami} resolves a key to. */
@@ -97,6 +99,11 @@ export interface RegisteredInstance {
   id: string;
   /** The project's shareable `*.local.evalut.io` URL. */
   projectUrl: string;
+  /**
+   * Where to open the browser on this machine: it remembers this instance
+   * there, so the project URL goes straight to it, then opens it.
+   */
+  openUrl?: string;
 }
 
 /** Names one synced database of a project. */
@@ -323,9 +330,31 @@ interface CloudRequestOptions {
   body?: unknown;
 }
 
+/** How {@link Evalution} rejects when the cloud refuses a call. */
+export class EvalutionApiError extends Error {
+  /** The HTTP status the cloud answered with. */
+  readonly status: number;
+  /** The cloud's explanation, if it gave one. */
+  readonly detail?: string;
+
+  constructor(status: number, detail?: string) {
+    super(`Evalution API: ${status} ${detail ?? ""}`.trim());
+    this.name = "EvalutionApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 /** `res`, or a rejection saying why the cloud refused. */
 async function readOk(res: Response): Promise<Response> {
   if (res.ok) return res;
-  const detail = await res.text().catch(() => "");
-  throw new Error(`Evalution API: ${res.status} ${detail}`.trim());
+  const text = await res.text().catch(() => "");
+  let detail = text || undefined;
+  try {
+    const { error } = JSON.parse(text) as { error?: unknown };
+    if (typeof error === "string") detail = error;
+  } catch {
+    // Not the cloud's JSON: keep the text as it is.
+  }
+  throw new EvalutionApiError(res.status, detail);
 }

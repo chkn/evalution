@@ -17,6 +17,7 @@ coding agent over [MCP](https://modelcontextprotocol.io).
 ```sh
 npx evalution [ui [path]] [--host <address>]
 npx evalution mcp [path]
+npx evalution link [path]
 ```
 
 - `evalution` — start the playground for the current directory.
@@ -26,6 +27,7 @@ npx evalution mcp [path]
   `127.0.0.1`. See [Network access](#network-access).
 - `evalution mcp` — serve the project as an MCP server over stdio. See [MCP server](#mcp-server).
 - `evalution mcp <path>` — same, for `<path>` instead of the current directory.
+- `evalution link` — link the project to Evalution Cloud. See [Project URL](#project-url).
 
 ## How a project is found
 
@@ -102,6 +104,44 @@ If portkit is installed, Evalution registers itself with it on
 start, as `<directory>.evalution`, and opens the playground at
 `https://<directory>.evalution.localhost`. The registration lasts as long as the server runs. If
 portkit isn't installed or refuses the name, Evalution starts as usual on its local port.
+
+## Project URL
+
+With Evalution Cloud, a project gets one URL,
+`https://<project>--<org>.local.evalut.io`, that opens **each member's own
+running playground**. A link to a trace sent to someone else opens that trace
+in their copy of the project.
+
+1. Create a personal API key at [evalut.io/cloud](https://evalut.io/cloud) and
+   set it as `EVALUTION_API_KEY`, in your shell profile or the project's `.env`.
+2. Run `npx evalution link` once per repo. It asks which of your cloud
+   projects to link (or creates one) and adds its id to `.evalution/config.ts`:
+
+   ```ts
+   export default {
+     cloud: { project: "prj_…" },
+     // …
+   } satisfies EvalutionConfig;
+   ```
+
+   Commit it. The id isn't a secret: only the project's members can use it.
+   If there's no config yet, set the project up with `npx evalution` first.
+
+From then on, a playground started with a personal key registers with the cloud
+while it runs and prints the project URL. **Copy link** on a trace copies a link
+to it by that URL. Opening the URL sends you to your running playground on that
+machine. The browser the playground opens in on start is remembered as being on
+that machine, so the URL goes straight there. Any other browser asks once which of
+your running playgrounds is on this machine, and remembers the answer.
+
+With [portkit](#https-with-portkit) there's nothing to ask: if every running
+copy is served at the same portkit name (the same directory name on each machine),
+the URL goes straight to `https://<directory>.evalution.localhost`, which is always
+this machine's copy. If it's set up to start on demand, visiting the link starts it.
+
+The cloud only ever sends a browser to a loopback address (`localhost`,
+`*.localhost`, `127.0.0.1`, `[::1]`), so a playground started with
+`--host` naming another interface doesn't register.
 
 ## Sending traces from your app
 
@@ -199,7 +239,7 @@ Start the playground before your agents when you use both: while an agent's
 | `PORT` | Port for the local server. When set, it's used as-is. When unset, Evalution uses `3000`, falling back to the next free port if it's already taken. |
 | `EVALUTION_NO_OPEN` | When set to any value, Evalution does **not** open the playground in your browser on start — useful for CI and remote or headless hosts. |
 | `EVALUTION_ENDPOINT` | In your app: the base URL of a local Evalution instance to send traces to. See [Sending traces from your app](#sending-traces-from-your-app). |
-| `EVALUTION_API_KEY` | In your app: an ingest key sends its traces to Evalution Cloud. |
+| `EVALUTION_API_KEY` | In your app: an ingest key sends its traces to Evalution Cloud. For the playground and `evalution link`: a personal key links the project to Evalution Cloud. See [Project URL](#project-url). |
 | `EVALUTION_API_URL` | Replaces `https://api.evalut.io` as the cloud's address, e.g. for staging. |
 | `EVALUTION_NO_COST_ESTIMATES` | By default, the first time a trace records an LLM call with token usage, Evalution downloads model prices from Vercel AI Gateway's public catalog (`https://ai-gateway.vercel.sh/v1/models`), or from OpenRouter's (`https://openrouter.ai/api/v1/models`) if that fails, to show estimated costs. When set to any value, those requests are never made and traces show no costs — useful for offline or air-gapped hosts. |
 

@@ -8,10 +8,17 @@ import { startServer } from "../server/index.ts";
 import { TerminalSessionRegistry } from "../server/terminal.ts";
 import { type CliArgs, parseCliArgs, USAGE } from "./args.ts";
 import { registerBundlerResolutionFallback } from "./bundler-resolution-hook.ts";
+import {
+  type CloudInstance,
+  connectInstance,
+  instanceRegistration,
+  linkedCloudClient,
+} from "./cloud.ts";
 import { registerEvalutionResolver } from "./config-loader-hooks.ts";
 import { watchForConfigCreation } from "./config-watcher.ts";
 import { findAvailablePort } from "./find-port.ts";
 import { registerFreshImportHook } from "./fresh-import-hook.ts";
+import { link } from "./link.ts";
 import {
   findOrBecomeHolder,
   keepStdoutForProtocol,
@@ -20,8 +27,17 @@ import {
   serveMcpHolder,
 } from "./mcp.ts";
 import { openBrowser } from "./open-browser.ts";
-import { resolvePublicUrl } from "./portkit.ts";
-import { findRootDir, loadConfig, setUpProject } from "./project.ts";
+import {
+  type PortkitAdoption,
+  resolvePublicUrl,
+  startedOnDemand,
+} from "./portkit.ts";
+import {
+  applyDotenv,
+  findRootDir,
+  loadConfig,
+  setUpProject,
+} from "./project.ts";
 import {
   claimServerInfo,
   findRunningServer,
@@ -63,14 +79,21 @@ registerVariationLoaderHook();
 // last-registered first) and sees variations' in-memory sources too.
 registerTypeScriptTransformFallback();
 
+/** What `evalution ui` hands every server it starts. */
+interface UiServerOptions {
+  port: number;
+  host: string | undefined;
+  publicUrl: string | undefined;
+  terminalSessions: TerminalSessionRegistry;
+  /** This process's registration with Evalution Cloud, once it has one. */
+  cloud: () => CloudInstance | undefined;
+}
+
 async function startConfiguredServer(
   rootDir: string,
   config: EvalutionConfig,
   hasConfig: boolean,
-  port: number,
-  host: string | undefined,
-  publicUrl: string | undefined,
-  terminalSessions: TerminalSessionRegistry,
+  { port, host, publicUrl, terminalSessions, cloud }: UiServerOptions,
 ) {
   return startServer({
     ...(await setUpProject(rootDir, config)),
@@ -81,7 +104,43 @@ async function startConfiguredServer(
     hasConfig,
     terminalSessions,
     version: VERSION,
+    getProjectUrl: () => cloud()?.projectUrl,
+    beforeExit: async () => {
+      await cloud()?.stop();
+    },
   });
+}
+
+/** How long opening the browser waits on the cloud, so "Copy link" is there from the start. */
+const CLOUD_WAIT_MS = 2000;
+
+/**
+ * Registers the running playground with Evalution Cloud when the project is
+ * linked and there's a personal key, resolving once the first attempt has
+ * settled or {@link CLOUD_WAIT_MS} has passed.
+ */
+async function connectToCloud(
+  rootDir: string,
+  config: EvalutionConfig,
+  localUrl: string,
+  portkit: PortkitAdoption | undefined,
+): Promise<CloudInstance | undefined> {
+  const client = linkedCloudClient(config);
+  const project = config.cloud?.project;
+  if (!client || !project) return undefined;
+  const registration = instanceRegistration({ rootDir, localUrl, portkit });
+  if (!registration) {
+    console.log(
+      `💡 Not registering with Evalution Cloud: the project URL can only send a browser to this machine's loopback address, and the playground is at ${localUrl}.`,
+    );
+    return undefined;
+  }
+  const instance = connectInstance(client, registration, { project });
+  await Promise.race([
+    instance.ready,
+    new Promise(resolve => setTimeout(resolve, CLOUD_WAIT_MS).unref()),
+  ]);
+  return instance;
 }
 
 async function main() {
@@ -106,6 +165,12 @@ async function main() {
   if (command === "mcp") {
     await mcp(rootDir, hasConfig);
     return;
+  }
+  if (command === "link") {
+    // For EVALUTION_API_KEY. The config isn't loaded, so `useDotenv` can't
+    // be read; it's only the key that's wanted.
+    applyDotenv(rootDir);
+    process.exit(await link(rootDir, hasConfig));
   }
   await ui(rootDir, hasConfig, host);
 }
@@ -183,13 +248,15 @@ async function ui(
   }
 
   // Behind a local HTTPS proxy, the playground is opened through it.
-  const publicUrl = await resolvePublicUrl(rootDir, port);
+  const portkit = await resolvePublicUrl(rootDir, port);
+  const publicUrl = portkit?.url;
 
   // Open the browser once the first server is listening. Subsequent restarts
   // (after a config file appears) reuse the same URL, so we don't reopen.
-  // `EVALUTION_NO_OPEN` opts out (CI, remote/headless hosts).
+  // `EVALUTION_NO_OPEN` opts out (CI, remote/headless hosts). Portkit
+  // starting this for a visit means a browser is already waiting on it.
   const maybeOpen = async (url: string) => {
-    if (process.env.EVALUTION_NO_OPEN) return;
+    if (process.env.EVALUTION_NO_OPEN || startedOnDemand(portkit)) return;
     await new Promise(r => setTimeout(r, 250));
     openBrowser(url);
   };
@@ -198,33 +265,35 @@ async function ui(
   // being temporarily disconnected and the reconnecting client resumes it.
   const terminalSessions = new TerminalSessionRegistry();
 
+  let cloud: CloudInstance | undefined;
+  const serverOptions: UiServerOptions = {
+    port,
+    host,
+    publicUrl,
+    terminalSessions,
+    cloud: () => cloud,
+  };
+
   if (hasConfig) {
+    const config = await loadConfig(rootDir);
     const handle = await startConfiguredServer(
       rootDir,
-      await loadConfig(rootDir),
+      config,
       true,
-      port,
-      host,
-      publicUrl,
-      terminalSessions,
+      serverOptions,
     );
     await writeServerInfo(rootDir, handle.url, "ui");
-    await maybeOpen(handle.publicUrl);
+    cloud = await connectToCloud(rootDir, config, handle.url, portkit);
+    // Through the cloud when it answered in time, so this browser is
+    // remembered as the one on this machine; it lands on the same page.
+    await maybeOpen(cloud?.openUrl ?? handle.publicUrl);
     return;
   }
 
   // No config yet: start in onboarding mode with defaults so the UI (and its
   // `POST /api/config/create` route) is reachable, then watch for the config
   // file to appear and restart the server with the real config once it does.
-  let server = await startConfiguredServer(
-    rootDir,
-    {},
-    false,
-    port,
-    host,
-    publicUrl,
-    terminalSessions,
-  );
+  let server = await startConfiguredServer(rootDir, {}, false, serverOptions);
   await writeServerInfo(rootDir, server.url, "ui");
   await maybeOpen(server.publicUrl);
   console.log(
@@ -239,15 +308,8 @@ async function ui(
     console.log("⚙️ Config loaded; restarting server...");
     stopWatching();
     await server.close();
-    server = await startConfiguredServer(
-      rootDir,
-      config,
-      true,
-      port,
-      host,
-      publicUrl,
-      terminalSessions,
-    );
+    server = await startConfiguredServer(rootDir, config, true, serverOptions);
+    cloud = await connectToCloud(rootDir, config, server.url, portkit);
   });
 }
 

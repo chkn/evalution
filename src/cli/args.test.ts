@@ -9,6 +9,16 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs([])).toEqual({ command: "ui" });
   });
 
+  it("reads `link`, which takes a path but no --host", () => {
+    expect(parseCliArgs(["link", "proj"])).toEqual({
+      command: "link",
+      path: "proj",
+    });
+    expect(() => parseCliArgs(["link", "--host", "0.0.0.0"])).toThrow(
+      "--host only applies",
+    );
+  });
+
   it("reads a command and a path", () => {
     expect(parseCliArgs(["mcp", "proj"])).toEqual({
       command: "mcp",

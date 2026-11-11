@@ -78,6 +78,13 @@ export interface ServerOptions {
    * local filesystem.
    */
   views?: ViewRegistry;
+  /**
+   * The project's Evalution Cloud URL, once it has one. The playground's
+   * "Copy link" shares links by it.
+   */
+  getProjectUrl?: () => string | undefined;
+  /** Runs on SIGINT or SIGTERM, before the server closes and the process exits. */
+  beforeExit?: () => Promise<void>;
 }
 
 /** A running server, returned by {@link startServer}. */
@@ -111,6 +118,8 @@ export async function startServer(
     otlpIngestor,
     traceEventIngestor,
     version,
+    getProjectUrl,
+    beforeExit,
   } = options;
   const views =
     options.views ??
@@ -173,6 +182,7 @@ export async function startServer(
     otlpIngestor,
     traceEventIngestor,
     views,
+    getProjectUrl,
   });
   // A view is rebuilt when its file, or anything it imports, changes.
   const unwatchViews = views.watch(version =>
@@ -268,6 +278,10 @@ export async function startServer(
       // fires each session's `onClose`, which starts the reconnect grace window
       // instead of killing the PTY, so a running coding agent survives the
       // restart and the reconnecting client resumes it.
+      // A server started after this one (the CLI's restart once a config
+      // appears) handles shutdown from here on.
+      process.off("SIGINT", shutdown);
+      process.off("SIGTERM", shutdown);
       for (const ws of wss.clients) ws.close();
       unwatchViews();
       void mcp.close();
@@ -280,6 +294,7 @@ export async function startServer(
   // Graceful shutdown
   const shutdown = async () => {
     console.log("\n\nShutting down gracefully...");
+    await beforeExit?.().catch(() => {});
     await close();
     process.exit(0);
   };

@@ -16,6 +16,7 @@ import { ViewChannel } from "../../views/host.ts";
 import { traceSurface } from "../../views/surfaces/trace.ts";
 import { deleteTrace, getTrace, subscribeTraceEvents } from "../api";
 import { useAnnotations } from "../hooks/useAnnotations.ts";
+import { traceLink } from "../trace-link.ts";
 import { AddToDatasetMenu, isInAddToDatasetMenu } from "./AddToDatasetMenu";
 import { AskAgentButton, AskAgentMenuItems } from "./AskAgentButton";
 import { DetailsPane, DetailsPaneHeader, useIsWide } from "./DetailsPane";
@@ -39,6 +40,7 @@ import {
   CalendarIcon,
   ConversationIcon,
   DatasetsIcon,
+  LinkIcon,
   ModelIcon,
   MoreIcon,
   PlusIcon,
@@ -95,6 +97,11 @@ interface Props {
    * `agents`), there's no "Ask" button.
    */
   onAskAgent?: (agent: AgentInfo) => void;
+  /**
+   * The project's Evalution Cloud URL. With one, "Copy link" copies a link
+   * that opens this trace in each project member's own playground.
+   */
+  projectUrl?: string;
 }
 
 /** A built-in tab, or a view's (`view:<uri>`). */
@@ -122,6 +129,7 @@ function TraceView({
   onOpenEvalRun,
   agents = [],
   onAskAgent,
+  projectUrl,
 }: Props) {
   const [state, setState] = useState<TraceState>({ trace: null, spans: [] });
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(
@@ -138,6 +146,20 @@ function TraceView({
   const listRef = useRef<HTMLDivElement>(null);
   const [showAnnotationForm, setShowAnnotationForm] = useState(false);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const copyLink = projectUrl
+    ? async () => {
+        try {
+          await navigator.clipboard.writeText(
+            traceLink(projectUrl, { providerId, traceId }),
+          );
+          setLinkCopied(true);
+          setTimeout(() => setLinkCopied(false), 1500);
+        } catch {
+          /* clipboard unavailable (e.g. insecure context) */
+        }
+      }
+    : undefined;
   const {
     triggerRef: headerMenuTriggerRef,
     popoverRef: headerMenuRef,
@@ -384,6 +406,21 @@ function TraceView({
             <span className="trace-header-menu-item-label">Add to dataset</span>
           </AddToDatasetMenu>
         )}
+        {copyLink && (
+          <button
+            type="button"
+            className="trace-header-menu-item"
+            onClick={() => {
+              setHeaderMenuOpen(false);
+              void copyLink();
+            }}
+          >
+            <span className="trace-header-menu-item-icon">
+              <LinkIcon />
+            </span>
+            <span className="trace-header-menu-item-label">Copy link</span>
+          </button>
+        )}
         <button
           type="button"
           className="trace-header-menu-item"
@@ -443,6 +480,17 @@ function TraceView({
               )}
               {onAskAgent && (
                 <AskAgentButton agents={agents} onAsk={onAskAgent} />
+              )}
+              {copyLink && (
+                <button
+                  type="button"
+                  className="trace-view-prompt-btn"
+                  onClick={() => void copyLink()}
+                  title="Copy a link to this trace for the project's members"
+                >
+                  <LinkIcon />
+                  {linkCopied ? "Copied" : "Copy link"}
+                </button>
               )}
               {onDeleted && (
                 <button

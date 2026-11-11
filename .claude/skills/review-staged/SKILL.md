@@ -1,6 +1,6 @@
 ---
 name: Review and commit staged changes
-description: Use when specifially asked to review or commit the staged changes.
+description: Use when specifically asked to review or commit the staged changes.
 model: opus
 effort: high
 context: fork

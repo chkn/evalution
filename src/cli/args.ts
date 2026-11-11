@@ -3,12 +3,15 @@
 
 /** The command line's usage summary, printed with any parse error. */
 export const USAGE =
-  "Usage: evalution [ui [path] [--host <address>]] | evalution mcp [path]";
+  "Usage: evalution [ui [path] [--host <address>]] | evalution mcp [path] | evalution link [path]";
 
 /** What the command line asks for, as {@link parseCliArgs} reads it. */
 export interface CliArgs {
-  /** `ui` (the default) serves the playground; `mcp` serves MCP over stdio. */
-  command: "ui" | "mcp";
+  /**
+   * `ui` (the default) serves the playground; `mcp` serves MCP over stdio;
+   * `link` links the project to Evalution Cloud.
+   */
+  command: "ui" | "mcp" | "link";
   /** Where to start looking for the project, if not the current directory. */
   path?: string;
   /** The address `ui` listens on, if `--host` gave one. */
@@ -39,11 +42,11 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
   }
 
   const [command = "ui", path, ...extra] = positional;
-  if (command !== "ui" && command !== "mcp")
+  if (command !== "ui" && command !== "mcp" && command !== "link")
     throw new Error(`Unknown command: ${command}`);
   if (extra.length > 0) throw new Error(`Unexpected argument: ${extra[0]}`);
   // The MCP holder only ever listens on loopback, for the relays beside it.
-  if (command === "mcp" && host !== undefined)
+  if (command !== "ui" && host !== undefined)
     throw new Error("--host only applies to `evalution ui`");
   return { command, path, host };
 }

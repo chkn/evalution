@@ -64,7 +64,7 @@ export {
  * ```
  * @module evalution
  */
-export type { EvalutionConfig } from "./config.ts";
+export type { CloudConfig, EvalutionConfig } from "./config.ts";
 export {
   type CreateDatasetInput,
   DatasetNotFoundError,

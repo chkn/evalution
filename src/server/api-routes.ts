@@ -112,15 +112,19 @@ function promptRefFrom(c: Context, promptId: string): PromptRef {
  * what the playground starts from, and what `findRunningServer` checks a
  * running server against before a later `evalution` process uses it. Also
  * an `instance` id, new each time it's mounted, so a relay can tell a
- * server restarted on the same port from the one it was talking to.
+ * server restarted on the same port from the one it was talking to. And the
+ * project's Evalution Cloud URL, once there is one, for sharing links by.
  */
 export function mountConfigRoute(
   app: Hono,
   rootPath: string,
   configured: boolean,
+  getProjectUrl?: () => string | undefined,
 ): void {
   const instance = crypto.randomUUID();
-  app.get("/api/config", c => c.json({ rootPath, configured, instance }));
+  app.get("/api/config", c =>
+    c.json({ rootPath, configured, instance, projectUrl: getProjectUrl?.() }),
+  );
 }
 
 /** Relays a neutral handler's `{status, body}` — a 204 carries no body of its own. */
@@ -226,6 +230,8 @@ export interface SetupRoutesOptions {
    * lists none. See `specs/trace-visualizers.md` §B.
    */
   views?: ViewRegistry;
+  /** The project's Evalution Cloud URL, if it has one yet. */
+  getProjectUrl?: () => string | undefined;
 }
 
 /**
@@ -242,6 +248,7 @@ export function setupRoutes({
   otlpIngestor,
   traceEventIngestor,
   views,
+  getProjectUrl,
 }: SetupRoutesOptions): void {
   const {
     promptProviders,
@@ -252,7 +259,7 @@ export function setupRoutes({
     resolvePromptLink,
   } = context;
 
-  mountConfigRoute(app, rootPath, hasConfig);
+  mountConfigRoute(app, rootPath, hasConfig, getProjectUrl);
 
   // GET /api/setup-tasks - Onboarding tasks (with per-step completion status)
   app.get("/api/setup-tasks", c =>

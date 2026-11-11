@@ -62,6 +62,7 @@ import { useSSE } from "./hooks/useSSE";
 import { useTraces } from "./hooks/useTraces";
 import { type PaneState, placeTab } from "./pane-layout";
 import { consumeSelfEdit } from "./self-edits";
+import { linkedTrace } from "./trace-link.ts";
 import { requireProviderId, withSetMembership } from "./utils";
 
 /**
@@ -357,6 +358,8 @@ function App() {
   // Coding agents the views' "Ask" button offers — those not installed greyed out.
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [configured, setConfigured] = useState(false);
+  // The project's Evalution Cloud URL, which links to traces are shared by.
+  const [projectUrl, setProjectUrl] = useState<string | undefined>();
   const [activeSection, setActiveSection] = useState<
     "prompts" | "traces" | "datasets" | "evals" | "settings"
   >("prompts");
@@ -414,6 +417,7 @@ function App() {
       .then(d => {
         setRootPath(d.rootPath);
         setConfigured(!!d.configured);
+        setProjectUrl(d.projectUrl ?? undefined);
       })
       .catch(() => {});
   }, []);
@@ -637,6 +641,21 @@ function App() {
     if (match?.providerId) handleSelectPrompt(match.providerId, match.id);
     didDeepLink.current = true;
   }, [loading, prompts]);
+
+  // Open the trace named by `?trace=<id>&provider=<id>` — a link shared from
+  // "Copy link" — exactly once.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one shot
+  useEffect(() => {
+    const linked = linkedTrace(window.location.search);
+    if (!linked) return;
+    openTabInFocusedPane({
+      type: "trace",
+      providerId: linked.providerId,
+      traceId: linked.traceId,
+      rootSpanId: "",
+      label: "Trace",
+    });
+  }, []);
 
   /**
    * Opens `tab` in the focused pane — what picking a trace or dataset in the
@@ -1700,6 +1719,7 @@ function App() {
                               closeTabEverywhere(key);
                               refetchTraces();
                             }}
+                            projectUrl={projectUrl}
                             agents={agents}
                             onAskAgent={agent =>
                               askAgentRightOf(pane.id, agent, {

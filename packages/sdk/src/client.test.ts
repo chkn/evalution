@@ -279,6 +279,20 @@ describe("Evalution's cloud calls", () => {
     await expect(cloud({}, 403).client.listProjects()).rejects.toThrow(
       "Evalution API: 403",
     );
+    await expect(cloud({}, 404).client.listProjects()).rejects.toMatchObject({
+      name: "EvalutionApiError",
+      status: 404,
+    });
+  });
+
+  it("rejects with the cloud's explanation", async () => {
+    const fetch = async () =>
+      new Response(JSON.stringify({ error: "Project not found." }), {
+        status: 404,
+      });
+    await expect(
+      new Evalution({ apiKey: PERSONAL, fetch }).listProjects(),
+    ).rejects.toMatchObject({ status: 404, detail: "Project not found." });
   });
 
   it("refuses a call its key or project can't make, without a request", async () => {

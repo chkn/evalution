@@ -82,16 +82,31 @@ export async function adoptIntoPortkit(
 }
 
 /**
- * Registers the server with portkit if it's there, and resolves to the URL to
- * open the playground at when a proxy serves it: the one that started this
- * process, or else the one that just adopted it.
+ * Whether portkit started this process because a browser asked for it, so
+ * the page it's holding is about to load and opening another would be a
+ * second tab.
+ */
+export function startedOnDemand(
+  adoption: PortkitAdoption | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return !!env.PORTKIT_URL && adoption?.mode === "on_demand";
+}
+
+/**
+ * Registers the server with portkit if it's there, and resolves to where a
+ * proxy serves it: the one that started this process, or else the one that
+ * just adopted it. `undefined` when no proxy does.
  */
 export async function resolvePublicUrl(
   rootDir: string,
   port: number,
   options: { env?: NodeJS.ProcessEnv; run?: RunCommand } = {},
-): Promise<string | undefined> {
+): Promise<PortkitAdoption | undefined> {
   const { env = process.env } = options;
   const adoption = await adoptIntoPortkit(rootDir, port, options);
-  return env.PORTKIT_URL ?? env.PORTLESS_URL ?? adoption?.url;
+  const url = env.PORTKIT_URL ?? env.PORTLESS_URL ?? adoption?.url;
+  // Adopting merges into the record portkit started us from, so its mode is
+  // that record's too.
+  return url ? { url, mode: adoption?.mode } : undefined;
 }
