@@ -5,13 +5,20 @@ version = 1
 
 # Every comment-capable file (code, configs, assets) carries its own in-file
 # SPDX header — see scripts/add-license-headers.mjs. The rules below cover only
-# the file types that have NO comment syntax (.json, .md) and the license texts
-# themselves. A new code/asset file with no header therefore matches no rule and
-# fails `reuse lint`, which is the point: it forces a deliberate license choice.
+# the file types that have NO comment syntax (.json, .md), generated files that
+# get rewritten without one (pnpm-lock.yaml), and the license texts themselves.
+# A new code/asset file with no header therefore matches no rule and fails
+# `reuse lint`, which is the point: it forces a deliberate license choice.
 
-# Comment-incapable files default to the AGPL-3.0-only core license.
+# These files default to the AGPL-3.0-only core license.
 [[annotations]]
-path = ["**/*.json", "**/*.md", "LICENSE", "LICENSE.addendum"]
+path = [
+  "**/*.json",
+  "**/*.md",
+  "pnpm-lock.yaml",
+  "LICENSE",
+  "LICENSE.addendum",
+]
 SPDX-FileCopyrightText = "2026 Alexander Corrado"
 SPDX-License-Identifier = "AGPL-3.0-only"
 
