@@ -23,6 +23,7 @@ import {
   CalendarIcon,
   ColumnsIcon,
   CostIcon,
+  EnvironmentIcon,
   EvalsIcon,
   GrabHandleIcon,
   ModelIcon,
@@ -65,6 +66,7 @@ const COLUMN_LABELS: Record<TraceColumnKey, string> = {
   duration: "Duration",
   totalTokens: "Tokens",
   model: "Model",
+  environment: "Environment",
   cost: "Cost",
   annotations: "Annotations",
   checks: "Checks",
@@ -84,6 +86,8 @@ function columnIcon(key: TraceColumnKey) {
       return <TokensIcon />;
     case "model":
       return <ModelIcon />;
+    case "environment":
+      return <EnvironmentIcon />;
     case "cost":
       return <CostIcon />;
     case "annotations":
@@ -241,6 +245,10 @@ const COLUMN_DEFS: Record<
   model: {
     cell: t => t.model ?? "—",
     sortValue: t => t.model,
+  },
+  environment: {
+    cell: t => t.environment ?? "—",
+    sortValue: t => t.environment,
   },
   cost: {
     cell: t => (t.cost !== undefined ? formatCost(t.cost) : "—"),

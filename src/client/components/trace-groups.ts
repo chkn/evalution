@@ -52,6 +52,7 @@ function summaryGroup(
   const cost = sum(traces.map(t => t.cost));
   const checkCounts = sumCounts(traces.map(t => t.checkCounts));
   const model = shared(traces.map(t => t.model));
+  const environment = shared(traces.map(t => t.environment));
   const promptVersion = shared(traces.map(t => t.promptVersion));
   const promptVariation = shared(traces.map(t => t.promptVariation));
   return {
@@ -68,6 +69,7 @@ function summaryGroup(
     ...(cost !== undefined && { cost }),
     ...(checkCounts && { checkCounts }),
     ...(model !== undefined && { model }),
+    ...(environment !== undefined && { environment }),
     ...(promptVersion !== undefined && { promptVersion }),
     ...(promptVariation !== undefined && { promptVariation }),
     annotationCounts: Object.fromEntries(

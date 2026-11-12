@@ -63,6 +63,7 @@ describe("groupTraces", () => {
         totalTokens: 10,
         cost: 0.5,
         model: "m",
+        environment: "production",
         promptVersion: "v1",
         promptVariation: "x",
         annotationCounts: { issue: 1, good: 0, note: 2 },
@@ -74,6 +75,7 @@ describe("groupTraces", () => {
         endTime: 3000,
         spanCount: 3,
         model: "m",
+        environment: "production",
         promptVersion: "v2",
         status: "error",
         annotationCounts: { issue: 0, good: 4, note: 0 },
@@ -85,6 +87,7 @@ describe("groupTraces", () => {
         startTime: 1100,
         endTime: 1200,
         model: "m",
+        environment: "production",
       }),
     ]);
     expect(group).toMatchObject({
@@ -95,6 +98,7 @@ describe("groupTraces", () => {
       totalTokens: 10,
       cost: 0.5,
       model: "m",
+      environment: "production",
       annotationCounts: { issue: 1, good: 4, note: 2 },
       checkCounts: { pass: 3, fail: 1, error: 1, skipped: 0, scored: 0 },
     });
