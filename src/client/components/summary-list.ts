@@ -79,3 +79,54 @@ export function tableModeWidth(columnWidths: number[]): number {
     TABLE_CHROME_WIDTH_PX;
   return Math.min(MAX_TABLE_MODE_WIDTH, Math.max(MIN_TABLE_MODE_WIDTH, target));
 }
+
+// ─── Table-mode memory ──────────────────────────────────────────────────────
+
+/**
+ * What the table-mode toggle remembers: two modes, each with the sidebar
+ * width it was last left at, and which of them it's in. The toggle makes no
+ * assumption about what either mode is.
+ */
+export interface TableModeMemory {
+  /** Which of `widths` the sidebar is in now. */
+  current: 0 | 1;
+  /** Each mode's width; `undefined` for a mode never visited. */
+  widths: [number | undefined, number | undefined];
+}
+
+/** `raw` (parsed from storage, say) as a {@link TableModeMemory}, discarding anything malformed. */
+export function parseTableModeMemory(raw: unknown): TableModeMemory {
+  const record = (raw && typeof raw === "object" ? raw : {}) as Record<
+    string,
+    unknown
+  >;
+  const width = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) && value > 0
+      ? value
+      : undefined;
+  const widths = Array.isArray(record.widths) ? record.widths : [];
+  return {
+    current: record.current === 1 ? 1 : 0,
+    widths: [width(widths[0]), width(widths[1])],
+  };
+}
+
+/**
+ * The toggle's next state, and the sidebar width to set, given the width
+ * it has now (which may have been dragged since the last toggle). The mode
+ * left keeps that width; the one entered gets the width it last had, or
+ * `defaultWidth` if it has never been visited.
+ */
+export function toggleTableMode(
+  memory: TableModeMemory,
+  currentWidth: number,
+  defaultWidth: number,
+): { memory: TableModeMemory; width: number } {
+  const next = memory.current === 0 ? 1 : 0;
+  const widths: TableModeMemory["widths"] = [...memory.widths];
+  widths[memory.current] = currentWidth;
+  return {
+    memory: { current: next, widths },
+    width: widths[next] ?? defaultWidth,
+  };
+}

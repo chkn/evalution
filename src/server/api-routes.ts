@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { TRACE_EVENTS_PATH } from "@evalution/sdk";
+import {
+  parseTraceGroupQuery,
+  parseTraceQuery,
+  TRACE_EVENTS_PATH,
+} from "@evalution/sdk";
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -78,11 +82,14 @@ import type { HandlerResult } from "./handlers/result.ts";
 import { handleTraceEvents } from "./handlers/trace-events-ingest.ts";
 import { streamTrace } from "./handlers/trace-stream.ts";
 import {
+  answerTraceQuery,
   handleDeleteTrace,
   handleGetTrace,
   handleGetTraceQuerySchema,
+  handleListTraceGroups,
   handleListTraces,
   handleQueryTraces,
+  handleTraceEvalRun,
 } from "./handlers/traces.ts";
 import { viewFrameCsp, viewFrameDocument } from "./view-frame.ts";
 import type { ViewRegistry } from "./view-registry.ts";
@@ -702,14 +709,32 @@ export function setupRoutes({
     ),
   );
 
-  // GET /api/traces - List all traces across all trace providers
+  const traceEvals = () => ({
+    providers: context.evalProviders.values(),
+    runner: context.evalRunner,
+  });
+
+  // GET /api/traces - List the traces across all trace providers, or with
+  // `q` and `filters` those that match
   app.get("/api/traces", async c =>
     relay(
       c,
-      await handleListTraces(traceProviders.values(), {
-        providers: context.evalProviders.values(),
-        runner: context.evalRunner,
-      }),
+      await answerTraceQuery(
+        () => parseTraceQuery(c.req.query()),
+        query => handleListTraces(traceProviders.values(), traceEvals(), query),
+      ),
+    ),
+  );
+
+  // GET /api/traces/groups - Those traces as the groups of the `groupBy` column
+  app.get("/api/traces/groups", async c =>
+    relay(
+      c,
+      await answerTraceQuery(
+        () => parseTraceGroupQuery(c.req.query()),
+        query =>
+          handleListTraceGroups(traceProviders.values(), traceEvals(), query),
+      ),
     ),
   );
 
@@ -1107,6 +1132,12 @@ export function setupRoutes({
       c,
       await handleTraceCheckResults(evalProviders.values(), providerId, id),
     );
+  });
+
+  // GET /api/traces/:providerId/:id/eval-run - The eval run a trace came from
+  app.get("/api/traces/:providerId/:id/eval-run", async c => {
+    const { providerId, id } = c.req.param();
+    return relay(c, await handleTraceEvalRun(traceEvals(), providerId, id));
   });
 
   // #endregion

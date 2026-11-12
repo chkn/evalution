@@ -4045,6 +4045,283 @@ pre {
   padding-left: 30px;
 }
 
+.trace-list-row-loading,
+.trace-table-row-loading {
+  color: var(--tree-text-secondary);
+  font-style: italic;
+  cursor: default;
+}
+
+/* ─── Search, filters and grouping ───────────────────────────────────────── */
+
+.trace-list-search {
+  border-bottom: none;
+}
+
+.trace-filter-chips {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 6px 5px;
+}
+
+.trace-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border-radius: 9px;
+  background: var(--tree-hover);
+  color: var(--tree-text);
+  font-size: 11px;
+  line-height: 18px;
+  padding-left: 7px;
+}
+
+.trace-filter-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-filter-chip-remove {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--tree-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+  padding: 0 6px 0 4px;
+  cursor: pointer;
+}
+
+.trace-filter-chip-remove:hover {
+  color: var(--tree-text);
+}
+
+.trace-list-clear {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.trace-filter-popover {
+  width: 220px;
+  max-height: min(70vh, 420px);
+  overflow-y: auto;
+}
+
+.trace-group-popover {
+  max-height: min(70vh, 460px);
+  overflow-y: auto;
+}
+
+.trace-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--dropdown-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.trace-menu-row:hover {
+  background: var(--dropdown-option-hover);
+}
+
+.trace-menu-row-selected {
+  background: var(--dropdown-option-selected);
+}
+
+.trace-menu-row-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trace-menu-row-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--dropdown-text-muted);
+}
+
+.trace-menu-row-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--accent);
+}
+
+.trace-menu-row-footer,
+.trace-menu-divided {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--dropdown-border);
+}
+
+.trace-menu-row-footer {
+  padding-top: 6px;
+  border-radius: 0 0 6px 6px;
+  color: var(--dropdown-text-muted);
+}
+
+.trace-group-resolutions {
+  display: flex;
+  gap: 2px;
+  padding: 2px 8px 4px;
+}
+
+.trace-group-resolution {
+  flex: 1;
+  border: 1px solid var(--dropdown-border);
+  background: none;
+  border-radius: 5px;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--dropdown-text-muted);
+  cursor: pointer;
+}
+
+.trace-group-resolution-selected {
+  background: var(--dropdown-option-selected);
+  border-color: var(--accent);
+  color: var(--dropdown-text);
+}
+
+.trace-filter-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--dropdown-text);
+}
+
+.trace-filter-header > span {
+  flex: 1;
+}
+
+.trace-filter-back,
+.trace-filter-clear {
+  border: none;
+  background: none;
+  border-radius: 5px;
+  padding: 0 6px;
+  font: inherit;
+  color: var(--dropdown-text-muted);
+  cursor: pointer;
+}
+
+.trace-filter-back {
+  font-size: 16px;
+  line-height: 18px;
+}
+
+.trace-filter-clear {
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+.trace-filter-back:hover,
+.trace-filter-clear:hover {
+  background: var(--dropdown-option-hover);
+  color: var(--dropdown-text);
+}
+
+.trace-filter-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 6px 6px;
+}
+
+.trace-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--dropdown-text-muted);
+}
+
+.trace-filter-field input {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--input-text);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+  outline: none;
+}
+
+.trace-filter-field input:focus {
+  border-color: var(--accent);
+  background: var(--input-focus-bg);
+}
+
+.trace-filter-status {
+  padding: 4px 8px 8px;
+  font-size: 12px;
+  color: var(--dropdown-text-muted);
+}
+
+.trace-filter-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--dropdown-text);
+  cursor: pointer;
+}
+
+.trace-filter-value:hover {
+  background: var(--dropdown-option-hover);
+}
+
+.trace-filter-value input[type="checkbox"] {
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.trace-filter-value-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-filter-value-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--dropdown-text-muted);
+}
+
 /* ─── Column picker popover ──────────────────────────────────────────────── */
 
 .trace-column-picker {

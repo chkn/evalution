@@ -2,8 +2,10 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import type {
+  ListTraceGroupsQuery,
   ListTracesQuery,
   TraceChangeEvent,
+  TraceGroup,
   TraceSummary,
 } from "@evalution/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,13 +28,19 @@ function summary(id: string, fields: Partial<TraceSummary> = {}) {
 
 /** A client whose listing is whatever `traces` holds when it's called. */
 function fakeClient(initial: TraceSummary[] = []) {
-  const state = { traces: initial, fail: false };
+  const state = { traces: initial, fail: false, groups: [] as TraceGroup[] };
   const queries: ListTracesQuery[] = [];
+  const groupQueries: ListTraceGroupsQuery[] = [];
   const client: CloudTraceClient = {
     listTraces: vi.fn(async (query?: ListTracesQuery) => {
       queries.push(query ?? {});
       if (state.fail) throw new Error("offline");
       return state.traces;
+    }),
+    listTraceGroups: vi.fn(async (query: ListTraceGroupsQuery) => {
+      groupQueries.push(query);
+      if (state.fail) throw new Error("offline");
+      return state.groups;
     }),
     getTrace: vi.fn(async (id: string) =>
       id === "t1"
@@ -43,7 +51,7 @@ function fakeClient(initial: TraceSummary[] = []) {
         : undefined,
     ),
   };
-  return { client, state, queries };
+  return { client, state, queries, groupQueries };
 }
 
 const quiet = { warn: vi.fn() };
@@ -154,5 +162,103 @@ describe("CloudTraceProvider", () => {
     await vi.advanceTimersByTimeAsync(1000);
 
     expect(events).toEqual([{ type: "add", traceId: "t2" }]);
+  });
+
+  it("runs a search and filters in the cloud, without mistaking the matches for the listing", async () => {
+    vi.setSystemTime(10_000_000);
+    const { client, state, queries } = fakeClient([
+      summary("t1"),
+      summary("t2"),
+    ]);
+    const provider = new CloudTraceProvider({
+      client,
+      windowMs: 1000,
+      limit: 5,
+      pollIntervalMs: 1000,
+    });
+    const events: TraceChangeEvent[] = [];
+    provider.watch(e => events.push(e));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const filters = [
+      { column: "status" as const, op: "in" as const, values: ["error"] },
+    ];
+    state.traces = [summary("t2")];
+    const matches = await provider.getAllTraces({ search: "t", filters });
+    state.traces = [summary("t1"), summary("t2")];
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(matches.map(t => t.id)).toEqual(["t2"]);
+    expect(queries[1]).toEqual({
+      from: 10_000_000 - 1000,
+      limit: 5,
+      search: "t",
+      filters,
+    });
+    // `t1` wasn't in the matches, but it never left.
+    expect(events).toEqual([]);
+  });
+
+  it("groups in the cloud, over the whole window", async () => {
+    vi.setSystemTime(10_000_000);
+    const { client, state, groupQueries } = fakeClient();
+    state.groups = [
+      {
+        key: 'model:in:["gpt"]',
+        filter: { column: "model", op: "in", values: ["gpt"] },
+        count: 4000,
+        summary: { startTime: 1, status: "ok", spanCount: 9000 },
+      } as TraceGroup,
+    ];
+    const provider = new CloudTraceProvider({
+      client,
+      windowMs: 1000,
+      environment: "production",
+    });
+
+    const groups = await provider.groupTraces({
+      search: "t",
+      groupBy: { column: "model" },
+      timeZone: "Europe/Berlin",
+    });
+
+    expect(groups).toEqual([
+      {
+        ...state.groups[0],
+        summary: {
+          ...state.groups[0]!.summary,
+          annotationCounts: { issue: 0, good: 0, note: 0 },
+        },
+      },
+    ]);
+    expect(groupQueries).toEqual([
+      {
+        environment: "production",
+        from: 10_000_000 - 1000,
+        search: "t",
+        filters: undefined,
+        groupBy: { column: "model" },
+        timeZone: "Europe/Berlin",
+      },
+    ]);
+  });
+
+  it("groups the last listing while the cloud can't be reached", async () => {
+    const { client, state } = fakeClient([
+      summary("t1", { model: "gpt" }),
+      summary("t2", { model: "gpt" }),
+      summary("t3"),
+    ]);
+    const provider = new CloudTraceProvider({ client, log: quiet });
+    await provider.getAllTraces();
+
+    state.fail = true;
+    const groups = await provider.groupTraces({ groupBy: { column: "model" } });
+
+    expect(groups.map(g => [g.key, g.count])).toEqual([
+      ['model:in:["gpt"]', 2],
+      ["model:in:[null]", 1],
+    ]);
+    expect(quiet.warn).toHaveBeenCalledTimes(1);
   });
 });

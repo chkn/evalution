@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type { TraceIngestor } from "@evalution/sdk";
-import type { Span, Trace, TraceSummary } from "../shared/types.ts";
+import { filterTraces, type TraceIngestor } from "@evalution/sdk";
+import type { Span, Trace, TraceQuery, TraceSummary } from "../shared/types.ts";
 import { BaseTraceProvider } from "./base-trace-provider.ts";
 import { mergeSpans } from "./span-merge.ts";
 import { rollupSpans } from "./span-rollup.ts";
@@ -27,7 +27,7 @@ export class MemoryTraceProvider extends BaseTraceProvider {
     super({ id, displayName, description });
   }
 
-  async getAllTraces(): Promise<TraceSummary[]> {
+  async getAllTraces(query?: TraceQuery): Promise<TraceSummary[]> {
     const summaries = Array.from(this.traces.values()).map(t => {
       const spans = this.spansByTrace.get(t.id) ?? [];
       return {
@@ -45,7 +45,7 @@ export class MemoryTraceProvider extends BaseTraceProvider {
       };
     });
     summaries.sort((a, b) => b.startTime - a.startTime);
-    return summaries;
+    return filterTraces(summaries, query);
   }
 
   async hasTrace(traceId: string): Promise<boolean> {

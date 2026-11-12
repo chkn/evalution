@@ -12,5 +12,6 @@ export * from "./evaluation-answers.ts";
 export * from "./http-trace-sink.ts";
 export * from "./prompt-tracer.ts";
 export * from "./trace-ingestor.ts";
+export * from "./trace-query.ts";
 export * from "./trace-sink.ts";
 export * from "./trace-types.ts";

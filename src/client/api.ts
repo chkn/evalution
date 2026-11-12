@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { traceQueryParams } from "@evalution/sdk";
 import type {
   EvalArmSpec,
   EvalDefinition,
@@ -41,8 +42,12 @@ import type {
   PromptStyle,
   PropDefinition,
   RebaseResult,
+  TraceEvalRun,
+  TraceGroup,
+  TraceGroupQuery,
   TraceLiveEvent,
   TraceProviderInfo,
+  TraceQuery,
   TraceSummary,
   TraceWithSpans,
   UpdatePromptResponse,
@@ -438,8 +443,27 @@ export async function getTraceProviders(): Promise<TraceProviderInfo[]> {
   return res.json();
 }
 
-export async function getTraces(): Promise<TraceSummary[]> {
-  const res = await fetch("/api/traces");
+/** A trace listing's query as a URL's search, `?` included; empty if it has none. */
+function traceSearch(query: TraceQuery & Partial<TraceGroupQuery>): string {
+  const params = new URLSearchParams(traceQueryParams(query));
+  return params.size > 0 ? `?${params}` : "";
+}
+
+/**
+ * The traces `query` matches across every provider, as the groups of the
+ * column it groups by.
+ */
+export async function getTraceGroups(
+  query: TraceGroupQuery,
+): Promise<TraceGroup[]> {
+  const res = await fetch(`/api/traces/groups${traceSearch(query)}`);
+  await throwIfError(res);
+  return res.json();
+}
+
+/** The traces of every provider, or with a `query` those it matches. */
+export async function getTraces(query?: TraceQuery): Promise<TraceSummary[]> {
+  const res = await fetch(`/api/traces${traceSearch(query ?? {})}`);
   await throwIfError(res);
   return res.json();
 }
@@ -1037,6 +1061,18 @@ export async function getTraceCheckResults(
   );
   await throwIfError(res);
   return res.json();
+}
+
+/** The eval run that produced a trace, or `undefined` if none did. */
+export async function getTraceEvalRun(
+  providerId: string,
+  traceId: string,
+): Promise<TraceEvalRun | undefined> {
+  const res = await fetch(
+    `/api/traces/${encodeURIComponent(providerId)}/${encodeURIComponent(traceId)}/eval-run`,
+  );
+  await throwIfError(res);
+  return (await res.json()) ?? undefined;
 }
 
 // #endregion

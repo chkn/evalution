@@ -9,7 +9,6 @@ import type {
   NormalizedPrompt,
   PromptID,
   RunResources,
-  TraceEvalRun,
   TraceLiveEvent,
 } from "../../shared/types";
 import { ViewChannel } from "../../views/host.ts";
@@ -86,8 +85,6 @@ interface Props {
   onDeleted?: () => void;
   /** Bumped on eval changes, so the trace's check results stay current. */
   evalVersion?: number;
-  /** The eval run this trace came from, if any. */
-  evalRun?: TraceEvalRun;
   /** Opens the eval run this trace came from, or that a check result did. */
   onOpenEvalRun?: OpenEvalRun;
   /** Coding agents the "Ask" button offers. */
@@ -125,7 +122,6 @@ function TraceView({
   findPrompt,
   onDeleted,
   evalVersion,
-  evalRun,
   onOpenEvalRun,
   agents = [],
   onAskAgent,
@@ -579,7 +575,6 @@ function TraceView({
         providerId={providerId}
         traceId={traceId}
         version={evalVersion}
-        evalRun={evalRun}
         onOpenRun={onOpenEvalRun}
       />
 

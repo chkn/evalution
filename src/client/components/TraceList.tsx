@@ -5,11 +5,18 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { TraceSummary, VariationInfo } from "../../shared/types";
 import { lookupVariations } from "../api";
+import type { TraceListing } from "../hooks/useTraces";
 import {
   type SummaryColumn,
   SummaryList,
   TableModeButton,
 } from "./SummaryList";
+import {
+  TraceFilterButton,
+  TraceFilterChips,
+  TraceGroupButton,
+  TraceSearchBox,
+} from "./TraceListControls";
 import { AnnotationCountBadges } from "./trace/AnnotationChip.tsx";
 import { CheckCountBadges } from "./trace/CheckCountBadges.tsx";
 import {
@@ -18,21 +25,8 @@ import {
   formatTimestampCompact,
   formatTokenCount,
 } from "./trace/format.ts";
-import {
-  AnnotationsIcon,
-  CalendarIcon,
-  ColumnsIcon,
-  CostIcon,
-  EnvironmentIcon,
-  EvalsIcon,
-  GrabHandleIcon,
-  ModelIcon,
-  SpansIcon,
-  StopwatchIcon,
-  TokensIcon,
-  VariationIcon,
-  VersionIcon,
-} from "./trace/icons.tsx";
+import { ColumnsIcon, GrabHandleIcon, SearchIcon } from "./trace/icons.tsx";
+import { traceColumnIcon } from "./trace-column-icon";
 import {
   DEFAULT_TRACE_COLUMNS,
   parseTraceColumns,
@@ -45,7 +39,12 @@ import {
   traceVariationLabel,
   traceVersionLabel,
 } from "./trace-columns";
-import { groupTraces, type TraceListItem } from "./trace-groups";
+import {
+  columnGroupItems,
+  groupTraces,
+  type TraceListItem,
+} from "./trace-groups";
+import { setColumnFilter, TRACE_COLUMN_LABELS } from "./trace-list-view";
 import { useAnchoredPopover } from "./use-anchored-popover";
 
 const COLUMN_STORAGE_KEY = "trace-list-columns";
@@ -58,47 +57,6 @@ function loadColumnState(): TraceColumnState[] {
     /* ignore */
   }
   return DEFAULT_TRACE_COLUMNS;
-}
-
-const COLUMN_LABELS: Record<TraceColumnKey, string> = {
-  startTime: "Date",
-  spanCount: "Spans",
-  duration: "Duration",
-  totalTokens: "Tokens",
-  model: "Model",
-  environment: "Environment",
-  cost: "Cost",
-  annotations: "Annotations",
-  checks: "Checks",
-  version: "Version",
-  variation: "Variation",
-};
-
-function columnIcon(key: TraceColumnKey) {
-  switch (key) {
-    case "startTime":
-      return <CalendarIcon />;
-    case "spanCount":
-      return <SpansIcon />;
-    case "duration":
-      return <StopwatchIcon />;
-    case "totalTokens":
-      return <TokensIcon />;
-    case "model":
-      return <ModelIcon />;
-    case "environment":
-      return <EnvironmentIcon />;
-    case "cost":
-      return <CostIcon />;
-    case "annotations":
-      return <AnnotationsIcon />;
-    case "checks":
-      return <EvalsIcon />;
-    case "version":
-      return <VersionIcon />;
-    case "variation":
-      return <VariationIcon />;
-  }
 }
 
 /**
@@ -172,9 +130,9 @@ function ColumnPickerButton({
                     onChange={() => onToggle(column.key)}
                   />
                   <span className="trace-column-picker-icon">
-                    {columnIcon(column.key)}
+                    {traceColumnIcon(column.key)}
                   </span>
-                  <span>{COLUMN_LABELS[column.key]}</span>
+                  <span>{TRACE_COLUMN_LABELS[column.key]}</span>
                 </label>
               </div>
             ))}
@@ -186,9 +144,8 @@ function ColumnPickerButton({
 }
 
 interface TraceListProps {
-  traces: TraceSummary[];
-  loading: boolean;
-  error: string | null;
+  /** The traces to show, and the search, filters and grouping that chose them. */
+  listing: TraceListing;
   selectedTraceKey: string | null;
   onSelect: (trace: TraceSummary) => void;
   /** The sidebar's current width, in px — read by the table-mode toggle to know what to restore. */
@@ -199,7 +156,10 @@ interface TraceListProps {
 
 /** A row's tooltip: a trace's name, or what a group gathers. */
 function groupTitle(item: TraceListItem): string {
-  const { children } = item;
+  const { children, group } = item;
+  if (group) {
+    return `${item.name} — ${group.count} trace${group.count === 1 ? "" : "s"}`;
+  }
   if (!children) return item.name;
   const count = `${children.length} ${item.evalRun ? "trace" : "run"}${children.length === 1 ? "" : "s"}`;
   return item.evalRun
@@ -274,22 +234,34 @@ const COLUMN_DEFS: Record<
 
 /**
  * Descriptions of the prompt variations the listed traces ran, looked up only
- * while their column is shown, and only for ids not already known — they are
- * immutable, so nothing ever needs re-fetching.
+ * while their column is shown, and of those the list is filtered or grouped
+ * by; only for ids not already known — they are immutable, so nothing ever
+ * needs re-fetching.
  */
 function useVariationLookups(
-  traces: TraceSummary[],
+  listing: TraceListing,
   columns: TraceColumnState[],
 ) {
   const [variations, setVariations] = useState<Record<string, VariationInfo>>(
     {},
   );
   const showVariations = columns.some(c => c.key === "variation" && c.visible);
-  const variationIds = showVariations
-    ? [...new Set(traces.flatMap(t => t.promptVariation ?? []))]
-        .filter(id => !(id in variations))
-        .join(",")
-    : "";
+  const { traces, groups, members, view } = listing;
+  const listed = showVariations
+    ? [...traces, ...Object.values(members).flatMap(m => m ?? [])].flatMap(
+        t => t.promptVariation ?? [],
+      )
+    : [];
+  const named = [...view.filters, ...(groups ?? []).map(g => g.filter)].flatMap(
+    filter =>
+      filter.column === "variation" &&
+      (filter.op === "in" || filter.op === "notIn")
+        ? filter.values.flatMap(value => value ?? [])
+        : [],
+  );
+  const variationIds = [...new Set([...listed, ...named])]
+    .filter(id => !(id in variations))
+    .join(",");
 
   useEffect(() => {
     if (!variationIds) return;
@@ -302,17 +274,27 @@ function useVariationLookups(
 }
 
 function TraceList({
-  traces,
-  loading,
-  error,
+  listing,
   selectedTraceKey,
   onSelect,
   sidebarWidth,
   onResizeSidebar,
 }: TraceListProps) {
   const [columns, setColumns] = useState<TraceColumnState[]>(loadColumnState);
-  const variations = useVariationLookups(traces, columns);
-  const items = useMemo(() => groupTraces(traces), [traces]);
+  const variations = useVariationLookups(listing, columns);
+  const { traces, groups, members, view, setView, loadGroup } = listing;
+  const { grouping } = view;
+  const items = useMemo<TraceListItem[]>(
+    () =>
+      grouping === "runs"
+        ? groupTraces(traces)
+        : grouping === "none"
+          ? traces
+          : columnGroupItems(groups ?? [], members, grouping, variations),
+    [grouping, traces, groups, members, variations],
+  );
+  const [searchVisible, setSearchVisible] = useState(view.search !== "");
+  const searching = view.search.trim() !== "" || view.filters.length > 0;
 
   useEffect(() => {
     try {
@@ -326,8 +308,8 @@ function TraceList({
     .filter(c => c.visible)
     .map(({ key }) => ({
       key,
-      label: COLUMN_LABELS[key],
-      icon: columnIcon(key),
+      label: TRACE_COLUMN_LABELS[key],
+      icon: traceColumnIcon(key),
       width: TRACE_COLUMN_WIDTH_PX[key],
       ...(key === "version"
         ? {
@@ -348,6 +330,25 @@ function TraceList({
       title="Traces"
       headerActions={
         <>
+          <button
+            type="button"
+            className={`tree-toolbar-btn${searchVisible ? " tree-toolbar-btn-active" : ""}`}
+            title="Toggle search"
+            aria-pressed={searchVisible}
+            onClick={() => {
+              if (searchVisible && view.search !== "") {
+                setView({ ...view, search: "" });
+              }
+              setSearchVisible(v => !v);
+            }}
+          >
+            <SearchIcon />
+          </button>
+          <TraceFilterButton listing={listing} variations={variations} />
+          <TraceGroupButton
+            grouping={grouping}
+            onChange={next => setView({ ...view, grouping: next })}
+          />
           <ColumnPickerButton
             columns={columns}
             onToggle={key => setColumns(prev => toggleTraceColumn(prev, key))}
@@ -359,16 +360,58 @@ function TraceList({
             sidebarWidth={sidebarWidth}
             onResizeSidebar={onResizeSidebar}
             tableWidth={tableModeWidth(columns)}
+            storageKey="traces"
           />
         </>
       }
-      loading={loading}
-      error={error}
-      empty={
+      toolbar={
         <>
-          <p>No traces yet.</p>
-          <p className="trace-list-hint">Run a prompt to create one.</p>
+          {searchVisible && (
+            <TraceSearchBox
+              value={view.search}
+              onChange={search => setView({ ...view, search })}
+              onEscape={() => {
+                setSearchVisible(false);
+                if (view.search !== "") setView({ ...view, search: "" });
+              }}
+            />
+          )}
+          <TraceFilterChips
+            filters={view.filters}
+            variations={variations}
+            onRemove={filter =>
+              setView({
+                ...view,
+                filters: setColumnFilter(
+                  view.filters,
+                  filter.column,
+                  undefined,
+                ),
+              })
+            }
+          />
         </>
+      }
+      loading={listing.loading}
+      error={listing.error}
+      empty={
+        searching ? (
+          <>
+            <p>No traces match.</p>
+            <button
+              type="button"
+              className="trace-list-clear"
+              onClick={() => setView({ ...view, search: "", filters: [] })}
+            >
+              Clear search and filters
+            </button>
+          </>
+        ) : (
+          <>
+            <p>No traces yet.</p>
+            <p className="trace-list-hint">Run a prompt to create one.</p>
+          </>
+        )
       }
       items={items}
       columns={visibleColumns}
@@ -376,6 +419,8 @@ function TraceList({
       itemName={t => t.name}
       itemTitle={groupTitle}
       itemChildren={t => t.children}
+      itemGroupCount={t => t.group?.count}
+      onExpandGroup={t => t.group && loadGroup(t.group)}
       itemMarker={t => (
         <span className={`trace-status-dot trace-status-${t.status}`} />
       )}

@@ -211,6 +211,7 @@ function DatasetList({
             sidebarWidth={sidebarWidth}
             onResizeSidebar={onResizeSidebar}
             tableWidth={tableModeWidth(columns.map(c => c.width))}
+            storageKey="datasets"
           />
           <NewDatasetButton onCreated={onSelect} />
         </>

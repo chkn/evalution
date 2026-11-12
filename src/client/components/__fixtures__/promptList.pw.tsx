@@ -52,3 +52,25 @@ test("keeps showing the current prompts while a refetch is in flight", async ({
   releaseRefetch();
   await expect(component.getByText("bye")).toBeVisible();
 });
+
+test("Esc in the search box clears the filter and hides the box", async ({
+  mount,
+  page,
+}) => {
+  await page.route("**/api/prompts", route =>
+    route.fulfill({ json: [chatPrompt("hello"), chatPrompt("bye")] }),
+  );
+  const component = await mount(<PromptListFetchHarness />);
+  await expect(component.getByText("hello")).toBeVisible();
+
+  await component.getByRole("button", { name: "Toggle search" }).click();
+  const filter = component.getByPlaceholder("Filter");
+  await expect(filter).toBeFocused();
+  await filter.fill("bye");
+  await expect(component.getByText("hello")).toHaveCount(0);
+
+  await filter.press("Escape");
+  await expect(filter).toHaveCount(0);
+  await expect(component.getByText("hello")).toBeVisible();
+  await expect(component.getByText("bye")).toBeVisible();
+});

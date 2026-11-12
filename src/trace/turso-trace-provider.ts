@@ -12,10 +12,12 @@ import {
   type Annotation,
   type AnnotationChanges,
   CHECK_ATTRIBUTE,
+  filterTraces,
   type LLMSpanDetails,
   type Span,
   type SpanKind,
   type Trace,
+  type TraceQuery,
   type TraceSummary,
 } from "@evalution/sdk";
 import type { Database } from "@tursodatabase/sync";
@@ -254,7 +256,7 @@ export class TursoTraceProvider extends BaseTraceProvider {
     return next;
   }
 
-  async getAllTraces(): Promise<TraceSummary[]> {
+  async getAllTraces(query?: TraceQuery): Promise<TraceSummary[]> {
     // A raw correlated-subquery column (`sql\`... where ${spans.traceId} =
     // ${traces.id}\``) renders both sides unqualified ("trace_id" = "id"),
     // which SQLite resolves against the innermost table in scope — silently
@@ -354,7 +356,9 @@ export class TursoTraceProvider extends BaseTraceProvider {
       .leftJoin(annotationCounts, eq(annotationCounts.traceId, traces.id))
       .orderBy(desc(traces.startTime));
 
-    return rows.map(row => ({
+    // Every summary is computed either way, so the query is answered over
+    // them rather than in SQL.
+    const summaries: TraceSummary[] = rows.map(row => ({
       id: row.id,
       providerId: row.providerId ?? this.id,
       name: row.name,
@@ -377,6 +381,7 @@ export class TursoTraceProvider extends BaseTraceProvider {
         note: Number(row.annotNote),
       },
     }));
+    return filterTraces(summaries, query);
   }
 
   /**

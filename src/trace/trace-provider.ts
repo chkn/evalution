@@ -7,6 +7,9 @@ import type {
   AnnotationEvent,
   AnnotationEventOp,
   TraceChangeEvent,
+  TraceGroup,
+  TraceGroupQuery,
+  TraceQuery,
   TraceStreamEvent,
   TraceSummary,
   TraceWithSpans,
@@ -49,8 +52,26 @@ export interface TraceProvider {
   /**
    * Returns compact summaries for every trace known to this provider, newest
    * first. Used to populate the Traces sidebar.
+   *
+   * With a `query`, only the traces it matches: `filterTraces` is the
+   * reference for what that means. A provider with a store that can search
+   * runs the query there; any other filters its summaries in memory. Filters
+   * on `checks` never reach a provider, which doesn't know a trace's checks:
+   * the server applies those itself.
    */
-  getAllTraces(): Promise<TraceSummary[]>;
+  getAllTraces(query?: TraceQuery): Promise<TraceSummary[]>;
+
+  /**
+   * Returns the traces `query` matches as groups, one per value or bucket of
+   * the column it groups by: `groupTraceSummaries` is the reference. Each
+   * group's `filter`, added to the query's and passed to
+   * {@link getAllTraces}, lists its traces.
+   *
+   * Optional. The server groups what {@link getAllTraces} returns for a
+   * provider without it, which a provider that lists only its most recent
+   * traces should improve on by counting every trace in its store.
+   */
+  groupTraces?(query: TraceGroupQuery): Promise<TraceGroup[]>;
 
   /**
    * Returns the trace with the given ID together with all of its spans, or

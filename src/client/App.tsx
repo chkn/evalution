@@ -325,7 +325,8 @@ function App() {
     refetch: refetchPrompts,
     patchPrompt,
   } = usePrompts();
-  const { traces, refetch: refetchTraces } = useTraces();
+  const traceListing = useTraces();
+  const { traces, refetch: refetchTraces } = traceListing;
   const {
     datasets,
     loading: datasetsLoading,
@@ -1335,9 +1336,7 @@ function App() {
                   )}
                   {activeSection === "traces" && (
                     <TraceList
-                      traces={traces}
-                      loading={false}
-                      error={null}
+                      listing={traceListing}
                       selectedTraceKey={selectedTraceKey}
                       onSelect={t =>
                         openTabInFocusedPane({
@@ -1702,13 +1701,6 @@ function App() {
                             }
                             findPrompt={findPrompt}
                             evalVersion={evalVersion}
-                            evalRun={
-                              traces.find(
-                                t =>
-                                  t.id === tab.traceId &&
-                                  t.providerId === tab.providerId,
-                              )?.evalRun
-                            }
                             onOpenEvalRun={(providerId, run, evalName) =>
                               openLinkedTab(
                                 pane.id,

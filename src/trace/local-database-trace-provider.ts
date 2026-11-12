@@ -8,6 +8,7 @@ import type {
   AnnotationChanges,
   Span,
   Trace,
+  TraceQuery,
   TraceStreamEvent,
   TraceSummary,
   TraceWithSpans,
@@ -164,8 +165,8 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
 
   // ── TraceProvider (read) — never opens the database ─────────────────────
 
-  override async getAllTraces(): Promise<TraceSummary[]> {
-    return (await this.currentReal())?.getAllTraces() ?? [];
+  override async getAllTraces(query?: TraceQuery): Promise<TraceSummary[]> {
+    return (await this.currentReal())?.getAllTraces(query) ?? [];
   }
 
   override async hasTrace(traceId: string): Promise<boolean> {

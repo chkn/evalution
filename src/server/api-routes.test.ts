@@ -771,6 +771,50 @@ describe("DELETE /api/traces/:providerId/:id", () => {
     expect((await app.request(url, { method: "DELETE" })).status).toBe(404);
   });
 
+  it("lists the traces a search and filters match, and groups them", async () => {
+    const provider = new MemoryTraceProvider({ id: TRACE_PROVIDER_ID });
+    for (const [traceId, name] of [
+      ["t1", "summarize"],
+      ["t2", "summarize"],
+      ["t3", "answer"],
+    ]) {
+      await provider.recordSpanStart({
+        id: `${traceId}:root`,
+        traceId,
+        name,
+        kind: "LLM",
+        startTime: 1,
+      });
+    }
+    const app = makeTraceApp(provider);
+    const json = async (url: string) => {
+      const res = await app.request(url);
+      return { status: res.status, body: (await res.json()) as any };
+    };
+    const filters = encodeURIComponent(
+      JSON.stringify([{ column: "name", op: "in", values: ["summarize"] }]),
+    );
+
+    const listed = await json(`/api/traces?q=T2&filters=${filters}`);
+    expect(listed.body.map((t: { id: string }) => t.id)).toEqual(["t2"]);
+
+    const grouped = await json("/api/traces/groups?groupBy=name");
+    expect(
+      grouped.body
+        .map((g: { key: string; count: number }) => [g.key, g.count])
+        .sort(),
+    ).toEqual([
+      ['name:in:["answer"]', 1],
+      ['name:in:["summarize"]', 2],
+    ]);
+
+    expect(await json("/api/traces?filters=nope")).toEqual({
+      status: 400,
+      body: { error: "`filters` isn't JSON." },
+    });
+    expect((await json("/api/traces/groups")).status).toBe(400);
+  });
+
   it("responds 404 for an unknown trace provider", async () => {
     const app = makeTraceApp(
       new MemoryTraceProvider({ id: TRACE_PROVIDER_ID }),

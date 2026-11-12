@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { NormalizedPrompt } from "../../shared/types";
 import { requireProviderId } from "../utils";
-import { PlusIcon } from "./trace/icons.tsx";
+import { PlusIcon, SearchIcon } from "./trace/icons.tsx";
 
 interface PromptListProps {
   prompts: NormalizedPrompt[];
@@ -172,24 +172,6 @@ function PromptIcon() {
     >
       <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
       <polyline points="14 2 14 8 20 8" />
-    </svg>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 11 11"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="4.5" cy="4.5" r="3" />
-      <line x1="7" y1="7" x2="9.5" y2="9.5" />
     </svg>
   );
 }
@@ -449,6 +431,13 @@ function PromptList({
         placeholder="Filter"
         value={filter}
         onChange={e => setFilter(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            setFilter("");
+            setSearchVisible(false);
+          }
+        }}
         autoFocus
       />
     </div>

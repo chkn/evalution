@@ -3,7 +3,7 @@
 
 import { useEffect, useLayoutEffect, useState } from "react";
 import type { TraceEvalRun } from "../../../shared/types";
-import { getTraceCheckResults } from "../../api";
+import { getTraceCheckResults, getTraceEvalRun } from "../../api";
 import { CheckCountBadges } from "./CheckCountBadges.tsx";
 import {
   countOutcomes,
@@ -22,7 +22,8 @@ import { ChevronIcon } from "./icons.tsx";
  * The trace's check results, from every eval run that made it — each check's
  * outcome and message beside the trace it judged, under a heading naming the
  * eval and version once and linking to the run. See `specs/evals.md` §F.
- * The run the trace came from gets its heading even with no checks to show.
+ * The run the trace came from, which this looks up itself, gets its heading
+ * even with no checks to show.
  * A run with checks collapses to its heading and a count chip per outcome;
  * which runs are collapsed is remembered for the last traces opened.
  * Renders nothing when no eval ran the trace.
@@ -31,25 +32,26 @@ export function TraceCheckResults({
   providerId,
   traceId,
   version,
-  evalRun,
   onOpenRun,
 }: {
   providerId: string;
   traceId: string;
-  /** Bumped on eval changes, so results that land later show up. */
+  /** Bumped on eval changes, so results and runs that land later show up. */
   version?: number;
-  /** The eval run the trace came from, if any. */
-  evalRun?: TraceEvalRun;
   /** Opens the run a heading names. Without it, the heading isn't a link. */
   onOpenRun?: OpenEvalRun;
 }) {
   const [results, setResults] = useState<ProvidedCheckResult[]>([]);
+  const [evalRun, setEvalRun] = useState<TraceEvalRun | undefined>();
   // biome-ignore lint/correctness/useExhaustiveDependencies: refetch on eval changes too.
   useEffect(() => {
     let cancelled = false;
     getTraceCheckResults(providerId, traceId)
       .then(r => !cancelled && setResults(r))
       .catch(() => !cancelled && setResults([]));
+    getTraceEvalRun(providerId, traceId)
+      .then(run => !cancelled && setEvalRun(run))
+      .catch(() => !cancelled && setEvalRun(undefined));
     return () => {
       cancelled = true;
     };

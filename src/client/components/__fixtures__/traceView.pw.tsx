@@ -86,6 +86,11 @@ async function mockTraceApi(
 ) {
   const annotations = [...initialAnnotations];
 
+  // No eval run made the trace, unless a test routes its own answer later.
+  await page.route("**/api/traces/*/*/eval-run", route =>
+    route.fulfill({ json: null }),
+  );
+
   await page.route("**/api/traces/*/*/events", route =>
     route.fulfill({
       contentType: "text/event-stream",
@@ -983,10 +988,9 @@ test("links a trace from an eval run to that run even with no check results", as
   await page.route("**/api/traces/*/*/check-results", route =>
     route.fulfill({ json: [] }),
   );
-  const opened: unknown[] = [];
-  const component = await mount(
-    <TraceViewHarness
-      evalRun={{
+  await page.route("**/api/traces/p1/t1/eval-run", route =>
+    route.fulfill({
+      json: {
         providerId: "e1",
         evalId: "eval",
         evalName: "Answers",
@@ -994,7 +998,12 @@ test("links a trace from an eval run to that run even with no check results", as
         startedAt: 5000,
         armId: "a1",
         armLabel: "Working tree",
-      }}
+      },
+    }),
+  );
+  const opened: unknown[] = [];
+  const component = await mount(
+    <TraceViewHarness
       onOpenEvalRun={(...args) => {
         opened.push(args);
       }}

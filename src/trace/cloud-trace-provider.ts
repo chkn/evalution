@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type {
-  Evalution,
-  TraceChangeEvent,
-  TraceSummary,
-  TraceWithSpans,
+import {
+  type Evalution,
+  filterTraces,
+  groupTraceSummaries,
+  isEmptyTraceQuery,
+  type TraceChangeEvent,
+  type TraceGroup,
+  type TraceGroupQuery,
+  type TraceQuery,
+  type TraceSummary,
+  type TraceWithSpans,
 } from "@evalution/sdk";
 import type { TraceProvider } from "./trace-provider.ts";
 
@@ -19,7 +25,10 @@ const DEFAULT_LIMIT = 200;
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
 
 /** The calls {@link CloudTraceProvider} makes of the cloud. */
-export type CloudTraceClient = Pick<Evalution, "listTraces" | "getTrace">;
+export type CloudTraceClient = Pick<
+  Evalution,
+  "listTraces" | "getTrace" | "listTraceGroups"
+>;
 
 /** Options for {@link CloudTraceProvider}. */
 export interface CloudTraceProviderOptions {
@@ -45,6 +54,9 @@ export interface CloudTraceProviderOptions {
   log?: Pick<Console, "warn">;
 }
 
+/** What the cloud's traces have: it keeps no annotations. */
+const NO_ANNOTATIONS = { issue: 0, good: 0, note: 0 };
+
 /** What a summary shows that can change, so a poll can tell it changed. */
 function fingerprint(trace: TraceSummary): string {
   return [
@@ -68,8 +80,10 @@ function fingerprint(trace: TraceSummary): string {
  *
  * It lists the most recent traces within a window (see
  * {@link CloudTraceProviderOptions}), since {@link TraceProvider.getAllTraces}
- * doesn't page. A cloud that can't be reached never fails the listing: the
- * last traces it returned are shown instead, and the failure is reported once.
+ * doesn't page. A search, filters and grouping run in the cloud, so they
+ * reach every trace in the window, not only the most recent ones. A cloud
+ * that can't be reached never fails the listing: the last traces it returned
+ * are shown instead, and the failure is reported once.
  */
 export class CloudTraceProvider implements TraceProvider {
   readonly id: string;
@@ -104,11 +118,45 @@ export class CloudTraceProvider implements TraceProvider {
     this.log = options.log ?? console;
   }
 
-  async getAllTraces(): Promise<TraceSummary[]> {
+  async getAllTraces(query?: TraceQuery): Promise<TraceSummary[]> {
     try {
-      return await this.list();
+      return await this.list(query);
     } catch {
+      // The server filters what a provider returns, so the last full listing
+      // still answers a query, as far as it reaches.
       return this.lastListed;
+    }
+  }
+
+  /**
+   * The groups of every trace in the window that `query` matches, counted in
+   * the cloud. When it can't be reached, the last traces it listed are
+   * grouped instead.
+   */
+  async groupTraces(query: TraceGroupQuery): Promise<TraceGroup[]> {
+    try {
+      const groups = await this.client.listTraceGroups({
+        ...this.window(),
+        search: query.search,
+        filters: query.filters,
+        groupBy: query.groupBy,
+        timeZone: query.timeZone,
+      });
+      this.failing = false;
+      return groups.map(group => ({
+        ...group,
+        summary: {
+          ...group.summary,
+          annotationCounts: group.summary.annotationCounts ?? NO_ANNOTATIONS,
+        },
+      }));
+    } catch (error) {
+      this.reportFailure(error);
+      return groupTraceSummaries(
+        filterTraces(this.lastListed, query),
+        query.groupBy,
+        query.timeZone,
+      );
     }
   }
 
@@ -135,36 +183,49 @@ export class CloudTraceProvider implements TraceProvider {
     };
   }
 
-  /** Lists the traces, noting what changed since the last listing. */
-  private async list(): Promise<TraceSummary[]> {
+  /** The traces every listing is of: the environment's, in the window. */
+  private window() {
+    return {
+      ...(this.environment && { environment: this.environment }),
+      from: Date.now() - this.windowMs,
+    };
+  }
+
+  private reportFailure(error: unknown): void {
+    if (this.failing) return;
+    this.log.warn(
+      `⚠️ Couldn't list production traces from Evalution Cloud (${(error as Error).message}).`,
+    );
+    this.failing = true;
+  }
+
+  /**
+   * Lists the traces `query` matches. A listing of them all also notes what
+   * changed since the last one.
+   */
+  private async list(query?: TraceQuery): Promise<TraceSummary[]> {
+    const everything = isEmptyTraceQuery(query);
     let listed: TraceSummary[];
     try {
       listed = await this.client.listTraces({
-        ...(this.environment && { environment: this.environment }),
-        from: Date.now() - this.windowMs,
+        ...this.window(),
         limit: this.limit,
+        ...(!everything && { search: query?.search, filters: query?.filters }),
       });
     } catch (error) {
-      if (!this.failing) {
-        this.log.warn(
-          `⚠️ Couldn't list production traces from Evalution Cloud (${(error as Error).message}).`,
-        );
-        this.failing = true;
-      }
+      this.reportFailure(error);
       throw error;
     }
     this.failing = false;
     const traces = listed.map(trace => ({
       ...trace,
       providerId: this.id,
-      annotationCounts: trace.annotationCounts ?? {
-        issue: 0,
-        good: 0,
-        note: 0,
-      },
+      annotationCounts: trace.annotationCounts ?? NO_ANNOTATIONS,
     }));
-    this.lastListed = traces;
-    this.noteChanges(traces);
+    if (everything) {
+      this.lastListed = traces;
+      this.noteChanges(traces);
+    }
     return traces;
   }
 

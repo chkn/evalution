@@ -2,6 +2,12 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { HttpTraceSink, type HttpTraceTarget } from "./http-trace-sink.ts";
+import {
+  type TraceFilter,
+  type TraceGroup,
+  type TraceGroupQuery,
+  traceQueryParams,
+} from "./trace-query.ts";
 import type { TraceSink } from "./trace-sink.ts";
 import type { Span, TraceSummary, TraceWithSpans } from "./trace-types.ts";
 
@@ -56,6 +62,20 @@ export interface EvalutionOptions {
   fetch?: typeof fetch;
 }
 
+/** A listing's query as a URL's search, `?` included; empty if it has none. */
+function listParams(
+  query: ListTracesQuery & Partial<ListTraceGroupsQuery>,
+): string {
+  const { search, filters, groupBy, timeZone, ...window } = query;
+  const params = new URLSearchParams(
+    traceQueryParams({ search, filters, groupBy, timeZone }),
+  );
+  for (const [name, value] of Object.entries(window)) {
+    if (value !== undefined) params.set(name, String(value));
+  }
+  return params.size > 0 ? `?${params}` : "";
+}
+
 /** Which traces {@link Evalution.listTraces} returns. */
 export interface ListTracesQuery {
   /** Only traces from this deployment environment. */
@@ -66,7 +86,16 @@ export interface ListTracesQuery {
   to?: number;
   /** At most this many, most recent first. */
   limit?: number;
+  /** Only traces whose name or id contains this text. */
+  search?: string;
+  /** Only traces that meet every one of these. */
+  filters?: TraceFilter[];
 }
+
+/** Which traces {@link Evalution.listTraceGroups} groups, and how. */
+export interface ListTraceGroupsQuery
+  extends Omit<ListTracesQuery, "limit">,
+    Pick<TraceGroupQuery, "groupBy" | "timeZone"> {}
 
 /** A project, as the cloud describes it. */
 export interface CloudProject {
@@ -226,12 +255,19 @@ export class Evalution implements TraceSink {
 
   /** The most recent production traces of the project. */
   listTraces(query: ListTracesQuery = {}): Promise<TraceSummary[]> {
-    const params = new URLSearchParams();
-    for (const [name, value] of Object.entries(query)) {
-      if (value !== undefined) params.set(name, String(value));
-    }
-    const search = params.size > 0 ? `?${params}` : "";
-    return this.json("GET", `/api/traces${search}`, { project: true });
+    return this.json("GET", `/api/traces${listParams(query)}`, {
+      project: true,
+    });
+  }
+
+  /**
+   * The project's production traces as groups, one per value or bucket of
+   * a column, counting every trace in the window rather than the most recent.
+   */
+  listTraceGroups(query: ListTraceGroupsQuery): Promise<TraceGroup[]> {
+    return this.json("GET", `/api/traces/groups${listParams(query)}`, {
+      project: true,
+    });
   }
 
   /** One production trace with its spans, or `undefined` if there's none. */

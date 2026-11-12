@@ -650,3 +650,61 @@ export function LinkIcon() {
     </svg>
   );
 }
+
+/** A funnel — filtering a list. */
+export function FilterIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <polygon points="22 3 2 3 10 12.5 10 19 14 21 14 12.5 22 3" />
+    </svg>
+  );
+}
+
+/** A heading with rows indented under it — grouping a list. */
+export function GroupIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="9" y1="12" x2="21" y2="12" />
+      <line x1="9" y1="18" x2="21" y2="18" />
+    </svg>
+  );
+}
+
+export function SearchIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 11 11"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="4.5" cy="4.5" r="3" />
+      <line x1="7" y1="7" x2="9.5" y2="9.5" />
+    </svg>
+  );
+}

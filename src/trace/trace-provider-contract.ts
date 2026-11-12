@@ -8,7 +8,14 @@
  * `specs/trace-workshopping.md` "Verification" ("Provider parity").
  */
 
-import type { Span, TraceSink, TraceStreamEvent } from "@evalution/sdk";
+import type {
+  Span,
+  TraceGroup,
+  TraceGroupQuery,
+  TraceQuery,
+  TraceSink,
+  TraceStreamEvent,
+} from "@evalution/sdk";
 import { afterAll, describe, expect, it } from "vitest";
 
 /** Minimal surface every `BaseTraceProvider` subclass exposes. */
@@ -17,7 +24,8 @@ export interface ContractProvider extends TraceSink {
   getTrace(traceId: string): Promise<{ trace: { status: string } } | undefined>;
   hasTrace(traceId: string): Promise<boolean>;
   deleteTrace(traceId: string): Promise<boolean>;
-  getAllTraces(): Promise<{ id: string }[]>;
+  getAllTraces(query?: TraceQuery): Promise<{ id: string }[]>;
+  groupTraces(query: TraceGroupQuery): Promise<TraceGroup[]>;
   subscribeTrace(
     traceId: string,
     callback: (event: TraceStreamEvent) => void,
@@ -243,6 +251,33 @@ export function runTraceProviderContractTests(
 
       const summaries = await provider.getAllTraces();
       expect(summaries.map(s => s.id)).toEqual(["b", "a"]);
+    });
+
+    it("getAllTraces lists only what a query matches, and groupTraces groups it", async () => {
+      const provider = await makeProvider();
+      await provider.recordSpanStart(
+        rootSpan("a", { name: "summarize", startTime: 1 }),
+      );
+      await provider.recordSpanStart(
+        rootSpan("b", { name: "answer", startTime: 2 }),
+      );
+      await provider.recordSpanStart(
+        rootSpan("c", { name: "summarize", startTime: 3 }),
+      );
+
+      const found = await provider.getAllTraces({
+        search: "SUMM",
+        filters: [{ column: "startTime", op: "range", min: 2 }],
+      });
+      expect(found.map(s => s.id)).toEqual(["c"]);
+
+      const groups = await provider.groupTraces({
+        groupBy: { column: "name" },
+      });
+      expect(groups.map(g => [g.filter, g.count])).toEqual([
+        [{ column: "name", op: "in", values: ["summarize"] }, 2],
+        [{ column: "name", op: "in", values: ["answer"] }, 1],
+      ]);
     });
 
     it("notifies watchers on add and update", async () => {

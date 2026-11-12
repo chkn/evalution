@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type {
-  Annotation,
-  AnnotationEvent,
-  AnnotationEventOp,
-  Span,
-  Trace,
-  TraceChangeEvent,
-  TraceSink,
-  TraceStreamEvent,
-  TraceSummary,
-  TraceWithSpans,
+import {
+  type Annotation,
+  type AnnotationEvent,
+  type AnnotationEventOp,
+  groupTraceSummaries,
+  type Span,
+  type Trace,
+  type TraceChangeEvent,
+  type TraceGroup,
+  type TraceGroupQuery,
+  type TraceQuery,
+  type TraceSink,
+  type TraceStreamEvent,
+  type TraceSummary,
+  type TraceWithSpans,
 } from "@evalution/sdk";
 import type { TraceProvider } from "./trace-provider.ts";
 
@@ -50,7 +54,16 @@ export abstract class BaseTraceProvider implements TraceProvider, TraceSink {
     this.description = options.description;
   }
 
-  abstract getAllTraces(): Promise<TraceSummary[]>;
+  abstract getAllTraces(query?: TraceQuery): Promise<TraceSummary[]>;
+
+  /** Groups what {@link getAllTraces} lists for the query, in memory. */
+  async groupTraces(query: TraceGroupQuery): Promise<TraceGroup[]> {
+    return groupTraceSummaries(
+      await this.getAllTraces(query),
+      query.groupBy,
+      query.timeZone,
+    );
+  }
 
   abstract hasTrace(traceId: string): Promise<boolean>;
 

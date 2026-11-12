@@ -250,7 +250,29 @@ test.describe("table-mode toggle", () => {
     await expect(component.locator(".trace-list-cards")).toBeVisible();
   });
 
-  test("the resize target grows with more visible columns, capped at a max", async ({
+  test("remembers which mode it's in across a remount", async ({
+    mount,
+    page,
+  }) => {
+    await page.setViewportSize({ width: 700, height: 700 });
+    const component = await mount(
+      <TraceListHarness traces={ONE_TRACE} initialSidebarWidth={220} />,
+    );
+    await component.getByTitle("Toggle table view").click();
+    await component.unmount();
+
+    const remounted = await mount(
+      <TraceListHarness traces={ONE_TRACE} initialSidebarWidth={340} />,
+    );
+    const toggle = remounted.getByTitle("Toggle table view");
+    // The mode it was in is remembered, so this goes to the other one.
+    await toggle.click();
+    expect(
+      await remounted.evaluate(el => (el as HTMLElement).style.width),
+    ).toBe("220px");
+  });
+
+  test("the first width to go to is sized to the visible columns, capped at a max", async ({
     mount,
     page,
   }) => {
@@ -259,14 +281,6 @@ test.describe("table-mode toggle", () => {
       <TraceListHarness traces={ONE_TRACE} initialSidebarWidth={220} />,
     );
     const toggle = component.getByTitle("Toggle table view");
-    const currentWidth = () =>
-      component.evaluate(el => (el as HTMLElement).style.width);
-
-    // Default columns (Date/Spans/Duration): 92 + 40 + 60 + 120 (Name) + 24
-    // (chrome) = 336, clamped up to the 340px minimum.
-    await toggle.click();
-    expect(await currentWidth()).toBe("340px");
-    await toggle.click(); // back to 220px before changing the columns
 
     // Show every column — comfortably over the 480px cap, so it clamps down to it.
     await component.getByTitle("Columns").click();
@@ -280,7 +294,25 @@ test.describe("table-mode toggle", () => {
     await page.keyboard.press("Escape");
 
     await toggle.click();
-    expect(await currentWidth()).toBe("480px");
+    expect(
+      await component.evaluate(el => (el as HTMLElement).style.width),
+    ).toBe("480px");
+  });
+
+  test("the first width to go to is at least the table's minimum", async ({
+    mount,
+    page,
+  }) => {
+    await page.setViewportSize({ width: 700, height: 700 });
+    const component = await mount(
+      <TraceListHarness traces={ONE_TRACE} initialSidebarWidth={220} />,
+    );
+    // Default columns (Date/Spans/Duration): 92 + 40 + 60 + 120 (Name) + 24
+    // (chrome) = 336, clamped up to the 340px minimum.
+    await component.getByTitle("Toggle table view").click();
+    expect(
+      await component.evaluate(el => (el as HTMLElement).style.width),
+    ).toBe("340px");
   });
 });
 
@@ -652,4 +684,258 @@ test("a stretch of playground runs starts collapsed under one Playground row", a
   await expect(rows.first()).toHaveAttribute("title", "Playground — 2 runs");
   await rows.first().click();
   await expect(component.locator(".trace-table-row-child")).toHaveCount(2);
+});
+
+test.describe("search, filters and grouping", () => {
+  const DAY = 86_400_000;
+  // Noon on the local clock, so each trace's day is the same in any zone.
+  const NOON = new Date(2026, 8, 8, 12).getTime();
+  const trace = (
+    id: string,
+    name: string,
+    fields: Partial<TraceSummary> = {},
+  ): TraceSummary => ({
+    id,
+    providerId: "p1",
+    name,
+    startTime: NOON,
+    endTime: NOON + 500,
+    status: "ok",
+    spanCount: 1,
+    annotationCounts: { issue: 0, good: 0, note: 0 },
+    ...fields,
+  });
+  const TRACES: TraceSummary[] = [
+    trace("t1", "summarize ticket", { model: "gpt-5", cost: 0.02 }),
+    trace("t2", "summarize email", {
+      model: "gpt-5",
+      cost: 0.5,
+      startTime: NOON - DAY,
+      endTime: NOON - DAY + 8000,
+      status: "error",
+    }),
+    trace("t3", "answer question", {
+      model: "claude",
+      startTime: NOON - 40 * DAY,
+      endTime: NOON - 40 * DAY + 500,
+    }),
+    trace("t4", "classify", { startTime: NOON - 2 * DAY, endTime: undefined }),
+  ];
+
+  const mountList = async (
+    mount: Parameters<Parameters<typeof test>[2]>[0]["mount"],
+    page: Page,
+  ) => {
+    await page.setViewportSize({ width: 420, height: 700 });
+    const component = await mount(<TraceListHarness traces={TRACES} />);
+    const rows = component.locator(".trace-table-row");
+    await expect(rows).toHaveCount(4);
+    return { component, rows };
+  };
+  const names = (rows: Locator) => rows.locator(".trace-list-name");
+
+  test("searching lists the traces whose name matches, and says when none does", async ({
+    mount,
+    page,
+  }) => {
+    const { component, rows } = await mountList(mount, page);
+    // The search is hidden until its toggle is clicked.
+    await expect(component.getByRole("searchbox")).toHaveCount(0);
+    await component.getByRole("button", { name: "Toggle search" }).click();
+    const search = component.getByRole("searchbox", { name: "Search traces" });
+
+    await search.fill("SUMMAR");
+    await expect(names(rows)).toHaveText([
+      "summarize ticket",
+      "summarize email",
+    ]);
+
+    await search.fill("nothing like this");
+    await expect(component.getByText("No traces match.")).toBeVisible();
+    // The search box is still there to change it, and so is a way out.
+    await expect(search).toBeVisible();
+    await component
+      .getByRole("button", { name: "Clear search and filters" })
+      .click();
+    await expect(rows).toHaveCount(4);
+    await expect(search).toHaveValue("");
+  });
+
+  test("Esc in the search box clears the search and hides the box", async ({
+    mount,
+    page,
+  }) => {
+    const { component, rows } = await mountList(mount, page);
+    const toggle = component.getByRole("button", { name: "Toggle search" });
+    await toggle.click();
+    const search = component.getByRole("searchbox", { name: "Search traces" });
+    await expect(search).toBeFocused();
+
+    await search.fill("email");
+    await expect(rows).toHaveCount(1);
+
+    await search.press("Escape");
+    await expect(search).toHaveCount(0);
+    await expect(rows).toHaveCount(4);
+
+    // Toggling off with the button clears the search as well.
+    await toggle.click();
+    await component.getByRole("searchbox").fill("email");
+    await expect(rows).toHaveCount(1);
+    await toggle.click();
+    await expect(component.getByRole("searchbox")).toHaveCount(0);
+    await expect(rows).toHaveCount(4);
+  });
+
+  test("the filter and group menus mark the columns that have an icon", async ({
+    mount,
+    page,
+  }) => {
+    const { component } = await mountList(mount, page);
+    const icon = (row: Locator) => row.locator(".trace-menu-row-icon svg");
+
+    await component.getByTitle("Filter").click();
+    const filterRows = page.locator(".trace-filter-popover .trace-menu-row");
+    await expect(icon(filterRows.filter({ hasText: "Date" }))).toHaveCount(1);
+    await expect(icon(filterRows.filter({ hasText: "Model" }))).toHaveCount(1);
+    // Name has none, but keeps its text lined up with the others.
+    await expect(icon(filterRows.filter({ hasText: "Name" }))).toHaveCount(0);
+    await page.keyboard.press("Escape");
+
+    await component.getByTitle("Group by").click();
+    const groupRows = page.getByRole("menuitemradio");
+    await expect(icon(groupRows.filter({ hasText: "Cost" }))).toHaveCount(1);
+    await expect(icon(groupRows.filter({ hasText: "Runs" }))).toHaveCount(0);
+    await expect(icon(groupRows.filter({ hasText: "Status" }))).toHaveCount(0);
+  });
+
+  test("filtering by a text column offers its values, with counts", async ({
+    mount,
+    page,
+  }) => {
+    const { component, rows } = await mountList(mount, page);
+
+    await component.getByTitle("Filter").click();
+    await page.locator(".trace-filter-popover").getByText("Model").click();
+    const values = page.locator(".trace-filter-value");
+    await expect(values).toHaveText(["gpt-52", "claude1", "No model1"]);
+
+    await values.filter({ hasText: "gpt-5" }).click();
+    await expect(names(rows)).toHaveText([
+      "summarize ticket",
+      "summarize email",
+    ]);
+    await values.filter({ hasText: "No model" }).click();
+    await expect(rows).toHaveCount(3);
+
+    const chip = component.locator(".trace-filter-chip");
+    await expect(chip).toHaveText(/Model: gpt-5, No model/);
+    await page.keyboard.press("Escape");
+    await chip.getByRole("button").click();
+    await expect(chip).toHaveCount(0);
+    await expect(rows).toHaveCount(4);
+  });
+
+  test("filtering by a number column takes a least and a most", async ({
+    mount,
+    page,
+  }) => {
+    const { component, rows } = await mountList(mount, page);
+
+    await component.getByTitle("Filter").click();
+    const popover = page.locator(".trace-filter-popover");
+    await popover.getByText("Duration").click();
+    const least = popover.getByLabel("At least (seconds)");
+    await least.fill("5");
+    await least.press("Enter");
+
+    // The 8-second trace; not the one still running, which has no duration.
+    await expect(names(rows)).toHaveText(["summarize email"]);
+    await expect(component.locator(".trace-filter-chip")).toHaveText(
+      /Duration: ≥ 5s/,
+    );
+
+    // Back at the columns, the filter shows against its column.
+    await popover.getByRole("button", { name: "Back to columns" }).click();
+    await expect(
+      popover.locator(".trace-menu-row", { hasText: "Duration" }),
+    ).toContainText("≥ 5s");
+    await popover.getByText("Clear all filters").click();
+    await expect(rows).toHaveCount(4);
+  });
+
+  test("grouping by a column gathers traces under its values, fetched when expanded", async ({
+    mount,
+    page,
+  }) => {
+    const { component, rows } = await mountList(mount, page);
+
+    await component.getByTitle("Group by").click();
+    await page.getByRole("menuitemradio", { name: "Model" }).click();
+
+    const groups = component.locator(".trace-table-row-group");
+    await expect(names(groups)).toHaveText(["gpt-5", "No model", "claude"]);
+    await expect(groups.locator(".trace-list-group-count")).toHaveText([
+      "2",
+      "1",
+      "1",
+    ]);
+    await expect(groups.first()).toHaveAttribute("title", "gpt-5 — 2 traces");
+
+    await groups.first().click();
+    const children = component.locator(".trace-table-row-child");
+    await expect(names(children)).toHaveText([
+      "summarize ticket",
+      "summarize email",
+    ]);
+    await children.first().click();
+    await expect(children.first()).toHaveClass(/-selected/);
+
+    // A search narrows the groups, and what's under the one left open.
+    await component.getByRole("button", { name: "Toggle search" }).click();
+    await component.getByRole("searchbox").fill("email");
+    await expect(names(groups)).toHaveText(["gpt-5"]);
+    await expect(names(children)).toHaveText(["summarize email"]);
+    await expect(rows).toHaveCount(2);
+  });
+
+  test("grouping by cost uses buckets, and by date a chosen resolution", async ({
+    mount,
+    page,
+  }) => {
+    const { component } = await mountList(mount, page);
+    const groups = component.locator(".trace-table-row-group");
+    const groupBy = component.getByTitle("Group by");
+
+    await groupBy.click();
+    await page.getByRole("menuitemradio", { name: "Cost" }).click();
+    await expect(names(groups)).toHaveText([
+      "$0.01 – $0.1",
+      "$0.1 – $1",
+      "No cost",
+    ]);
+
+    await groupBy.click();
+    await page.getByRole("menuitemradio", { name: "Date" }).click();
+    await expect(groups).toHaveCount(4); // A day each.
+    await page.getByRole("button", { name: "Month" }).click();
+    const month = (ms: number) =>
+      new Date(ms).toLocaleDateString(undefined, {
+        month: "long",
+        year: "numeric",
+      });
+    await expect(names(groups)).toHaveText([
+      month(NOON),
+      month(NOON - 40 * DAY),
+    ]);
+    await expect(groups.locator(".trace-list-group-count")).toHaveText([
+      "3",
+      "1",
+    ]);
+
+    // Back to no grouping at all.
+    await page.getByRole("menuitemradio", { name: "None" }).click();
+    await expect(groups).toHaveCount(0);
+    await expect(component.locator(".trace-table-row")).toHaveCount(4);
+  });
 });

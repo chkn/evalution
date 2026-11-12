@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
   nextSort,
+  parseTableModeMemory,
   type SortState,
   type SortValue,
   sortItems,
+  type TableModeMemory,
+  toggleTableMode,
 } from "./summary-list";
 import { ChevronIcon } from "./trace/icons.tsx";
 
@@ -31,6 +34,8 @@ interface SummaryListProps<T> {
   title: string;
   /** Buttons at the right of the section header. */
   headerActions?: ReactNode;
+  /** Shown under the header, whatever the list holds: a search box, say. */
+  toolbar?: ReactNode;
   loading: boolean;
   error: string | null;
   /** Shown instead of the list when `items` is empty. */
@@ -52,6 +57,18 @@ interface SummaryListProps<T> {
    * `undefined` for an ordinary item.
    */
   itemChildren?: (item: T) => T[] | undefined;
+  /**
+   * How many items are grouped under `item`, for a group whose items are
+   * fetched only once it's expanded: `item` is then a group even while
+   * {@link itemChildren} has nothing for it. `undefined` for any other item.
+   */
+  itemGroupCount?: (item: T) => number | undefined;
+  /**
+   * Called for a group that's expanded while {@link itemChildren} has
+   * nothing for it, to fetch its items — again on each render until it has,
+   * so it should ignore a group it's already fetching.
+   */
+  onExpandGroup?: (item: T) => void;
   selectedKey: string | null;
   onSelect: (item: T) => void;
   defaultSort: SortState;
@@ -102,8 +119,12 @@ function SortableHeader({
 interface ListRow<T> {
   item: T;
   key: string;
-  /** Set for a group: its items. */
+  /** Set for a group: how many items it holds. */
+  count?: number;
+  /** A group's items, once they're known. */
   children?: T[];
+  /** Stands in for an expanded group's items until they're known. */
+  placeholder?: boolean;
   /** Whether a group is expanded. */
   open?: boolean;
   /** Whether the row is one of a group's items. */
@@ -118,7 +139,8 @@ function rowClassName<T>(
 ): string {
   let name = base;
   if (row.key === selectedKey) name += ` ${base}-selected`;
-  if (row.children) name += ` ${base}-group`;
+  if (row.count !== undefined) name += ` ${base}-group`;
+  if (row.placeholder) name += ` ${base}-loading`;
   if (row.child) name += ` ${base}-child`;
   return name;
 }
@@ -136,18 +158,20 @@ function RowLabel<T>({
   itemName: (item: T) => string;
   itemMarker?: (item: T) => ReactNode;
 }) {
+  if (row.placeholder) {
+    return <span className="trace-list-name">Loading…</span>;
+  }
+  const group = row.count !== undefined;
   return (
     <>
-      {row.children && (
+      {group && (
         <span className="trace-list-chevron">
           <ChevronIcon open={!!row.open} />
         </span>
       )}
       {itemMarker?.(row.item)}
       <span className="trace-list-name">{itemName(row.item)}</span>
-      {row.children && (
-        <span className="trace-list-group-count">{row.children.length}</span>
-      )}
+      {group && <span className="trace-list-group-count">{row.count}</span>}
     </>
   );
 }
@@ -174,40 +198,55 @@ function TableModeIcon() {
   );
 }
 
+/** The table-mode memory kept in `localStorage` under `key`. */
+function loadTableModeMemory(key: string): TableModeMemory {
+  try {
+    return parseTableModeMemory(
+      JSON.parse(localStorage.getItem(key) ?? "null"),
+    );
+  } catch {
+    return parseTableModeMemory(null);
+  }
+}
+
 /**
- * Header button that widens the sidebar to `tableWidth` (enough for the
- * table layout) and, on a second click, restores the width it had before.
+ * Header button that toggles the sidebar between two modes, each with its own
+ * width: the one it has now, and `tableWidth` (enough for the table layout)
+ * until the other has been visited. Each mode remembers the width it was last
+ * left at, across reloads too.
  */
 export function TableModeButton({
   sidebarWidth,
   onResizeSidebar,
   tableWidth,
+  storageKey,
 }: {
-  /** The sidebar's current width, in px — what a second click restores. */
+  /** The sidebar's current width, in px. */
   sidebarWidth: number;
   onResizeSidebar: (width: number) => void;
   tableWidth: number;
+  /** Tells this list's remembered widths from the other lists'. */
+  storageKey: string;
 }) {
-  // `null` while at its normal width; the width to restore to while expanded
-  // for table mode, so the second click can put it back exactly.
-  const [savedWidth, setSavedWidth] = useState<number | null>(null);
+  const key = `table-mode:${storageKey}`;
+  const [memory, setMemory] = useState(() => loadTableModeMemory(key));
 
   const toggle = () => {
-    if (savedWidth !== null) {
-      onResizeSidebar(savedWidth);
-      setSavedWidth(null);
-    } else {
-      setSavedWidth(sidebarWidth);
-      onResizeSidebar(tableWidth);
+    const next = toggleTableMode(memory, sidebarWidth, tableWidth);
+    setMemory(next.memory);
+    try {
+      localStorage.setItem(key, JSON.stringify(next.memory));
+    } catch {
+      /* ignore */
     }
+    onResizeSidebar(next.width);
   };
 
   return (
     <button
       type="button"
-      className={`tree-toolbar-btn${savedWidth !== null ? " tree-toolbar-btn-active" : ""}`}
+      className="tree-toolbar-btn"
       title="Toggle table view"
-      aria-pressed={savedWidth !== null}
       onClick={toggle}
     >
       <TableModeIcon />
@@ -223,6 +262,7 @@ export function TableModeButton({
 export function SummaryList<T>({
   title,
   headerActions,
+  toolbar,
   loading,
   error,
   empty,
@@ -234,6 +274,8 @@ export function SummaryList<T>({
   itemTitle = itemName,
   itemMarker,
   itemChildren,
+  itemGroupCount,
+  onExpandGroup,
   selectedKey,
   onSelect,
   defaultSort,
@@ -261,13 +303,31 @@ export function SummaryList<T>({
     }
   }
 
+  // Fetch the items of every expanded group that doesn't have them yet:
+  // one just expanded, or one left open across a change of what's listed.
+  useEffect(() => {
+    if (!onExpandGroup) return;
+    for (const item of items) {
+      if (
+        expanded.has(itemKey(item)) &&
+        itemGroupCount?.(item) !== undefined &&
+        !itemChildren?.(item)
+      ) {
+        onExpandGroup(item);
+      }
+    }
+  });
+
   const header = (
-    <div className="section-panel-header">
-      <span>{title}</span>
-      {headerActions && (
-        <div className="section-panel-header-actions">{headerActions}</div>
-      )}
-    </div>
+    <>
+      <div className="section-panel-header">
+        <span>{title}</span>
+        {headerActions && (
+          <div className="section-panel-header-actions">{headerActions}</div>
+        )}
+      </div>
+      {toolbar}
+    </>
   );
 
   if (loading || error || items.length === 0) {
@@ -298,22 +358,34 @@ export function SummaryList<T>({
   const rows: ListRow<T>[] = sortList(items).flatMap(item => {
     const key = itemKey(item);
     const children = itemChildren?.(item);
-    if (!children) return [{ item, key }];
+    const count = itemGroupCount?.(item) ?? children?.length;
+    if (count === undefined) return [{ item, key }];
     const open = expanded.has(key);
+    const group = { item, key, count, children, open };
+    if (!open) return [group];
+    if (!children) {
+      return [
+        group,
+        { item, key: `${key}:loading`, child: true, placeholder: true },
+      ];
+    }
     return [
-      { item, key, children, open },
-      ...(open
-        ? sortList(children).map(child => ({
-            item: child,
-            key: itemKey(child),
-            child: true,
-          }))
-        : []),
+      group,
+      ...sortList(children).map(child => ({
+        item: child,
+        key: itemKey(child),
+        child: true,
+      })),
     ];
   });
   // A group's row toggles it; any other row selects its item.
-  const onRowClick = (row: ListRow<T>) =>
-    row.children ? toggleExpanded(row.key) : onSelect(row.item);
+  const onRowClick = (row: ListRow<T>) => {
+    if (row.placeholder) return;
+    if (row.count !== undefined) toggleExpanded(row.key);
+    else onSelect(row.item);
+  };
+  const rowTitle = (row: ListRow<T>) =>
+    row.placeholder ? undefined : itemTitle(row.item);
   const cardColumns = columns.slice(0, cardColumnCount);
   const onSort = (key: string) => setSort(prev => nextSort(prev, key));
 
@@ -332,8 +404,8 @@ export function SummaryList<T>({
                 key={row.key}
                 className={rowClassName("trace-list-row", row, selectedKey)}
                 onClick={() => onRowClick(row)}
-                title={itemTitle(item)}
-                {...(row.children && {
+                title={rowTitle(row)}
+                {...(row.count !== undefined && {
                   role: "button",
                   "aria-expanded": row.open,
                 })}
@@ -346,7 +418,7 @@ export function SummaryList<T>({
                   />
                 </div>
                 <div className="trace-list-row-meta">
-                  {cardColumns.map(column => {
+                  {(row.placeholder ? [] : cardColumns).map(column => {
                     const content = (column.card ?? column.cell)(item);
                     if (content === null) return null;
                     return (
@@ -413,8 +485,8 @@ export function SummaryList<T>({
                   key={row.key}
                   className={rowClassName("trace-table-row", row, selectedKey)}
                   onClick={() => onRowClick(row)}
-                  title={itemTitle(item)}
-                  aria-expanded={row.children ? row.open : undefined}
+                  title={rowTitle(row)}
+                  aria-expanded={row.count !== undefined ? row.open : undefined}
                 >
                   <td>
                     <div className="trace-table-name-cell">
@@ -430,7 +502,7 @@ export function SummaryList<T>({
                       key={column.key}
                       className={`trace-table-col-${column.key}`}
                     >
-                      {column.cell(item)}
+                      {!row.placeholder && column.cell(item)}
                     </td>
                   ))}
                 </tr>

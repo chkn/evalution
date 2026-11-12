@@ -225,6 +225,44 @@ describe("Evalution's cloud calls", () => {
     );
   });
 
+  it("sends a search and filters along with the window", async () => {
+    const { client, calls } = cloud([]);
+    const filters = [
+      { column: "model" as const, op: "in" as const, values: ["gpt", null] },
+    ];
+
+    await client.listTraces({ search: " ticket ", filters, limit: 5 });
+
+    const url = new URL(calls[0].url);
+    expect(url.pathname).toBe("/api/traces");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      q: "ticket",
+      filters: JSON.stringify(filters),
+      limit: "5",
+    });
+  });
+
+  it("lists groups by a column, in a time zone", async () => {
+    const { client, calls } = cloud([]);
+
+    await expect(
+      client.listTraceGroups({
+        groupBy: { column: "startTime", resolution: "week" },
+        timeZone: "Europe/Berlin",
+        from: 5,
+      }),
+    ).resolves.toEqual([]);
+
+    const url = new URL(calls[0].url);
+    expect(url.pathname).toBe("/api/traces/groups");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      groupBy: "startTime",
+      resolution: "week",
+      tz: "Europe/Berlin",
+      from: "5",
+    });
+  });
+
   it("gets one trace, or undefined when there's none", async () => {
     const found = cloud({ trace: { id: "a/b" }, spans: [] });
     await expect(found.client.getTrace("a/b")).resolves.toMatchObject({

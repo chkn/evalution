@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
-import type {
-  NormalizedPrompt,
-  PromptID,
-  TraceEvalRun,
-} from "../../../shared/types";
+import type { NormalizedPrompt, PromptID } from "../../../shared/types";
 import TraceView from "../TraceView";
 import type { OpenEvalRun } from "../trace/check-runs.ts";
 
@@ -29,7 +25,6 @@ export function TraceViewHarness({
   onDeleted,
   onOpenPrompt,
   onOpenEvalRun,
-  evalRun,
   promptName,
 }: {
   providerId?: string;
@@ -37,7 +32,6 @@ export function TraceViewHarness({
   onDeleted?: () => void;
   onOpenPrompt?: (prompt: PromptID) => void;
   onOpenEvalRun?: OpenEvalRun;
-  evalRun?: TraceEvalRun;
   promptName?: string;
 }) {
   return (
@@ -48,7 +42,6 @@ export function TraceViewHarness({
         onDeleted={onDeleted}
         onOpenPrompt={onOpenPrompt}
         onOpenEvalRun={onOpenEvalRun}
-        evalRun={evalRun}
         findPrompt={
           promptName
             ? prompt =>

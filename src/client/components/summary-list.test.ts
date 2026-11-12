@@ -2,7 +2,13 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
-import { nextSort, sortItems, tableModeWidth } from "./summary-list";
+import {
+  nextSort,
+  parseTableModeMemory,
+  sortItems,
+  tableModeWidth,
+  toggleTableMode,
+} from "./summary-list";
 
 describe("nextSort", () => {
   it("flips direction when the same column is clicked again", () => {
@@ -77,5 +83,56 @@ describe("tableModeWidth", () => {
 
   it("clamps down to the maximum", () => {
     expect(tableModeWidth([200, 200, 200])).toBe(480);
+  });
+});
+
+describe("toggleTableMode", () => {
+  it("goes to the default width the first time, remembering the width it left", () => {
+    const { memory, width } = toggleTableMode(
+      { current: 0, widths: [undefined, undefined] },
+      224,
+      400,
+    );
+    expect(width).toBe(400);
+    expect(memory).toEqual({ current: 1, widths: [224, undefined] });
+  });
+
+  it("returns to the other mode's width, remembering this one's", () => {
+    const { memory, width } = toggleTableMode(
+      { current: 1, widths: [224, undefined] },
+      450, // dragged while here
+      400,
+    );
+    expect(width).toBe(224);
+    expect(memory).toEqual({ current: 0, widths: [224, 450] });
+  });
+
+  it("goes back to a width it last had, however narrow", () => {
+    const { memory, width } = toggleTableMode(
+      { current: 0, widths: [224, 250] },
+      260,
+      400,
+    );
+    expect(width).toBe(250);
+    expect(memory).toEqual({ current: 1, widths: [260, 250] });
+  });
+});
+
+describe("parseTableModeMemory", () => {
+  it("keeps valid widths and the current mode", () => {
+    expect(parseTableModeMemory({ current: 1, widths: [224, 450] })).toEqual({
+      current: 1,
+      widths: [224, 450],
+    });
+  });
+
+  it("discards what isn't a width", () => {
+    expect(
+      parseTableModeMemory({ current: "x", widths: ["wide", -1] }),
+    ).toEqual({ current: 0, widths: [undefined, undefined] });
+    expect(parseTableModeMemory(null)).toEqual({
+      current: 0,
+      widths: [undefined, undefined],
+    });
   });
 });

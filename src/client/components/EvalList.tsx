@@ -106,6 +106,7 @@ function EvalList({
             sidebarWidth={sidebarWidth}
             onResizeSidebar={onResizeSidebar}
             tableWidth={tableModeWidth(columns.map(c => c.width))}
+            storageKey="evals"
           />
           <button
             type="button"
