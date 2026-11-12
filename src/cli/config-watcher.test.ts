@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -80,12 +81,16 @@ describe("watchForConfigCreation", () => {
     const rootDir = await makeTmpDir();
     const configPath = path.join(rootDir, ".evalution", "config.ts");
 
+    // A single write can surface as more than one chokidar event (e.g. the
+    // truncate and the write of `writeFile` seen separately under load), so
+    // don't count events: wait until a call after the failure sees the edit.
     let calls = 0;
-    const secondCall = new Promise<void>(resolve => {
+    const sawEdit = new Promise<void>(resolve => {
       const stop = watchForConfigCreation(rootDir, async () => {
         calls += 1;
         if (calls === 1) throw new Error("boom on first load");
-        resolve();
+        const text = readFileSync(configPath, "utf8");
+        if (text.includes("a: 1")) resolve();
       });
       stops.push(stop);
     });
@@ -100,7 +105,7 @@ describe("watchForConfigCreation", () => {
     await new Promise(r => setTimeout(r, 300));
     await fs.writeFile(configPath, "export default { a: 1 };", "utf8");
 
-    await expect(secondCall).resolves.toBeUndefined();
-    expect(calls).toBe(2);
+    await expect(sawEdit).resolves.toBeUndefined();
+    expect(calls).toBeGreaterThanOrEqual(2);
   });
 });
