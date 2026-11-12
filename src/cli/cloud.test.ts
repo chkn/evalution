@@ -117,6 +117,7 @@ describe("connectInstance", () => {
       })),
       heartbeatInstance: vi.fn(async (_id: string) => {}),
       endInstanceSession: vi.fn(async (_id: string) => {}),
+      printableApiKey: "evl_user_f00b4r",
     } satisfies InstanceClient;
   }
 
@@ -188,7 +189,11 @@ describe("connectInstance", () => {
     await connectInstance(client, registration, { ...options, log }).ready;
     await vi.advanceTimersByTimeAsync(5000);
     expect(client.registerInstance).toHaveBeenCalledTimes(1);
-    expect(log.warn.mock.calls[0][0]).toContain(hint);
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    const output = [...log.warn.mock.calls, ...log.log.mock.calls]
+      .flat()
+      .join("\n");
+    expect(output).toContain(hint);
   });
 
   it("ends the session on stop, and stops beating", async () => {

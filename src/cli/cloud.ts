@@ -116,7 +116,10 @@ export interface CloudInstance {
 /** The calls {@link connectInstance} makes. */
 export type InstanceClient = Pick<
   Evalution,
-  "registerInstance" | "heartbeatInstance" | "endInstanceSession"
+  | "registerInstance"
+  | "heartbeatInstance"
+  | "endInstanceSession"
+  | "printableApiKey"
 >;
 
 /**
@@ -169,8 +172,10 @@ export function connectInstance(
       const status = err instanceof EvalutionApiError ? err.status : undefined;
       if (status === 404) {
         log.warn(
-          `⚠️ You aren't a member of the Evalution Cloud project ${project} that .evalution/config.ts links to. Run \`evalution link\` to link a project of your own.`,
+          `⚠️ Your EVALUTION_API_KEY (${client.printableApiKey}) cannot access the Evalution Cloud project ${project} linked from .evalution/config.ts.`,
         );
+        log.log("");
+        log.log("💡 Run `evalution link` to link a project of your own.");
         stopped = true;
       } else if (status === 401 || status === 403) {
         log.warn(

@@ -16,9 +16,12 @@ import { LocalFileProvider } from "../file-provider-local.ts";
 
 /** What {@link linkConfigSource} makes of a config file. */
 export type ConfigEdit =
-  /** The field was added; `source` is the new file. */
-  | { kind: "linked"; source: string }
-  /** The config already names a project. */
+  /**
+   * The field was added, or replaced the project in `previous`; `source` is
+   * the new file.
+   */
+  | { kind: "linked"; source: string; previous?: string }
+  /** The config already names this project. */
   | { kind: "already"; project: string }
   /** It couldn't be edited safely: `line` is what to add by hand. */
   | { kind: "manual"; line: string };
@@ -72,10 +75,13 @@ const propertyNamed = (object: ts.ObjectLiteralExpression, name: string) =>
       p.name.text === name,
   );
 
-/** The project a config's `cloud.project` names, or `null` for a `cloud` it can't read. */
-function linkedProject(
+/**
+ * The string literal a config's `cloud.project` is, `undefined` for no
+ * `cloud`, or `null` for a `cloud` it can't read.
+ */
+function linkedProjectLiteral(
   object: ts.ObjectLiteralExpression,
-): string | null | undefined {
+): ts.StringLiteralLike | null | undefined {
   const cloud = propertyNamed(object, "cloud");
   if (!cloud) return undefined;
   if (!ts.isPropertyAssignment(cloud)) return null;
@@ -85,13 +91,31 @@ function linkedProject(
   return project &&
     ts.isPropertyAssignment(project) &&
     ts.isStringLiteralLike(project.initializer)
-    ? project.initializer.text
+    ? project.initializer
     : null;
+}
+
+/** The project a config's `cloud.project` names, or `null` for a `cloud` it can't read. */
+function linkedProject(
+  object: ts.ObjectLiteralExpression,
+): string | null | undefined {
+  const literal = linkedProjectLiteral(object);
+  return literal ? literal.text : literal;
+}
+
+const parseConfig = (text: string) =>
+  ts.createSourceFile("config.ts", text, ts.ScriptTarget.Latest, true);
+
+/** The project a config file's source links, if it names one. */
+export function configLinkedProject(source: string): string | undefined {
+  const object = defaultExportObject(parseConfig(source));
+  return (object && linkedProject(object)) ?? undefined;
 }
 
 /**
  * Adds `cloud: { project }` to a config file's source, as the first field of
- * its default export. Anything it can't be sure of is left for the user.
+ * its default export, or points the `cloud.project` it has at `project`.
+ * Anything it can't be sure of is left for the user.
  */
 export function linkConfigSource(source: string, project: string): ConfigEdit {
   // Quote as the file does.
@@ -99,20 +123,25 @@ export function linkConfigSource(source: string, project: string): ConfigEdit {
   const field = `cloud: { project: ${quote}${project}${quote} },`;
   const manual = { kind: "manual", line: field } as const;
 
-  const parse = (text: string) =>
-    ts.createSourceFile("config.ts", text, ts.ScriptTarget.Latest, true);
-  const file = parse(source);
+  const file = parseConfig(source);
   const object = defaultExportObject(file);
   if (!object) return manual;
-  const existing = linkedProject(object);
-  if (typeof existing === "string")
-    return { kind: "already", project: existing };
+  const existing = linkedProjectLiteral(object);
   if (existing === null) return manual;
 
-  const open = object.getStart(file);
   let edited: string;
+  let previous: string | undefined;
+  const open = object.getStart(file);
   const [first] = object.properties;
-  if (!first) {
+  if (existing) {
+    if (existing.text === project) return { kind: "already", project };
+    previous = existing.text;
+    // Keep the literal's own quotes.
+    const start = existing.getStart(file);
+    const q = source[start];
+    if (q !== '"' && q !== "'") return manual;
+    edited = `${source.slice(0, start)}${q}${project}${q}${source.slice(existing.end)}`;
+  } else if (!first) {
     if (object.getText(file).replace(/\s/g, "") !== "{}") return manual;
     edited = `${source.slice(0, open)}{\n  ${field}\n}${source.slice(object.end)}`;
   } else {
@@ -129,9 +158,9 @@ export function linkConfigSource(source: string, project: string): ConfigEdit {
   }
 
   // Only keep an edit that reads back as intended.
-  const check = defaultExportObject(parse(edited));
+  const check = defaultExportObject(parseConfig(edited));
   return check && linkedProject(check) === project
-    ? { kind: "linked", source: edited }
+    ? { kind: "linked", source: edited, previous }
     : manual;
 }
 
@@ -140,26 +169,30 @@ export type Ask = (question: string) => Promise<string>;
 
 /**
  * The project to link: one of `projects`, picked by number, or a new one,
- * named after the directory unless the user gives a name.
+ * named after the directory unless the user gives a name. The `linked`
+ * project, if listed, is marked and is the default.
  */
 export async function chooseProject(
   client: Pick<Evalution, "listProjects" | "createProject">,
   defaultName: string,
   ask: Ask,
   log: Pick<Console, "log"> = console,
+  linked?: string,
 ): Promise<CloudProject> {
   const projects = await client.listProjects();
   if (projects.length > 0) {
     log.log("Your Evalution Cloud projects:");
     projects.forEach((p, i) => {
-      log.log(`  ${i + 1}. ${p.name} (${p.orgSlug}/${p.slug})`);
+      const current = p.id === linked ? " — linked now" : "";
+      log.log(`  ${i + 1}. ${p.name} (${p.orgSlug}/${p.slug})${current}`);
     });
     log.log(`  ${projects.length + 1}. A new project`);
+    // Enter keeps the linked project, or else makes a new one.
+    const fallback =
+      projects.findIndex(p => p.id === linked) + 1 || projects.length + 1;
     while (true) {
-      const answer = (
-        await ask(`Link which? [${projects.length + 1}] `)
-      ).trim();
-      const n = answer === "" ? projects.length + 1 : Number(answer);
+      const answer = (await ask(`Link which? [${fallback}] `)).trim();
+      const n = answer === "" ? fallback : Number(answer);
       if (Number.isInteger(n) && n >= 1 && n <= projects.length) {
         return projects[n - 1];
       }
@@ -202,15 +235,12 @@ export async function link(
   const source = hasConfig
     ? await fileProvider.readFile(configPath)
     : undefined;
-  if (source !== undefined) {
-    // Say so before asking anything.
-    const edit = linkConfigSource(source, "prj_");
-    if (edit.kind === "already") {
-      log.log(
-        `This project is already linked to ${edit.project}. To link another, change \`cloud.project\` in ${configPath}.`,
-      );
-      return 0;
-    }
+  const linked = source === undefined ? undefined : configLinkedProject(source);
+  if (linked) {
+    log.log("");
+    log.log(
+      `💡 This project is already linked to ${linked}. Change it below, or press Ctrl+C to cancel.`,
+    );
   }
 
   let readline: ReturnType<typeof createInterface> | undefined;
@@ -230,6 +260,7 @@ export async function link(
       path.basename(rootDir),
       askUser,
       log,
+      linked,
     );
   } catch (err) {
     log.error(`Couldn't link the project: ${(err as Error).message}`);
@@ -245,14 +276,16 @@ export async function link(
     return 0;
   }
   const edit = linkConfigSource(source, project.id);
-  if (edit.kind === "linked") {
+  if (edit.kind === "already") {
+    log.log(`✅ Still linked to ${project.name}.`);
+  } else if (edit.kind === "linked") {
     await fileProvider.writeFile(configPath, edit.source);
     log.log(
-      `✅ Linked to ${project.name}. Commit ${path.relative(process.cwd(), configPath) || configPath} so everyone who clones the repo is linked too.`,
+      `✅ ${edit.previous ? `Switched from ${edit.previous} to` : "Linked to"} ${project.name}. Commit ${path.relative(process.cwd(), configPath) || configPath} so everyone who clones the repo is linked too.`,
     );
   } else {
     log.log(
-      `Couldn't edit ${configPath} safely. Add this to its default export:\n\n  ${edit.kind === "manual" ? edit.line : `cloud: { project: "${project.id}" },`}\n`,
+      `Couldn't edit ${configPath} safely. ${linked ? "Set `cloud.project` in its default export" : "Add this to its default export"}:\n\n  ${edit.line}\n`,
     );
   }
   return 0;

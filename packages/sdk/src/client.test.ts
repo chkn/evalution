@@ -61,6 +61,20 @@ describe("apiKeyKind", () => {
   });
 });
 
+describe("printableApiKey", () => {
+  it("shows only the start of the key", () => {
+    const key = "evl_user_0123456789abcdef0123456789abcdef";
+    expect(new Evalution({ apiKey: key }).printableApiKey).toBe(
+      "evl_user_012345…",
+    );
+  });
+
+  it("says when there's no key", () => {
+    vi.stubEnv("EVALUTION_API_KEY", "");
+    expect(new Evalution().printableApiKey).toBe("<none>");
+  });
+});
+
 describe("where Evalution sends traces", () => {
   it("sends nowhere with nothing configured", async () => {
     expect(await destination()).toBeUndefined();

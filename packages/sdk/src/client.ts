@@ -8,6 +8,9 @@ import type { Span, TraceSummary, TraceWithSpans } from "./trace-types.ts";
 /** The Evalution Cloud API, unless `EVALUTION_API_URL` says otherwise. */
 export const DEFAULT_API_URL = "https://api.evalut.io";
 
+/** How much of an API key is safe to print: its kind and a few characters. */
+const PRINTABLE_API_KEY_PREFIX = 15;
+
 /**
  * What an API key can do: an `ingest` key writes one project's production
  * traces and nothing else, and a `personal` key reads and manages a user's
@@ -145,6 +148,13 @@ export class Evalution implements TraceSink {
   private readonly project?: string;
   private readonly fetch: typeof fetch;
   private readonly sink: HttpTraceSink;
+
+  /** The start of the API key, safe to show in messages, or `<none>`. */
+  get printableApiKey(): string {
+    return this.apiKey
+      ? `${this.apiKey.slice(0, PRINTABLE_API_KEY_PREFIX)}…`
+      : "<none>";
+  }
 
   constructor(options: EvalutionOptions = {}) {
     // `process` is absent in some runtimes (e.g. Cloudflare Workers).

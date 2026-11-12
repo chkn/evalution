@@ -126,6 +126,8 @@ in their copy of the project.
 
    Commit it. The id isn't a secret: only the project's members can use it.
    If there's no config yet, set the project up with `npx evalution` first.
+   Run it again to switch projects: it marks the linked one and, if you pick
+   another, updates `cloud.project`.
 
 From then on, a playground started with a personal key registers with the cloud
 while it runs and prints the project URL. **Copy link** on a trace copies a link
