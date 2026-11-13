@@ -167,6 +167,18 @@ describe("WorkspaceSync", () => {
     expect(sync.database(key, 1)).not.toBe(before);
   });
 
+  it("forgets the sync of a dataset deleted elsewhere, so one made again here syncs", async () => {
+    const { cloud, deleted } = fakeCloud();
+    const sync = new WorkspaceSync({ cloud, log: quiet });
+    const key = { kind: "dataset", provider: "d", key: "a" } as const;
+    const before = sync.database(key, 1);
+
+    await sync.forgetDataset("d", "a");
+
+    expect(deleted).toEqual([]);
+    expect(sync.database(key, 1)).not.toBe(before);
+  });
+
   it("pushes every database on close, and stops pulling", async () => {
     const sync = new WorkspaceSync({
       cloud: fakeCloud().cloud,

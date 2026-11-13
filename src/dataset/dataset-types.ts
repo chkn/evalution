@@ -73,6 +73,11 @@ export interface Dataset {
   createdAt: number;
   /** Timestamp (ms) of the last change to the dataset or its rows. */
   updatedAt: number;
+  /**
+   * Synced with the linked project in Evalution Cloud: deleting it deletes
+   * the cloud's copy and every project member's.
+   */
+  synced?: boolean;
 }
 
 /** One key one level inside a path, as `DatasetProvider.describePath` finds it. */

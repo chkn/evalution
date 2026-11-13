@@ -229,13 +229,24 @@ export class WorkspaceSync {
     }
   }
 
-  /** Deletes a provider's dataset from the cloud, so it goes from every machine. Never rejects. */
-  async deleteDataset(provider: string, datasetId: string): Promise<void> {
-    const key = { kind: "dataset", provider, key: datasetId } as const;
-    const id = keyOf(key);
+  /**
+   * Stops syncing a provider's dataset, and forgets its sync, so a dataset
+   * made again with its id starts afresh. For one deleted on another machine.
+   */
+  async forgetDataset(provider: string, datasetId: string): Promise<void> {
+    const id = keyOf({ kind: "dataset", provider, key: datasetId });
     const sync = this.databases.get(id);
     this.databases.delete(id);
     await sync?.close();
+  }
+
+  /**
+   * Deletes a provider's dataset from the cloud. Every other machine whose
+   * copy synced with it removes it on its next pull. Never rejects.
+   */
+  async deleteDataset(provider: string, datasetId: string): Promise<void> {
+    await this.forgetDataset(provider, datasetId);
+    const key = { kind: "dataset", provider, key: datasetId } as const;
     try {
       await this.cloud.deleteSyncDatabase(key);
     } catch (err) {

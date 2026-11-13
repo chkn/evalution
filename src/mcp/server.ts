@@ -854,7 +854,8 @@ export function createMcpServer(
     "delete_dataset",
     {
       title: "Delete a dataset",
-      description: "Deletes a dataset and all of its rows.",
+      description:
+        "Deletes a dataset and all of its rows. When the project syncs with Evalution Cloud, it's also deleted from the cloud and from every project member's machine.",
       inputSchema: z.object({
         datasetId: datasetIdParam,
         providerId: providerIdParam("dataset"),

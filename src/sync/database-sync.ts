@@ -57,6 +57,12 @@ export interface AttachOptions {
    * no link to.
    */
   adopt: () => Promise<void>;
+  /**
+   * Removes the file. Called when the cloud says the database it synced
+   * with was deleted from the project — on another machine, say. A file that
+   * never synced with it is kept, local-only.
+   */
+  onDeleted?: () => void;
 }
 
 /** Writes come in bursts (a span start, then its end): push once they settle. */
@@ -124,6 +130,9 @@ export class DatabaseSync {
   /** The operation in flight: the engine runs one at a time. */
   private chain: Promise<unknown> = Promise.resolve();
   private warned = false;
+  /** The cloud said the database was deleted: settled once a file is attached. */
+  private deletion: { syncId?: string; detail?: string } | undefined;
+  private onDeleted: (() => void) | undefined;
 
   constructor(options: DatabaseSyncOptions) {
     this.cloud = options.cloud;
@@ -265,17 +274,47 @@ export class DatabaseSync {
     }
     this.stopped = true;
     this.credentials = undefined;
-    const detail = (err as EvalutionApiError).detail;
+    const { detail, body } = err as EvalutionApiError;
+    if (status === 410) {
+      const syncId = body?.syncId;
+      this.deletion = {
+        ...(typeof syncId === "string" && { syncId }),
+        ...(detail && { detail }),
+      };
+      // What becomes of the file depends on its links, known once attached.
+      if (this.db) this.settleDeletion();
+      return;
+    }
     const reason =
       status === 404
         ? "your EVALUTION_API_KEY cannot access the project linked from .evalution/config.ts"
         : status === 401 || status === 403
           ? "Evalution Cloud didn't accept EVALUTION_API_KEY"
-          : status === 410
-            ? `it was deleted from the project${detail ? ` (${detail})` : ""}`
-            : (detail ?? `the cloud answered ${status}`);
+          : (detail ?? `the cloud answered ${status}`);
     this.log.warn(
       `⚠️ Not syncing ${this.label}: ${reason}. It stays on this machine.`,
+    );
+  }
+
+  /**
+   * Removes the attached file if it synced with the deleted database, and
+   * keeps it local-only if not: then it holds rows the cloud never had.
+   */
+  private settleDeletion(): void {
+    const deletion = this.deletion;
+    if (!deletion) return;
+    this.deletion = undefined;
+    const onDeleted = this.onDeleted;
+    if (deletion.syncId && this.links.has(deletion.syncId) && onDeleted) {
+      this.log.warn(
+        `🗑️ Removing ${this.label} from this machine: it was deleted from the project in Evalution Cloud.`,
+      );
+      onDeleted();
+      return;
+    }
+    const detail = deletion.detail ? ` (${deletion.detail})` : "";
+    this.log.warn(
+      `⚠️ Not syncing ${this.label}: it was deleted from the project${detail}. It stays on this machine.`,
     );
   }
 
@@ -291,13 +330,21 @@ export class DatabaseSync {
    * adopted instead, once the cloud answers. Attaching the database that's
    * attached already does nothing.
    */
-  attach(db: SyncedDatabase, { links, onPulled, adopt }: AttachOptions): void {
+  attach(
+    db: SyncedDatabase,
+    { links, onPulled, adopt, onDeleted }: AttachOptions,
+  ): void {
     if (this.db === db) return;
     this.db = db;
     this.links = new Set(links);
     this.onPulled = onPulled;
     this.adoptFile = adopt;
+    this.onDeleted = onDeleted;
     this.owesPush = true;
+    if (this.deletion) {
+      this.settleDeletion();
+      return;
+    }
     if (this.isLinked) void this.pull();
     else void this.adoptIfUnlinked();
   }
@@ -329,6 +376,16 @@ export class DatabaseSync {
     })();
     this.onStatusChange();
     return this.adopting;
+  }
+
+  /**
+   * Asks the cloud again for the database, as if for a new token: how a
+   * dataset gone from the project's list is found to be deleted. Never
+   * rejects.
+   */
+  async recheck(): Promise<void> {
+    if (this.closed || this.stopped) return;
+    await this.requestCredentials();
   }
 
   /** Says the database was written to: it's pushed once writes settle. */

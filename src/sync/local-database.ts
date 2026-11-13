@@ -32,7 +32,7 @@ import type { SyncDatabaseCredentials } from "@evalution/sdk";
 import { connect, type Database } from "@tursodatabase/sync";
 import { createLocalTursoClient } from "../trace/db/local-turso-client.ts";
 import { MIGRATIONS_TABLE } from "../trace/db/migrate.ts";
-import type { DatabaseSync } from "./database-sync.ts";
+import type { AttachOptions, DatabaseSync } from "./database-sync.ts";
 
 /** The table recording which cloud databases a file has synced with. */
 export const SYNC_LINKS_TABLE = "evalution_sync_links";
@@ -277,6 +277,8 @@ export interface LocalDatabaseSync {
   reopen: () => Promise<unknown>;
   /** Copies tables a generic copy would get wrong. */
   merge?: MergeTables;
+  /** Removes the file: see {@link AttachOptions.onDeleted}. */
+  onDeleted?: () => void;
   /**
    * A file that synced with an earlier cloud database of the same project
    * is replaced by the cloud's copy, not merged into it. For a dataset: that
@@ -366,6 +368,7 @@ export async function startSyncing({
     links: links.map(link => link.syncId),
     onPulled: sync.onPulled,
     adopt: () => adopt(path, client, links, migrate, sync),
+    ...(sync.onDeleted && { onDeleted: sync.onDeleted }),
   });
 }
 

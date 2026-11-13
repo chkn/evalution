@@ -295,6 +295,70 @@ describe("DatabaseSync", () => {
     expect(warn.warn).toHaveBeenCalledTimes(1);
   });
 
+  describe("when the cloud says the database was deleted", () => {
+    const deleted = (syncId: string) =>
+      new EvalutionApiError(410, "deleted", { error: "deleted", syncId });
+    const datasetSync = (cloud: SyncCloud, warn = log()) =>
+      new DatabaseSync({
+        cloud,
+        key: { kind: "dataset", provider: "local-datasets", key: "tickets" },
+        schemaVersion: 1,
+        log: warn,
+      });
+
+    it("has a file that synced with it removed, finding out on a recheck", async () => {
+      const { cloud, fail } = fakeCloud();
+      const warn = log();
+      const sync = datasetSync(cloud, warn);
+      const onDeleted = vi.fn();
+      await sync.prepare();
+      sync.attach(fakeDb().db, { ...linked(), onDeleted });
+      await sync.idle();
+
+      fail(deleted("db-1"));
+      await sync.recheck();
+
+      expect(onDeleted).toHaveBeenCalledTimes(1);
+      expect(sync.isStopped).toBe(true);
+      expect(warn.warn).toHaveBeenCalledWith(
+        expect.stringContaining("Removing the dataset tickets"),
+      );
+    });
+
+    it("has a file that synced with it removed, finding out as it opens", async () => {
+      const { cloud, fail } = fakeCloud();
+      const sync = datasetSync(cloud);
+      const onDeleted = vi.fn();
+      fail(deleted("db-1"));
+      await sync.prepare();
+
+      sync.attach(fakeDb().db, { ...linked(), onDeleted });
+
+      expect(onDeleted).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps a file that never synced with it", async () => {
+      const { cloud, fail } = fakeCloud();
+      const warn = log();
+      const sync = datasetSync(cloud, warn);
+      const onDeleted = vi.fn();
+      fail(deleted("db-1"));
+      await sync.prepare();
+
+      sync.attach(fakeDb().db, {
+        links: ["db-0"],
+        onPulled: () => {},
+        adopt: async () => {},
+        onDeleted,
+      });
+
+      expect(onDeleted).not.toHaveBeenCalled();
+      expect(warn.warn).toHaveBeenCalledWith(
+        expect.stringContaining("It stays on this machine"),
+      );
+    });
+  });
+
   it("pulls then pushes when attached, and reports pulled changes", async () => {
     const { cloud } = fakeCloud();
     const { db, ops, willPull } = fakeDb();

@@ -392,6 +392,28 @@ describe("Evalution's cloud calls", () => {
     ).rejects.toMatchObject({ status: 404, detail: "Project not found." });
   });
 
+  it("rejects with the rest of the cloud's answer", async () => {
+    const fetch = async () =>
+      new Response(JSON.stringify({ error: "Deleted.", syncId: "db-1" }), {
+        status: 410,
+      });
+    await expect(
+      new Evalution({
+        apiKey: PERSONAL,
+        project: "prj_1",
+        fetch,
+      }).getSyncDatabase({
+        kind: "dataset",
+        provider: "local-datasets",
+        key: "questions",
+      }),
+    ).rejects.toMatchObject({
+      status: 410,
+      detail: "Deleted.",
+      body: { error: "Deleted.", syncId: "db-1" },
+    });
+  });
+
   it("refuses a call its key or project can't make, without a request", async () => {
     const { fetch, calls } = stubFetch();
 

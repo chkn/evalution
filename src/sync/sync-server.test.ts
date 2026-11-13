@@ -73,11 +73,20 @@ function fakeCloud(serverUrl: string, project: string): WorkspaceCloud {
   const generation = new Map<string, number>();
   const id = ({ kind, provider, key = "" }: SyncDatabaseKey) =>
     `${kind}-${provider}-${key}`;
+  const databaseOf = (name: string) =>
+    `${project}-${name}-${generation.get(name) ?? 0}`;
   return {
     async getSyncDatabase(request: SyncDatabaseRequest) {
       const name = id(request);
       if (deleted.has(name)) {
-        if (!request.create) throw new EvalutionApiError(410, "deleted");
+        if (!request.create) {
+          // As the cloud does, naming the database deleted.
+          const syncId = databaseOf(name);
+          throw new EvalutionApiError(410, "deleted", {
+            error: "deleted",
+            syncId,
+          });
+        }
         deleted.delete(name);
         generation.set(name, (generation.get(name) ?? 0) + 1);
       }
@@ -86,7 +95,7 @@ function fakeCloud(serverUrl: string, project: string): WorkspaceCloud {
         provider: request.provider,
         key: request.key ?? "",
       });
-      const database = `${project}-${name}-${generation.get(name) ?? 0}`;
+      const database = databaseOf(name);
       return {
         url: `${serverUrl}/db/${database}`,
         token: "unused-by-the-local-server",
@@ -446,6 +455,74 @@ describe.skipIf(!tursodb)("workspace sync through a Turso sync server", () => {
       { id: "tickets", rowCount: 1 },
     ]);
     await Promise.all([a.stop(), bAgain.stop()]);
+  });
+
+  it("removes a dataset deleted on another machine", async () => {
+    const cloud = newProject();
+    const a = await machine(cloud);
+    const tickets = await a.datasets.createDataset({
+      name: "Tickets",
+      fields: [],
+    });
+    await a.datasets.addRows(tickets.id, [{ cells: {} }]);
+    await a.syncNow();
+    const b = await machine(cloud);
+    await b.syncNow();
+    expect(await b.datasets.listDatasets()).toMatchObject([{ id: "tickets" }]);
+    const removed: string[] = [];
+    b.datasets.watch(event => {
+      if (event.type === "remove") removed.push(event.datasetId);
+    });
+
+    await a.datasets.deleteDataset(tickets.id);
+    await b.syncNow();
+
+    expect(await b.datasets.listDatasets()).toEqual([]);
+    expect(existsSync(join(b.root, "datasets", "tickets.db"))).toBe(false);
+    expect(removed).toEqual(["tickets"]);
+    await Promise.all([a.stop(), b.stop()]);
+  });
+
+  it("removes a dataset deleted while this machine was off", async () => {
+    const cloud = newProject();
+    const a = await machine(cloud);
+    await a.datasets.createDataset({ name: "Tickets", fields: [] });
+    await a.syncNow();
+    const b = await machine(cloud);
+    await b.syncNow();
+    await b.sync.close();
+    await b.datasets.close();
+
+    await a.datasets.deleteDataset("tickets");
+    const bAgain = await machineAt(b.root, cloud);
+    await bAgain.syncNow();
+
+    expect(await bAgain.datasets.listDatasets()).toEqual([]);
+    await Promise.all([a.stop(), bAgain.stop()]);
+  });
+
+  it("keeps a dataset made here, unsynced, with the id of one deleted from the project", async () => {
+    const cloud = newProject();
+    const a = await machine(cloud);
+    await a.datasets.createDataset({ name: "Tickets", fields: [] });
+    await a.syncNow();
+    await a.datasets.deleteDataset("tickets");
+    const root = await mkdtemp(join(tmpdir(), "evalution-sync-machine-"));
+    const before = unlinkedAt(root);
+    const mine = await before.datasets.createDataset({
+      name: "Tickets",
+      fields: [],
+    });
+    await before.datasets.addRows(mine.id, [{ cells: {} }]);
+    await before.datasets.close();
+
+    const b = await machineAt(root, cloud);
+    await b.syncNow();
+
+    expect(await b.datasets.listDatasets()).toMatchObject([
+      { id: "tickets", rowCount: 1 },
+    ]);
+    await Promise.all([a.stop(), b.stop()]);
   });
 
   it("brings a machine's traces to the next project it's linked to", async () => {

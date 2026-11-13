@@ -129,6 +129,11 @@ in their copy of the project.
    Run it again to switch projects: it marks the linked one and, if you pick
    another, updates `cloud.project`.
 
+   Linking also [syncs](#syncing-traces-datasets-and-evals) the project's
+   traces, datasets and evals, including those already on this machine, so
+   every member of the project can see them. `evalution link` says so before
+   it asks.
+
 From then on, a playground started with a personal key registers with the cloud
 while it runs and prints the project URL. **Copy link** on a trace copies a link
 to it by that URL. Opening the URL sends you to your running playground on that
@@ -144,6 +149,29 @@ this machine's copy. If it's set up to start on demand, visiting the link starts
 The cloud only ever sends a browser to a loopback address (`localhost`,
 `*.localhost`, `127.0.0.1`, `[::1]`), so a playground started with
 `--host` naming another interface doesn't register.
+
+### Syncing traces, datasets and evals
+
+In a linked project, `evalution ui` and `evalution mcp` started with a personal key sync the
+project's local traces, datasets and evals with Evalution Cloud. Every member sees them in their
+own playground, on any of their machines, and a link to a trace opens on a machine that didn't
+record it.
+
+- **What syncs:** every local trace, dataset and eval provider, whether it's a default or one your
+  config names. The cloud tells them apart by `id`, so give each provider of a kind its own `id`,
+  and keep it: changing it starts a new copy in the cloud.
+- **Data already on a machine** joins the project's the first time it syncs. Where the cloud
+  already has a row, the cloud's version is kept, and a dataset's columns are matched by name.
+  Meanwhile the list shows **Syncing**, and changes to it wait until it's done.
+- **When:** changes are sent a second after they're made. Other machines' changes arrive every 30
+  seconds and when the playground's window regains focus. Whatever is left is sent on exit.
+- **Deleting a dataset** deletes it from the cloud and, the next time they sync, from every
+  member's machine that synced it. The playground warns before deleting one. Changes another
+  machine hadn't sent yet are lost with it. A dataset made on a machine under the same id, but
+  never synced, is kept there.
+- **Without the cloud,** offline say, everything works locally, and syncs once the cloud can be
+  reached. An evalution older than the newest one that has synced a database can't sync it: it
+  says so and keeps the database local until it's upgraded.
 
 ## Sending traces from your app
 

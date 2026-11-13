@@ -426,6 +426,21 @@ describe("LocalDirectoryDatasetProvider, syncing", () => {
     expect(await provider.listDatasets()).toEqual([]);
   });
 
+  it("marks a dataset the cloud has, since deleting it deletes every copy", async () => {
+    const sync = stubSync();
+    const provider = sync.synced(new LocalDirectoryDatasetProvider({ dir }));
+    const dataset = await provider.createDataset({
+      name: "Tickets",
+      fields: [],
+    });
+    expect((await provider.getDataset(dataset.id))?.synced).toBeUndefined();
+
+    sync.db(`dataset/local-datasets/${dataset.id}`).url = "http://127.0.0.1:9";
+
+    expect((await provider.getDataset(dataset.id))?.synced).toBe(true);
+    await provider.close();
+  });
+
   it("fetches a dataset only the cloud has, when the sync pulls", async () => {
     const sync = stubSync(["from-elsewhere"]);
     const provider = sync.synced(new LocalDirectoryDatasetProvider({ dir }));

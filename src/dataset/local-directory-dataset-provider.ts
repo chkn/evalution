@@ -127,6 +127,8 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
   private sync: WorkspaceSync | undefined;
   /** Per file: holds operations while sync swaps it. */
   private readonly gates = new Map<string, PauseGate>();
+  /** Datasets being removed because they were deleted on another machine. */
+  private readonly removals = new Map<string, Promise<void>>();
 
   constructor(options: LocalDirectoryDatasetProviderOptions = {}) {
     this.id = options.id ?? "local-datasets";
@@ -186,6 +188,7 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
         merge: mergeDatasetTables,
         // A dataset synced before, made again since: start over from it.
         replaceSuperseded: true,
+        onDeleted: () => this.removeDeleted(datasetId),
       }
     );
   }
@@ -212,34 +215,67 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
   }
 
   /**
+   * Removes a dataset deleted on another machine, once its sync has found
+   * this file synced with the deleted cloud copy.
+   */
+  private removeDeleted(datasetId: string): void {
+    if (this.removals.has(datasetId)) return;
+    const removal = (async () => {
+      await this.sync?.forgetDataset(this.id, datasetId);
+      await this.removeLocal(datasetId);
+    })()
+      .catch(err =>
+        console.warn(`⚠️ Couldn't remove the dataset ${datasetId}:`, err),
+      )
+      .finally(() => this.removals.delete(datasetId));
+    this.removals.set(datasetId, removal);
+  }
+
+  /**
    * Opens this machine's datasets, so each syncs — one made before the
    * project was linked is brought into it — and fetches the datasets the
    * project has in the cloud that this machine doesn't, announcing each as
-   * added. Chained with creates, so it can't open a file a create is making.
+   * added. One gone from the cloud's list is checked on, so if it was
+   * deleted on another machine it's removed here too. Chained with creates,
+   * so it can't open a file a create is making.
    */
   private fetchRemoteDatasets(): Promise<void> {
     const next = this.creates.then(async () => {
-      const local = new Set(await this.fileIds());
-      for (const id of local) {
-        if (!this.entries.has(id)) await this.openEntry(id);
-      }
-      const remote = await this.sync?.remoteDatasetIds(this.id);
-      if (!remote) return;
-      for (const id of remote) {
-        if (!isValidDatasetId(id) || local.has(id) || this.entries.has(id)) {
-          continue;
-        }
-        // Without the cloud's copy to start from, the file would be empty.
-        const sync = this.datasetSync(id);
-        await sync?.prepare();
-        if (!sync?.isAvailable) continue;
-        await mkdirSelfIgnoring(this.dir);
-        const entry = await this.openEntry(id);
-        if (entry.ok) this.emit({ type: "add", datasetId: id });
+      try {
+        await this.fetchRemoteDatasetsNow();
+      } finally {
+        // Opening a file, or checking on one, may have found it deleted.
+        await Promise.all(this.removals.values());
       }
     });
     this.creates = next.catch(() => {});
     return next;
+  }
+
+  private async fetchRemoteDatasetsNow(): Promise<void> {
+    const local = new Set(await this.fileIds());
+    for (const id of local) {
+      if (!this.entries.has(id)) await this.openEntry(id);
+    }
+    const remote = await this.sync?.remoteDatasetIds(this.id);
+    if (!remote) return;
+    const listed = new Set(remote);
+    for (const id of local) {
+      const sync = this.datasetSync(id);
+      if (!listed.has(id) && sync?.isAvailable) await sync.recheck();
+    }
+    for (const id of remote) {
+      if (!isValidDatasetId(id) || local.has(id) || this.entries.has(id)) {
+        continue;
+      }
+      // Without the cloud's copy to start from, the file would be empty.
+      const sync = this.datasetSync(id);
+      await sync?.prepare();
+      if (!sync?.isAvailable) continue;
+      await mkdirSelfIgnoring(this.dir);
+      const entry = await this.openEntry(id);
+      if (entry.ok) this.emit({ type: "add", datasetId: id });
+    }
   }
 
   private pathFor(datasetId: string): string {
@@ -377,9 +413,13 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
     return entry;
   }
 
-  /** `dataset` with its id rewritten to the file's. */
+  /** `dataset` with its id rewritten to the file's, marked if the cloud has it. */
   private withFileId(datasetId: string, dataset: Dataset): Dataset {
-    return { ...dataset, id: datasetId };
+    return {
+      ...dataset,
+      id: datasetId,
+      ...(this.datasetSync(datasetId)?.isAvailable && { synced: true }),
+    };
   }
 
   async listDatasets(): Promise<DatasetSummary[]> {
@@ -542,7 +582,12 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
     if (!isValidDatasetId(datasetId)) return;
     // First, so nothing syncs to the copy as it goes.
     await this.sync?.deleteDataset(this.id, datasetId);
-    await this.on(datasetId, async () => {
+    await this.removeLocal(datasetId);
+  }
+
+  /** Closes the file's client, then removes it and its sidecars. */
+  private removeLocal(datasetId: string): Promise<void> {
+    return this.on(datasetId, async () => {
       const entry = await this.entries.get(datasetId);
       this.entries.delete(datasetId);
       this.reported.delete(datasetId);

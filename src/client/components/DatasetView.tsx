@@ -4,6 +4,7 @@
 import type { EvalRun, EvalSummary } from "../../eval/eval-types";
 import type { AgentInfo } from "../../shared/agent";
 import { AskAgentButton, AskAgentMenuItems } from "./AskAgentButton";
+import { deleteDatasetPrompt } from "./delete-dataset";
 import "@glideapps/glide-data-grid/dist/index.css";
 import {
   booleanCellRenderer,
@@ -1330,12 +1331,7 @@ function DatasetView({
   };
 
   const handleDelete = () => {
-    if (
-      !window.confirm(
-        `Delete “${dataset.name}” and its ${rowCount} row${rowCount === 1 ? "" : "s"}?`,
-      )
-    )
-      return;
+    if (!window.confirm(deleteDatasetPrompt(dataset, rowCount))) return;
     void act(async () => {
       await deleteDataset(providerId, datasetId);
       forgetLayout(layoutKey);

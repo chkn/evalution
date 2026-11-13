@@ -161,7 +161,8 @@ export interface SyncDatabaseRequest extends SyncDatabaseKey {
   /**
    * Set when creating a dataset. Without it, the cloud answers 410 for a
    * dataset that was deleted, so a machine that still has a copy can't
-   * bring it back.
+   * bring it back. The 410's {@link EvalutionApiError.body} has the deleted
+   * database's `syncId`: a copy that synced with it should go too.
    */
   create?: boolean;
 }
@@ -426,12 +427,15 @@ export class EvalutionApiError extends Error {
   readonly status: number;
   /** The cloud's explanation, if it gave one. */
   readonly detail?: string;
+  /** The cloud's whole answer, when it was JSON: a 410's `syncId`, say. */
+  readonly body?: Record<string, unknown>;
 
-  constructor(status: number, detail?: string) {
+  constructor(status: number, detail?: string, body?: Record<string, unknown>) {
     super(`Evalution API: ${status} ${detail ?? ""}`.trim());
     this.name = "EvalutionApiError";
     this.status = status;
     this.detail = detail;
+    this.body = body;
   }
 }
 
@@ -440,11 +444,15 @@ async function readOk(res: Response): Promise<Response> {
   if (res.ok) return res;
   const text = await res.text().catch(() => "");
   let detail = text || undefined;
+  let body: Record<string, unknown> | undefined;
   try {
-    const { error } = JSON.parse(text) as { error?: unknown };
-    if (typeof error === "string") detail = error;
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      body = parsed as Record<string, unknown>;
+      if (typeof body.error === "string") detail = body.error;
+    }
   } catch {
     // Not the cloud's JSON: keep the text as it is.
   }
-  throw new EvalutionApiError(res.status, detail);
+  throw new EvalutionApiError(res.status, detail, body);
 }
