@@ -12,6 +12,7 @@ import type { EvalProvider } from "../eval/eval-provider.ts";
 import { LocalFileProvider } from "../file-provider-local.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import type { SSEData } from "../shared/types.ts";
+import type { WorkspaceSync } from "../sync/workspace-sync.ts";
 import type { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
 import type { TraceEventIngestor } from "../trace/trace-event-ingestor.ts";
 import type { TraceProvider } from "../trace/trace-provider.ts";
@@ -86,6 +87,15 @@ export interface ServerOptions {
   getProjectUrl?: () => string | undefined;
   /** Runs on SIGINT or SIGTERM, before the server closes and the process exits. */
   beforeExit?: () => Promise<void>;
+  /**
+   * The project's sync with Evalution Cloud, if it has one: the playground
+   * asks it to pull when its window regains focus, and it pushes what's
+   * left before the process exits.
+   */
+  sync?: Pick<
+    WorkspaceSync,
+    "pullAll" | "close" | "adopting" | "onStatusChange"
+  >;
 }
 
 /** A running server, returned by {@link startServer}. */
@@ -121,6 +131,7 @@ export async function startServer(
     version,
     getProjectUrl,
     beforeExit,
+    sync,
   } = options;
   const views =
     options.views ??
@@ -190,7 +201,14 @@ export async function startServer(
     traceEventIngestor,
     views,
     getProjectUrl,
+    ...(sync && {
+      pullSync: () => sync.pullAll(),
+      syncStatus: () => sync.adopting(),
+    }),
   });
+  const unwatchSync = sync?.onStatusChange(() =>
+    broadcast({ type: "sync-status", adopting: sync.adopting() }),
+  );
   // A view is rebuilt when its file, or anything it imports, changes.
   const unwatchViews = views.watch(version =>
     broadcast({ type: "views-changed", version }),
@@ -301,6 +319,7 @@ export async function startServer(
       process.off("SIGTERM", shutdown);
       for (const ws of wss.clients) ws.close();
       unwatchViews();
+      unwatchSync?.();
       void mcp.close();
       if ("closeAllConnections" in server) {
         server.closeAllConnections();
@@ -312,6 +331,7 @@ export async function startServer(
   const shutdown = async () => {
     console.log("\n\nShutting down gracefully...");
     await beforeExit?.().catch(() => {});
+    await sync?.close().catch(() => {});
     await close();
     process.exit(0);
   };

@@ -6547,6 +6547,25 @@ pre {
     transform: rotate(360deg);
   }
 }
+
+/* A database being brought into the project's sync: see SyncingIndicator. */
+.syncing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--tree-text-secondary);
+  white-space: nowrap;
+}
+.syncing-indicator-ring {
+  width: 9px;
+  height: 9px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--panel-border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: setup-step-spin 0.8s linear infinite;
+}
 .setup-step-label code {
   font-size: 12px;
   background: var(--input-bg);

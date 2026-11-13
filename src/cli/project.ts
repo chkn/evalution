@@ -21,6 +21,7 @@ import { LocalDirectoryDatasetProvider } from "../dataset/local-directory-datase
 import type { EvalProvider } from "../eval/eval-provider.ts";
 import { LocalEvalProvider } from "../eval/local-eval-provider.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
+import { WorkspaceSync } from "../sync/workspace-sync.ts";
 import { CheckScopeTraceSink } from "../trace/check-scope.ts";
 import { CloudTraceProvider } from "../trace/cloud-trace-provider.ts";
 import { CostFetchingTraceSink } from "../trace/cost-fetching-trace-sink.ts";
@@ -121,6 +122,13 @@ export interface ProjectProviders {
    * can send traces to the server (`POST /api/traces`).
    */
   traceEventIngestor: TraceEventIngestor;
+  /**
+   * Syncs the local trace, eval and dataset providers' databases (the
+   * config's or the defaults) with Evalution Cloud, when the project is
+   * linked and there's a personal key. Close it before exiting, to push
+   * what's left.
+   */
+  sync?: WorkspaceSync;
 }
 
 /**
@@ -143,6 +151,8 @@ export async function setUpProject(
   const promptProviders = config.promptProviders ?? [];
   let traceProviders = config.traceProviders;
 
+  const { client } = linkedCloudClient(config, { env });
+
   if (!traceProviders) {
     // An explicit `rootDir`-relative path rather than `LocalDatabaseTraceProvider`'s
     // own CWD-relative default, so this never depends on the caller having
@@ -153,16 +163,8 @@ export async function setUpProject(
     traceProviders = [provider];
   }
 
-  // Quietly: `evalution ui` hints at linking when it registers the instance.
-  const cloud = linkedCloudClient(config, {
-    env,
-    log: { log() {}, warn() {} },
-  });
-  if (cloud) {
-    traceProviders = [
-      ...traceProviders,
-      new CloudTraceProvider({ client: cloud }),
-    ];
+  if (client) {
+    traceProviders = [...traceProviders, new CloudTraceProvider({ client })];
   }
 
   // As for traces: `rootDir`-relative, not the provider's CWD-relative default.
@@ -177,6 +179,20 @@ export async function setUpProject(
       path: path.join(rootDir, ".evalution", "evals", "evals.db"),
     }),
   ];
+
+  // Every local provider syncs, whichever made it: each names its databases
+  // in the cloud by its id.
+  const sync = client && new WorkspaceSync({ cloud: client });
+  if (sync) {
+    sync.syncProviders({
+      traces: traceProviders,
+      datasets: datasetProviders,
+      evals: evalProviders,
+    });
+    sync.start();
+    // Fetches the datasets this machine doesn't have yet.
+    void sync.pullAll();
+  }
 
   // Each adapter runs its own SDK-specific setup and returns the resulting
   // ingestor — we stand up nothing here beyond the default provider.
@@ -231,5 +247,6 @@ export async function setUpProject(
     evalProviders,
     otlpIngestor,
     traceEventIngestor,
+    ...(sync && { sync }),
   };
 }

@@ -361,7 +361,25 @@ export interface ViewsChangedSSEData {
   version: number;
 }
 
+/**
+ * A local database being brought into a linked project's sync — its file
+ * swapped for a copy of the cloud's holding its rows too. Changes to it wait
+ * meanwhile. `provider` is its provider's id; `key` is a dataset's id.
+ */
+export interface SyncingDatabase {
+  kind: "traces" | "evals" | "dataset";
+  provider: string;
+  key?: string;
+}
+
+/** The databases being brought into sync changed — see `GET /api/sync`. */
+export interface SyncStatusSSEData {
+  type: "sync-status";
+  adopting: SyncingDatabase[];
+}
+
 export type SSEData =
+  | SyncStatusSSEData
   | PromptChangedSSEData
   | TraceChangedSSEData
   | DatasetChangedSSEData

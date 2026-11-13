@@ -33,6 +33,12 @@ export interface LocalTursoClientOptions {
   getAuthToken?: () => Promise<string>;
   /** Identifies this client to the sync engine (shown in Turso's dashboard). */
   clientName?: string;
+  /**
+   * Called when a database new to this machine couldn't be started from the
+   * cloud's copy (the cloud was unreachable), so it was opened empty instead.
+   * Sync stays on: the next pull brings the cloud's rows.
+   */
+  onBootstrapFailure?: (err: unknown) => void;
 }
 
 /**
@@ -54,13 +60,30 @@ export async function createLocalTursoClient({
   getCloudUrl = () => null,
   getAuthToken,
   clientName = "evalution",
+  onBootstrapFailure,
 }: LocalTursoClientOptions): Promise<Database> {
-  const db = await connect({
+  const options = {
     path,
-    url: getCloudUrl,
     ...(getAuthToken && { authToken: getAuthToken }),
     clientName,
-  });
+  };
+  let db: Database;
+  try {
+    // With a URL already, a file that doesn't exist yet starts as a copy of
+    // the cloud's: that's a network call, made here.
+    db = await connect({ ...options, url: getCloudUrl });
+  } catch (err) {
+    if (getCloudUrl() === null) throw err;
+    onBootstrapFailure?.(err);
+    // Open it empty instead: the URL reads as `null` while connecting, so
+    // there's no copy to fetch, and as itself after, so sync is still on.
+    let connecting = true;
+    db = await connect({
+      ...options,
+      url: () => (connecting ? null : getCloudUrl()),
+    });
+    connecting = false;
+  }
   // SQLite disables FK enforcement by default per-connection; the schema's
   // `ON DELETE CASCADE`s (see ./schema.ts) are inert without this.
   await db.exec("PRAGMA foreign_keys = ON");

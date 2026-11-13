@@ -7,6 +7,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -20,8 +21,9 @@ import type {
   PromptRef,
   RunResources,
   SSEData,
+  SyncingDatabase,
 } from "../shared/types";
-import { getAgentCommand, getAgents, renamePrompt } from "./api";
+import { getAgentCommand, getAgents, getSyncStatus, renamePrompt } from "./api";
 import AddPromptDialog from "./components/AddPromptDialog";
 import DatasetList, { datasetKey } from "./components/DatasetList";
 import EvalList, { evalKey } from "./components/EvalList";
@@ -57,11 +59,13 @@ import { WelcomeWizard } from "./components/welcome/WelcomeWizard";
 import { useDatasets } from "./hooks/useDatasets";
 import { useEvals } from "./hooks/useEvals";
 import { usePrompts } from "./hooks/usePrompts";
+import { usePullOnFocus } from "./hooks/usePullOnFocus";
 import { useResizable } from "./hooks/useResizable";
 import { useSSE } from "./hooks/useSSE";
 import { useTraces } from "./hooks/useTraces";
 import { type PaneState, placeTab } from "./pane-layout";
 import { consumeSelfEdit } from "./self-edits";
+import { syncingLists } from "./sync-status";
 import { linkedTrace } from "./trace-link.ts";
 import { requireProviderId, withSetMembership } from "./utils";
 
@@ -348,6 +352,15 @@ function App() {
     Record<string, EvalRunProgress>
   >({});
   const [newEvalSeed, setNewEvalSeed] = useState<NewEvalSeed | null>(null);
+  // The databases being brought into the project's sync, whose changes wait
+  // meanwhile: their lists say so.
+  const [adopting, setAdopting] = useState<SyncingDatabase[]>([]);
+  const syncing = useMemo(() => syncingLists(adopting), [adopting]);
+  const refetchSyncStatus = useCallback(() => {
+    getSyncStatus()
+      .then(setAdopting)
+      .catch(() => {});
+  }, []);
   // Bumped on every prompt change made elsewhere, so a tab showing a version
   // or variation re-reads it.
   const [promptsVersion, setPromptsVersion] = useState(0);
@@ -438,7 +451,9 @@ function App() {
   const handleSSEMessage = useCallback(
     (data: SSEData) => {
       // FIXME: Delay these for a hot second to debounce multiple rapid changes
-      if (data.type === "prompt-changed") {
+      if (data.type === "sync-status") {
+        setAdopting(data.adopting);
+      } else if (data.type === "prompt-changed") {
         // Skip echoes of this client's own edits — local state is already
         // patched, and re-fetching would reset editor cursor position. Edits
         // from other clients (e.g. another tab) aren't marked, so they refetch.
@@ -482,6 +497,7 @@ function App() {
   // event sent while the stream was down is simply gone.
   const handleSSEOpen = useCallback(() => {
     refetchConfig();
+    refetchSyncStatus();
     refetchPrompts();
     refetchTraces();
     refetchDatasets();
@@ -489,6 +505,7 @@ function App() {
     refetchViews();
   }, [
     refetchConfig,
+    refetchSyncStatus,
     refetchPrompts,
     refetchTraces,
     refetchDatasets,
@@ -496,6 +513,7 @@ function App() {
   ]);
 
   useSSE(handleSSEMessage, handleSSEOpen);
+  usePullOnFocus();
 
   // Remove tabs whose prompt ID no longer exists (handles renames and deletions)
   useEffect(() => {
@@ -1349,6 +1367,7 @@ function App() {
                       }
                       sidebarWidth={sidebarWidth}
                       onResizeSidebar={w => sidebar.setSize("w", w)}
+                      syncing={syncing.traces}
                     />
                   )}
                   {activeSection === "datasets" && (
@@ -1368,6 +1387,7 @@ function App() {
                       promptName={ref => findPrompt(ref)?.name}
                       sidebarWidth={sidebarWidth}
                       onResizeSidebar={w => sidebar.setSize("w", w)}
+                      syncing={syncing.datasets}
                     />
                   )}
                   {activeSection === "evals" && (
@@ -1388,6 +1408,7 @@ function App() {
                       promptName={ref => findEvalPrompt(prompts, ref)?.name}
                       sidebarWidth={sidebarWidth}
                       onResizeSidebar={w => sidebar.setSize("w", w)}
+                      syncing={syncing.evals}
                     />
                   )}
                   {activeSection === "settings" && (

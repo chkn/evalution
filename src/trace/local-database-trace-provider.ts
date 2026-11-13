@@ -13,10 +13,18 @@ import type {
   TraceSummary,
   TraceWithSpans,
 } from "@evalution/sdk";
+import type { Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
+import type { DatabaseSync } from "../sync/database-sync.ts";
+import {
+  type LocalDatabaseSync,
+  openLocalDatabase,
+  startSyncing,
+} from "../sync/local-database.ts";
+import { PauseGate } from "../sync/pause-gate.ts";
+import type { WorkspaceSync } from "../sync/workspace-sync.ts";
 import { BaseTraceProvider } from "./base-trace-provider.ts";
-import { createLocalTursoClient } from "./db/local-turso-client.ts";
-import { runMigrations } from "./db/migrate.ts";
+import { runMigrations, TRACE_SCHEMA_VERSION } from "./db/migrate.ts";
 import { TRACE_QUERY_SCHEMA } from "./db/query-schema.ts";
 import { runQueryInWorker } from "./db/query-worker.ts";
 import {
@@ -49,10 +57,16 @@ export interface LocalDatabaseTraceProviderOptions {
    * @default "./.evalution/traces/local.db"
    */
   path?: string;
+  /**
+   * Also names the database in Evalution Cloud when the project is linked:
+   * changing it starts a new cloud copy.
+   */
   id?: string;
   displayName?: string;
   description?: string;
 }
+
+const migrate = (client: Database) => runMigrations(drizzle({ client }));
 
 /**
  * A {@link TraceProvider} that lazily opens a {@link TursoTraceProvider} over
@@ -74,6 +88,13 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
    * migrations — and re-logging the same stack — once per span.
    */
   private openFailure: Error | undefined;
+
+  private sync: DatabaseSync | undefined;
+  /** The open file, for sync. */
+  private client: Database | undefined;
+  /** Holds operations while sync swaps the database file. */
+  private readonly gate = new PauseGate();
+  private unwatchReal: (() => void) | undefined;
 
   constructor(options: LocalDatabaseTraceProviderOptions = {}) {
     super({
@@ -112,6 +133,59 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
     return undefined;
   }
 
+  /**
+   * Syncs the database with the linked project's copy (named by this
+   * provider's id), once `setUpProject` hands this the project's sync. Opens
+   * (and creates) the database at once, since the project may already have
+   * traces from another machine; a database already open starts syncing as
+   * it is.
+   *
+   * @internal Not public API yet.
+   */
+  _ecSetSync(workspace: WorkspaceSync): void {
+    if (this.sync) return;
+    this.sync = workspace.database(
+      { kind: "traces", provider: this.id },
+      TRACE_SCHEMA_VERSION,
+    );
+    if (this.openFailure) return;
+    this.creating = (
+      this.real
+        ? Promise.resolve(this.real)
+        : (this.creating ?? Promise.resolve(undefined))
+    ).then(async existing => {
+      if (!existing)
+        return this.open().catch(err => this.reportOpenFailure(err));
+      await this.startSyncing().catch(err =>
+        console.warn(`⚠️ Couldn't start syncing ${this.path}:`, err),
+      );
+      return existing;
+    });
+  }
+
+  /** What syncing the file needs, once there's a sync. */
+  private syncHooks(): LocalDatabaseSync | undefined {
+    const database = this.sync;
+    return (
+      database && {
+        database,
+        // What a pull brings in names no trace: say the list has changed.
+        onPulled: () => this.emitChange({ type: "update", traceId: "" }),
+        pause: during => this.gate.pause(during),
+        reopen: () => this.reopen(),
+      }
+    );
+  }
+
+  /** Starts syncing the open file. */
+  private async startSyncing(): Promise<void> {
+    const sync = this.syncHooks();
+    const client = this.client;
+    if (!sync || !client) return;
+    await sync.database.prepare();
+    await startSyncing({ path: this.path, client, migrate, sync });
+  }
+
   /** The live provider if one exists, awaiting an already-in-flight open — but never starting one. */
   private async currentReal(): Promise<TursoTraceProvider | undefined> {
     return this.real ?? this.creating;
@@ -139,8 +213,15 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
     // A directory this creates ignores itself, so traces stay out of git
     // without anyone editing their `.gitignore`.
     await mkdirSelfIgnoring(dirname(this.path));
-    const client = await createLocalTursoClient({ path: this.path });
-    await runMigrations(drizzle({ client }));
+    // Before connecting, so a database new to this machine starts from the
+    // cloud's copy.
+    await this.sync?.prepare();
+    const client = await openLocalDatabase({
+      path: this.path,
+      migrate,
+      sync: () => this.syncHooks(),
+    });
+    this.client = client;
     const real = new TursoTraceProvider({
       client,
       runQuery: (query, options) => runQueryInWorker(this.path, query, options),
@@ -149,10 +230,29 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
       description: this.description,
     });
     this.real = real;
-    real.watch(event => this.emitChange(event));
+    this.unwatchReal = real.watch(event => this.emitChange(event));
     for (const traceId of this.subscribers.keys())
       this.bridgeTrace(real, traceId);
     return real;
+  }
+
+  /** Opens the database again, after sync swapped its file (and closed the old one). */
+  private reopen(): Promise<unknown> {
+    this.unwatchReal?.();
+    for (const unsubscribe of this.bridgedTraceUnsubscribes.values()) {
+      unsubscribe();
+    }
+    this.bridgedTraceUnsubscribes.clear();
+    this.real = undefined;
+    this.client = undefined;
+    this.creating = undefined;
+    return this.ensureReal();
+  }
+
+  /** `result`, after telling the sync the database was written to. */
+  private wrote<T>(result: T): T {
+    this.sync?.noteWrite();
+    return result;
   }
 
   private bridgeTrace(real: TursoTraceProvider, traceId: string): void {
@@ -165,12 +265,16 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
 
   // ── TraceProvider (read) — never opens the database ─────────────────────
 
-  override async getAllTraces(query?: TraceQuery): Promise<TraceSummary[]> {
-    return (await this.currentReal())?.getAllTraces(query) ?? [];
+  override getAllTraces(query?: TraceQuery): Promise<TraceSummary[]> {
+    return this.gate.run(
+      async () => (await this.currentReal())?.getAllTraces(query) ?? [],
+    );
   }
 
-  override async hasTrace(traceId: string): Promise<boolean> {
-    return (await this.currentReal())?.hasTrace(traceId) ?? false;
+  override hasTrace(traceId: string): Promise<boolean> {
+    return this.gate.run(
+      async () => (await this.currentReal())?.hasTrace(traceId) ?? false,
+    );
   }
 
   protected override getTraceWithoutSpans(): Promise<Trace | undefined> {
@@ -198,8 +302,12 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
    * was never created. The `remove` event reaches this provider's watchers
    * through the bridge set up when the database is opened.
    */
-  override async deleteTrace(traceId: string): Promise<boolean> {
-    return (await (await this.currentReal())?.deleteTrace(traceId)) ?? false;
+  override deleteTrace(traceId: string): Promise<boolean> {
+    return this.gate.run(async () =>
+      this.wrote(
+        (await (await this.currentReal())?.deleteTrace(traceId)) ?? false,
+      ),
+    );
   }
 
   /**
@@ -207,7 +315,14 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
    * database yet there is nothing to query, and opening one to find that out
    * would create the file, so this says so instead.
    */
-  async query(sql: string, options?: SqlQueryOptions): Promise<SqlQueryResult> {
+  query(sql: string, options?: SqlQueryOptions): Promise<SqlQueryResult> {
+    return this.gate.run(() => this.queryNow(sql, options));
+  }
+
+  private async queryNow(
+    sql: string,
+    options?: SqlQueryOptions,
+  ): Promise<SqlQueryResult> {
     const real = await this.currentReal();
     if (!real) {
       throw new SqlQueryError(
@@ -224,10 +339,18 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
     return TRACE_QUERY_SCHEMA;
   }
 
-  override async getTrace(
-    traceId: string,
-  ): Promise<TraceWithSpans | undefined> {
-    return (await this.currentReal())?.getTrace(traceId);
+  /**
+   * The trace with its spans. When syncing, a trace that isn't here is
+   * pulled for once before it's reported missing: it may be a shared link to
+   * one recorded on another machine.
+   */
+  override getTrace(traceId: string): Promise<TraceWithSpans | undefined> {
+    return this.gate.run(async () => {
+      const real = await this.currentReal();
+      const found = await real?.getTrace(traceId);
+      if (found || !real || !this.sync) return found;
+      return (await this.sync.pull()) ? real.getTrace(traceId) : undefined;
+    });
   }
 
   override subscribeTrace(
@@ -250,26 +373,37 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
   // With no database to record into, a span passes through unchanged —
   // there is nothing stored to merge it with.
 
-  override async recordSpanStart(span: Span): Promise<Span> {
-    return (await this.ensureReal())?.recordSpanStart(span) ?? span;
+  override recordSpanStart(span: Span): Promise<Span> {
+    return this.gate.run(async () =>
+      this.wrote(
+        (await (await this.ensureReal())?.recordSpanStart(span)) ?? span,
+      ),
+    );
   }
 
-  override async recordSpanEnd(span: Span): Promise<Span> {
-    return (await this.ensureReal())?.recordSpanEnd(span) ?? span;
+  override recordSpanEnd(span: Span): Promise<Span> {
+    return this.gate.run(async () =>
+      this.wrote(
+        (await (await this.ensureReal())?.recordSpanEnd(span)) ?? span,
+      ),
+    );
   }
 
-  override async failTrace(
-    traceId: string,
-    errorMessage: string,
-  ): Promise<void> {
-    await (await this.ensureReal())?.failTrace(traceId, errorMessage);
+  override failTrace(traceId: string, errorMessage: string): Promise<void> {
+    return this.gate.run(async () => {
+      this.wrote(
+        await (await this.ensureReal())?.failTrace(traceId, errorMessage),
+      );
+    });
   }
 
   // ── annotation store — mirrors `TursoTraceProvider`'s (see its own docs) ─
 
   /** Lists every annotation on a trace, oldest first. Empty if nothing has been saved yet. */
-  async listAnnotations(traceId: string): Promise<Annotation[]> {
-    return (await this.currentReal())?.listAnnotations(traceId) ?? [];
+  listAnnotations(traceId: string): Promise<Annotation[]> {
+    return this.gate.run(
+      async () => (await this.currentReal())?.listAnnotations(traceId) ?? [],
+    );
   }
 
   /**
@@ -278,32 +412,40 @@ export class LocalDatabaseTraceProvider extends BaseTraceProvider {
    * for this note to be saved, so dropping it silently would be worse than
    * the error.
    */
-  async createAnnotation(
+  createAnnotation(
     input: Omit<Annotation, "id" | "createdAt">,
   ): Promise<Annotation> {
-    const real = await this.ensureReal();
-    if (!real) {
-      throw new Error(
-        `Cannot save an annotation: the trace database at ${this.path} could not be opened.`,
-        { cause: this.openFailure },
-      );
-    }
-    return real.createAnnotation(input);
+    return this.gate.run(async () => {
+      const real = await this.ensureReal();
+      if (!real) {
+        throw new Error(
+          `Cannot save an annotation: the trace database at ${this.path} could not be opened.`,
+          { cause: this.openFailure },
+        );
+      }
+      return this.wrote(await real.createAnnotation(input));
+    });
   }
 
   /**
    * Changes an annotation's `kind` and/or `note`. `undefined` if it doesn't
    * exist — including when the database was never created.
    */
-  async updateAnnotation(
+  updateAnnotation(
     id: string,
     changes: AnnotationChanges,
   ): Promise<Annotation | undefined> {
-    return (await this.currentReal())?.updateAnnotation(id, changes);
+    return this.gate.run(async () =>
+      this.wrote(
+        await (await this.currentReal())?.updateAnnotation(id, changes),
+      ),
+    );
   }
 
   /** Deletes an annotation by id. A no-op if the database was never created. */
-  async deleteAnnotation(id: string): Promise<void> {
-    await (await this.currentReal())?.deleteAnnotation(id);
+  deleteAnnotation(id: string): Promise<void> {
+    return this.gate.run(async () => {
+      this.wrote(await (await this.currentReal())?.deleteAnnotation(id));
+    });
   }
 }

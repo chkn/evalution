@@ -10,6 +10,7 @@ import {
   configLinkedProject,
   link,
   linkConfigSource,
+  SHARING_NOTICE,
 } from "./link.ts";
 
 const ID = "prj_abc";
@@ -185,6 +186,24 @@ describe("link", () => {
       }),
     ).resolves.toBe(1);
     expect(error.mock.calls[0][0]).toContain("personal API key");
+  });
+
+  it("says who will see the project's local data before asking which project to link", async () => {
+    const events: string[] = [];
+    await link(ROOT, true, {
+      client: fakeClient([project(1)]),
+      ask: async question => {
+        events.push(`ask: ${question}`);
+        return "1";
+      },
+      log: { log: line => events.push(`log: ${line}`), error: () => {} },
+      fileProvider: files("export default {};"),
+    });
+    const notice = events.indexOf(`log: ${SHARING_NOTICE}`);
+    expect(notice).toBeGreaterThanOrEqual(0);
+    expect(notice).toBeLessThan(events.findIndex(e => e.startsWith("ask: ")));
+    expect(SHARING_NOTICE).toMatch(/traces, datasets and evals/);
+    expect(SHARING_NOTICE).toMatch(/Anyone with access to the project/);
   });
 
   it("writes the chosen project into the config", async () => {

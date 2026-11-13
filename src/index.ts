@@ -357,6 +357,18 @@ export type {
   VersionId,
   VersionInfo,
 } from "./shared/types.ts";
+export {
+  type AttachOptions,
+  DatabaseSync,
+  type DatabaseSyncOptions,
+  type SyncCloud,
+  type SyncedDatabase,
+} from "./sync/database-sync.ts";
+export {
+  type WorkspaceCloud,
+  WorkspaceSync,
+  type WorkspaceSyncOptions,
+} from "./sync/workspace-sync.ts";
 export { BaseTraceProvider } from "./trace/base-trace-provider.ts";
 export {
   type CloudTraceClient,

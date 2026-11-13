@@ -134,8 +134,10 @@ export async function serveMcpHolder(
       for (;;) {
         await context.evalRunner?.idle();
         await http.idle();
-        if (!context.evalRunner?.isBusy()) return;
+        if (!context.evalRunner?.isBusy()) break;
       }
+      // Pushes what's left: idle is what's awaited before this process exits.
+      await providers.sync?.close();
     },
   };
 }

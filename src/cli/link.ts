@@ -205,6 +205,9 @@ export async function chooseProject(
   return client.createProject({ name });
 }
 
+export const SHARING_NOTICE =
+  "⚠️ Linking will sync your local traces, datasets and evals to Evalution Cloud. Anyone with access to the project you link will be able to see and edit them. Press Ctrl+C to cancel.";
+
 /** Runs `evalution link` for the project at `rootDir`. Resolves to the exit code. */
 export async function link(
   rootDir: string,
@@ -236,12 +239,14 @@ export async function link(
     ? await fileProvider.readFile(configPath)
     : undefined;
   const linked = source === undefined ? undefined : configLinkedProject(source);
+  log.log("");
+  log.log(SHARING_NOTICE);
   if (linked) {
-    log.log("");
     log.log(
-      `💡 This project is already linked to ${linked}. Change it below, or press Ctrl+C to cancel.`,
+      `💡 This project is already linked to ${linked}. Keep it, or change it below.`,
     );
   }
+  log.log("");
 
   let readline: ReturnType<typeof createInterface> | undefined;
   const askUser: Ask =

@@ -303,7 +303,25 @@ describe("Evalution's cloud calls", () => {
       "getSyncDatabase",
       "POST",
       "/cloud/v1/sync/databases",
-      (c: Evalution) => c.getSyncDatabase({ kind: "traces" }),
+      (c: Evalution) =>
+        c.getSyncDatabase({ kind: "traces", provider: "local-db" }),
+    ],
+    [
+      "listSyncDatabases",
+      "GET",
+      "/cloud/v1/sync/databases",
+      (c: Evalution) => c.listSyncDatabases(),
+    ],
+    [
+      "deleteSyncDatabase",
+      "DELETE",
+      "/cloud/v1/sync/databases/dataset/my%20datasets/my%20data",
+      (c: Evalution) =>
+        c.deleteSyncDatabase({
+          kind: "dataset",
+          provider: "my datasets",
+          key: "my data",
+        }),
     ],
     [
       "listProjects",
@@ -325,6 +343,33 @@ describe("Evalution's cloud calls", () => {
 
     expect(calls[0].url).toBe(`https://api.evalut.io${path}`);
     expect(calls[0].init.method).toBe(method);
+  });
+
+  it("asks for a synced database with the client's schema version", async () => {
+    const { client, calls } = cloud({
+      url: "libsql://x",
+      token: "t",
+      expiresAt: 1,
+    });
+
+    await client.getSyncDatabase({
+      kind: "dataset",
+      provider: "local-datasets",
+      key: "questions",
+      schemaVersion: 3,
+      create: true,
+    });
+
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      kind: "dataset",
+      provider: "local-datasets",
+      key: "questions",
+      schemaVersion: 3,
+      create: true,
+    });
+    expect(new Headers(calls[0].init.headers).get("evalution-project")).toBe(
+      "prj_1",
+    );
   });
 
   it("rejects with the status when the cloud refuses", async () => {

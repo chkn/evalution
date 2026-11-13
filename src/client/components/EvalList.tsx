@@ -9,6 +9,7 @@ import {
   SummaryList,
   TableModeButton,
 } from "./SummaryList";
+import { SyncingIndicator } from "./SyncingIndicator";
 import { tableModeWidth } from "./summary-list";
 import { formatTimestampCompact } from "./trace/format.ts";
 import {
@@ -19,6 +20,8 @@ import {
 } from "./trace/icons.tsx";
 
 interface Props {
+  /** The eval database is being brought into the project's sync. */
+  syncing?: boolean;
   evals: EvalSummary[];
   loading: boolean;
   error: string | null;
@@ -58,6 +61,7 @@ function EvalList({
   promptName,
   sidebarWidth,
   onResizeSidebar,
+  syncing = false,
 }: Props) {
   const columns: SummaryColumn<EvalSummary>[] = [
     {
@@ -102,6 +106,7 @@ function EvalList({
       title="Evals"
       headerActions={
         <>
+          {syncing && <SyncingIndicator />}
           <TableModeButton
             sidebarWidth={sidebarWidth}
             onResizeSidebar={onResizeSidebar}

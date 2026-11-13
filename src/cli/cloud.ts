@@ -29,24 +29,21 @@ type Log = Pick<Console, "log" | "warn">;
 
 /**
  * The cloud client for this project, when it's linked and there's a personal
- * key to act with; otherwise `undefined`. A personal key without a linked
- * project gets a hint to link one.
+ * key to act with.
  */
 export function linkedCloudClient(
   config: EvalutionConfig,
-  {
-    env = process.env,
-    log = console,
-  }: { env?: NodeJS.ProcessEnv; log?: Log } = {},
-): Evalution | undefined {
+  { env = process.env }: { env?: NodeJS.ProcessEnv } = {},
+): { client?: Evalution; hasPersonalApiKey: boolean } {
   const apiKey = env.EVALUTION_API_KEY;
-  if (!apiKey || apiKeyKind(apiKey) !== "personal") return undefined;
+  if (!apiKey || apiKeyKind(apiKey) !== "personal")
+    return { hasPersonalApiKey: false };
+
+  let client: Evalution | undefined;
   const project = config.cloud?.project;
-  if (!project) {
-    log.log("💡 Run `evalution link` to link this project to Evalution Cloud.");
-    return undefined;
-  }
-  return new Evalution({ apiKey, project, endpoint: false });
+  if (project) client = new Evalution({ apiKey, project, endpoint: false });
+
+  return { client, hasPersonalApiKey: true };
 }
 
 /** Whether `url` is on this machine, which is all the cloud will send a browser to. */

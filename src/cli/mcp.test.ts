@@ -22,13 +22,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { type PromptProvider, promptIdOf } from "../prompt/prompt-provider.ts";
 import { createProjectContext } from "../server/api-context.ts";
 import type { NormalizedPrompt } from "../shared/types.ts";
+import type { WorkspaceSync } from "../sync/workspace-sync.ts";
 import { runMigrations } from "../trace/db/migrate.ts";
+import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
+import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
+import { TraceEventIngestor } from "../trace/trace-event-ingestor.ts";
 import { TursoTraceProvider } from "../trace/turso-trace-provider.ts";
 import {
   findOrBecomeHolder,
   type McpHttpServer,
   type RelayMcpOptions,
   relayMcp,
+  serveMcpHolder,
   serveMcpOverHttp,
 } from "./mcp.ts";
 import { serverInfoPath } from "./server-discovery.ts";
@@ -355,6 +360,35 @@ describe("serveMcpOverHttp and relayMcp", () => {
 });
 
 /** Real filesystem, deliberately: the claim is a file other processes read. */
+describe("serveMcpHolder", () => {
+  it("pushes the project's synced databases once it's idle, before the process exits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "evalution-mcp-holder-"));
+    try {
+      const close = vi.fn(async () => {});
+      const holder = await serveMcpHolder(
+        root,
+        {
+          promptProviders: [],
+          traceProviders: [new MemoryTraceProvider()],
+          datasetProviders: [],
+          evalProviders: [],
+          otlpIngestor: new OtlpTraceIngestor(),
+          traceEventIngestor: new TraceEventIngestor(),
+          sync: { close } as unknown as WorkspaceSync,
+        },
+        "test",
+        false,
+      );
+
+      await holder.idle();
+
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("findOrBecomeHolder", () => {
   async function project(): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), "evalution-holder-"));

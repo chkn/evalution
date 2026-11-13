@@ -26,6 +26,7 @@ import type {
   ExecuteRequest,
   PromptRef,
   SSEData,
+  SyncingDatabase,
   UpdatePromptResponse,
   ViewList,
 } from "../shared/types.ts";
@@ -239,6 +240,13 @@ export interface SetupRoutesOptions {
   views?: ViewRegistry;
   /** The project's Evalution Cloud URL, if it has one yet. */
   getProjectUrl?: () => string | undefined;
+  /**
+   * Pulls the project's synced databases from Evalution Cloud, when they
+   * sync. Without it, `POST /api/sync` does nothing.
+   */
+  pullSync?: () => Promise<void>;
+  /** The databases being brought into sync now: see {@link SyncingDatabase}. */
+  syncStatus?: () => SyncingDatabase[];
 }
 
 /**
@@ -256,6 +264,8 @@ export function setupRoutes({
   traceEventIngestor,
   views,
   getProjectUrl,
+  pullSync,
+  syncStatus,
 }: SetupRoutesOptions): void {
   const {
     promptProviders,
@@ -267,6 +277,18 @@ export function setupRoutes({
   } = context;
 
   mountConfigRoute(app, rootPath, hasConfig, getProjectUrl);
+
+  // POST /api/sync - Pull other machines' changes now: the playground asks
+  // when its window regains focus. Answers once they're in, and their
+  // change events sent.
+  app.post("/api/sync", async c => {
+    await pullSync?.();
+    return c.json({ synced: !!pullSync });
+  });
+
+  // GET /api/sync - The databases being brought into sync, whose changes
+  // wait meanwhile. `sync-status` events say when this changes.
+  app.get("/api/sync", c => c.json({ adopting: syncStatus?.() ?? [] }));
 
   // GET /api/setup-tasks - Onboarding tasks (with per-step completion status)
   app.get("/api/setup-tasks", c =>

@@ -3,8 +3,10 @@
 
 import type { Span } from "@evalution/sdk";
 import { BaseTraceIngestor } from "@evalution/sdk";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { EvalutionConfig } from "../config.ts";
+import type { DatasetProvider } from "../dataset/dataset-provider.ts";
+import type { EvalProvider } from "../eval/eval-provider.ts";
 import type { PromptProvider } from "../prompt/prompt-provider.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { movedExportError, setUpProject } from "./project.ts";
@@ -113,6 +115,53 @@ describe("setUpProject", () => {
       ["no linked project", { EVALUTION_API_KEY: "evl_user_x" }, undefined],
     ])("adds nothing with %s", async (_name, env, cloud) => {
       expect(await providerIds({ ...base, cloud }, env)).toEqual(["memory"]);
+    });
+
+    it("syncs the project's databases", async () => {
+      const { sync } = await setUpProject(
+        "/project",
+        { ...base, cloud: { project: "prj_1" } },
+        { env: { EVALUTION_API_KEY: "evl_user_x" } },
+      );
+      expect(sync).toBeDefined();
+      await sync?.close();
+    });
+
+    it("syncs the providers the config names, not only the defaults", async () => {
+      const syncable = <T extends object>(provider: T) =>
+        Object.assign(provider, { _ecSetSync: vi.fn() });
+      const traces = syncable(new MemoryTraceProvider());
+      const datasets = syncable({ id: "shared-datasets" });
+      const evals = syncable({ id: "team-evals" });
+
+      const { sync } = await setUpProject(
+        "/project",
+        {
+          ...base,
+          traceProviders: [traces],
+          datasetProviders: [datasets as unknown as DatasetProvider],
+          evalProviders: [evals as unknown as EvalProvider],
+          cloud: { project: "prj_1" },
+        },
+        { env: { EVALUTION_API_KEY: "evl_user_x" } },
+      );
+
+      for (const provider of [traces, datasets, evals]) {
+        expect(provider._ecSetSync).toHaveBeenCalledWith(sync);
+      }
+      await sync?.close();
+    });
+
+    it.each([
+      ["no key", {}, { project: "prj_1" }],
+      ["no linked project", { EVALUTION_API_KEY: "evl_user_x" }, undefined],
+    ])("syncs nothing with %s", async (_name, env, cloud) => {
+      const { sync } = await setUpProject(
+        "/project",
+        { ...base, cloud },
+        { env },
+      );
+      expect(sync).toBeUndefined();
     });
   });
 });

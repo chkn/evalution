@@ -18,7 +18,12 @@ import {
   VariationConflictError,
 } from "../prompt/prompt-provider.ts";
 import { PromptRegistry } from "../prompt/prompt-registry.ts";
-import type { ExecuteRequest, PropType, SSEData } from "../shared/types.ts";
+import type {
+  ExecuteRequest,
+  PropType,
+  SSEData,
+  SyncingDatabase,
+} from "../shared/types.ts";
 import { runMigrations } from "../trace/db/migrate.ts";
 import { MemoryTraceProvider } from "../trace/memory-trace-provider.ts";
 import { OtlpTraceIngestor } from "../trace/otlp-trace-ingestor.ts";
@@ -90,6 +95,8 @@ function makeApp(
   otlpIngestor?: OtlpTraceIngestor,
   agents?: AgentHandlers,
   traceEventIngestor?: TraceEventIngestor,
+  pullSync?: () => Promise<void>,
+  syncStatus?: () => SyncingDatabase[],
 ) {
   const app = new Hono();
   const promptProvider = fakeProvider(execute);
@@ -105,6 +112,8 @@ function makeApp(
     otlpIngestor,
     traceEventIngestor,
     agents,
+    pullSync,
+    syncStatus,
     context: createApiContext({
       promptProviders,
       traceProviders,
@@ -1541,5 +1550,62 @@ describe("prompt refs on the prompt routes", () => {
       method: "POST",
     });
     expect(save.status).toBe(405);
+  });
+});
+
+describe("POST /api/sync", () => {
+  it("pulls the project's synced databases, answering once they're in", async () => {
+    let pulled = false;
+    const { app } = makeApp(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        pulled = true;
+      },
+    );
+
+    const res = await app.request("/api/sync", { method: "POST" });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ synced: true });
+    expect(pulled).toBe(true);
+  });
+
+  it("does nothing when the project doesn't sync", async () => {
+    const { app } = makeApp();
+
+    const res = await app.request("/api/sync", { method: "POST" });
+
+    expect(await res.json()).toEqual({ synced: false });
+  });
+});
+
+describe("GET /api/sync", () => {
+  it("says which databases are being brought into sync", async () => {
+    const { app } = makeApp(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => [{ kind: "dataset", provider: "local-datasets", key: "tickets" }],
+    );
+
+    const res = await app.request("/api/sync");
+
+    expect(await res.json()).toEqual({
+      adopting: [
+        { kind: "dataset", provider: "local-datasets", key: "tickets" },
+      ],
+    });
+  });
+
+  it("says none are when the project doesn't sync", async () => {
+    const res = await makeApp().app.request("/api/sync");
+
+    expect(await res.json()).toEqual({ adopting: [] });
   });
 });

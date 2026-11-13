@@ -17,10 +17,8 @@ describe("linkedCloudClient", () => {
 
   it("is a client for a linked project with a personal key", () => {
     expect(
-      linkedCloudClient(
-        { cloud },
-        { env: { EVALUTION_API_KEY: "evl_user_x" }, log: quiet() },
-      ),
+      linkedCloudClient({ cloud }, { env: { EVALUTION_API_KEY: "evl_user_x" } })
+        .client,
     ).toBeInstanceOf(Evalution);
   });
 
@@ -29,15 +27,9 @@ describe("linkedCloudClient", () => {
     [{ EVALUTION_API_KEY: "evl_ingest_x" }],
     [{ EVALUTION_API_KEY: "nonsense" }],
   ])("is nothing without a personal key: %j", env => {
-    expect(linkedCloudClient({ cloud }, { env, log: quiet() })).toBeUndefined();
-  });
-
-  it("suggests linking when there's a personal key but no project", () => {
-    const log = quiet();
-    expect(
-      linkedCloudClient({}, { env: { EVALUTION_API_KEY: "evl_user_x" }, log }),
-    ).toBeUndefined();
-    expect(log.log.mock.calls[0][0]).toContain("evalution link");
+    const { client, hasPersonalApiKey } = linkedCloudClient({ cloud }, { env });
+    expect(client).toBeUndefined();
+    expect(hasPersonalApiKey).toBeFalsy();
   });
 });
 

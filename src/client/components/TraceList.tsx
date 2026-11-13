@@ -11,6 +11,7 @@ import {
   SummaryList,
   TableModeButton,
 } from "./SummaryList";
+import { SyncingIndicator } from "./SyncingIndicator";
 import {
   TraceFilterButton,
   TraceFilterChips,
@@ -152,6 +153,8 @@ interface TraceListProps {
   sidebarWidth: number;
   /** Resizes the sidebar — how the table-mode toggle widens it and restores it. */
   onResizeSidebar: (width: number) => void;
+  /** The trace database is being brought into the project's sync. */
+  syncing?: boolean;
 }
 
 /** A row's tooltip: a trace's name, or what a group gathers. */
@@ -279,6 +282,7 @@ function TraceList({
   onSelect,
   sidebarWidth,
   onResizeSidebar,
+  syncing = false,
 }: TraceListProps) {
   const [columns, setColumns] = useState<TraceColumnState[]>(loadColumnState);
   const variations = useVariationLookups(listing, columns);
@@ -330,6 +334,7 @@ function TraceList({
       title="Traces"
       headerActions={
         <>
+          {syncing && <SyncingIndicator />}
           <button
             type="button"
             className={`tree-toolbar-btn${searchVisible ? " tree-toolbar-btn-active" : ""}`}

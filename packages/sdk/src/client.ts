@@ -141,8 +141,29 @@ export interface RegisteredInstance {
 /** Names one synced database of a project. */
 export interface SyncDatabaseKey {
   kind: "traces" | "evals" | "dataset";
+  /**
+   * The id of the local provider whose database it is. Each provider of a
+   * kind syncs its own databases.
+   */
+  provider: string;
   /** The dataset's id, for `kind: "dataset"`. */
   key?: string;
+}
+
+/** What {@link Evalution.getSyncDatabase} asks for. */
+export interface SyncDatabaseRequest extends SyncDatabaseKey {
+  /**
+   * How many migrations this client's schema for the kind has. The cloud
+   * refuses a client whose schema is older than one that synced before, with
+   * a 409.
+   */
+  schemaVersion?: number;
+  /**
+   * Set when creating a dataset. Without it, the cloud answers 410 for a
+   * dataset that was deleted, so a machine that still has a copy can't
+   * bring it back.
+   */
+  create?: boolean;
 }
 
 /** Where a synced database lives, and a short-lived token for it. */
@@ -151,6 +172,14 @@ export interface SyncDatabaseCredentials {
   token: string;
   /** When {@link token} expires (ms). */
   expiresAt: number;
+  /**
+   * Names this one cloud database: a new one, made after a dataset was
+   * deleted, say, has a new id. A local file records the ids it has synced
+   * with, so it can tell whether it holds this database's rows.
+   */
+  syncId: string;
+  /** The linked project's id. */
+  projectId: string;
 }
 
 /**
@@ -160,7 +189,7 @@ export interface SyncDatabaseCredentials {
  * Where traces go is worked out once, on the first one sent:
  *
  * 1. the {@link EvalutionOptions.endpoint} option;
- * 2. the cloud, when the API key is an ingest key;
+ * 2. Evalution Cloud, when the API key is an ingest key;
  * 3. the local instance `EVALUTION_ENDPOINT` names;
  * 4. on Node, the instance portkit knows for this directory;
  * 5. otherwise nowhere, and sending does nothing.
@@ -315,11 +344,26 @@ export class Evalution implements TraceSink {
   }
 
   /** Ensures a synced database exists, and returns how to reach it. */
-  getSyncDatabase(key: SyncDatabaseKey): Promise<SyncDatabaseCredentials> {
+  getSyncDatabase(
+    request: SyncDatabaseRequest,
+  ): Promise<SyncDatabaseCredentials> {
     return this.json("POST", "/cloud/v1/sync/databases", {
       project: true,
-      body: key,
+      body: request,
     });
+  }
+
+  /** The project's synced databases. A dataset's has its id as the `key`; the others' `key` is empty. */
+  listSyncDatabases(): Promise<Required<SyncDatabaseKey>[]> {
+    return this.json("GET", "/cloud/v1/sync/databases", { project: true });
+  }
+
+  /** Deletes a dataset's synced database, for every member's machine. */
+  async deleteSyncDatabase(
+    key: SyncDatabaseKey & { kind: "dataset"; key: string },
+  ): Promise<void> {
+    const path = `/cloud/v1/sync/databases/dataset/${encodeURIComponent(key.provider)}/${encodeURIComponent(key.key)}`;
+    await readOk(await this.request("DELETE", path, { project: true }));
   }
 
   private instanceRequest(

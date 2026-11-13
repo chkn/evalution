@@ -42,6 +42,7 @@ import type {
   PromptStyle,
   PropDefinition,
   RebaseResult,
+  SyncingDatabase,
   TraceEvalRun,
   TraceGroup,
   TraceGroupQuery,
@@ -117,6 +118,25 @@ export async function executeSetupStep(
   );
   await throwIfError(res);
   return res.json();
+}
+
+/**
+ * Has the server pull the project's synced databases from Evalution Cloud
+ * now. What it brings in arrives as the usual change events.
+ */
+export async function pullSync(): Promise<void> {
+  const res = await fetch("/api/sync", { method: "POST" });
+  await throwIfError(res);
+}
+
+/**
+ * The databases being brought into the project's sync now, whose changes
+ * wait meanwhile. `sync-status` events say when this changes.
+ */
+export async function getSyncStatus(): Promise<SyncingDatabase[]> {
+  const res = await fetch("/api/sync");
+  await throwIfError(res);
+  return ((await res.json()) as { adopting: SyncingDatabase[] }).adopting;
 }
 
 /** Fetches the coding agents that can be launched (their CLI is installed). */

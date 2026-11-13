@@ -10,6 +10,7 @@ import {
   SummaryList,
   TableModeButton,
 } from "./SummaryList";
+import { SyncingIndicator } from "./SyncingIndicator";
 import { tableModeWidth } from "./summary-list";
 import { formatTimestampCompact } from "./trace/format.ts";
 import {
@@ -21,6 +22,8 @@ import {
 import { useAnchoredPopover } from "./use-anchored-popover";
 
 interface Props {
+  /** The datasets being brought into the project's sync, by {@link datasetKey}. */
+  syncing?: ReadonlySet<string>;
   datasets: DatasetSummary[];
   loading: boolean;
   error: string | null;
@@ -159,6 +162,7 @@ function DatasetList({
   promptName,
   sidebarWidth,
   onResizeSidebar,
+  syncing,
 }: Props) {
   const linkedName = (d: DatasetSummary) => d.prompt && promptName(d.prompt);
 
@@ -232,6 +236,9 @@ function DatasetList({
       itemKey={datasetKey}
       itemName={d => d.name}
       itemTitle={d => d.error ?? d.name}
+      itemMarker={d =>
+        syncing?.has(datasetKey(d)) ? <SyncingIndicator label={false} /> : null
+      }
       selectedKey={selectedKey}
       onSelect={onSelect}
       defaultSort={{ key: "updatedAt", dir: "desc" }}

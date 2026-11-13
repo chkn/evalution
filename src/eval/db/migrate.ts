@@ -18,3 +18,10 @@ export async function runEvalMigrations(
 ): Promise<void> {
   await runMigrations(db, bundledMigrations);
 }
+
+/**
+ * The eval database's schema version, for sync: how many migrations it has.
+ * The cloud won't let an evalution with an older schema sync a database a
+ * newer one has.
+ */
+export const EVAL_SCHEMA_VERSION: number = bundledMigrations.length;

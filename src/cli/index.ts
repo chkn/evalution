@@ -125,7 +125,12 @@ async function connectToCloud(
   localUrl: string,
   portkit: PortkitAdoption | undefined,
 ): Promise<CloudInstance | undefined> {
-  const client = linkedCloudClient(config);
+  const { client, hasPersonalApiKey } = linkedCloudClient(config);
+  if (!client && hasPersonalApiKey) {
+    console.log(
+      "💡 Run `evalution link` to link this project to Evalution Cloud.",
+    );
+  }
   const project = config.cloud?.project;
   if (!client || !project) return undefined;
   const registration = instanceRegistration({ rootDir, localUrl, portkit });

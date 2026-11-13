@@ -8,9 +8,13 @@ import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import type { ColumnPath, DatasetColumnSpec } from "../shared/column-paths.ts";
 import type { PropDefinition } from "../shared/types.ts";
 import {
-  assertSqliteFile,
-  createLocalTursoClient,
-} from "../trace/db/local-turso-client.ts";
+  type LocalDatabaseSync,
+  openLocalDatabase,
+  startSyncing,
+} from "../sync/local-database.ts";
+import { PauseGate } from "../sync/pause-gate.ts";
+import type { WorkspaceSync } from "../sync/workspace-sync.ts";
+import { assertSqliteFile } from "../trace/db/local-turso-client.ts";
 import { runQueryInWorker } from "../trace/db/query-worker.ts";
 import type {
   SqlQueryOptions,
@@ -39,7 +43,8 @@ import type {
   DatasetRowUpdate,
   DatasetSummary,
 } from "./dataset-types.ts";
-import { runDatasetMigrations } from "./db/migrate.ts";
+import { mergeDatasetTables } from "./db/merge.ts";
+import { DATASET_SCHEMA_VERSION, runDatasetMigrations } from "./db/migrate.ts";
 import { TursoDatasetProvider } from "./turso-dataset-provider.ts";
 
 /** Extension of a dataset file. */
@@ -77,10 +82,17 @@ export interface LocalDirectoryDatasetProviderOptions {
    * @default "./.evalution/datasets"
    */
   dir?: string;
+  /**
+   * Also names the datasets in Evalution Cloud when the project is linked:
+   * changing it starts new cloud copies.
+   */
   id?: string;
   displayName?: string;
   description?: string;
 }
+
+const migrateDataset = (client: Database) =>
+  runDatasetMigrations(drizzle({ client }));
 
 /**
  * A {@link DatasetProvider} that keeps **one SQLite file per dataset** in a
@@ -112,6 +124,9 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
   private readonly reported = new Set<string>();
   /** Tail of the create chain: id choice and file creation are one step. */
   private creates: Promise<unknown> = Promise.resolve();
+  private sync: WorkspaceSync | undefined;
+  /** Per file: holds operations while sync swaps it. */
+  private readonly gates = new Map<string, PauseGate>();
 
   constructor(options: LocalDirectoryDatasetProviderOptions = {}) {
     this.id = options.id ?? "local-datasets";
@@ -120,6 +135,111 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
       options.description ??
       "Stores each dataset in its own SQLite file in a local directory.";
     this.dir = resolve(options.dir ?? "./.evalution/datasets");
+  }
+
+  /**
+   * Syncs each dataset with the linked project's copy (named by this
+   * provider's id and the dataset's), once `setUpProject` hands this the
+   * project's sync. A dataset the project has in the cloud but this machine
+   * doesn't is fetched whenever the sync pulls, and deleting a dataset
+   * deletes it from the cloud. Datasets already open start syncing as they
+   * are.
+   *
+   * @internal Not public API yet.
+   */
+  _ecSetSync(workspace: WorkspaceSync): void {
+    if (this.sync) return;
+    this.sync = workspace;
+    workspace.onPull(() => this.fetchRemoteDatasets());
+    for (const [datasetId, opening] of this.entries) {
+      void opening.then(async entry => {
+        if (!entry.ok) return;
+        const sync = this.syncHooksFor(datasetId);
+        if (!sync) return;
+        try {
+          await sync.database.prepare();
+          await startSyncing({
+            path: this.pathFor(datasetId),
+            client: entry.client,
+            migrate: migrateDataset,
+            sync,
+          });
+        } catch (err) {
+          console.warn(
+            `⚠️ Couldn't start syncing the dataset ${datasetId}:`,
+            err,
+          );
+        }
+      });
+    }
+  }
+
+  /** What syncing `datasetId`'s file needs, once there's a sync. */
+  private syncHooksFor(datasetId: string): LocalDatabaseSync | undefined {
+    const database = this.datasetSync(datasetId);
+    return (
+      database && {
+        database,
+        onPulled: () => this.emit({ type: "update", datasetId }),
+        pause: during => this.gateFor(datasetId).pause(during),
+        reopen: () => this.reopenEntry(datasetId),
+        merge: mergeDatasetTables,
+        // A dataset synced before, made again since: start over from it.
+        replaceSuperseded: true,
+      }
+    );
+  }
+
+  private gateFor(datasetId: string): PauseGate {
+    let gate = this.gates.get(datasetId);
+    if (!gate) {
+      gate = new PauseGate();
+      this.gates.set(datasetId, gate);
+    }
+    return gate;
+  }
+
+  /** Runs `op` on `datasetId`'s file, after any swap of it. */
+  private on<T>(datasetId: string, op: () => Promise<T>): Promise<T> {
+    return this.gateFor(datasetId).run(op);
+  }
+
+  private datasetSync(datasetId: string) {
+    return this.sync?.database(
+      { kind: "dataset", provider: this.id, key: datasetId },
+      DATASET_SCHEMA_VERSION,
+    );
+  }
+
+  /**
+   * Opens this machine's datasets, so each syncs — one made before the
+   * project was linked is brought into it — and fetches the datasets the
+   * project has in the cloud that this machine doesn't, announcing each as
+   * added. Chained with creates, so it can't open a file a create is making.
+   */
+  private fetchRemoteDatasets(): Promise<void> {
+    const next = this.creates.then(async () => {
+      const local = new Set(await this.fileIds());
+      for (const id of local) {
+        if (!this.entries.has(id)) await this.openEntry(id);
+      }
+      const remote = await this.sync?.remoteDatasetIds(this.id);
+      if (!remote) return;
+      for (const id of remote) {
+        if (!isValidDatasetId(id) || local.has(id) || this.entries.has(id)) {
+          continue;
+        }
+        // Without the cloud's copy to start from, the file would be empty.
+        const sync = this.datasetSync(id);
+        await sync?.prepare();
+        if (!sync?.isAvailable) continue;
+        await mkdirSelfIgnoring(this.dir);
+        const entry = await this.openEntry(id);
+        if (entry.ok) this.emit({ type: "add", datasetId: id });
+      }
+    });
+    this.creates = next.catch(() => {});
+    return next;
   }
 
   private pathFor(datasetId: string): string {
@@ -168,22 +288,37 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
     return this.openEntry(datasetId);
   }
 
-  /** Opens (and migrates) `datasetId`'s file, caching the result. */
-  private openEntry(datasetId: string): Promise<Entry> {
+  /**
+   * Opens (and migrates) `datasetId`'s file, caching the result. `create`
+   * says the dataset is being made now, which may reuse a deleted one's id.
+   */
+  private openEntry(
+    datasetId: string,
+    { create = false }: { create?: boolean } = {},
+  ): Promise<Entry> {
     const cached = this.entries.get(datasetId);
     if (cached) return cached;
-    const opening = this.openUncached(datasetId);
+    const opening = this.openUncached(datasetId, create);
     this.entries.set(datasetId, opening);
     return opening;
   }
 
-  private async openUncached(datasetId: string): Promise<Entry> {
+  private async openUncached(
+    datasetId: string,
+    create: boolean,
+  ): Promise<Entry> {
     const path = this.pathFor(datasetId);
     let client: Database | undefined;
     try {
       await assertSqliteFile(path);
-      client = await createLocalTursoClient({ path });
-      await runDatasetMigrations(drizzle({ client }));
+      // Before connecting, so a dataset new to this machine starts from the
+      // cloud's copy.
+      await this.datasetSync(datasetId)?.prepare({ create });
+      client = await openLocalDatabase({
+        path,
+        migrate: migrateDataset,
+        sync: () => this.syncHooksFor(datasetId),
+      });
       const inner = new TursoDatasetProvider({
         client,
         runQuery: (query, options) => runQueryInWorker(path, query, options),
@@ -198,9 +333,10 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
         );
       }
       const innerId = found[0]?.id ?? datasetId;
-      const unwatch = inner.watch(event =>
-        this.emit({ type: event.type, datasetId }),
-      );
+      const unwatch = inner.watch(event => {
+        this.emit({ type: event.type, datasetId });
+        this.datasetSync(datasetId)?.noteWrite();
+      });
       return { ok: true, client, inner, innerId, unwatch };
     } catch (err) {
       await client?.close().catch(() => {});
@@ -214,6 +350,17 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
       }
       return { ok: false, error };
     }
+  }
+
+  /** Opens `datasetId`'s file again, after sync swapped it (and closed the old one). */
+  private async reopenEntry(datasetId: string): Promise<Entry> {
+    const old = await this.entries.get(datasetId);
+    if (old?.ok) old.unwatch();
+    this.entries.delete(datasetId);
+    const entry = await this.openEntry(datasetId);
+    // The adopted copy may hold rows from the cloud.
+    if (entry.ok) this.emit({ type: "update", datasetId });
+    return entry;
   }
 
   /** The open entry for `datasetId`, or a {@link DatasetNotFoundError}. */
@@ -236,7 +383,11 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
   }
 
   async listDatasets(): Promise<DatasetSummary[]> {
-    const ids = await this.fileIds();
+    // A file being swapped may be missing for a moment.
+    const swapping = [...this.gates]
+      .filter(([, gate]) => gate.isPaused)
+      .map(([id]) => id);
+    const ids = [...new Set([...(await this.fileIds()), ...swapping])].sort();
     // A file removed by hand since the last list: let go of its client.
     const present = new Set(ids);
     for (const [id, opening] of this.entries) {
@@ -249,70 +400,80 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
       });
     }
     const summaries = await Promise.all(
-      ids.map(async (id): Promise<DatasetSummary> => {
-        const entry = await this.openEntry(id);
-        if (!entry.ok) {
-          const mtime = await stat(this.pathFor(id)).then(
-            s => s.mtimeMs,
-            () => 0,
-          );
-          return {
-            providerId: this.id,
-            id,
-            name: id,
-            rowCount: 0,
-            fields: [],
-            updatedAt: mtime,
-            error: entry.error,
-          };
-        }
-        const [summary] = await entry.inner.listDatasets();
-        if (!summary) {
-          return {
-            providerId: this.id,
-            id,
-            name: id,
-            rowCount: 0,
-            fields: [],
-            updatedAt: 0,
-            error: "holds no dataset",
-          };
-        }
-        return { ...summary, id };
-      }),
+      ids.map(id => this.on(id, () => this.summarize(id))),
     );
     return summaries.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  async getDataset(datasetId: string): Promise<Dataset | undefined> {
-    const entry = await this.entryFor(datasetId);
-    if (!entry?.ok) return undefined;
-    const dataset = await entry.inner.getDataset(entry.innerId);
-    return dataset && this.withFileId(datasetId, dataset);
+  private async summarize(id: string): Promise<DatasetSummary> {
+    const entry = await this.openEntry(id);
+    if (!entry.ok) {
+      const mtime = await stat(this.pathFor(id)).then(
+        s => s.mtimeMs,
+        () => 0,
+      );
+      return {
+        providerId: this.id,
+        id,
+        name: id,
+        rowCount: 0,
+        fields: [],
+        updatedAt: mtime,
+        error: entry.error,
+      };
+    }
+    const [summary] = await entry.inner.listDatasets();
+    if (!summary) {
+      return {
+        providerId: this.id,
+        id,
+        name: id,
+        rowCount: 0,
+        fields: [],
+        updatedAt: 0,
+        error: "holds no dataset",
+      };
+    }
+    return { ...summary, id };
   }
 
-  async listRows(
+  getDataset(datasetId: string): Promise<Dataset | undefined> {
+    return this.on(datasetId, async () => {
+      const entry = await this.entryFor(datasetId);
+      if (!entry?.ok) return undefined;
+      const dataset = await entry.inner.getDataset(entry.innerId);
+      return dataset && this.withFileId(datasetId, dataset);
+    });
+  }
+
+  listRows(
     datasetId: string,
     options?: ListRowsOptions,
   ): Promise<DatasetRow[]> {
-    const entry = await this.entryFor(datasetId);
-    if (!entry?.ok) return [];
-    return entry.inner.listRows(entry.innerId, options);
+    return this.on(datasetId, async () => {
+      const entry = await this.entryFor(datasetId);
+      if (!entry?.ok) return [];
+      return entry.inner.listRows(entry.innerId, options);
+    });
   }
 
-  async describeRows(datasetId: string): Promise<DatasetRowsOverview> {
-    const entry = await this.entryFor(datasetId);
-    if (!entry?.ok) return { rowCount: 0, fields: {}, instances: {} };
-    return entry.inner.describeRows(entry.innerId);
+  describeRows(datasetId: string): Promise<DatasetRowsOverview> {
+    return this.on(datasetId, async () => {
+      const entry = await this.entryFor(datasetId);
+      if (!entry?.ok) return { rowCount: 0, fields: {}, instances: {} };
+      return entry.inner.describeRows(entry.innerId);
+    });
   }
 
-  async describePath(
+  describePath(
     datasetId: string,
     path: ColumnPath,
   ): Promise<DatasetPathChild[]> {
-    const entry = await this.entryFor(datasetId);
-    if (!entry?.ok) return [];
-    return entry.inner.describePath(entry.innerId, path);
+    return this.on(datasetId, async () => {
+      const entry = await this.entryFor(datasetId);
+      if (!entry?.ok) return [];
+      return entry.inner.describePath(entry.innerId, path);
+    });
   }
 
   /**
@@ -330,119 +491,142 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
     // A directory that ignores its own contents is the only version that
     // works without telling anyone to edit their own `.gitignore`.
     await mkdirSelfIgnoring(this.dir);
-    const existing = new Set(await this.fileIds());
+    // Including the project's datasets this machine hasn't fetched yet: one
+    // of the same id would be the same file.
+    const existing = new Set([
+      ...(await this.fileIds()),
+      ...((await this.sync?.remoteDatasetIds(this.id)) ?? []),
+    ]);
     const id = uniqueDatasetId(
       slugifyDatasetName(input.name),
       candidate => existing.has(candidate) || this.entries.has(candidate),
     );
-    const entry = await this.openEntry(id);
+    const entry = await this.openEntry(id, { create: true });
     if (!entry.ok) {
       this.entries.delete(id);
       throw new Error(
         `Could not create dataset file for ${id}: ${entry.error}`,
       );
     }
-    const created = await entry.inner.createDataset(input, { id });
-    return this.withFileId(id, created);
+    return this.on(id, async () => {
+      const opened = await this.requireEntry(id);
+      const created = await opened.inner.createDataset(input, { id });
+      return this.withFileId(id, created);
+    });
   }
 
-  async renameDataset(datasetId: string, name: string): Promise<Dataset> {
-    const entry = await this.requireEntry(datasetId);
-    const renamed = await entry.inner.renameDataset(entry.innerId, name);
-    return this.withFileId(datasetId, renamed);
+  /** Runs `op` on `datasetId`'s open entry, or throws if there's none. */
+  private withEntry<T>(
+    datasetId: string,
+    op: (entry: Extract<Entry, { ok: true }>) => Promise<T>,
+  ): Promise<T> {
+    return this.on(datasetId, async () =>
+      op(await this.requireEntry(datasetId)),
+    );
   }
 
-  /** Closes the file's client, then removes it and its sidecars. */
+  renameDataset(datasetId: string, name: string): Promise<Dataset> {
+    return this.withEntry(datasetId, async entry =>
+      this.withFileId(
+        datasetId,
+        await entry.inner.renameDataset(entry.innerId, name),
+      ),
+    );
+  }
+
+  /**
+   * Closes the file's client, then removes it and its sidecars. When
+   * syncing, it's deleted from the cloud too, and so from every machine.
+   */
   async deleteDataset(datasetId: string): Promise<void> {
     if (!isValidDatasetId(datasetId)) return;
-    const entry = await this.entries.get(datasetId);
-    this.entries.delete(datasetId);
-    this.reported.delete(datasetId);
-    if (entry?.ok) {
-      entry.unwatch();
-      await entry.client.close();
-    }
-    const path = this.pathFor(datasetId);
-    let removed = false;
-    for (const file of [path, ...SIDECARS.map(s => path + s)]) {
-      try {
-        await unlink(file);
-        if (file === path) removed = true;
-      } catch (err: any) {
-        if (err?.code !== "ENOENT") throw err;
+    // First, so nothing syncs to the copy as it goes.
+    await this.sync?.deleteDataset(this.id, datasetId);
+    await this.on(datasetId, async () => {
+      const entry = await this.entries.get(datasetId);
+      this.entries.delete(datasetId);
+      this.reported.delete(datasetId);
+      if (entry?.ok) {
+        entry.unwatch();
+        await entry.client.close();
       }
-    }
-    if (removed) this.emit({ type: "remove", datasetId });
+      const path = this.pathFor(datasetId);
+      let removed = false;
+      for (const file of [path, ...SIDECARS.map(s => path + s)]) {
+        try {
+          await unlink(file);
+          if (file === path) removed = true;
+        } catch (err: any) {
+          if (err?.code !== "ENOENT") throw err;
+        }
+      }
+      if (removed) this.emit({ type: "remove", datasetId });
+    });
   }
 
-  async addRows(
-    datasetId: string,
-    rows: NewDatasetRow[],
-  ): Promise<DatasetRow[]> {
-    const entry = await this.requireEntry(datasetId);
-    return entry.inner.addRows(entry.innerId, rows);
+  addRows(datasetId: string, rows: NewDatasetRow[]): Promise<DatasetRow[]> {
+    return this.withEntry(datasetId, entry =>
+      entry.inner.addRows(entry.innerId, rows),
+    );
   }
 
-  async updateRows(
-    datasetId: string,
-    updates: DatasetRowUpdate[],
-  ): Promise<void> {
-    const entry = await this.requireEntry(datasetId);
-    await entry.inner.updateRows(entry.innerId, updates);
+  updateRows(datasetId: string, updates: DatasetRowUpdate[]): Promise<void> {
+    return this.withEntry(datasetId, entry =>
+      entry.inner.updateRows(entry.innerId, updates),
+    );
   }
 
-  async deleteRows(
-    datasetId: string,
-    rowIds: readonly string[],
-  ): Promise<number> {
-    const entry = await this.entryFor(datasetId);
-    if (!entry?.ok) return 0;
-    return entry.inner.deleteRows(entry.innerId, rowIds);
+  deleteRows(datasetId: string, rowIds: readonly string[]): Promise<number> {
+    return this.on(datasetId, async () => {
+      const entry = await this.entryFor(datasetId);
+      if (!entry?.ok) return 0;
+      return entry.inner.deleteRows(entry.innerId, rowIds);
+    });
   }
 
-  async addField(
-    datasetId: string,
-    def: PropDefinition,
-  ): Promise<DatasetField> {
-    const entry = await this.requireEntry(datasetId);
-    return entry.inner.addField(entry.innerId, def);
+  addField(datasetId: string, def: PropDefinition): Promise<DatasetField> {
+    return this.withEntry(datasetId, entry =>
+      entry.inner.addField(entry.innerId, def),
+    );
   }
 
-  async renameField(
+  renameField(
     datasetId: string,
     fieldId: string,
     name: string,
   ): Promise<DatasetField> {
-    const entry = await this.requireEntry(datasetId);
-    return entry.inner.renameField(entry.innerId, fieldId, name);
+    return this.withEntry(datasetId, entry =>
+      entry.inner.renameField(entry.innerId, fieldId, name),
+    );
   }
 
-  async deleteField(datasetId: string, fieldId: string): Promise<void> {
-    const entry = await this.requireEntry(datasetId);
-    await entry.inner.deleteField(entry.innerId, fieldId);
+  deleteField(datasetId: string, fieldId: string): Promise<void> {
+    return this.withEntry(datasetId, entry =>
+      entry.inner.deleteField(entry.innerId, fieldId),
+    );
   }
 
-  async setColumns(
+  setColumns(
     datasetId: string,
     columns: DatasetColumnSpec[],
     rowLabel: ColumnPath | undefined,
   ): Promise<Dataset> {
-    const entry = await this.requireEntry(datasetId);
-    const updated = await entry.inner.setColumns(
-      entry.innerId,
-      columns,
-      rowLabel,
+    return this.withEntry(datasetId, async entry =>
+      this.withFileId(
+        datasetId,
+        await entry.inner.setColumns(entry.innerId, columns, rowLabel),
+      ),
     );
-    return this.withFileId(datasetId, updated);
   }
 
-  async queryRows(
+  queryRows(
     datasetId: string,
     sql: string,
     options?: SqlQueryOptions,
   ): Promise<SqlQueryResult> {
-    const entry = await this.requireEntry(datasetId);
-    return entry.inner.queryRows(entry.innerId, sql, options);
+    return this.withEntry(datasetId, entry =>
+      entry.inner.queryRows(entry.innerId, sql, options),
+    );
   }
 
   /** Closes every open file. The provider reopens them on next use. */
