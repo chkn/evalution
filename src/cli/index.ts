@@ -9,6 +9,7 @@ import { TerminalSessionRegistry } from "../server/terminal.ts";
 import { type CliArgs, parseCliArgs, USAGE } from "./args.ts";
 import { registerBundlerResolutionFallback } from "./bundler-resolution-hook.ts";
 import {
+  apiKeyNotice,
   type CloudInstance,
   connectInstance,
   instanceRegistration,
@@ -131,6 +132,8 @@ async function connectToCloud(
       "💡 Run `evalution link` to link this project to Evalution Cloud.",
     );
   }
+  const notice = apiKeyNotice(config);
+  if (notice) console.log(notice);
   const project = config.cloud?.project;
   if (!client || !project) return undefined;
   const registration = instanceRegistration({ rootDir, localUrl, portkit });

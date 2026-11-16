@@ -17,6 +17,7 @@ import {
   type InstanceRegistration,
 } from "@evalution/sdk";
 import type { EvalutionConfig } from "../config.ts";
+import { API_KEYS_URL } from "../shared/links.ts";
 import type { PortkitAdoption } from "./portkit.ts";
 
 /** How often a running instance tells the cloud it's still there. */
@@ -44,6 +45,30 @@ export function linkedCloudClient(
   if (project) client = new Evalution({ apiKey, project, endpoint: false });
 
   return { client, hasPersonalApiKey: true };
+}
+
+/**
+ * What to tell someone whose project is linked but who has no personal key in
+ * `EVALUTION_API_KEY` to sync it with; `undefined` otherwise.
+ */
+export function apiKeyNotice(
+  config: EvalutionConfig,
+  { env = process.env }: { env?: NodeJS.ProcessEnv } = {},
+): string | undefined {
+  const project = config.cloud?.project;
+  const apiKey = env.EVALUTION_API_KEY;
+  if (!project) return undefined;
+  const howToFix = `To sync it with Evalution Cloud, create a personal API key at ${API_KEYS_URL} and set it as EVALUTION_API_KEY, in your shell or the project's .env.`;
+  const linked = `This project is linked to Evalution Cloud (${project}) in .evalution/config.ts`;
+  if (!apiKey)
+    return `💡 ${linked}, but EVALUTION_API_KEY isn't set. ${howToFix}`;
+  const kind = apiKeyKind(apiKey);
+  if (kind === "personal") return undefined;
+  const which =
+    kind === "ingest"
+      ? "is an ingest key, which can only send traces"
+      : "isn't an Evalution API key";
+  return `💡 ${linked}, but EVALUTION_API_KEY ${which}. ${howToFix}`;
 }
 
 /** Whether `url` is on this machine, which is all the cloud will send a browser to. */
@@ -106,7 +131,10 @@ export interface CloudInstance {
   readonly openUrl: string | undefined;
   /** Settles once the first registration attempt has, whatever its outcome. */
   readonly ready: Promise<void>;
-  /** Stops heartbeating and tells the cloud this instance has stopped. */
+  /**
+   * Stops heartbeating and tells the cloud this instance has stopped — unless
+   * portkit starts it on demand, when the registration outlives the process.
+   */
   stop(): Promise<void>;
 }
 
@@ -120,9 +148,21 @@ export type InstanceClient = Pick<
 >;
 
 /**
+ * Whether portkit starts this instance on demand, so its portkit URL works
+ * after this process exits: the next visit starts it again.
+ */
+function restartedByPortkit(registration: InstanceRegistration): boolean {
+  return !!registration.portkitUrl && registration.portkitMode === "on_demand";
+}
+
+/**
  * Registers this instance and keeps it registered, with a heartbeat. Nothing
  * here can stop the playground starting: a failure is reported, and retried
  * on the next beat unless retrying can't help.
+ *
+ * An instance portkit starts on demand is registered once and then left be:
+ * its portkit URL stays good after it exits, so there's nothing for a
+ * heartbeat to say, and its session isn't ended on exit.
  */
 export function connectInstance(
   client: InstanceClient,
@@ -161,10 +201,13 @@ export function connectInstance(
     openUrl = registered.openUrl;
   };
 
+  const persistent = restartedByPortkit(registration);
+
   const tick = async () => {
     try {
       await beat();
       warned = false;
+      if (persistent) stopped = true;
     } catch (err) {
       const status = err instanceof EvalutionApiError ? err.status : undefined;
       if (status === 404) {
@@ -211,7 +254,7 @@ export function connectInstance(
         // A registration still in flight would otherwise land after we've
         // gone, leaving the cloud sending browsers here until it times out.
         await current;
-        if (id) await client.endInstanceSession(id);
+        if (id && !persistent) await client.endInstanceSession(id);
       })().catch(() => {});
       await Promise.race([
         ending,

@@ -4,6 +4,7 @@
 import { Evalution, EvalutionApiError } from "@evalution/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  apiKeyNotice,
   connectInstance,
   type InstanceClient,
   instanceRegistration,
@@ -30,6 +31,40 @@ describe("linkedCloudClient", () => {
     const { client, hasPersonalApiKey } = linkedCloudClient({ cloud }, { env });
     expect(client).toBeUndefined();
     expect(hasPersonalApiKey).toBeFalsy();
+  });
+});
+
+describe("apiKeyNotice", () => {
+  const config = { cloud: { project: "prj_1" } };
+  const notice = (env: NodeJS.ProcessEnv) => apiKeyNotice(config, { env });
+
+  it("asks for a key when the project is linked and none is set", () => {
+    expect(notice({})).toContain("EVALUTION_API_KEY isn't set");
+    expect(notice({})).toContain("sync it with Evalution Cloud");
+  });
+
+  it("asks for a personal key in place of an ingest key", () => {
+    const text = notice({ EVALUTION_API_KEY: "evl_ingest_secret" });
+    expect(text).toContain("is an ingest key");
+    expect(text).toContain("create a personal API key");
+    expect(text).not.toContain("evl_ingest_secret");
+  });
+
+  it("asks for a personal key in place of something else", () => {
+    const text = notice({ EVALUTION_API_KEY: "sk-secret" });
+    expect(text).toContain("isn't an Evalution API key");
+    expect(text).not.toContain("sk-secret");
+  });
+
+  it("is nothing with a personal key", () => {
+    expect(notice({ EVALUTION_API_KEY: "evl_user_x" })).toBeUndefined();
+  });
+
+  it("is nothing for an unlinked project", () => {
+    expect(apiKeyNotice({}, { env: {} })).toBeUndefined();
+    expect(
+      apiKeyNotice({}, { env: { EVALUTION_API_KEY: "evl_ingest_x" } }),
+    ).toBeUndefined();
   });
 });
 
@@ -220,6 +255,69 @@ describe("connectInstance", () => {
     expect(client.endInstanceSession).toHaveBeenCalledWith("ins_1");
     await vi.advanceTimersByTimeAsync(5000);
     expect(client.heartbeatInstance).not.toHaveBeenCalled();
+  });
+
+  describe("when portkit starts it on demand", () => {
+    const onDemand = {
+      ...registration,
+      portkitUrl: "https://app.evalution.localhost",
+      portkitMode: "on_demand",
+    };
+
+    it("registers once, then stops beating", async () => {
+      const client = fakeClient();
+      const instance = connectInstance(client, onDemand, {
+        ...options,
+        log: quiet(),
+      });
+      await instance.ready;
+      expect(client.registerInstance).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(client.heartbeatInstance).not.toHaveBeenCalled();
+      expect(client.registerInstance).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps retrying until it's registered", async () => {
+      const client = fakeClient();
+      client.registerInstance.mockRejectedValueOnce(new Error("offline"));
+      const instance = connectInstance(client, onDemand, {
+        ...options,
+        log: quiet(),
+      });
+      await instance.ready;
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(client.registerInstance).toHaveBeenCalledTimes(2);
+      expect(instance.projectUrl).toBe(PROJECT_URL);
+    });
+
+    it("doesn't end the session on stop", async () => {
+      const client = fakeClient();
+      const instance = connectInstance(client, onDemand, {
+        ...options,
+        log: quiet(),
+      });
+      await instance.ready;
+      await instance.stop();
+      expect(client.endInstanceSession).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      "adopted",
+      "port",
+      "foreground",
+    ])("still heartbeats in %s mode", async portkitMode => {
+      const client = fakeClient();
+      const instance = connectInstance(
+        client,
+        { ...onDemand, portkitMode },
+        { ...options, log: quiet() },
+      );
+      await instance.ready;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(client.heartbeatInstance).toHaveBeenCalledWith("ins_1");
+      await instance.stop();
+      expect(client.endInstanceSession).toHaveBeenCalledWith("ins_1");
+    });
   });
 
   it("doesn't let a cloud that never answers hold up exiting", async () => {
