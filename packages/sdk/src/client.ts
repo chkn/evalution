@@ -129,7 +129,7 @@ export interface InstanceRegistration {
 /** The cloud's answer to {@link Evalution.registerInstance}. */
 export interface RegisteredInstance {
   id: string;
-  /** The project's shareable `*.local.evalut.io` URL. */
+  /** The project's shareable URL, `https://l.evalut.io/<org>/<project>`. */
   projectUrl: string;
   /**
    * Where to open the browser on this machine: it remembers this instance

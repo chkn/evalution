@@ -97,7 +97,7 @@ describe("connectInstance", () => {
     label: "laptop:app",
     localUrl: "http://localhost:3000",
   };
-  const PROJECT_URL = "https://app--octo.local.evalut.io";
+  const PROJECT_URL = "https://l.evalut.io/octo/app";
   const OPEN_URL = "https://evalut.io/cloud/remember/ins_1";
 
   function fakeClient() {

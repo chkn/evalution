@@ -12,6 +12,10 @@ import {
 } from "./registry.ts";
 
 describe("coding-agent registry", () => {
+  it("points the agent at the setup docs through the link host", () => {
+    expect(AGENT_SETUP_PROMPT).toContain("https://l.evalut.io/s/setup.md");
+  });
+
   it("offers Claude Code and Codex with a setup-prompt launch step", () => {
     for (const id of AGENT_REGISTRY.map(t => t.id)) {
       const task = findSetupTask(id);
@@ -21,8 +25,11 @@ describe("coding-agent registry", () => {
       expect(step?.kind).toBe("run_command");
       if (step?.kind === "run_command") {
         expect(step.command).toContain(AGENT_SETUP_PROMPT);
-        // The agent may fetch the setup docs without asking.
-        expect(step.command).toContain("evalut.io");
+        // The agent may fetch the setup docs without asking: the link, and
+        // the page it redirects to.
+        // Claude Code takes `WebFetch(domain:…)`, Codex a quoted domain.
+        expect(step.command).toMatch(/(domain:|")l\.evalut\.io[)"]/);
+        expect(step.command).toMatch(/(domain:|")evalut\.io[)"]/);
       }
     }
   });

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { expect, test } from "@playwright/experimental-ct-react";
-import { OTHER_AGENT_URL } from "../../../shared/agent";
+import { AGENT_REQUEST_URL } from "../../../shared/links";
 import { AskAgentButtonHarness } from "./AskAgentButtonHarness";
 
 test("renders nothing for a host that lists no agents", async ({ mount }) => {
@@ -52,7 +52,7 @@ test("ends with a separator and an always-enabled Other link", async ({
   const items = menu.getByRole("menuitem");
   await expect(items).toHaveCount(3);
   await expect(items.last()).toHaveText("Other");
-  await expect(items.last()).toHaveAttribute("href", OTHER_AGENT_URL);
+  await expect(items.last()).toHaveAttribute("href", AGENT_REQUEST_URL);
   await expect(items.last()).toHaveAttribute("target", "_blank");
   // The separator sits between the agents and Other.
   await expect(menu.locator("hr + [role='menuitem']")).toHaveText("Other");

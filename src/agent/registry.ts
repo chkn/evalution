@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { LINK_HOST, SETUP_DOCS_MARKDOWN_URL } from "../shared/links.ts";
 import type { SetupStep, SetupTask } from "../shared/setup-task.ts";
 import {
   type AgentCommandBuilder,
@@ -8,14 +9,12 @@ import {
   CodexCommandBuilder,
 } from "./command-builder.ts";
 
-const AGENT_SETUP_DOMAIN = "evalut.io";
-
-/** Setup instructions URL a coding agent is pointed at to wire up evalution. */
-const AGENT_SETUP_URL = `https://${AGENT_SETUP_DOMAIN}/n/docs/setup.md`;
+/** The site the setup docs' link redirects to. */
+const DOCS_DOMAIN = "evalut.io";
 
 /** The prompt handed to a coding agent */
 // exported for the tests
-export const AGENT_SETUP_PROMPT = `Follow manual setup steps from ${AGENT_SETUP_URL}`;
+export const AGENT_SETUP_PROMPT = `Follow manual setup steps from ${SETUP_DOCS_MARKDOWN_URL}`;
 
 /** A coding agent evalution can launch in a terminal. */
 export interface CodingAgent {
@@ -73,10 +72,13 @@ export const AGENT_REGISTRY: readonly SetupTask[] = CODING_AGENTS.map(
       {
         kind: "run_command",
         id: "launch",
+        // The agent may fetch the setup docs without asking: the link, and
+        // the page it redirects to.
         command: agent
           .commandBuilder()
           .setPrompt(AGENT_SETUP_PROMPT)
-          .addAllowedDomain(AGENT_SETUP_DOMAIN)
+          .addAllowedDomain(LINK_HOST)
+          .addAllowedDomain(DOCS_DOMAIN)
           .build(),
         label: agent.label,
       },

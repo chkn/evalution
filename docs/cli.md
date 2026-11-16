@@ -108,7 +108,7 @@ portkit isn't installed or refuses the name, Evalution starts as usual on its lo
 ## Project URL
 
 With Evalution Cloud, a project gets one URL,
-`https://<project>--<org>.local.evalut.io`, that opens **each member's own
+`https://l.evalut.io/<org>/<project>`, that opens **each member's own
 running playground**. A link to a trace sent to someone else opens that trace
 in their copy of the project.
 

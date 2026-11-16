@@ -13,6 +13,7 @@ import { apiKeyKind, type CloudProject, Evalution } from "@evalution/sdk";
 import ts from "typescript";
 import type { FileProvider } from "../file-provider.ts";
 import { LocalFileProvider } from "../file-provider-local.ts";
+import { API_KEYS_URL } from "../shared/links.ts";
 
 /** What {@link linkConfigSource} makes of a config file. */
 export type ConfigEdit =
@@ -229,7 +230,7 @@ export async function link(
   const apiKey = env.EVALUTION_API_KEY;
   if (!client && (!apiKey || apiKeyKind(apiKey) !== "personal")) {
     log.error(
-      "`evalution link` needs a personal API key. Create one at https://evalut.io/cloud and set it as EVALUTION_API_KEY, in your shell or the project's .env.",
+      `\`evalution link\` needs a personal API key. Create one at ${API_KEYS_URL} and set it as EVALUTION_API_KEY, in your shell or the project's .env.`,
     );
     return 1;
   }

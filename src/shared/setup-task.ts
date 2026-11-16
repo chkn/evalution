@@ -13,9 +13,6 @@
 /** Path, relative to the project root, where evalution looks for its config. */
 export const CONFIG_FILE_RELATIVE_PATH = ".evalution/config.ts";
 
-/** URL of the configuration documentation, linked from the onboarding wizard. */
-export const CONFIG_DOCS_URL = "https://evalut.io/n/docs/config";
-
 /**
  * Name of the browser `CustomEvent` dispatched (with a {@link SetupStepDoneDetail}
  * payload) when a terminal-run setup step exits successfully, so the manual-setup

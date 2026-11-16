@@ -3,7 +3,8 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { type AgentInfo, OTHER_AGENT_URL } from "../../shared/agent";
+import type { AgentInfo } from "../../shared/agent";
+import { AGENT_REQUEST_URL } from "../../shared/links";
 import ProviderIcon from "./ProviderIcon";
 import { ChevronDownIcon } from "./trace/icons";
 import { useAnchoredPopover } from "./use-anchored-popover";
@@ -71,7 +72,7 @@ export function AskAgentButton({ agents, onAsk }: Props) {
             <a
               role="menuitem"
               className="trace-header-menu-item"
-              href={OTHER_AGENT_URL}
+              href={AGENT_REQUEST_URL}
               target="_blank"
               rel="noopener"
               onClick={close}

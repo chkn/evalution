@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import { PROMPTS_DOCS_URL } from "../../../shared/links";
 import type { WizardStepProps } from "./types";
-
-/** Guide the user is pointed at once their project is configured. */
-const GETTING_STARTED_URL = "https://evalut.io/n/docs/prompts";
 
 /**
  * Final onboarding step, shown once a project config is loaded. Confirms the
@@ -21,7 +19,7 @@ export function AllSetStep({ onCreatePrompt }: WizardStepProps) {
       </p>
       <a
         className="welcome-link"
-        href={GETTING_STARTED_URL}
+        href={PROMPTS_DOCS_URL}
         target="_blank"
         rel="noopener"
       >

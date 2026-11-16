@@ -2,6 +2,11 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { expect, test } from "@playwright/experimental-ct-react";
+import {
+  AGENT_REQUEST_URL,
+  PROMPTS_DOCS_URL,
+  SDK_REQUEST_URL,
+} from "../../../shared/links";
 import { WelcomeWizardHarness } from "./WelcomeWizardHarness";
 
 const AGENT_TASKS = [
@@ -133,10 +138,7 @@ test("the coding-agent Other button links to the agent issue template", async ({
   const other = component
     .getByRole("group", { name: "Coding agent" })
     .getByRole("link", { name: "Other" });
-  await expect(other).toHaveAttribute(
-    "href",
-    "https://github.com/chkn/evalution/issues/new?template=agent-request.yml",
-  );
+  await expect(other).toHaveAttribute("href", AGENT_REQUEST_URL);
   await expect(other).toHaveAttribute("target", "_blank");
 });
 
@@ -161,10 +163,7 @@ test("manual setup lists the SDK steps and links other SDKs externally", async (
   const other = component
     .getByRole("group", { name: "AI SDK" })
     .getByRole("link", { name: "Other" });
-  await expect(other).toHaveAttribute(
-    "href",
-    "https://github.com/chkn/evalution/issues/new?template=sdk-request.yml",
-  );
+  await expect(other).toHaveAttribute("href", SDK_REQUEST_URL);
   await expect(other).toHaveAttribute("target", "_blank");
 });
 
@@ -273,10 +272,7 @@ test("all-set step links to the docs in a new tab", async ({ mount }) => {
   const component = await mount(<WelcomeWizardHarness initialConfigured />);
 
   const docs = component.getByRole("link", { name: /Read the docs/ });
-  await expect(docs).toHaveAttribute(
-    "href",
-    "https://evalut.io/n/docs/prompts",
-  );
+  await expect(docs).toHaveAttribute("href", PROMPTS_DOCS_URL);
   await expect(docs).toHaveAttribute("target", "_blank");
 });
 

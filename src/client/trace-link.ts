@@ -12,8 +12,8 @@ export interface LinkedTrace {
  * opens each member's own playground, at `?trace=<id>&provider=<id>`.
  */
 export function traceLink(projectUrl: string, trace: LinkedTrace): string {
+  // The project URL's path names the project, so it stays.
   const url = new URL(projectUrl);
-  url.pathname = "/";
   url.search = new URLSearchParams({
     trace: trace.traceId,
     provider: trace.providerId,

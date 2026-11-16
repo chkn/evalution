@@ -2,9 +2,13 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { type ReactElement, useEffect, useState } from "react";
-import { OTHER_AGENT_URL } from "../../../shared/agent";
 import {
+  AGENT_REQUEST_URL,
   CONFIG_DOCS_URL,
+  SDK_REQUEST_URL,
+  SETUP_DOCS_URL,
+} from "../../../shared/links";
+import {
   SETUP_STEP_DONE_EVENT,
   type SetupStep as SetupStepDef,
   type SetupStepDoneDetail,
@@ -15,13 +19,6 @@ import { executeSetupStep, getSetupTasks } from "../../api";
 import ProviderIcon from "../ProviderIcon";
 import { CopyBox } from "./CopyBox";
 import type { WizardStepProps } from "./types";
-
-/** URL for requesting support for an AI SDK we don't list. */
-const OTHER_SDK_URL =
-  "https://github.com/chkn/evalution/issues/new?template=sdk-request.yml";
-
-/** Guide the user is pointed at once their project is configured. */
-const MANUAL_SETUP_URL = "https://evalut.io/n/docs/setup";
 
 type SetupStepProps = Pick<WizardStepProps, "onOpenTerminal">;
 
@@ -157,7 +154,7 @@ export function SetupStep({ onOpenTerminal }: SetupStepProps) {
           })}
           <a
             className="setup-sdk-option setup-sdk-option-link"
-            href={OTHER_AGENT_URL}
+            href={AGENT_REQUEST_URL}
             target="_blank"
             rel="noopener"
           >
@@ -176,7 +173,7 @@ export function SetupStep({ onOpenTerminal }: SetupStepProps) {
           Manual setup —{" "}
           <a
             className="welcome-link"
-            href={MANUAL_SETUP_URL}
+            href={SETUP_DOCS_URL}
             target="_blank"
             rel="noopener"
           >
@@ -202,7 +199,7 @@ export function SetupStep({ onOpenTerminal }: SetupStepProps) {
             ))}
             <a
               className="setup-sdk-option setup-sdk-option-link"
-              href={OTHER_SDK_URL}
+              href={SDK_REQUEST_URL}
               target="_blank"
               rel="noopener"
             >

@@ -9,10 +9,6 @@
  * any Node- or DOM-specific imports.
  */
 
-/** URL for requesting support for a coding agent we don't list. */
-export const OTHER_AGENT_URL =
-  "https://github.com/chkn/evalution/issues/new?template=agent-request.yml";
-
 /** A coding agent evalution knows how to launch, as `GET /api/agents` lists it. */
 export interface AgentInfo {
   /** Stable identifier, e.g. `claude-code`. */

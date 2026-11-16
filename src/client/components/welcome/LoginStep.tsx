@@ -2,11 +2,8 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { useState } from "react";
+import { FORGOT_LOGIN_URL, SIGN_UP_URL } from "../../../shared/links";
 import type { WizardStepProps } from "./types";
-
-/** External Evalution Cloud auth pages, opened in a new tab. */
-const SIGNUP_URL = "https://evalut.io/signup";
-const FORGOT_LOGIN_URL = "https://evalut.io/forgot";
 
 /**
  * Stubbed login screen for Evalution Cloud.
@@ -74,7 +71,7 @@ export function LoginStep({ onNext }: WizardStepProps) {
       <div className="welcome-login-footer">
         <a
           className="welcome-link"
-          href={SIGNUP_URL}
+          href={SIGN_UP_URL}
           target="_blank"
           rel="noreferrer"
         >

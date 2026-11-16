@@ -3,7 +3,7 @@
 
 /**
  * Registering a running playground with Evalution Cloud, so the project's
- * URL (`https://<project>--<org>.local.evalut.io`) can send its members to
+ * URL (`https://l.evalut.io/<org>/<project>`) can send its members to
  * their own running copy. See PLAN §7 in the cloud repo.
  */
 

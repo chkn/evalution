@@ -4,7 +4,7 @@ Evalution is a local-first development tool. Maintain your prompts directly in y
 use the web playground to edit parameters, switch models, and see results in real
 time, so what you test is exactly what ships.
 
-📖 **Documentation: [evalut.io/n/docs](https://evalut.io/n/docs)**
+📖 **Documentation: [evalut.io/n/docs](https://l.evalut.io/s/docs)**
 
 ## Features
 
@@ -26,7 +26,7 @@ npx evalution
 
 Requires Node.js 22.18.0 or higher.
 
-See the [documentation](https://evalut.io/n/docs) for more detailed guidance.
+See the [documentation](https://l.evalut.io/s/docs) for more detailed guidance.
 
 ## Development
 

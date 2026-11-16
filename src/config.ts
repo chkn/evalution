@@ -38,7 +38,7 @@ export interface EvalutionConfig {
    *
    * With a personal API key in `EVALUTION_API_KEY`, each running playground
    * registers with the cloud, so the project's URL
-   * (`https://<project>--<org>.local.evalut.io`) opens it, and links to it
+   * (`https://l.evalut.io/<org>/<project>`) opens it, and links to it
    * can be shared with the project's members.
    */
   cloud?: CloudConfig;
