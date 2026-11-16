@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import type { ColumnPath, DatasetColumnSpec } from "../shared/column-paths.ts";
 import type { PropDefinition } from "../shared/types.ts";
 import {
+  filesOf,
   type LocalDatabaseSync,
   openLocalDatabase,
   startSyncing,
@@ -49,12 +50,6 @@ import { TursoDatasetProvider } from "./turso-dataset-provider.ts";
 
 /** Extension of a dataset file. */
 const DB_EXT = ".db";
-
-/**
- * Files Turso keeps beside a database, removed with it. `-shm` is SQLite's
- * own, listed in case a file was last opened by another SQLite build.
- */
-const SIDECARS = ["-wal", "-shm", "-info", "-changes"];
 
 /** What opening one dataset file produced. */
 type Entry =
@@ -597,7 +592,7 @@ export class LocalDirectoryDatasetProvider implements DatasetProvider {
       }
       const path = this.pathFor(datasetId);
       let removed = false;
-      for (const file of [path, ...SIDECARS.map(s => path + s)]) {
+      for (const file of filesOf(path)) {
         try {
           await unlink(file);
           if (file === path) removed = true;

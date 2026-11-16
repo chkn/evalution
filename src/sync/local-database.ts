@@ -15,19 +15,12 @@
  * 3. The copy takes the file's place, and the provider reopens it. Sync
  *    pushes the copied rows like any other change.
  *
- * Only step 3 can't simply be started over. A small state file records how
- * far it got, so opening the file finishes it after a crash.
+ * Only step 3 can't simply be started over. A marker file says it has
+ * begun, so opening the file finishes it after a crash.
  */
 
 import { constants } from "node:fs";
-import {
-  copyFile,
-  readFile,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { copyFile, rm, stat, writeFile } from "node:fs/promises";
 import type { SyncDatabaseCredentials } from "@evalution/sdk";
 import { connect, type Database } from "@tursodatabase/sync";
 import { createLocalTursoClient } from "../trace/db/local-turso-client.ts";
@@ -43,12 +36,16 @@ export interface SyncLink {
   projectId: string;
 }
 
-/** Files Turso keeps beside a database. `-shm` is SQLite's own, in case another build opened it. */
-const SIDECARS = ["-wal", "-shm", "-info", "-changes"];
+/**
+ * Files Turso keeps beside a database. `-wal-revert` is the sync engine's,
+ * written while a pull sets local changes aside. `-shm` is SQLite's own, in
+ * case another build opened it.
+ */
+const SIDECARS = ["-wal", "-wal-revert", "-shm", "-info", "-changes"];
 
 const ADOPTING = ".adopting";
-/** Holds the swap's progress: `replace`, then `place`. */
-const SWAP_STATE = ".adopted";
+/** Says the adopted copy is taking the file's place. */
+const SWAPPING = ".adopted";
 
 /** Rows read and written at a time when copying. */
 const COPY_BATCH = 500;
@@ -110,7 +107,8 @@ export async function stopRecordingChanges(db: Database): Promise<void> {
   }
 }
 
-function filesOf(path: string): string[] {
+/** A database file and the files Turso keeps beside it. */
+export function filesOf(path: string): string[] {
   return [path, ...SIDECARS.map(suffix => path + suffix)];
 }
 
@@ -125,40 +123,32 @@ async function removeDatabase(path: string): Promise<void> {
   await Promise.all(filesOf(path).map(file => rm(file, { force: true })));
 }
 
-/** Writes the swap's state so no crash leaves it half written. */
-async function writeSwapState(path: string, state: "replace" | "place") {
-  const file = path + SWAP_STATE;
-  await writeFile(`${file}.tmp`, state);
-  await rename(`${file}.tmp`, file);
-}
-
 /**
- * Puts the adopted copy in the file's place. `replace` removes the file;
- * `place` copies the adopted files in, then removes them. Each step can be
- * run again, so whichever a crash interrupted is finished on the next open.
+ * Puts the adopted copy in the file's place, once the {@link SWAPPING}
+ * marker is down: each of the file's files is removed, and the copy's put
+ * there if it has one. The copy's files outlive the marker, so a crash
+ * before it's removed leaves everything to run this again from, and one
+ * after leaves a finished swap.
  *
  * Copied, not renamed: `@tursodatabase/sync` 0.7 remembers a closed
  * database by its file, not its path, until it's garbage collected, so a
  * renamed file reopened in the same process is taken for the old path's,
- * and fails to open. A copy is a new file. (A clone, where the file system
- * can, so it's instant.) The closed database also keeps its files open
- * until then, so their inodes can't be reused meanwhile.
+ * and fails to open. A copy into a path just emptied is a new file. (A
+ * clone, where the file system can, so it's instant.) The closed database
+ * also keeps its files open until then, so their inodes can't be reused
+ * meanwhile.
  */
 async function finishSwap(path: string): Promise<void> {
-  const file = path + SWAP_STATE;
-  if ((await readFile(file, "utf8")) === "replace") {
-    await removeDatabase(path);
-    await writeSwapState(path, "place");
-  }
   const adopted = filesOf(path + ADOPTING);
   for (const [i, target] of filesOf(path).entries()) {
     const source = adopted[i] as string;
+    await rm(target, { force: true });
     if (await exists(source)) {
       await copyFile(source, target, constants.COPYFILE_FICLONE);
     }
   }
+  await rm(path + SWAPPING, { force: true });
   await removeDatabase(path + ADOPTING);
-  await rm(file, { force: true });
 }
 
 /**
@@ -166,11 +156,8 @@ async function finishSwap(path: string): Promise<void> {
  * got that far: it starts over once the file is open.
  */
 export async function recoverAdoption(path: string): Promise<void> {
-  if (await exists(path + SWAP_STATE)) {
-    await finishSwap(path);
-    return;
-  }
-  await removeDatabase(path + ADOPTING);
+  if (await exists(path + SWAPPING)) await finishSwap(path);
+  else await removeDatabase(path + ADOPTING);
 }
 
 /** How {@link copyTable} reads and writes some of a table's columns. */
@@ -229,7 +216,8 @@ export async function copyTable(
 
 /**
  * Copies tables a generic copy would get wrong, returning their names: a
- * dataset's fields, say, must be merged with the cloud's.
+ * dataset's fields, say, must be merged with the cloud's. Runs before the
+ * other tables are copied, so its tables can't reference theirs.
  */
 export type MergeTables = (from: Database, into: Database) => Promise<string[]>;
 
@@ -237,28 +225,63 @@ export type MergeTables = (from: Database, into: Database) => Promise<string[]>;
 const NOT_ROWS = /^(sqlite_|turso_|__turso)/;
 
 /**
+ * `tables`, each after the ones it references. Tables that reference each
+ * other in a cycle keep the order they came in.
+ */
+async function referencedFirst(
+  db: Database,
+  tables: string[],
+): Promise<string[]> {
+  const included = new Set(tables);
+  const ordered = new Set<string>();
+  const visiting = new Set<string>();
+  const visit = async (table: string): Promise<void> => {
+    if (!included.has(table) || ordered.has(table) || visiting.has(table)) {
+      return;
+    }
+    visiting.add(table);
+    const references = await all(
+      db,
+      `SELECT "table" FROM pragma_foreign_key_list(?)`,
+      table,
+    );
+    for (const { table: referenced } of references) {
+      await visit(String(referenced));
+    }
+    ordered.add(table);
+  };
+  for (const table of tables) await visit(table);
+  return [...ordered];
+}
+
+/**
  * Copies every row of `from` into `into`, keeping `into`'s rows where both
  * have one. Leaves out what isn't rows: Turso's and SQLite's own tables,
  * the migrations ledger, and the sync links.
+ *
+ * Sync pushes the rows in the order they're written here, and the cloud
+ * checks each one's foreign keys as it arrives. A row it rejects is lost:
+ * the rest of the push lands, and the next pull drops the row here too. So
+ * each table is copied after the ones it references, with foreign keys
+ * checked as the cloud checks them: a row it would reject fails the
+ * adoption instead, before the file is touched.
  */
 export async function copyRows(
   from: Database,
   into: Database,
   merge?: MergeTables,
 ): Promise<void> {
-  // Tables are copied one at a time, so a row may arrive before the one it
-  // references.
-  await into.exec("PRAGMA foreign_keys = OFF");
+  await into.exec("PRAGMA foreign_keys = ON");
   const done = new Set([
     MIGRATIONS_TABLE,
     SYNC_LINKS_TABLE,
     ...((await merge?.(from, into)) ?? []),
   ]);
   const target = await tableNames(into);
-  for (const table of await tableNames(from)) {
-    if (NOT_ROWS.test(table) || done.has(table) || !target.has(table)) {
-      continue;
-    }
+  const tables = [...(await tableNames(from))].filter(
+    table => !NOT_ROWS.test(table) && !done.has(table) && target.has(table),
+  );
+  for (const table of await referencedFirst(into, tables)) {
     await copyTable(from, into, table);
   }
 }
@@ -313,22 +336,29 @@ export async function openLocalDatabase({
 }: OpenLocalDatabaseOptions): Promise<Database> {
   await recoverAdoption(path);
   const database = () => sync()?.database;
-  const bootstrapping = database();
-  const isNew = !(await exists(path));
-  if (isNew) bootstrapping?.beginBootstrap();
+  // A file new to this machine starts as a copy of the cloud's database, if
+  // the cloud has said where it is: its URL is handed over while connecting.
+  let bootstrap = (await exists(path))
+    ? undefined
+    : database()?.currentCredentials;
   const client = await createLocalTursoClient({
     path,
     // Asked on every sync operation, so sync can start once the file is open.
-    getCloudUrl: () => database()?.getCloudUrl() ?? null,
+    getCloudUrl: () => bootstrap?.url ?? database()?.getCloudUrl() ?? null,
     getAuthToken: async () => {
       const current = database();
       if (!current) throw new Error("This database isn't synced.");
       return current.getAuthToken();
     },
-    onBootstrapFailure: err => bootstrapping?.reportBootstrapFailure(err),
+    onBootstrapFailure: err => {
+      // It's made empty instead, and adopted once the cloud answers.
+      bootstrap = undefined;
+      database()?.reportBootstrapFailure(err);
+    },
   });
+  const copied = bootstrap;
+  bootstrap = undefined;
   try {
-    const copied = isNew ? bootstrapping?.endBootstrap() : undefined;
     if (copied) await recordSyncLink(client, copied);
     if ((await readSyncLinks(client)).length === 0) {
       await stopRecordingChanges(client);
@@ -389,7 +419,7 @@ async function adopt(
   const adopting = path + ADOPTING;
   await removeDatabase(adopting);
   let into: Database | undefined;
-  let committed = false;
+  let swapping = false;
   try {
     // A string URL: the copy must come from the cloud, or not be made.
     into = await connect({
@@ -402,20 +432,21 @@ async function adopt(
     await recordSyncLink(into, credentials);
     const copyInto = into;
     await sync.pause(async () => {
+      if (copy) await copyRows(client, copyInto, sync.merge);
+      await copyInto.close();
       try {
-        if (copy) await copyRows(client, copyInto, sync.merge);
-        await copyInto.close();
         await client.close();
-        await writeSwapState(path, "replace");
-        committed = true;
+        await writeFile(path + SWAPPING, "");
+        swapping = true;
         await finishSwap(path);
       } finally {
-        if (!committed) await client.close().catch(() => {});
+        // The old client is gone. Opening the file again finishes a swap
+        // that failed partway.
         await sync.reopen();
       }
     });
   } finally {
-    if (!committed) {
+    if (!swapping) {
       await into?.close().catch(() => {});
       await removeDatabase(adopting);
     }

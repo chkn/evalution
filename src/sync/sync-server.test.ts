@@ -62,11 +62,32 @@ async function waitForServer(url: string): Promise<void> {
 }
 
 /**
+ * Turns on foreign keys for one of the sync server's databases, as Turso
+ * Cloud has them: a push that inserts a row before the one it references
+ * fails there. The server keeps one connection per database, so the pragma
+ * holds for the pushes that follow.
+ */
+async function enforceForeignKeys(databaseUrl: string): Promise<void> {
+  const response = await fetch(`${databaseUrl}/v2/pipeline`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      baton: null,
+      requests: [
+        { type: "execute", stmt: { sql: "PRAGMA foreign_keys = ON" } },
+      ],
+    }),
+  });
+  if (!response.ok) throw new Error(await response.text());
+}
+
+/**
  * Evalution Cloud, for one project: each synced database is one of the
  * sync server's, and deleted datasets are remembered as the registry does.
  */
 function fakeCloud(serverUrl: string, project: string): WorkspaceCloud {
   const live = new Map<string, Required<SyncDatabaseKey>>();
+  const enforced = new Set<string>();
   const deleted = new Set<string>();
   // A deleted dataset made again gets a database of its own, as a new Turso
   // database of the same name would be empty.
@@ -96,8 +117,13 @@ function fakeCloud(serverUrl: string, project: string): WorkspaceCloud {
         key: request.key ?? "",
       });
       const database = databaseOf(name);
+      const url = `${serverUrl}/db/${database}`;
+      if (!enforced.has(database)) {
+        await enforceForeignKeys(url);
+        enforced.add(database);
+      }
       return {
-        url: `${serverUrl}/db/${database}`,
+        url,
         token: "unused-by-the-local-server",
         expiresAt: Date.now() + 3_600_000,
         syncId: database,
@@ -541,6 +567,46 @@ describe.skipIf(!tursodb)("workspace sync through a Turso sync server", () => {
     await Promise.all([relinked.stop(), other.stop()]);
   });
 
+  it("pushes rows that reference others when a file is adopted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "evalution-sync-machine-"));
+    const before = unlinkedAt(root);
+    await before.traces.recordSpanStart(span("annotated"));
+    await before.traces.createAnnotation({
+      traceId: "annotated",
+      kind: "issue",
+      note: "wrong answer",
+      source: "user",
+    });
+    const evalDef = await before.evals.createEval({
+      name: "Plans tasks",
+      prompt: { id: "odin" },
+      dataset: { providerId: "local-datasets", id: "tickets" },
+      inputs: { functionInputs: {}, executeInputs: {} },
+      checks: [],
+    });
+    const run = await before.evals.createRun(evalDef.id, {
+      definition: evalDef,
+      arms: [{ id: "a0", label: "Working tree", spec: { kind: "head" } }],
+      dirty: true,
+      concurrency: 1,
+      total: 1,
+    });
+    await before.datasets.close();
+    const cloud = newProject();
+
+    const linked = await machineAt(root, cloud);
+    await linked.syncNow();
+    const other = await machine(cloud);
+
+    expect(await other.traces.listAnnotations("annotated")).toMatchObject([
+      { note: "wrong answer" },
+    ]);
+    expect(await other.evals.listRuns(evalDef.id)).toMatchObject([
+      { id: run.id },
+    ]);
+    await Promise.all([linked.stop(), other.stop()]);
+  });
+
   it("keeps the writes made while a file is adopted", async () => {
     const root = await mkdtemp(join(tmpdir(), "evalution-sync-machine-"));
     const before = unlinkedAt(root);
@@ -570,6 +636,7 @@ function unlinkedAt(root: string) {
     traces: new LocalDatabaseTraceProvider({
       path: join(root, "traces", "local.db"),
     }),
+    evals: new LocalEvalProvider({ path: join(root, "evals", "evals.db") }),
     datasets: new LocalDirectoryDatasetProvider({
       dir: join(root, "datasets"),
     }),

@@ -15,8 +15,10 @@ import { connect, type Database } from "@tursodatabase/sync";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createLocalTursoClient } from "../trace/db/local-turso-client.ts";
 import { MIGRATIONS_TABLE } from "../trace/db/migrate.ts";
+import type { DatabaseSync } from "./database-sync.ts";
 import {
   copyRows,
+  type LocalDatabaseSync,
   openLocalDatabase,
   readSyncLinks,
   recordSyncLink,
@@ -80,6 +82,68 @@ describe("openLocalDatabase", () => {
     const db = track(await openLocalDatabase({ path, migrate: makeTable }));
 
     expect(await recorded(db)).toBe(0);
+    expect(await all(db, "SELECT id FROM t")).toEqual([{ id: "a" }]);
+  });
+
+  /**
+   * A sync whose cloud has answered, naming a copy nothing serves: fetching
+   * it fails fast.
+   */
+  function unreachableCloud() {
+    const failures: unknown[] = [];
+    const database = {
+      currentCredentials: {
+        url: "http://127.0.0.1:9",
+        token: "token",
+        expiresAt: Date.now() + 3_600_000,
+        syncId: "db-1",
+        projectId: "prj_1",
+      },
+      getCloudUrl: () => null,
+      getAuthToken: async () => "token",
+      reportBootstrapFailure: (err: unknown) => failures.push(err),
+      attach() {},
+    } as unknown as DatabaseSync;
+    const sync: LocalDatabaseSync = {
+      database,
+      onPulled() {},
+      pause: during => during(),
+      reopen: async () => {},
+    };
+    return { failures, sync: () => sync };
+  }
+
+  it("opens a file new to this machine empty and unlinked when the cloud's copy can't be fetched", async () => {
+    const cloud = unreachableCloud();
+
+    const db = track(
+      await openLocalDatabase({
+        path: join(dir, "a.db"),
+        migrate: makeTable,
+        sync: cloud.sync,
+      }),
+    );
+    await db.exec("INSERT INTO t VALUES ('a', 'x')");
+
+    expect(cloud.failures).toHaveLength(1);
+    expect(await readSyncLinks(db)).toEqual([]);
+    expect(await recorded(db)).toBe(0);
+  });
+
+  it("never takes a file already here for the cloud's copy", async () => {
+    const path = join(dir, "a.db");
+    const before = await openLocalDatabase({ path, migrate: makeTable });
+    await before.exec("INSERT INTO t VALUES ('a', 'x')");
+    await before.close();
+    const cloud = unreachableCloud();
+
+    const db = track(
+      await openLocalDatabase({ path, migrate: makeTable, sync: cloud.sync }),
+    );
+
+    // Linked, it would sync as if it held the cloud database's rows.
+    expect(await readSyncLinks(db)).toEqual([]);
+    expect(cloud.failures).toEqual([]);
     expect(await all(db, "SELECT id FROM t")).toEqual([{ id: "a" }]);
   });
 
@@ -170,6 +234,38 @@ describe("copyRows", () => {
     ).toEqual([{ cells: '{"n":1233}' }]);
   });
 
+  // Drizzle creates tables in name order, so a table often comes before the
+  // one it references.
+  const makeReferencingTables = async (db: Database) => {
+    await db.exec(
+      "CREATE TABLE notes (id TEXT PRIMARY KEY, trace_id TEXT NOT NULL REFERENCES traces(id))",
+    );
+    await db.exec("CREATE TABLE traces (id TEXT PRIMARY KEY)");
+  };
+
+  it("copies each table after the ones it references, so the cloud gets them in that order", async () => {
+    const { from, into } = await pair();
+    await makeReferencingTables(from);
+    await makeReferencingTables(into);
+    await from.exec("INSERT INTO traces VALUES ('t1')");
+    await from.exec("INSERT INTO notes VALUES ('n1', 't1')");
+
+    await copyRows(from, into);
+
+    expect(await all(into, "SELECT id, trace_id FROM notes")).toEqual([
+      { id: "n1", trace_id: "t1" },
+    ]);
+  });
+
+  it("refuses a row the cloud would, rather than push one it rejects", async () => {
+    const { from, into } = await pair();
+    await makeReferencingTables(from);
+    await makeReferencingTables(into);
+    await from.exec("INSERT INTO notes VALUES ('n1', 'gone')");
+
+    await expect(copyRows(from, into)).rejects.toThrow(/FOREIGN KEY/);
+  });
+
   it("leaves out the migrations ledger, the sync links, and Turso's own tables", async () => {
     const { from, into } = await pair();
     for (const db of [from, into]) {
@@ -219,32 +315,52 @@ describe("recoverAdoption", () => {
     expect(existsSync(file("a.db.adopting-wal"))).toBe(false);
   });
 
-  it("finishes a swap that had begun removing the file", async () => {
+  it("finishes a swap a crash interrupted", async () => {
+    await write("a.db", "old");
     await write("a.db-wal", "old wal");
+    await write("a.db-wal-revert", "old revert");
     await write("a.db.adopting", "new");
     await write("a.db.adopting-info", "new info");
-    await write("a.db.adopted", "replace");
+    await write("a.db.adopted", "");
 
     await recoverAdoption(file("a.db"));
 
     expect(await read("a.db")).toBe("new");
     expect(await read("a.db-info")).toBe("new info");
     expect(existsSync(file("a.db-wal"))).toBe(false);
+    expect(existsSync(file("a.db-wal-revert"))).toBe(false);
     expect(existsSync(file("a.db.adopting"))).toBe(false);
+    expect(existsSync(file("a.db.adopting-info"))).toBe(false);
     expect(existsSync(file("a.db.adopted"))).toBe(false);
   });
 
-  it("finishes a swap that had begun putting the copy in place", async () => {
+  it("finishes a swap a crash interrupted partway through putting the copy in place", async () => {
+    // The file was removed, and the copy's put there; its WAL wasn't yet.
     await write("a.db", "new");
+    await write("a.db-wal", "old wal");
+    await write("a.db.adopting", "new");
+    await write("a.db.adopting-wal", "new wal");
+    await write("a.db.adopted", "");
+
+    await recoverAdoption(file("a.db"));
+
+    expect(await read("a.db")).toBe("new");
+    expect(await read("a.db-wal")).toBe("new wal");
+    expect(existsSync(file("a.db.adopting-wal"))).toBe(false);
+    expect(existsSync(file("a.db.adopted"))).toBe(false);
+  });
+
+  it("keeps a finished swap whose copy a crash left behind", async () => {
+    // The marker goes before the copy's files do.
+    await write("a.db", "new");
+    await write("a.db-info", "new info");
     await write("a.db.adopting-info", "new info");
-    await write("a.db.adopted", "place");
 
     await recoverAdoption(file("a.db"));
 
     expect(await read("a.db")).toBe("new");
     expect(await read("a.db-info")).toBe("new info");
     expect(existsSync(file("a.db.adopting-info"))).toBe(false);
-    expect(existsSync(file("a.db.adopted"))).toBe(false);
   });
 
   it("does nothing to a file no adoption touched", async () => {

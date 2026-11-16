@@ -129,42 +129,24 @@ describe("DatabaseSync", () => {
     expect(ops).toEqual([]);
   });
 
-  it("hands the engine the URL while a new file is made from the cloud's copy", async () => {
+  it("says when a new file couldn't start from the cloud's copy", async () => {
     const { cloud } = fakeCloud();
+    const warn = log();
     const sync = new DatabaseSync({
       cloud,
       key: { kind: "traces", provider: "local-db" },
       schemaVersion: 1,
-      log: log(),
+      log: warn,
     });
     await sync.prepare();
-    expect(sync.getCloudUrl()).toBeNull();
 
-    sync.beginBootstrap();
-    expect(sync.getCloudUrl()).toBe("libsql://db.turso.io");
-
-    expect(sync.endBootstrap()).toMatchObject({ syncId: "db-1" });
-    expect(sync.getCloudUrl()).toBeNull();
-  });
-
-  it("makes a new file empty, unlinked, without the cloud's answer or when fetching its copy fails", async () => {
-    const { cloud } = fakeCloud();
-    const sync = new DatabaseSync({
-      cloud,
-      key: { kind: "traces", provider: "local-db" },
-      schemaVersion: 1,
-      log: log(),
-    });
-    sync.beginBootstrap();
-    expect(sync.getCloudUrl()).toBeNull();
-    expect(sync.endBootstrap()).toBeUndefined();
-
-    await sync.prepare();
-    sync.beginBootstrap();
     sync.reportBootstrapFailure(new Error("fetch failed"));
 
+    expect(warn.warn).toHaveBeenCalledTimes(1);
+    expect(warn.warn.mock.calls[0][0]).toContain(
+      "Couldn't fetch the trace database from Evalution Cloud (fetch failed)",
+    );
     expect(sync.getCloudUrl()).toBeNull();
-    expect(sync.endBootstrap()).toBeUndefined();
   });
 
   it("asks to create the database when told it's new", async () => {

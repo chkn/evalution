@@ -95,8 +95,9 @@ function sleep(ms: number): Promise<void> {
 /**
  * One local database's link to its cloud copy. Hand {@link getCloudUrl} and
  * {@link getAuthToken} to `createLocalTursoClient`, after {@link prepare} so
- * a database that isn't on this machine yet starts from the cloud's copy.
- * Then {@link attach} the open database.
+ * a database that isn't on this machine yet can start from the copy
+ * {@link currentCredentials} names. Then {@link attach} the open database.
+ * `openLocalDatabase` does all this.
  */
 export class DatabaseSync {
   private readonly cloud: SyncCloud;
@@ -120,8 +121,6 @@ export class DatabaseSync {
   private onPulled: () => void = () => {};
   /** The open file's links: see {@link AttachOptions.links}. */
   private links: ReadonlySet<string> = new Set();
-  /** A file new to this machine is being made from the cloud's copy. */
-  private bootstrapping = false;
   private adoptFile: (() => Promise<void>) | undefined;
   private adopting: Promise<void> | undefined;
   /** Local writes may not have been pushed. */
@@ -196,26 +195,10 @@ export class DatabaseSync {
    */
   readonly getCloudUrl = (): string | null => {
     const credentials = this.currentCredentials;
-    if (!credentials) return null;
-    return this.bootstrapping || this.links.has(credentials.syncId)
+    return credentials && this.links.has(credentials.syncId)
       ? credentials.url
       : null;
   };
-
-  /**
-   * Says the file is about to be made, so it should start as a copy of the
-   * cloud's: {@link getCloudUrl} answers while connecting.
-   */
-  beginBootstrap(): void {
-    this.bootstrapping = this.isAvailable;
-  }
-
-  /** After connecting: the cloud database the new file is a copy of, if it is one. */
-  endBootstrap(): SyncDatabaseCredentials | undefined {
-    const copied = this.bootstrapping ? this.currentCredentials : undefined;
-    this.bootstrapping = false;
-    return copied;
-  }
 
   /** A current token for the cloud copy. Only called by the engine once {@link getCloudUrl} has a URL. */
   readonly getAuthToken = async (): Promise<string> => {
@@ -228,10 +211,11 @@ export class DatabaseSync {
     return fresh.token;
   };
 
-  /** For `createLocalTursoClient`'s `onBootstrapFailure`. */
+  /**
+   * For `createLocalTursoClient`'s `onBootstrapFailure`: the file is made
+   * empty instead, and adopted once the cloud answers.
+   */
   readonly reportBootstrapFailure = (err: unknown): void => {
-    // The file is made empty instead, and adopted once the cloud answers.
-    this.bootstrapping = false;
     this.warnOnce(
       `⚠️ Couldn't fetch ${this.label} from Evalution Cloud (${(err as Error).message}); it starts empty here until the next sync.`,
     );

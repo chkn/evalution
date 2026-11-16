@@ -71,8 +71,17 @@ function stubSync(remoteDatasets: string[] = []) {
         reportBootstrapFailure: () => {
           s.bootstrapFailures++;
         },
-        beginBootstrap() {},
-        endBootstrap: () => undefined,
+        get currentCredentials() {
+          return s.url === null
+            ? undefined
+            : {
+                url: s.url,
+                token: "token",
+                expiresAt: Date.now() + 3_600_000,
+                syncId: `sync-${id}`,
+                projectId: "prj_1",
+              };
+        },
         get isAvailable() {
           return s.url !== null;
         },

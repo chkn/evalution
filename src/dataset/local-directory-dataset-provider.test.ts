@@ -133,8 +133,9 @@ describe("LocalDirectoryDatasetProvider — files", () => {
       fields: [{ def: def("a") }],
     });
     await provider.addRows(dataset.id, [{ cells: { "0": text("x") } }]);
-    // Whatever sidecars the engine left, plus one planted to be sure.
+    // Whatever sidecars the engine left, plus some planted to be sure.
     await writeFile(join(dir, "gone.db-info"), "");
+    await writeFile(join(dir, "gone.db-wal-revert"), "");
 
     await provider.deleteDataset(dataset.id);
     const left = (await readdir(dir)).filter(n => n.startsWith("gone"));
