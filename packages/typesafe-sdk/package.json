@@ -19,6 +19,7 @@
     "dist"
   ],
   "scripts": {
+    "prepublishOnly": "node ../../scripts/require-pnpm-publish.ts",
     "build": "tsdown",
     "prepare": "pnpm run build",
     "typecheck": "tsc --noEmit"

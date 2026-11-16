@@ -14,7 +14,11 @@ export default defineConfig({
     environment: "node",
     // Tests must not find a developer's own portkit and send it traces.
     env: { PORTKIT_HOME: "/nonexistent/portkit" },
-    include: ["src/**/*.test.ts", "packages/*/src/**/*.test.ts"],
+    include: [
+      "src/**/*.test.ts",
+      "packages/*/src/**/*.test.ts",
+      "scripts/**/*.test.ts",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],

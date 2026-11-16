@@ -43,7 +43,7 @@
     "node": ">=22.18.0"
   },
   "scripts": {
-    "prepublishOnly": "pnpm run build",
+    "prepublishOnly": "node scripts/require-pnpm-publish.ts && pnpm run build",
     "version": "node scripts/pin-workspace-deps.ts && pnpm install --lockfile-only && git add .",
     "build": "pnpm run build:cli && pnpm run build:client",
     "build:cli": "tsdown",
