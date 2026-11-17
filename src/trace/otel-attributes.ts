@@ -50,15 +50,66 @@ const KNOWN_KINDS: readonly SpanKind[] = [
 
 /**
  * Reads a span's {@link SpanKind} from its attributes: the explicit
- * `evalution.span.type` attribute if present, otherwise a mapping from the
- * OTel GenAI semconv `gen_ai.operation.name`. Falls back to `'DEFAULT'`.
+ * `evalution.span.type` attribute if present, then Claude Code's
+ * `span.type: llm_request`, otherwise a mapping from the OTel GenAI semconv
+ * `gen_ai.operation.name`. Falls back to `'DEFAULT'`.
  */
 export function readKind(attributes: Record<string, unknown>): SpanKind {
   attributes = liftTelemetryMetadata(attributes);
   const raw =
     (attributes[SPAN_KIND_ATTRIBUTE] as SpanKind | undefined) ??
-    otelOperationToSpanKind(attributes["gen_ai.operation.name"]);
+    (isClaudeCodeLLMRequest(attributes)
+      ? "LLM"
+      : otelOperationToSpanKind(attributes["gen_ai.operation.name"]));
   return typeof raw === "string" && KNOWN_KINDS.includes(raw) ? raw : "DEFAULT";
+}
+
+/**
+ * Whether a span is a Claude Code model call, which it marks with
+ * `span.type: llm_request` rather than a `gen_ai.operation.name`.
+ */
+function isClaudeCodeLLMRequest(attributes: Record<string, unknown>): boolean {
+  return attributes["span.type"] === "llm_request";
+}
+
+/**
+ * A Claude Code model call's token usage, from its own attribute names.
+ * Anthropic counts `input_tokens` apart from the cache reads and writes, so
+ * they're added back in to make `promptTokens` every input token, as
+ * {@link LLMSpanDetails} counts it. Read only off an `llm_request` span, as
+ * the bare names could mean anything elsewhere.
+ */
+function readClaudeCodeUsage(
+  attributes: Record<string, unknown>,
+): Pick<
+  LLMSpanDetails,
+  "promptTokens" | "completionTokens" | "cacheReadTokens" | "cacheWriteTokens"
+> {
+  if (!isClaudeCodeLLMRequest(attributes)) return {};
+  const input = num(attributes.input_tokens);
+  const cacheReadTokens = num(attributes.cache_read_tokens);
+  const cacheWriteTokens = num(attributes.cache_creation_tokens);
+  return {
+    ...(input !== undefined && {
+      promptTokens: input + (cacheReadTokens ?? 0) + (cacheWriteTokens ?? 0),
+    }),
+    completionTokens: num(attributes.output_tokens),
+    cacheReadTokens,
+    cacheWriteTokens,
+  };
+}
+
+/**
+ * The prompt that started a Claude Code interaction, recorded (when
+ * `OTEL_LOG_USER_PROMPTS` is set) as `user_prompt` on its `interaction` span.
+ */
+function readClaudeCodeUserPrompt(
+  attributes: Record<string, unknown>,
+): SpanMessage[] | undefined {
+  const prompt = str(attributes.user_prompt);
+  return attributes["span.type"] === "interaction" && prompt
+    ? [{ role: "user", content: prompt }]
+    : undefined;
 }
 
 /** Where the Vercel AI SDK (≤ v6) records `experimental_telemetry.metadata`. */
@@ -347,24 +398,31 @@ export function readLLM(
     str(attributes["gen_ai.response.model"]) ??
     str(attributes["gen_ai.request.model"]);
   const finishReason = readFinishReason(attributes);
-  // Token usage: OTel GenAI semconv keys, falling back to the Vercel AI SDK's
-  // and the two `gen_ai.usage.{prompt,completion}_tokens` fallbacks Workshop
-  // added for SDKs that predate the semconv's `input`/`output` rename.
+  const effort = isClaudeCodeLLMRequest(attributes)
+    ? str(attributes.effort)
+    : undefined;
+  // Token usage: OTel GenAI semconv keys, falling back to the Vercel AI SDK's,
+  // the two `gen_ai.usage.{prompt,completion}_tokens` fallbacks Workshop
+  // added for SDKs that predate the semconv's `input`/`output` rename, and
+  // Claude Code's own.
+  const claudeCode = readClaudeCodeUsage(attributes);
   const promptTokens =
     num(attributes["gen_ai.usage.input_tokens"]) ??
     num(attributes["gen_ai.usage.prompt_tokens"]) ??
-    num(attributes["ai.usage.promptTokens"]);
+    num(attributes["ai.usage.promptTokens"]) ??
+    claudeCode.promptTokens;
   const completionTokens =
     num(attributes["gen_ai.usage.output_tokens"]) ??
     num(attributes["gen_ai.usage.completion_tokens"]) ??
-    num(attributes["ai.usage.completionTokens"]);
+    num(attributes["ai.usage.completionTokens"]) ??
+    claudeCode.completionTokens;
   // Both are counted in `promptTokens` too, per the OTel GenAI semconv.
-  const cacheReadTokens = num(
-    attributes["gen_ai.usage.cache_read.input_tokens"],
-  );
-  const cacheWriteTokens = num(
-    attributes["gen_ai.usage.cache_creation.input_tokens"],
-  );
+  const cacheReadTokens =
+    num(attributes["gen_ai.usage.cache_read.input_tokens"]) ??
+    claudeCode.cacheReadTokens;
+  const cacheWriteTokens =
+    num(attributes["gen_ai.usage.cache_creation.input_tokens"]) ??
+    claudeCode.cacheWriteTokens;
   // Input/output: the OTel GenAI semconv uses `gen_ai.{input,output}.messages`,
   // but the Vercel AI SDK instead emits `ai.prompt.messages` (a JSON message
   // array) and `ai.response.text` (a plain string). Support both.
@@ -375,7 +433,11 @@ export function readLLM(
     attributes["gen_ai.input.messages"] ?? attributes["ai.prompt.messages"],
   );
   const evaluation = readEvaluation(attributes);
-  const input = jsonInput ?? evaluation.input ?? messages;
+  const input =
+    jsonInput ??
+    evaluation.input ??
+    messages ??
+    readClaudeCodeUserPrompt(attributes);
   const jsonOutput =
     tryParseJson(attributes["evalution.llm.output"]) ?? evaluation.output;
   const text =
@@ -409,6 +471,7 @@ export function readLLM(
     !provider &&
     !model &&
     !finishReason &&
+    !effort &&
     !promptTokens &&
     !completionTokens &&
     !input &&
@@ -423,6 +486,7 @@ export function readLLM(
     ...(provider && { provider }),
     ...(model && { model }),
     ...(finishReason && { finishReason }),
+    ...(effort && { effort }),
     ...(input && { input }),
     ...(output !== undefined && output !== "" && { output }),
     ...(reasoning && { reasoning }),

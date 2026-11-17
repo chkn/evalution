@@ -46,4 +46,37 @@ describe("ChatFlow", () => {
     ]);
     expect(html).not.toContain("message-reasoning");
   });
+
+  it("opens with the user prompt an agent span was given", () => {
+    const html = render([
+      makeSpan("agent", {
+        kind: "AGENT",
+        llm: { input: [{ role: "user", content: "Explore the repo." }] },
+      }),
+      makeSpan("turn", {
+        kind: "LLM",
+        parentId: "agent",
+        startTime: 1,
+        llm: { output: "On it." },
+      }),
+    ]);
+    expect(html).toContain("chat-bubble-role-user");
+    expect(html.indexOf("Explore the repo.")).toBeLessThan(
+      html.indexOf("On it."),
+    );
+  });
+
+  it("doesn't repeat the user prompt a later turn re-sends", () => {
+    const prompt = { role: "user", content: "Explore the repo." };
+    const html = render([
+      makeSpan("agent", { kind: "AGENT", llm: { input: [prompt] } }),
+      makeSpan("turn", {
+        kind: "LLM",
+        parentId: "agent",
+        startTime: 1,
+        llm: { input: [prompt], output: "On it." },
+      }),
+    ]);
+    expect(html.split("Explore the repo.")).toHaveLength(2);
+  });
 });

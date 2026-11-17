@@ -15,6 +15,7 @@ import {
 import {
   CalendarIcon,
   CostIcon,
+  EffortIcon,
   FlagIcon,
   ModelIcon,
   ProviderIcon,
@@ -93,6 +94,13 @@ export function SpanDetails({
   }
   if (llm?.model) {
     provenance.push({ label: "Model", icon: <ModelIcon />, value: llm.model });
+  }
+  if (llm?.effort) {
+    provenance.push({
+      label: "Effort",
+      icon: <EffortIcon />,
+      value: llm.effort,
+    });
   }
   if (llm?.promptTokens !== undefined || llm?.completionTokens !== undefined) {
     const prompt = llm.promptTokens ?? 0;

@@ -144,6 +144,35 @@ export function runTraceProviderContractTests(
       );
     });
 
+    it("summarizes the effort every LLM span shares", async () => {
+      const provider = await makeProvider();
+      await provider.recordSpanStart(rootSpan("t1", { kind: "AGENT" }));
+      for (const [id, effort] of [
+        ["a", "high"],
+        ["b", "high"],
+      ]) {
+        await provider.recordSpanStart({
+          ...rootSpan("t1"),
+          id,
+          parentId: "t1:root",
+          llm: { effort },
+        });
+      }
+      await provider.recordSpanStart(
+        rootSpan("t2", { llm: { effort: "low" } }),
+      );
+      await provider.recordSpanStart({
+        ...rootSpan("t2"),
+        id: "b",
+        parentId: "t2:root",
+        llm: { effort: "high" },
+      });
+
+      const summaries = (await provider.getAllTraces()) as any[];
+      expect(summaries.find(s => s.id === "t1").effort).toBe("high");
+      expect(summaries.find(s => s.id === "t2")).not.toHaveProperty("effort");
+    });
+
     it("does not create a trace for a non-root span", async () => {
       const provider = await makeProvider();
       const child = rootSpan("t1", { id: "t1:child", parentId: "t1:root" });

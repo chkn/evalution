@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { describe, expect, it } from "vitest";
+import { CostFetchingTraceSink } from "./cost-fetching-trace-sink.ts";
 import { MemoryTraceProvider } from "./memory-trace-provider.ts";
 import type { NormalizedOtlpSpan } from "./otlp/normalize.ts";
 import { OtlpTraceIngestor } from "./otlp-trace-ingestor.ts";
@@ -119,6 +120,54 @@ describe("OtlpTraceIngestor", () => {
     expect(s?.kind).toBe("LLM");
     expect(s?.llm?.model).toBe("gpt-4o");
     expect(s?.llm?.totalTokens).toBe(12);
+  });
+
+  it("costs a Claude Code llm_request span", async () => {
+    const ingestor = new OtlpTraceIngestor();
+    const provider = new MemoryTraceProvider();
+    const costSink = new CostFetchingTraceSink({
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "anthropic/claude-sonnet-5-5",
+                pricing: {
+                  input: "0.000003",
+                  output: "0.000015",
+                  input_cache_read: "0.0000003",
+                  input_cache_write: "0.00000375",
+                },
+              },
+            ],
+          }),
+        ),
+    });
+    costSink.addSink(provider);
+    ingestor.addSink(costSink);
+
+    await ingestor.ingest([
+      span({
+        name: "claude_code.llm_request",
+        endTimeMs: 10,
+        statusCode: "ok",
+        attributes: {
+          "span.type": "llm_request",
+          "gen_ai.request.model": "claude-sonnet-5-5",
+          input_tokens: 2,
+          output_tokens: 369,
+          cache_read_tokens: 11507,
+          cache_creation_tokens: 6592,
+        },
+      }),
+    ]);
+
+    const s = (await provider.getTrace("t1"))?.spans[0];
+    expect(s?.kind).toBe("LLM");
+    expect(s?.llm?.cost?.prompt).toBeCloseTo(
+      2 * 0.000003 + 11507 * 0.0000003 + 6592 * 0.00000375,
+    );
+    expect(s?.llm?.cost?.completion).toBeCloseTo(369 * 0.000015);
   });
 
   it("maps tool-call attributes into ToolSpanDetails", async () => {

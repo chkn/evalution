@@ -137,6 +137,16 @@ export function hasOutput(llm: LLMSpanDetails | undefined): boolean {
 }
 
 /**
+ * For `ChatFlow`: the prompt an `AGENT` span was given, as messages — a Claude
+ * Code interaction's user prompt, say — or `undefined` if it records none.
+ */
+export function agentPrompt(span: Span): SpanMessage[] | undefined {
+  if (span.kind !== "AGENT") return undefined;
+  const messages = spanMessages(span.llm);
+  return messages?.length ? messages : undefined;
+}
+
+/**
  * For `ChatFlow`'s linear thread: maps each `LLM` row's span id to the
  * suffix of its input messages not already shown by an earlier turn. An `LLM`
  * span's `messages` is the *full* conversation sent to the model, so a later
@@ -145,11 +155,15 @@ export function hasOutput(llm: LLMSpanDetails | undefined): boolean {
  * turn's `messages` folds back in as an assistant message once the
  * conversation continues. This trims that repeated prefix, counting a prior
  * turn's `output` or `reasoning` (if any) as one extra already-shown message.
+ * An agent's prompt ({@link agentPrompt}) counts as already shown too, since
+ * `ChatFlow` renders it ahead of the turns.
  */
 export function newMessagesByTurn(rows: Row[]): Map<string, SpanMessage[]> {
   const result = new Map<string, SpanMessage[]>();
   let shownCount = 0;
   for (const row of rows) {
+    const prompt = agentPrompt(row.span);
+    if (prompt) shownCount = Math.max(shownCount, prompt.length);
     if (row.span.kind !== "LLM") continue;
     const allMessages = spanMessages(row.span.llm) ?? [];
     result.set(row.span.id, allMessages.slice(shownCount));

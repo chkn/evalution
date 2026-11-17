@@ -63,5 +63,14 @@ export const bundledMigrations: MigrationMeta[] = [
     "sql": [
       "-- SPDX\u002DLicense-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nALTER TABLE `spans` ADD `llm_reasoning` text;"
     ]
+  },
+  {
+    "name": "20261117095006_fine_eddie_brock",
+    "hash": "a6c2b2b2f851201bf04fcab9b054dba333436138dbbf40f179df11ffc8f83dd4",
+    "folderMillis": 1794909006000,
+    "bps": true,
+    "sql": [
+      "-- SPDX\u002DLicense-Identifier: AGPL-3.0-only\n-- Copyright (c) 2026 Alexander Corrado\n\nALTER TABLE `spans` ADD `llm_effort` text;"
+    ]
   }
 ];

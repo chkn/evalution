@@ -2,10 +2,10 @@
 // Copyright (c) 2026 Alexander Corrado
 
 /**
- * Linear conversation view: walks the span tree and renders each `LLM`
- * span's messages/output and each `TOOL` span's call as one continuous
- * thread, instead of having to expand each row in the flame view one at a
- * time.
+ * Linear conversation view: walks the span tree and renders each `AGENT`
+ * span's prompt, each `LLM` span's messages/output and each `TOOL` span's
+ * call as one continuous thread, instead of having to expand each row in the
+ * flame view one at a time.
  *
  * Scoped down from Workshop's `ChatFlow.tsx`: that version is built around
  * *live token-delta* events from Workshop's own websocket protocol
@@ -32,6 +32,7 @@ import { MessageList, ReasoningBlock } from "./MessageList.tsx";
 import { renderOutput } from "./output-renderers.tsx";
 import type { Row } from "./rows.ts";
 import {
+  agentPrompt,
   chatMessages,
   countSpanAnnotations,
   hasOutput,
@@ -136,6 +137,32 @@ function ChatLLMBlock({
       <AnnotationCountBadges
         counts={countSpanAnnotations(annotations, [span])}
       />
+    </div>
+  );
+}
+
+/**
+ * The prompt an `AGENT` span was given ({@link agentPrompt}), opening its
+ * part of the thread. Only the prompt: an agent's output, where it records
+ * one, repeats its last turn's.
+ */
+function ChatPromptBlock({
+  row,
+  selected,
+  onSelect,
+}: {
+  row: Row;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const { span } = row;
+  return (
+    <div
+      className={`chat-turn${selected ? " chat-turn-selected" : ""}`}
+      data-span-id={span.id}
+      onClick={onSelect}
+    >
+      <MessageList messages={agentPrompt(span) ?? []} variant="bubble" />
     </div>
   );
 }
@@ -267,7 +294,7 @@ export function ChatFlow({
   const containerRef = useRef<HTMLDivElement>(null);
   const rows = runRows(allRows);
   const blocks = rows.filter(
-    r => r.span.kind === "LLM" || r.span.kind === "TOOL",
+    r => r.span.kind === "LLM" || r.span.kind === "TOOL" || agentPrompt(r.span),
   );
 
   useEffect(() => {
@@ -288,7 +315,14 @@ export function ChatFlow({
   return (
     <div className="chat-flow" ref={containerRef}>
       {blocks.map(row =>
-        row.span.kind === "LLM" ? (
+        row.span.kind === "AGENT" ? (
+          <ChatPromptBlock
+            key={row.span.id}
+            row={row}
+            selected={row.span.id === selectedSpanId}
+            onSelect={() => onSelectSpan(row.span.id)}
+          />
+        ) : row.span.kind === "LLM" ? (
           <ChatLLMBlock
             key={row.span.id}
             row={row}

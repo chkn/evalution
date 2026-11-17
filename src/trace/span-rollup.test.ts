@@ -107,4 +107,21 @@ describe("rollupSpans", () => {
     const result = rollupSpans([llmSpan("a", { totalTokens: 5 })]);
     expect(result.model).toBeUndefined();
   });
+
+  it("returns the effort every LLM span that reports one shares", () => {
+    const result = rollupSpans([
+      llmSpan("a", { effort: "high" }),
+      llmSpan("b", { effort: "high" }),
+      llmSpan("c", {}),
+    ]);
+    expect(result.effort).toBe("high");
+  });
+
+  it("returns undefined for effort when spans disagree", () => {
+    const result = rollupSpans([
+      llmSpan("a", { effort: "high" }),
+      llmSpan("b", { effort: "low" }),
+    ]);
+    expect(result.effort).toBeUndefined();
+  });
 });

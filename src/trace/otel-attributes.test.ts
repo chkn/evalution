@@ -528,3 +528,56 @@ describe("evalution attributes recorded as telemetry metadata", () => {
     ).toBe("direct#p");
   });
 });
+
+describe("Claude Code spans", () => {
+  // Trimmed from a real `claude_code.llm_request` span. Anthropic counts
+  // `input_tokens` apart from the cache reads and writes.
+  const llmRequest = {
+    "span.type": "llm_request",
+    "gen_ai.provider.name": "anthropic",
+    "gen_ai.request.model": "claude-sonnet-5-5",
+    input_tokens: 2,
+    output_tokens: 369,
+    cache_read_tokens: 11507,
+    cache_creation_tokens: 6592,
+    effort: "high",
+    "gen_ai.response.finish_reasons": ["tool_use"],
+  };
+
+  it("is an LLM span", () => {
+    expect(readKind(llmRequest)).toBe("LLM");
+  });
+
+  it("reads its token usage, counting cache reads and writes as input", () => {
+    const llm = readLLM(llmRequest);
+    expect(llm?.promptTokens).toBe(2 + 11507 + 6592);
+    expect(llm?.completionTokens).toBe(369);
+    expect(llm?.totalTokens).toBe(2 + 11507 + 6592 + 369);
+    expect(llm?.cacheReadTokens).toBe(11507);
+    expect(llm?.cacheWriteTokens).toBe(6592);
+  });
+
+  it("reads the effort level", () => {
+    expect(readLLM(llmRequest)?.effort).toBe("high");
+  });
+
+  it("ignores those bare attribute names on any other span", () => {
+    const llm = readLLM({
+      input_tokens: 2,
+      output_tokens: 369,
+      effort: "high",
+    });
+    expect(llm).toBeUndefined();
+  });
+
+  it("reads an interaction's user prompt as a user message", () => {
+    const llm = readLLM({
+      "span.type": "interaction",
+      "gen_ai.operation.name": "invoke_agent",
+      user_prompt: "Explore the repo.",
+    });
+    expect(llm?.input).toEqual([
+      { role: "user", content: "Explore the repo." },
+    ]);
+  });
+});

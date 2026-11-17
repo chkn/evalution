@@ -209,6 +209,10 @@ const COLUMN_DEFS: Record<
     cell: t => t.model ?? "—",
     sortValue: t => t.model,
   },
+  effort: {
+    cell: t => t.effort ?? "—",
+    sortValue: t => t.effort,
+  },
   environment: {
     cell: t => t.environment ?? "—",
     sortValue: t => t.environment,

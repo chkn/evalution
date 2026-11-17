@@ -173,6 +173,11 @@ export interface LLMSpanDetails {
    * (`stop`, `length`, `tool-calls`, …). Not normalized across providers.
    */
   finishReason?: string;
+  /**
+   * How much effort the model was asked to spend on the call (`low`,
+   * `medium`, `high`, …), as the provider or SDK reports it.
+   */
+  effort?: string;
 
   // -- prompt info --
   /**
@@ -362,6 +367,11 @@ export interface TraceSummary extends TraceBase {
   cost?: number;
   /** The model name, if every LLM span that reports one reports the same one. */
   model?: string;
+  /**
+   * The effort level ({@link LLMSpanDetails.effort}), if every LLM span that
+   * reports one reports the same one.
+   */
+  effort?: string;
   /** The prompt version the run executed against (`PromptID.version`). */
   promptVersion?: string;
   /** The prompt variation the run applied (`PromptID.variation`). */

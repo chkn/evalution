@@ -21,6 +21,7 @@ export interface SpanRollup {
   totalTokens?: number;
   cost?: number;
   model?: string;
+  effort?: string;
   promptVersion?: string;
   promptVariation?: string;
   environment?: string;
@@ -75,6 +76,10 @@ export function rollupSpans(spans: Span[]): SpanRollup {
     runSpans.map(s => s.llm?.model).filter((m): m is string => !!m),
   );
   const model = models.size === 1 ? [...models][0] : undefined;
+  const efforts = new Set(
+    runSpans.map(s => s.llm?.effort).filter((e): e is string => !!e),
+  );
+  const effort = efforts.size === 1 ? [...efforts][0] : undefined;
 
   // The run's prompt reference sits on its root span; any span that carries
   // one names the same run, so the first is as good as any.
@@ -90,6 +95,7 @@ export function rollupSpans(spans: Span[]): SpanRollup {
     totalTokens,
     cost,
     model,
+    ...(effort && { effort }),
     ...(typeof environment === "string" && { environment }),
     ...(prompt?.version && { promptVersion: prompt.version }),
     ...(prompt?.variation && { promptVariation: prompt.variation }),

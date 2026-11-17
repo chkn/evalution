@@ -66,6 +66,21 @@ describe("filterTraces", () => {
     ]);
   });
 
+  it("matches traces by effort", () => {
+    const traces = [
+      trace("a", { effort: "high" }),
+      trace("b", { effort: "low" }),
+      trace("c"),
+    ];
+    expect(
+      ids(
+        filterTraces(traces, {
+          filters: [{ column: "effort", op: "in", values: ["high", null] }],
+        }),
+      ),
+    ).toEqual(["a", "c"]);
+  });
+
   it("matches number columns by half-open range, or by having no value", () => {
     const traces = [
       trace("fast", { startTime: 0, endTime: 500 }),
@@ -201,6 +216,20 @@ describe("groupTraceSummaries", () => {
         count: 1,
         summary: expect.not.objectContaining({ model: expect.anything() }),
       },
+    ]);
+  });
+
+  it("groups by effort, summarizing the effort a group shares", () => {
+    const groups = groupTraceSummaries(
+      [trace("a", { effort: "high" }), trace("b", { effort: "high" })],
+      { column: "effort" },
+    );
+    expect(groups).toEqual([
+      expect.objectContaining({
+        filter: { column: "effort", op: "in", values: ["high"] },
+        count: 2,
+        summary: expect.objectContaining({ effort: "high" }),
+      }),
     ]);
   });
 

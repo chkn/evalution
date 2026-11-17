@@ -80,6 +80,7 @@ function spanToRow(span: Span) {
     llmProvider: span.llm?.provider ?? null,
     llmModel: span.llm?.model ?? null,
     llmFinishReason: span.llm?.finishReason ?? null,
+    llmEffort: span.llm?.effort ?? null,
     llmPromptTokens: span.llm?.promptTokens ?? null,
     llmCompletionTokens: span.llm?.completionTokens ?? null,
     llmTotalTokens: span.llm?.totalTokens ?? null,
@@ -108,6 +109,7 @@ function rowToSpan(row: typeof spans.$inferSelect): Span {
     ...(row.llmProvider && { provider: row.llmProvider }),
     ...(row.llmModel && { model: row.llmModel }),
     ...(row.llmFinishReason && { finishReason: row.llmFinishReason }),
+    ...(row.llmEffort && { effort: row.llmEffort }),
     ...(row.llmPromptTokens != null && { promptTokens: row.llmPromptTokens }),
     ...(row.llmCompletionTokens != null && {
       completionTokens: row.llmCompletionTokens,
@@ -273,12 +275,12 @@ export class TursoTraceProvider extends BaseTraceProvider {
     // NULL — when a span reports no token usage at all. `cost` sums
     // `llm_cost_prompt + llm_cost_completion`, NULL (and so excluded) unless a
     // span set both. `model` is the one model every model-reporting span
-    // agrees on (`model_count = 1`), else NULL. `promptVersion` and
-    // `promptVariation` come off whichever span recorded the run's prompt
-    // reference — its root, in practice. `environment` is the root span's
-    // resource's `deployment.environment.name`. Usage and the prompt reference
-    // count only the run's own spans — `ofRun` — not what an eval check
-    // recorded while judging it (`isCheckSpan`).
+    // agrees on (`model_count = 1`), else NULL, and `effort` likewise.
+    // `promptVersion` and `promptVariation` come off whichever span recorded
+    // the run's prompt reference — its root, in practice. `environment` is the
+    // root span's resource's `deployment.environment.name`. Usage and the
+    // prompt reference count only the run's own spans — `ofRun` — not what an
+    // eval check recorded while judging it (`isCheckSpan`).
     const ofRun = (value: SQL) =>
       sql`case when json_extract(${spans.attributes}, ${`$."${CHECK_ATTRIBUTE}"`}) is null then ${value} end`;
     const spanRollups = this.db
@@ -296,6 +298,10 @@ export class TursoTraceProvider extends BaseTraceProvider {
           "modelCount",
         ),
         model: sql`min(${ofRun(sql`${spans.llmModel}`)})`.as("model"),
+        effortCount: sql`count(distinct ${ofRun(sql`${spans.llmEffort}`)})`.as(
+          "effortCount",
+        ),
+        effort: sql`min(${ofRun(sql`${spans.llmEffort}`)})`.as("effort"),
         promptVersion:
           sql`min(${ofRun(sql`json_extract(${spans.prompt}, '$.version')`)})`.as(
             "promptVersion",
@@ -344,6 +350,8 @@ export class TursoTraceProvider extends BaseTraceProvider {
         cost: sql<number | null>`${spanRollups.cost}`,
         modelCount: sql<number>`coalesce(${spanRollups.modelCount}, 0)`,
         model: sql<string | null>`${spanRollups.model}`,
+        effortCount: sql<number>`coalesce(${spanRollups.effortCount}, 0)`,
+        effort: sql<string | null>`${spanRollups.effort}`,
         promptVersion: sql<string | null>`${spanRollups.promptVersion}`,
         promptVariation: sql<string | null>`${spanRollups.promptVariation}`,
         environment: sql<string | null>`${spanRollups.environment}`,
@@ -370,6 +378,8 @@ export class TursoTraceProvider extends BaseTraceProvider {
       ...(row.cost != null && { cost: Number(row.cost) }),
       ...(Number(row.modelCount) === 1 &&
         row.model != null && { model: row.model }),
+      ...(Number(row.effortCount) === 1 &&
+        row.effort != null && { effort: row.effort }),
       ...(row.promptVersion != null && { promptVersion: row.promptVersion }),
       ...(row.promptVariation != null && {
         promptVariation: row.promptVariation,

@@ -343,6 +343,27 @@ export function ModelIcon() {
   );
 }
 
+/** A gauge with its needle past halfway — a model call's effort level. */
+export function EffortIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3.5 17a9 9 0 1 1 17 0" />
+      <line x1="12" y1="15" x2="16.5" y2="9" />
+      <circle cx="12" cy="15" r="1" />
+    </svg>
+  );
+}
+
 /** A tag — the annotations column in the trace list. */
 export function AnnotationsIcon() {
   return (

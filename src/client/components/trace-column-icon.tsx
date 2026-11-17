@@ -6,6 +6,7 @@ import {
   AnnotationsIcon,
   CalendarIcon,
   CostIcon,
+  EffortIcon,
   EnvironmentIcon,
   EvalsIcon,
   ModelIcon,
@@ -29,6 +30,8 @@ export function traceColumnIcon(key: TraceQueryColumn) {
       return <TokensIcon />;
     case "model":
       return <ModelIcon />;
+    case "effort":
+      return <EffortIcon />;
     case "environment":
       return <EnvironmentIcon />;
     case "cost":

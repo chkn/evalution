@@ -15,6 +15,7 @@ export type TraceTextColumn =
   | "name"
   | "status"
   | "model"
+  | "effort"
   | "environment"
   | "annotations"
   | "checks"
@@ -36,6 +37,7 @@ const TEXT_COLUMNS: readonly TraceTextColumn[] = [
   "name",
   "status",
   "model",
+  "effort",
   "environment",
   "annotations",
   "checks",
@@ -178,6 +180,8 @@ export function traceTextValue(
       return trace.status;
     case "model":
       return trace.model ?? null;
+    case "effort":
+      return trace.effort ?? null;
     case "environment":
       return trace.environment ?? null;
     case "version":
@@ -490,6 +494,7 @@ export function summarizeTraces(
   const cost = sum(traces.map(t => t.cost));
   const checkCounts = sumCounts(traces.map(t => t.checkCounts));
   const model = shared(traces.map(t => t.model));
+  const effort = shared(traces.map(t => t.effort));
   const environment = shared(traces.map(t => t.environment));
   const promptVersion = shared(traces.map(t => t.promptVersion));
   const promptVariation = shared(traces.map(t => t.promptVariation));
@@ -508,6 +513,7 @@ export function summarizeTraces(
     ...(cost !== undefined && { cost }),
     ...(checkCounts && { checkCounts }),
     ...(model !== undefined && { model }),
+    ...(effort !== undefined && { effort }),
     ...(environment !== undefined && { environment }),
     ...(promptVersion !== undefined && { promptVersion }),
     ...(promptVariation !== undefined && { promptVariation }),

@@ -125,4 +125,17 @@ describe("SpanDetails", () => {
     expect(html).toContain("questions");
     expect(html).not.toContain(">Output<");
   });
+  it("shows the effort level below the model", () => {
+    const html = render(
+      makeSpan("step", {
+        kind: "LLM",
+        llm: { model: "claude-sonnet-5-5", effort: "high" },
+      }),
+    );
+    expect(html).toContain(">Effort<");
+    expect(html.indexOf("claude-sonnet-5-5")).toBeLessThan(
+      html.indexOf(">Effort<"),
+    );
+    expect(html.indexOf(">Effort<")).toBeLessThan(html.indexOf(">high<"));
+  });
 });

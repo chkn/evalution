@@ -39,6 +39,7 @@ CREATE TABLE spans (
   llm_provider          TEXT,           -- e.g. 'openai', 'anthropic'
   llm_model             TEXT,           -- e.g. 'gpt-4o'
   llm_finish_reason     TEXT,           -- e.g. 'stop', 'length', 'tool-calls'
+  llm_effort            TEXT,           -- e.g. 'low', 'medium', 'high'
   llm_prompt_tokens     INTEGER,        -- includes cache reads and writes
   llm_completion_tokens INTEGER,
   llm_total_tokens      INTEGER,
