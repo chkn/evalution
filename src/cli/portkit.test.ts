@@ -199,6 +199,56 @@ describe("preparePortkit", () => {
     expect(startedOnDemand(adoption, startedByPortkit)).toBe(true);
   });
 
+  it("retries until portkit has seen the server listening", async () => {
+    const { state, run } = onDemandPortkit();
+    const sleep = vi.fn(async () => {
+      if (run.mock.calls.length === 2) state.listening = true;
+    });
+
+    const plan = await preparePortkit("/work/app", 4100, {
+      env: startedByPortkit,
+      run,
+      sleep,
+    });
+
+    await expect(plan.adoption()).resolves.toEqual({
+      url: "https://app.evalution.localhost",
+      mode: "on_demand",
+    });
+    expect(run).toHaveBeenCalledTimes(3);
+  });
+
+  it("gives up retrying, keeping the URL", async () => {
+    const { run } = onDemandPortkit();
+
+    const plan = await preparePortkit("/work/app", 4100, {
+      env: startedByPortkit,
+      run,
+      sleep: async () => {},
+    });
+
+    await expect(plan.adoption()).resolves.toEqual({
+      url: "https://app.evalution.localhost",
+      mode: undefined,
+    });
+    expect(run).toHaveBeenCalledTimes(15);
+  });
+
+  it("tries once under portless", async () => {
+    const plan = await preparePortkit("/work/app", 4100, {
+      env: { PORTLESS_URL: "https://less.localhost" },
+      run: missing,
+      sleep: async () => {},
+    });
+    missing.mockClear();
+
+    await expect(plan.adoption()).resolves.toEqual({
+      url: "https://less.localhost",
+      mode: undefined,
+    });
+    expect(missing).toHaveBeenCalledTimes(1);
+  });
+
   it("adopts once however often it's asked", async () => {
     const { state, run } = onDemandPortkit();
     state.listening = true;

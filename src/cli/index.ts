@@ -314,6 +314,9 @@ async function ui(
   // file to appear and restart the server with the real config once it does.
   let server = await startConfiguredServer(rootDir, {}, false, serverOptions);
   await writeServerInfo(rootDir, server.url, "ui");
+  // Register now rather than leave it to `maybeOpen`, which skips asking when
+  // `EVALUTION_NO_OPEN` is set: nothing else would until a config appears.
+  await portkit.adoption();
   await maybeOpen(server.publicUrl);
   console.log(
     `👀 No config found; watching ${path.join(rootDir, ".evalution", "config.ts")} for creation...`,

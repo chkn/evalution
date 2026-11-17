@@ -115,6 +115,13 @@ export async function resolvePublicUrl(
   return url ? { url, mode: adoption?.mode } : undefined;
 }
 
+/**
+ * How long a server portkit started keeps asking it to merge the adoption:
+ * portkit notices the server listening a moment after it does.
+ */
+const MERGE_RETRY_MS = 3000;
+const MERGE_RETRY_INTERVAL_MS = 200;
+
 /** Where a proxy serves the server, from {@link preparePortkit}. */
 export interface PortkitPlan {
   /** Where a proxy serves it, known before it listens. */
@@ -132,25 +139,48 @@ export interface PortkitPlan {
  *
  * A proxy that started this process already said where in its environment,
  * so registering waits for {@link PortkitPlan.adoption}: portkit merges into
- * the record it started this process from only once the server is listening.
- * Otherwise portkit is asked now, as only it knows the URL.
+ * the record it started this process from only once it has seen the server
+ * listening, so a refusal is retried for a moment. Otherwise portkit is asked
+ * now, as only it knows the URL.
  */
 export async function preparePortkit(
   rootDir: string,
   port: number,
-  options: { env?: NodeJS.ProcessEnv; run?: RunCommand } = {},
+  options: {
+    env?: NodeJS.ProcessEnv;
+    run?: RunCommand;
+    /** Waits between attempts; a test's resolves at once. */
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
 ): Promise<PortkitPlan> {
-  const { env = process.env } = options;
+  const {
+    env = process.env,
+    sleep = ms => new Promise(r => setTimeout(r, ms)),
+  } = options;
   const proxied = env.PORTKIT_URL ?? env.PORTLESS_URL;
   if (!proxied) {
     const adoption = await resolvePublicUrl(rootDir, port, options);
     return { publicUrl: adoption?.url, adoption: async () => adoption };
   }
+  const adoptOnceSeen = async () => {
+    // Only portkit sets this, so it's installed and a refusal is worth
+    // retrying. Under another proxy, one attempt is all there is.
+    const attempts = env.PORTKIT_URL
+      ? MERGE_RETRY_MS / MERGE_RETRY_INTERVAL_MS
+      : 1;
+    for (let i = 1; ; i++) {
+      const adoption = await adoptIntoPortkit(rootDir, port, options);
+      if (adoption || i >= attempts) {
+        return { url: proxied, mode: adoption?.mode };
+      }
+      await sleep(MERGE_RETRY_INTERVAL_MS);
+    }
+  };
   let adoption: Promise<PortkitAdoption | undefined> | undefined;
   return {
     publicUrl: proxied,
     adoption: () => {
-      adoption ??= resolvePublicUrl(rootDir, port, options);
+      adoption ??= adoptOnceSeen();
       return adoption;
     },
   };
