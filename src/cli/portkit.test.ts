@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   adoptIntoPortkit,
   portkitServiceName,
+  preparePortkit,
   type RunCommand,
   resolvePublicUrl,
   startedOnDemand,
@@ -145,5 +146,94 @@ describe("resolvePublicUrl", () => {
         run: adopted(),
       }),
     ).resolves.toMatchObject({ url: "https://less.localhost" });
+  });
+});
+
+describe("preparePortkit", () => {
+  /**
+   * Like portkit with an on-demand record that started this process: it
+   * refuses to merge an adoption until the server is listening.
+   */
+  const onDemandPortkit = () => {
+    const state = { listening: false };
+    const run = vi.fn<Parameters<RunCommand>, ReturnType<RunCommand>>(
+      async () => {
+        if (!state.listening) {
+          throw new Error(
+            "portkit: app.evalution.localhost already belongs to a running on demand service on another port; pick another name",
+          );
+        }
+        return {
+          stdout: JSON.stringify({
+            action: "merged",
+            name: "app.evalution",
+            url: "https://app.evalution.localhost",
+            record: { mode: "on_demand" },
+          }),
+        };
+      },
+    );
+    return { state, run };
+  };
+  const startedByPortkit = {
+    PORTKIT_URL: "https://app.evalution.localhost",
+    PORTKIT_HOME: "/pk",
+  };
+
+  it("keeps the on-demand mode by adopting only once the server listens", async () => {
+    const { state, run } = onDemandPortkit();
+
+    const plan = await preparePortkit("/work/app", 4100, {
+      env: startedByPortkit,
+      run,
+    });
+    expect(plan.publicUrl).toBe("https://app.evalution.localhost");
+    expect(run).not.toHaveBeenCalled();
+
+    state.listening = true;
+    const adoption = await plan.adoption();
+    expect(adoption).toEqual({
+      url: "https://app.evalution.localhost",
+      mode: "on_demand",
+    });
+    expect(startedOnDemand(adoption, startedByPortkit)).toBe(true);
+  });
+
+  it("adopts once however often it's asked", async () => {
+    const { state, run } = onDemandPortkit();
+    state.listening = true;
+
+    const plan = await preparePortkit("/work/app", 4100, {
+      env: startedByPortkit,
+      run,
+    });
+    await plan.adoption();
+    await plan.adoption();
+
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks portkit up front when no proxy started it, for the URL", async () => {
+    const run = adopted();
+
+    const plan = await preparePortkit("/work/app", 4100, { env: {}, run });
+
+    expect(plan.publicUrl).toBe("https://app.evalution.localhost");
+    expect(run).toHaveBeenCalledTimes(1);
+    await expect(plan.adoption()).resolves.toEqual({
+      url: "https://app.evalution.localhost",
+      mode: "adopted",
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("has no URL without portkit", async () => {
+    const plan = await preparePortkit("/work/app", 4100, {
+      env: {},
+      run: missing,
+    });
+
+    expect(plan.publicUrl).toBeUndefined();
+    await expect(plan.adoption()).resolves.toBeUndefined();
   });
 });

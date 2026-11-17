@@ -97,6 +97,10 @@ export function startedOnDemand(
  * Registers the server with portkit if it's there, and resolves to where a
  * proxy serves it: the one that started this process, or else the one that
  * just adopted it. `undefined` when no proxy does.
+ *
+ * When portkit started this process, call it only once the server is
+ * listening: until then portkit refuses to merge into its own record, and the
+ * mode is lost. {@link preparePortkit} sees to that.
  */
 export async function resolvePublicUrl(
   rootDir: string,
@@ -109,4 +113,45 @@ export async function resolvePublicUrl(
   // Adopting merges into the record portkit started us from, so its mode is
   // that record's too.
   return url ? { url, mode: adoption?.mode } : undefined;
+}
+
+/** Where a proxy serves the server, from {@link preparePortkit}. */
+export interface PortkitPlan {
+  /** Where a proxy serves it, known before it listens. */
+  publicUrl: string | undefined;
+  /**
+   * Registers it with portkit, if that hasn't happened yet, and resolves to
+   * where portkit serves it and how. Call it once the server is listening;
+   * later calls resolve to the same.
+   */
+  adoption(): Promise<PortkitAdoption | undefined>;
+}
+
+/**
+ * Works out where a proxy will serve the server about to start on `port`.
+ *
+ * A proxy that started this process already said where in its environment,
+ * so registering waits for {@link PortkitPlan.adoption}: portkit merges into
+ * the record it started this process from only once the server is listening.
+ * Otherwise portkit is asked now, as only it knows the URL.
+ */
+export async function preparePortkit(
+  rootDir: string,
+  port: number,
+  options: { env?: NodeJS.ProcessEnv; run?: RunCommand } = {},
+): Promise<PortkitPlan> {
+  const { env = process.env } = options;
+  const proxied = env.PORTKIT_URL ?? env.PORTLESS_URL;
+  if (!proxied) {
+    const adoption = await resolvePublicUrl(rootDir, port, options);
+    return { publicUrl: adoption?.url, adoption: async () => adoption };
+  }
+  let adoption: Promise<PortkitAdoption | undefined> | undefined;
+  return {
+    publicUrl: proxied,
+    adoption: () => {
+      adoption ??= resolvePublicUrl(rootDir, port, options);
+      return adoption;
+    },
+  };
 }

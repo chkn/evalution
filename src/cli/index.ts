@@ -30,7 +30,7 @@ import {
 import { openBrowser } from "./open-browser.ts";
 import {
   type PortkitAdoption,
-  resolvePublicUrl,
+  preparePortkit,
   startedOnDemand,
 } from "./portkit.ts";
 import {
@@ -255,16 +255,22 @@ async function ui(
     port = await findAvailablePort(3000, host);
   }
 
-  // Behind a local HTTPS proxy, the playground is opened through it.
-  const portkit = await resolvePublicUrl(rootDir, port);
-  const publicUrl = portkit?.url;
+  // Behind a local HTTPS proxy, the playground is opened through it. When
+  // portkit started this process, registering with it waits until the server
+  // is listening, so `portkit.adoption()` is only asked for after that.
+  const portkit = await preparePortkit(rootDir, port);
+  const { publicUrl } = portkit;
 
   // Open the browser once the first server is listening. Subsequent restarts
   // (after a config file appears) reuse the same URL, so we don't reopen.
   // `EVALUTION_NO_OPEN` opts out (CI, remote/headless hosts). Portkit
   // starting this for a visit means a browser is already waiting on it.
   const maybeOpen = async (url: string) => {
-    if (process.env.EVALUTION_NO_OPEN || startedOnDemand(portkit)) return;
+    if (
+      process.env.EVALUTION_NO_OPEN ||
+      startedOnDemand(await portkit.adoption())
+    )
+      return;
     await new Promise(r => setTimeout(r, 250));
     openBrowser(url);
   };
@@ -291,7 +297,12 @@ async function ui(
       serverOptions,
     );
     await writeServerInfo(rootDir, handle.url, "ui");
-    cloud = await connectToCloud(rootDir, config, handle.url, portkit);
+    cloud = await connectToCloud(
+      rootDir,
+      config,
+      handle.url,
+      await portkit.adoption(),
+    );
     // Through the cloud when it answered in time, so this browser is
     // remembered as the one on this machine; it lands on the same page.
     await maybeOpen(cloud?.openUrl ?? handle.publicUrl);
@@ -317,7 +328,12 @@ async function ui(
     stopWatching();
     await server.close();
     server = await startConfiguredServer(rootDir, config, true, serverOptions);
-    cloud = await connectToCloud(rootDir, config, server.url, portkit);
+    cloud = await connectToCloud(
+      rootDir,
+      config,
+      server.url,
+      await portkit.adoption(),
+    );
   });
 }
 
