@@ -16,9 +16,8 @@ const isNodeBuiltin = (specifier: string) =>
 describe("evalution/ingest", () => {
   // What Evalution Cloud's ingest consumer bundles. A Worker has no Node
   // built-ins unless it opts into `nodejs_compat`, so none may be imported
-  // statically. Two other kinds are fine: `@evalution/sdk` loads its
-  // Node-only portkit discovery with a dynamic import, and only on Node, and
-  // protobufjs `require`s `fs` inside a `try`, falling back when it throws.
+  // statically. A dynamic import is fine: `@evalution/sdk` loads its
+  // Node-only portkit discovery that way, and only on Node.
   it("bundles for Cloudflare Workers without static Node imports", async () => {
     const result = await build({
       entryPoints: [path.join(import.meta.dirname, "ingest.ts")],

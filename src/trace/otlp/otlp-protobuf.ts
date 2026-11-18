@@ -20,207 +20,344 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //
-// This file is adapted (with the wire decode's `Buffer` type annotation widened
-// to `Uint8Array`) from Workshop's `src/otlp-protobuf.ts`
+// This file was adapted from Workshop's `src/otlp-protobuf.ts`, and now
+// decodes the wire format by hand instead of with protobufjs: protobufjs
+// builds its decoders with `new Function`, which Cloudflare Workers refuse
+// ("Code generation from strings disallowed for this context").
+//
+// The messages it reads, from opentelemetry-proto's trace/v1/trace.proto,
+// common/v1/common.proto and resource/v1/resource.proto (fields this file
+// doesn't list are skipped):
+//
+//   ExportTraceServiceRequest { repeated ResourceSpans resource_spans = 1; }
+//   ResourceSpans   { Resource resource = 1; repeated ScopeSpans scope_spans = 2; }
+//   Resource        { repeated KeyValue attributes = 1; }
+//   ScopeSpans      { InstrumentationScope scope = 1; repeated Span spans = 2; }
+//   InstrumentationScope { string name = 1; string version = 2; }
+//   Span {
+//     bytes trace_id = 1; bytes span_id = 2; string trace_state = 3;
+//     bytes parent_span_id = 4; string name = 5; SpanKind kind = 6;
+//     fixed64 start_time_unix_nano = 7; fixed64 end_time_unix_nano = 8;
+//     repeated KeyValue attributes = 9; repeated Event events = 11;
+//     repeated Link links = 13; Status status = 15;
+//   }
+//   Event  { fixed64 time_unix_nano = 1; string name = 2; repeated KeyValue attributes = 3; }
+//   Link   { bytes trace_id = 1; bytes span_id = 2; repeated KeyValue attributes = 4; }
+//   Status { string message = 2; StatusCode code = 3; }
+//   KeyValue { string key = 1; AnyValue value = 2; }
+//   AnyValue { oneof value {
+//     string string_value = 1; bool bool_value = 2; int64 int_value = 3;
+//     double double_value = 4; ArrayValue array_value = 5;
+//     KeyValueList kvlist_value = 6; bytes bytes_value = 7;
+//   } }
+//   ArrayValue   { repeated AnyValue values = 1; }
+//   KeyValueList { repeated KeyValue values = 1; }
 
-import protobuf from "protobufjs";
+const VARINT = 0;
+const FIXED64 = 1;
+const LENGTH_DELIMITED = 2;
+const FIXED32 = 5;
 
-const OTLP_PROTO = `
-syntax = "proto3";
-package otlp;
+// Lenient, like protobufjs: a bad byte in one string shouldn't drop the batch.
+const utf8 = new TextDecoder();
 
-message AnyValue {
-  oneof value {
-    string string_value = 1;
-    bool bool_value = 2;
-    int64 int_value = 3;
-    double double_value = 4;
-    ArrayValue array_value = 5;
-    KeyValueList kvlist_value = 6;
-    bytes bytes_value = 7;
-  }
-}
-message ArrayValue { repeated AnyValue values = 1; }
-message KeyValueList { repeated KeyValue values = 1; }
-message KeyValue { string key = 1; AnyValue value = 2; }
-message InstrumentationScope {
-  string name = 1;
-  string version = 2;
-  repeated KeyValue attributes = 3;
-  uint32 dropped_attributes_count = 4;
-}
-message Resource {
-  repeated KeyValue attributes = 1;
-  uint32 dropped_attributes_count = 2;
-}
-message Status {
-  reserved 1;
-  string message = 2;
-  enum StatusCode {
-    STATUS_CODE_UNSET = 0;
-    STATUS_CODE_OK = 1;
-    STATUS_CODE_ERROR = 2;
-  }
-  StatusCode code = 3;
-}
-message Span {
-  bytes trace_id = 1;
-  bytes span_id = 2;
-  string trace_state = 3;
-  bytes parent_span_id = 4;
-  fixed32 flags = 16;
-  string name = 5;
-  enum SpanKind {
-    SPAN_KIND_UNSPECIFIED = 0;
-    SPAN_KIND_INTERNAL = 1;
-    SPAN_KIND_SERVER = 2;
-    SPAN_KIND_CLIENT = 3;
-    SPAN_KIND_PRODUCER = 4;
-    SPAN_KIND_CONSUMER = 5;
-  }
-  SpanKind kind = 6;
-  fixed64 start_time_unix_nano = 7;
-  fixed64 end_time_unix_nano = 8;
-  repeated KeyValue attributes = 9;
-  uint32 dropped_attributes_count = 10;
-  repeated Event events = 11;
-  uint32 dropped_events_count = 12;
-  repeated Link links = 13;
-  uint32 dropped_links_count = 14;
-  Status status = 15;
-  message Event {
-    fixed64 time_unix_nano = 1;
-    string name = 2;
-    repeated KeyValue attributes = 3;
-    uint32 dropped_attributes_count = 4;
-  }
-  message Link {
-    bytes trace_id = 1;
-    bytes span_id = 2;
-    string trace_state = 3;
-    repeated KeyValue attributes = 4;
-    uint32 dropped_attributes_count = 5;
-    fixed32 flags = 6;
-  }
-}
-message ScopeSpans {
-  InstrumentationScope scope = 1;
-  repeated Span spans = 2;
-  string schema_url = 3;
-}
-message ResourceSpans {
-  Resource resource = 1;
-  repeated ScopeSpans scope_spans = 2;
-  string schema_url = 3;
-}
-message ExportTraceServiceRequest {
-  repeated ResourceSpans resource_spans = 1;
-}
-`;
+/** A cursor over one message's bytes. */
+class Reader {
+  private pos = 0;
+  private readonly buf: Uint8Array;
+  private readonly view: DataView;
 
-const root = protobuf.parse(OTLP_PROTO, { keepCase: false }).root;
-const ExportTraceServiceRequest = root.lookupType(
-  "otlp.ExportTraceServiceRequest",
-);
+  constructor(buf: Uint8Array) {
+    this.buf = buf;
+    this.view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  }
+
+  /** Calls `onField` with each field's number and wire type, in order. */
+  forEachField(onField: (field: number, wireType: number) => boolean): void {
+    while (this.pos < this.buf.length) {
+      const tag = this.varint();
+      const field = Number(tag >> 3n);
+      const wireType = Number(tag & 7n);
+      if (field === 0) throw new Error("invalid field number 0");
+      if (!onField(field, wireType)) this.skip(wireType);
+    }
+  }
+
+  varint(): bigint {
+    let result = 0n;
+    for (let shift = 0n; shift < 70n; shift += 7n) {
+      if (this.pos >= this.buf.length) throw new Error("truncated varint");
+      const byte = this.buf[this.pos++]!;
+      result |= BigInt(byte & 0x7f) << shift;
+      if (byte < 0x80) return BigInt.asUintN(64, result);
+    }
+    throw new Error("varint too long");
+  }
+
+  fixed64(): bigint {
+    this.need(8);
+    const value = this.view.getBigUint64(this.pos, true);
+    this.pos += 8;
+    return value;
+  }
+
+  double(): number {
+    this.need(8);
+    const value = this.view.getFloat64(this.pos, true);
+    this.pos += 8;
+    return value;
+  }
+
+  bytes(): Uint8Array {
+    const length = Number(this.varint());
+    this.need(length);
+    const value = this.buf.subarray(this.pos, this.pos + length);
+    this.pos += length;
+    return value;
+  }
+
+  string(): string {
+    return utf8.decode(this.bytes());
+  }
+
+  /** Decodes a length-delimited submessage with `decode`. */
+  message<T>(decode: (r: Reader) => T): T {
+    return decode(new Reader(this.bytes()));
+  }
+
+  private skip(wireType: number): void {
+    switch (wireType) {
+      case VARINT:
+        this.varint();
+        return;
+      case FIXED64:
+        this.need(8);
+        this.pos += 8;
+        return;
+      case LENGTH_DELIMITED:
+        this.bytes();
+        return;
+      case FIXED32:
+        this.need(4);
+        this.pos += 4;
+        return;
+      default:
+        throw new Error(`unsupported wire type ${wireType}`);
+    }
+  }
+
+  private need(length: number): void {
+    if (this.pos + length > this.buf.length) {
+      throw new Error("truncated message");
+    }
+  }
+}
 
 function bytesToHex(bytes: Uint8Array | undefined): string | undefined {
   if (!bytes || bytes.length === 0) return undefined;
   let hex = "";
   for (let i = 0; i < bytes.length; i++) {
-    hex += bytes[i].toString(16).padStart(2, "0");
+    hex += bytes[i]!.toString(16).padStart(2, "0");
   }
   return hex;
 }
 
-// With `{ defaults: false, oneofs: true }`, protobufjs drops scalar oneof
-// fields equal to the proto3 default (false, 0, "") but still sets the
-// virtual `v.value` to the selected alternative name. Check both so
-// zero/false survive.
-function convertAnyValue(v: any): any {
-  if (v == null) return undefined;
-  if (v.stringValue !== undefined || v.value === "stringValue")
-    return { stringValue: v.stringValue ?? "" };
-  if (v.boolValue !== undefined || v.value === "boolValue")
-    return { boolValue: v.boolValue ?? false };
-  if (v.intValue !== undefined || v.value === "intValue")
-    return { intValue: String(v.intValue ?? 0) };
-  if (v.doubleValue !== undefined || v.value === "doubleValue")
-    return { doubleValue: v.doubleValue ?? 0 };
-  if (v.bytesValue !== undefined || v.value === "bytesValue")
-    return { stringValue: bytesToHex(v.bytesValue) ?? "" };
-  if (v.arrayValue !== undefined || v.value === "arrayValue") {
-    return {
-      arrayValue: { values: (v.arrayValue?.values ?? []).map(convertAnyValue) },
-    };
-  }
-  if (v.kvlistValue !== undefined || v.value === "kvlistValue") {
-    return {
-      kvlistValue: {
-        values: (v.kvlistValue?.values ?? []).map(convertKeyValue),
-      },
-    };
-  }
-  return undefined;
+// The OTLP/JSON shapes these return: camelCase keys, hex ids, and 64-bit
+// values as decimal strings.
+
+function decodeAnyValue(r: Reader): any {
+  // A oneof: when a sender writes more than one alternative, the last wins.
+  let value: any;
+  r.forEachField((field, wireType) => {
+    if (field === 1 && wireType === LENGTH_DELIMITED)
+      value = { stringValue: r.string() };
+    else if (field === 2 && wireType === VARINT)
+      value = { boolValue: r.varint() !== 0n };
+    else if (field === 3 && wireType === VARINT)
+      value = { intValue: String(BigInt.asIntN(64, r.varint())) };
+    else if (field === 4 && wireType === FIXED64)
+      value = { doubleValue: r.double() };
+    else if (field === 5 && wireType === LENGTH_DELIMITED)
+      value = {
+        arrayValue: { values: r.message(decodeRepeated(decodeAnyValue)) },
+      };
+    else if (field === 6 && wireType === LENGTH_DELIMITED)
+      value = {
+        kvlistValue: { values: r.message(decodeRepeated(decodeKeyValue)) },
+      };
+    else if (field === 7 && wireType === LENGTH_DELIMITED)
+      value = { stringValue: bytesToHex(r.bytes()) ?? "" };
+    else return false;
+    return true;
+  });
+  return value;
 }
 
-function convertKeyValue(kv: any): any {
-  return { key: kv.key ?? "", value: convertAnyValue(kv.value) };
-}
-
-function convertSpan(s: any): any {
-  return {
-    traceId: bytesToHex(s.traceId) ?? "",
-    spanId: bytesToHex(s.spanId) ?? "",
-    parentSpanId: bytesToHex(s.parentSpanId),
-    traceState: s.traceState,
-    name: s.name ?? "",
-    kind: typeof s.kind === "number" ? s.kind : 0,
-    startTimeUnixNano: String(s.startTimeUnixNano ?? "0"),
-    endTimeUnixNano: String(s.endTimeUnixNano ?? "0"),
-    attributes: (s.attributes ?? []).map(convertKeyValue),
-    events: (s.events ?? []).map((e: any) => ({
-      timeUnixNano: String(e.timeUnixNano ?? "0"),
-      name: e.name ?? "",
-      attributes: (e.attributes ?? []).map(convertKeyValue),
-    })),
-    links: (s.links ?? []).map((l: any) => ({
-      traceId: bytesToHex(l.traceId) ?? "",
-      spanId: bytesToHex(l.spanId) ?? "",
-      attributes: (l.attributes ?? []).map(convertKeyValue),
-    })),
-    status: s.status
-      ? {
-          code: typeof s.status.code === "number" ? s.status.code : 0,
-          message: s.status.message,
-        }
-      : undefined,
+/**
+ * Decodes a message whose one field read here is a repeated submessage at
+ * field 1: `ArrayValue`, `KeyValueList`, `Resource` and
+ * `ExportTraceServiceRequest`.
+ */
+function decodeRepeated<T>(decode: (r: Reader) => T): (r: Reader) => T[] {
+  return r => {
+    const values: T[] = [];
+    r.forEachField((field, wireType) => {
+      if (field !== 1 || wireType !== LENGTH_DELIMITED) return false;
+      values.push(r.message(decode));
+      return true;
+    });
+    return values;
   };
+}
+
+function decodeKeyValue(r: Reader): any {
+  let key = "";
+  let value: any;
+  r.forEachField((field, wireType) => {
+    if (wireType !== LENGTH_DELIMITED) return false;
+    if (field === 1) key = r.string();
+    else if (field === 2) value = r.message(decodeAnyValue);
+    else return false;
+    return true;
+  });
+  return { key, value };
+}
+
+function decodeStatus(r: Reader): any {
+  const status: { code: number; message?: string } = { code: 0 };
+  r.forEachField((field, wireType) => {
+    if (field === 2 && wireType === LENGTH_DELIMITED)
+      status.message = r.string();
+    else if (field === 3 && wireType === VARINT)
+      status.code = Number(BigInt.asIntN(32, r.varint()));
+    else return false;
+    return true;
+  });
+  return status;
+}
+
+function decodeEvent(r: Reader): any {
+  const event = { timeUnixNano: "0", name: "", attributes: [] as any[] };
+  r.forEachField((field, wireType) => {
+    if (field === 1 && wireType === FIXED64)
+      event.timeUnixNano = String(r.fixed64());
+    else if (field === 2 && wireType === LENGTH_DELIMITED)
+      event.name = r.string();
+    else if (field === 3 && wireType === LENGTH_DELIMITED)
+      event.attributes.push(r.message(decodeKeyValue));
+    else return false;
+    return true;
+  });
+  return event;
+}
+
+function decodeLink(r: Reader): any {
+  const link = { traceId: "", spanId: "", attributes: [] as any[] };
+  r.forEachField((field, wireType) => {
+    if (wireType !== LENGTH_DELIMITED) return false;
+    if (field === 1) link.traceId = bytesToHex(r.bytes()) ?? "";
+    else if (field === 2) link.spanId = bytesToHex(r.bytes()) ?? "";
+    else if (field === 4) link.attributes.push(r.message(decodeKeyValue));
+    else return false;
+    return true;
+  });
+  return link;
+}
+
+function decodeSpan(r: Reader): any {
+  const span: any = {
+    traceId: "",
+    spanId: "",
+    parentSpanId: undefined,
+    traceState: undefined,
+    name: "",
+    kind: 0,
+    startTimeUnixNano: "0",
+    endTimeUnixNano: "0",
+    attributes: [],
+    events: [],
+    links: [],
+    status: undefined,
+  };
+  r.forEachField((field, wireType) => {
+    if (wireType === LENGTH_DELIMITED) {
+      if (field === 1) span.traceId = bytesToHex(r.bytes()) ?? "";
+      else if (field === 2) span.spanId = bytesToHex(r.bytes()) ?? "";
+      else if (field === 3) span.traceState = r.string() || undefined;
+      else if (field === 4) span.parentSpanId = bytesToHex(r.bytes());
+      else if (field === 5) span.name = r.string();
+      else if (field === 9) span.attributes.push(r.message(decodeKeyValue));
+      else if (field === 11) span.events.push(r.message(decodeEvent));
+      else if (field === 13) span.links.push(r.message(decodeLink));
+      else if (field === 15) span.status = r.message(decodeStatus);
+      else return false;
+    } else if (field === 6 && wireType === VARINT) {
+      span.kind = Number(BigInt.asIntN(32, r.varint()));
+    } else if (field === 7 && wireType === FIXED64) {
+      span.startTimeUnixNano = String(r.fixed64());
+    } else if (field === 8 && wireType === FIXED64) {
+      span.endTimeUnixNano = String(r.fixed64());
+    } else return false;
+    return true;
+  });
+  return span;
+}
+
+function decodeScope(r: Reader): any {
+  const scope: { name: string; version?: string } = { name: "" };
+  r.forEachField((field, wireType) => {
+    if (wireType !== LENGTH_DELIMITED) return false;
+    if (field === 1) scope.name = r.string();
+    else if (field === 2) scope.version = r.string() || undefined;
+    else return false;
+    return true;
+  });
+  return scope;
+}
+
+function decodeScopeSpans(r: Reader): any {
+  const scopeSpans: { scope?: any; spans: any[] } = {
+    scope: undefined,
+    spans: [],
+  };
+  r.forEachField((field, wireType) => {
+    if (wireType !== LENGTH_DELIMITED) return false;
+    if (field === 1) scopeSpans.scope = r.message(decodeScope);
+    else if (field === 2) scopeSpans.spans.push(r.message(decodeSpan));
+    else return false;
+    return true;
+  });
+  return scopeSpans;
+}
+
+function decodeResource(r: Reader): any {
+  return { attributes: decodeRepeated(decodeKeyValue)(r) };
+}
+
+function decodeResourceSpans(r: Reader): any {
+  const resourceSpans = {
+    resource: { attributes: [] },
+    scopeSpans: [] as any[],
+  };
+  r.forEachField((field, wireType) => {
+    if (wireType !== LENGTH_DELIMITED) return false;
+    if (field === 1) resourceSpans.resource = r.message(decodeResource);
+    else if (field === 2)
+      resourceSpans.scopeSpans.push(r.message(decodeScopeSpans));
+    else return false;
+    return true;
+  });
+  return resourceSpans;
 }
 
 /**
  * Decodes an OTLP/protobuf `ExportTraceServiceRequest` payload into the same
  * plain-object shape as the OTLP/JSON encoding (camelCase keys, hex trace/span
  * ids, stringified 64-bit values) — so `../otlp/normalize.ts` can walk either
- * with one function.
+ * with one function. Throws on a payload that isn't well-formed protobuf.
  */
 export function decodeOtlpProtobuf(buf: Uint8Array): { resourceSpans: any[] } {
-  const decoded = ExportTraceServiceRequest.decode(buf);
-  const obj = ExportTraceServiceRequest.toObject(decoded, {
-    longs: String,
-    bytes: Array,
-    defaults: false,
-    oneofs: true,
-  });
-  const resourceSpans = (obj.resourceSpans ?? []).map((rs: any) => ({
-    resource: rs.resource
-      ? { attributes: (rs.resource.attributes ?? []).map(convertKeyValue) }
-      : { attributes: [] },
-    scopeSpans: (rs.scopeSpans ?? []).map((ss: any) => ({
-      scope: ss.scope
-        ? { name: ss.scope.name ?? "", version: ss.scope.version }
-        : undefined,
-      spans: (ss.spans ?? []).map(convertSpan),
-    })),
-  }));
-  return { resourceSpans };
+  return {
+    resourceSpans: decodeRepeated(decodeResourceSpans)(new Reader(buf)),
+  };
 }

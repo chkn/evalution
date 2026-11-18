@@ -217,9 +217,6 @@ importers:
       minimatch:
         specifier: ^10.2.4
         version: 10.2.5
-      protobufjs:
-        specifier: ^7.5.3
-        version: 7.6.4
       remark-breaks:
         specifier: ^4.0.0
         version: 4.0.0
@@ -314,6 +311,9 @@ importers:
       lucide-react:
         specifier: ^1.43.0
         version: 1.43.0(react@19.2.7)
+      protobufjs:
+        specifier: ^7.6.4
+        version: 7.6.4
       react:
         specifier: ^19.2.0
         version: 19.2.7

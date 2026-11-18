@@ -379,9 +379,10 @@ Storage = the §B `annotations` table; UI inserts default `source:'user'`; agent
 **All of A–D is OSS Phase 0 work.** Order (0a.1 and 0a.4 from the original plan are done):
 
 - **0a Foundations** — (1) ~~Drizzle spike~~ ✅ **passed**, adopt
-  `drizzle-orm/tursodatabase-sync`; (2) confirm `protobufjs`/`decodeOtlpProtobuf` bundle &
-  run under `workerd`; (3) extract shared extractors → `src/trace/otel-attributes.ts`
-  (no-behaviour-change refactor); (4) ~~Fastify→Hono~~ ✅ **done**; (5) **§A.5 multi-part
+  `drizzle-orm/tursodatabase-sync`; (2) ~~confirm `protobufjs`/`decodeOtlpProtobuf` bundle &
+  run under `workerd`~~ ✅ **done**: protobufjs builds its decoders with `new Function`,
+  which Workers refuse, so `decodeOtlpProtobuf` now reads the wire format by hand; (3)
+  extract shared extractors → `src/trace/otel-attributes.ts` (no-behaviour-change refactor); (4) ~~Fastify→Hono~~ ✅ **done**; (5) **§A.5 multi-part
   `SpanMessage.content`** — do this early, it touches a dual-licensed public type and all
   three producers.
 - **0b Persistence** (needs 0a.1): schema + bundled migrations + `runMigrations` via
@@ -421,8 +422,9 @@ a synced-replica client — not Phase 0, but the seams (the handler deps, the in
    local DB. Decide the encryption posture during 0b.
 3. *Cloud push-to-empty-DB is unverified locally* — the local half is proven; schedule one
    integration test against a real Turso account before the cloud phase depends on it.
-4. *Protobuf on Workers* — smoke-test early; the JSON path ships independently;
-   `@bufbuild/protobuf` behind the same `decodeOtlpProtobuf` interface as backup.
+4. *~~Protobuf on Workers~~* — **retired**: protobufjs failed there (no code generation
+   from strings), so `decodeOtlpProtobuf` decodes by hand, with a test that runs it in a
+   V8 context with string code generation off.
 5. *OTLP attribute coverage across SDKs* — port Workshop's key lists (not its adapter class
    hierarchy); unknown → `DEFAULT` with attributes preserved; add per-SDK fixture tests.
 6. *Three-provenance UI divergence* — single `toSpanViewModel` adapter, fixture-tested

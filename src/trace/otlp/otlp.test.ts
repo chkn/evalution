@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2026 Alexander Corrado
 
+import path from "node:path";
+import vm from "node:vm";
+import { build } from "esbuild";
 import protobuf from "protobufjs";
 import { describe, expect, it } from "vitest";
 import { normalizeOtlpRequest } from "./normalize.ts";
@@ -19,20 +22,38 @@ message AnyValue {
     int64 int_value = 3;
     double double_value = 4;
     ArrayValue array_value = 5;
+    KeyValueList kvlist_value = 6;
+    bytes bytes_value = 7;
   }
 }
 message ArrayValue { repeated AnyValue values = 1; }
+message KeyValueList { repeated KeyValue values = 1; }
 message KeyValue { string key = 1; AnyValue value = 2; }
 message Status { string message = 2; int32 code = 3; }
+message Event {
+  fixed64 time_unix_nano = 1;
+  string name = 2;
+  repeated KeyValue attributes = 3;
+}
+message Link {
+  bytes trace_id = 1;
+  bytes span_id = 2;
+  repeated KeyValue attributes = 4;
+}
 message Span {
   bytes trace_id = 1;
   bytes span_id = 2;
   bytes parent_span_id = 4;
   string name = 5;
+  int32 kind = 6;
   fixed64 start_time_unix_nano = 7;
   fixed64 end_time_unix_nano = 8;
   repeated KeyValue attributes = 9;
+  uint32 dropped_attributes_count = 10;
+  repeated Event events = 11;
+  repeated Link links = 13;
   Status status = 15;
+  fixed32 flags = 16;
 }
 message ScopeSpans { repeated Span spans = 2; }
 message Resource { repeated KeyValue attributes = 1; }
@@ -139,6 +160,90 @@ describe("decodeOtlpProtobuf + normalizeOtlpRequest", () => {
     expect(second!.resource).toBeUndefined();
   });
 
+  it("decodes every attribute value type, events and links, and skips unknown fields", () => {
+    const bytes = encodeTestRequest([
+      {
+        traceId: hexToBytes("0102030405060708090a0b0c0d0e0f10"),
+        spanId: hexToBytes("0102030405060708"),
+        name: "tool",
+        kind: 3,
+        droppedAttributesCount: 7,
+        flags: 1,
+        attributes: [
+          { key: "negative", value: { intValue: "-5" } },
+          { key: "zero", value: { intValue: "0" } },
+          { key: "no", value: { boolValue: false } },
+          { key: "empty", value: { stringValue: "" } },
+          { key: "blob", value: { bytesValue: hexToBytes("beef") } },
+          {
+            key: "map",
+            value: {
+              kvlistValue: {
+                values: [{ key: "inner", value: { stringValue: "x" } }],
+              },
+            },
+          },
+        ],
+        events: [
+          {
+            timeUnixNano: "1500000000",
+            name: "retry",
+            attributes: [{ key: "attempt", value: { intValue: "2" } }],
+          },
+        ],
+        links: [
+          {
+            traceId: hexToBytes("11111111111111111111111111111111"),
+            spanId: hexToBytes("2222222222222222"),
+          },
+        ],
+      },
+    ]);
+
+    const [span] =
+      decodeOtlpProtobuf(bytes).resourceSpans[0].scopeSpans[0].spans;
+
+    expect(span.kind).toBe(3);
+    expect(span.attributes).toEqual([
+      { key: "negative", value: { intValue: "-5" } },
+      { key: "zero", value: { intValue: "0" } },
+      { key: "no", value: { boolValue: false } },
+      { key: "empty", value: { stringValue: "" } },
+      { key: "blob", value: { stringValue: "beef" } },
+      {
+        key: "map",
+        value: {
+          kvlistValue: {
+            values: [{ key: "inner", value: { stringValue: "x" } }],
+          },
+        },
+      },
+    ]);
+    expect(span.events).toEqual([
+      {
+        timeUnixNano: "1500000000",
+        name: "retry",
+        attributes: [{ key: "attempt", value: { intValue: "2" } }],
+      },
+    ]);
+    expect(span.links).toEqual([
+      {
+        traceId: "11111111111111111111111111111111",
+        spanId: "2222222222222222",
+        attributes: [],
+      },
+    ]);
+  });
+
+  it("throws on a truncated payload", () => {
+    const bytes = encodeTestRequest([
+      { traceId: hexToBytes("0102030405060708090a0b0c0d0e0f10"), name: "x" },
+    ]);
+    expect(() =>
+      decodeOtlpProtobuf(bytes.subarray(0, bytes.length - 1)),
+    ).toThrow(/truncated/);
+  });
+
   it("normalizes an error status and keeps the message", () => {
     const bytes = encodeTestRequest([
       {
@@ -156,6 +261,42 @@ describe("decodeOtlpProtobuf + normalizeOtlpRequest", () => {
     expect(span.statusMessage).toBe("boom");
     // No end time on the wire → absent, not epoch-zero.
     expect(span.endTimeMs).toBeUndefined();
+  });
+});
+
+describe("decodeOtlpProtobuf on Cloudflare Workers", () => {
+  // Workers refuse `eval` and `new Function`, as does a V8 context with
+  // string code generation off. protobufjs builds its decoders that way.
+  it("decodes where code generation from strings is disallowed", async () => {
+    const result = await build({
+      entryPoints: [path.join(import.meta.dirname, "otlp-protobuf.ts")],
+      bundle: true,
+      write: false,
+      format: "iife",
+      globalName: "otlpProtobuf",
+      platform: "neutral",
+      conditions: ["workerd", "worker", "browser"],
+      mainFields: ["module", "main"],
+      logLevel: "silent",
+    });
+    const context = vm.createContext(
+      { TextDecoder },
+      { codeGeneration: { strings: false, wasm: false } },
+    );
+    vm.runInContext(result.outputFiles[0]!.text, context);
+    const bytes = encodeTestRequest([
+      {
+        traceId: hexToBytes("0102030405060708090a0b0c0d0e0f10"),
+        spanId: hexToBytes("0102030405060708"),
+        name: "chat",
+      },
+    ]);
+
+    const decoded = context.otlpProtobuf.decodeOtlpProtobuf(bytes);
+
+    expect(decoded.resourceSpans[0].scopeSpans[0].spans[0].traceId).toBe(
+      "0102030405060708090a0b0c0d0e0f10",
+    );
   });
 });
 
