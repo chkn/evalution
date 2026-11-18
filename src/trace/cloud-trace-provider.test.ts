@@ -144,6 +144,59 @@ describe("CloudTraceProvider", () => {
     expect(client.listTraces).toHaveBeenCalledTimes(3);
   });
 
+  it("polls less often while nothing changes, and as often again once something does", async () => {
+    const { client, state } = fakeClient([summary("t1")]);
+    const provider = new CloudTraceProvider({
+      client,
+      pollIntervalMs: 1000,
+      maxPollIntervalMs: 4000,
+    });
+    const events: TraceChangeEvent[] = [];
+    provider.watch(e => events.push(e));
+    await vi.advanceTimersByTimeAsync(0);
+    const polls = () => vi.mocked(client.listTraces).mock.calls.length;
+
+    // Quiet polls come after 1s, 2s, 4s, then 4s again.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(polls()).toBe(2);
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(polls()).toBe(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(polls()).toBe(3);
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(polls()).toBe(4);
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(polls()).toBe(5);
+
+    // A change brings it back to every second.
+    state.traces = [summary("t1"), summary("t2")];
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(events).toEqual([{ type: "add", traceId: "t2" }]);
+    expect(polls()).toBe(6);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(polls()).toBe(7);
+  });
+
+  it("polls as often again when someone lists the traces", async () => {
+    const { client } = fakeClient([summary("t1")]);
+    const provider = new CloudTraceProvider({
+      client,
+      pollIntervalMs: 1000,
+      maxPollIntervalMs: 8000,
+    });
+    provider.watch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000 + 2000 + 4000);
+    const polls = () => vi.mocked(client.listTraces).mock.calls.length;
+    expect(polls()).toBe(4);
+
+    // The next poll was 8s off; a listing brings it to 1s from now.
+    await provider.getAllTraces();
+    expect(polls()).toBe(5);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(polls()).toBe(6);
+  });
+
   it("keeps polling through a failure", async () => {
     const { client, state } = fakeClient([summary("t1")]);
     const provider = new CloudTraceProvider({
@@ -159,7 +212,8 @@ describe("CloudTraceProvider", () => {
     await vi.advanceTimersByTimeAsync(1000);
     state.fail = false;
     state.traces = [summary("t1"), summary("t2")];
-    await vi.advanceTimersByTimeAsync(1000);
+    // A failed poll finds nothing new, so the next waits twice as long.
+    await vi.advanceTimersByTimeAsync(2000);
 
     expect(events).toEqual([{ type: "add", traceId: "t2" }]);
   });

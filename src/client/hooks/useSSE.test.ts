@@ -49,6 +49,23 @@ class FakeEventSource {
   }
 }
 
+/** A document whose visibility a test flips by hand. */
+function fakeDocument(initial: DocumentVisibilityState = "visible") {
+  const target = new EventTarget();
+  const doc = Object.assign(target, {
+    visibilityState: initial,
+    hide() {
+      doc.visibilityState = "hidden";
+      target.dispatchEvent(new Event("visibilitychange"));
+    },
+    show() {
+      doc.visibilityState = "visible";
+      target.dispatchEvent(new Event("visibilitychange"));
+    },
+  });
+  return doc;
+}
+
 function setup() {
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
@@ -148,6 +165,79 @@ describe("connectSSE", () => {
 
     expect(instances).toHaveLength(1);
     expect(instances[0].closeCalls).toBe(1);
+  });
+
+  it("closes the stream while the tab stays hidden, and reopens it when shown", () => {
+    // With no stream open the server stops watching trace providers, so a
+    // tab left in the background doesn't poll Evalution Cloud all night.
+    vi.useFakeTimers();
+    const instances = setup();
+    const doc = fakeDocument();
+    const onOpen = vi.fn();
+
+    const close = connectSSE({
+      onMessage: vi.fn(),
+      onOpen,
+      doc,
+      hiddenGraceMs: 60_000,
+    });
+    instances[0].open();
+
+    // A quick look at another tab keeps the stream.
+    doc.hide();
+    vi.advanceTimersByTime(30_000);
+    doc.show();
+    vi.advanceTimersByTime(60_000);
+    expect(instances[0].closeCalls).toBe(0);
+
+    doc.hide();
+    vi.advanceTimersByTime(60_000);
+    expect(instances[0].closeCalls).toBe(1);
+    expect(instances).toHaveLength(1);
+
+    // Coming back reopens it, and the reopen refetches what was missed.
+    doc.show();
+    expect(instances).toHaveLength(2);
+    instances[1].open();
+    expect(onOpen).toHaveBeenCalledTimes(2);
+
+    close();
+    // Nothing reopens it once closed.
+    doc.hide();
+    doc.show();
+    expect(instances).toHaveLength(2);
+  });
+
+  it("doesn't open the stream in a tab that starts hidden until it's shown", () => {
+    vi.useFakeTimers();
+    const instances = setup();
+    const doc = fakeDocument("hidden");
+
+    const close = connectSSE({ onMessage: vi.fn(), doc });
+    expect(instances).toHaveLength(0);
+    doc.show();
+    expect(instances).toHaveLength(1);
+    close();
+  });
+
+  it("doesn't reopen a stream that was closed for being hidden", () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const instances = setup();
+    const doc = fakeDocument();
+
+    const close = connectSSE({
+      onMessage: vi.fn(),
+      doc,
+      hiddenGraceMs: 1000,
+      retryDelaysMs: [500],
+    });
+    instances[0].failClosed();
+    doc.hide();
+    vi.advanceTimersByTime(60_000);
+    // The retry pending when the tab was hidden doesn't count.
+    expect(instances.filter(es => es.readyState !== 2)).toHaveLength(0);
+    close();
   });
 
   it("delivers parsed messages and survives a malformed one", () => {

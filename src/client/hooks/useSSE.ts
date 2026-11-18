@@ -7,6 +7,14 @@ import type { SSEData } from "../../shared/types.ts";
 /** Backoff schedule for reopening a stream the browser gave up on, in ms. */
 const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 
+/** How long a tab stays hidden before its stream is closed, in ms. */
+const HIDDEN_GRACE_MS = 60_000;
+
+/** The document whose visibility {@link connectSSE} follows. */
+export type VisibilitySource = EventTarget & {
+  visibilityState: DocumentVisibilityState;
+};
+
 /** Handlers and test seams for {@link connectSSE}. */
 export interface ConnectSSEOptions {
   /** Invoked for each parsed message. Malformed payloads are logged and skipped. */
@@ -15,6 +23,10 @@ export interface ConnectSSEOptions {
   onOpen?: () => void;
   /** Delays between reconnect attempts; the last one repeats. Exposed for tests. */
   retryDelaysMs?: number[];
+  /** Defaults to the page's `document`, when there is one. Exposed for tests. */
+  doc?: VisibilitySource;
+  /** How long the tab stays hidden before the stream is closed, in ms. */
+  hiddenGraceMs?: number;
 }
 
 /**
@@ -27,14 +39,22 @@ export interface ConnectSSEOptions {
  * spec. Left alone, the page then goes silently stale: no `trace-changed`, no
  * `prompt-changed`, until someone reloads. So a closed stream is reopened here
  * on a backoff instead.
+ *
+ * A tab that stays hidden for `hiddenGraceMs` closes its stream, and opens it
+ * again when it's shown, which refetches through `onOpen`. With no stream
+ * open the server stops watching its trace providers, so a tab left in the
+ * background doesn't keep `CloudTraceProvider` polling Evalution Cloud.
  */
 export function connectSSE({
   onMessage,
   onOpen,
   retryDelaysMs = RETRY_DELAYS_MS,
+  doc = typeof document === "undefined" ? undefined : document,
+  hiddenGraceMs = HIDDEN_GRACE_MS,
 }: ConnectSSEOptions): () => void {
   let eventSource: EventSource | undefined;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let hiddenTimer: ReturnType<typeof setTimeout> | undefined;
   let attempt = 0;
   let closed = false;
 
@@ -65,6 +85,29 @@ export function connectSSE({
     };
   };
 
+  /** Closes the stream, and any reopen pending, until {@link open} again. */
+  const pause = () => {
+    if (retryTimer !== undefined) clearTimeout(retryTimer);
+    retryTimer = undefined;
+    attempt = 0;
+    eventSource?.close();
+    eventSource = undefined;
+  };
+
+  const onVisibility = () => {
+    if (closed || !doc) return;
+    if (doc.visibilityState === "hidden") {
+      hiddenTimer ??= setTimeout(() => {
+        hiddenTimer = undefined;
+        pause();
+      }, hiddenGraceMs);
+      return;
+    }
+    if (hiddenTimer !== undefined) clearTimeout(hiddenTimer);
+    hiddenTimer = undefined;
+    if (!eventSource) open();
+  };
+
   const scheduleReopen = () => {
     if (closed || retryTimer !== undefined) return;
     const delay =
@@ -78,12 +121,14 @@ export function connectSSE({
     }, delay);
   };
 
-  open();
+  if (doc?.visibilityState !== "hidden") open();
+  doc?.addEventListener("visibilitychange", onVisibility);
 
   return () => {
     closed = true;
-    if (retryTimer !== undefined) clearTimeout(retryTimer);
-    eventSource?.close();
+    doc?.removeEventListener("visibilitychange", onVisibility);
+    if (hiddenTimer !== undefined) clearTimeout(hiddenTimer);
+    pause();
   };
 }
 

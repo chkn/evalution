@@ -24,6 +24,9 @@ const DEFAULT_LIMIT = 200;
 /** How often {@link CloudTraceProvider} checks for new traces while watched. */
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
 
+/** The least often {@link CloudTraceProvider} checks while nothing changes. */
+const DEFAULT_MAX_POLL_INTERVAL_MS = 5 * 60_000;
+
 /** The calls {@link CloudTraceProvider} makes of the cloud. */
 export type CloudTraceClient = Pick<
   Evalution,
@@ -48,8 +51,16 @@ export interface CloudTraceProviderOptions {
   limit?: number;
   /** How far back to list traces, in ms. Defaults to a week. */
   windowMs?: number;
-  /** How often to check for new and changed traces while watched, in ms. */
+  /**
+   * How often to check for new and changed traces while watched, in ms.
+   * Defaults to 15s.
+   */
   pollIntervalMs?: number;
+  /**
+   * The longest to wait between checks, in ms: each check that finds nothing
+   * new doubles the wait, up to this. Defaults to 5 minutes.
+   */
+  maxPollIntervalMs?: number;
   /** Where to report a cloud that can't be reached. Defaults to `console`. */
   log?: Pick<Console, "warn">;
 }
@@ -72,7 +83,8 @@ function fingerprint(trace: TraceSummary): string {
  * The project's production traces, read from Evalution Cloud: what the apps
  * you deployed sent with an ingest key. Read-only. There's no live stream of
  * a trace's spans, and no annotations or SQL; {@link watch} polls the cloud
- * for new and changed traces instead.
+ * for new and changed traces instead, less often while nothing changes and
+ * nobody lists the traces, since each poll is a query the cloud pays for.
  *
  * `evalution` adds one of these next to the configured trace providers when
  * `EVALUTION_API_KEY` is a personal key and `.evalution/config.ts` links a
@@ -95,10 +107,17 @@ export class CloudTraceProvider implements TraceProvider {
   private readonly limit: number;
   private readonly windowMs: number;
   private readonly pollIntervalMs: number;
+  private readonly maxPollIntervalMs: number;
   private readonly log: Pick<Console, "warn">;
 
   private watchers = new Set<(event: TraceChangeEvent) => void>();
   private timer: ReturnType<typeof setTimeout> | undefined;
+  /** How long the next poll waits after the one before it, in ms. */
+  private delayMs = 0;
+  /** When the next poll is due, in ms since the epoch. */
+  private dueAt = 0;
+  /** Whether a poll is waiting on the cloud. */
+  private polling = false;
   /** What the last listing returned, by id, as {@link fingerprint}s. */
   private known: Map<string, string> | undefined;
   private lastListed: TraceSummary[] = [];
@@ -115,10 +134,15 @@ export class CloudTraceProvider implements TraceProvider {
     this.limit = options.limit ?? DEFAULT_LIMIT;
     this.windowMs = options.windowMs ?? DEFAULT_WINDOW_MS;
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    this.maxPollIntervalMs = Math.max(
+      this.pollIntervalMs,
+      options.maxPollIntervalMs ?? DEFAULT_MAX_POLL_INTERVAL_MS,
+    );
     this.log = options.log ?? console;
   }
 
   async getAllTraces(query?: TraceQuery): Promise<TraceSummary[]> {
+    this.hurry();
     try {
       return await this.list(query);
     } catch {
@@ -134,6 +158,7 @@ export class CloudTraceProvider implements TraceProvider {
    * grouped instead.
    */
   async groupTraces(query: TraceGroupQuery): Promise<TraceGroup[]> {
+    this.hurry();
     try {
       const groups = await this.client.listTraceGroups({
         ...this.window(),
@@ -172,7 +197,10 @@ export class CloudTraceProvider implements TraceProvider {
    */
   watch(callback: (event: TraceChangeEvent) => void): () => void {
     this.watchers.add(callback);
-    if (this.watchers.size === 1) this.schedule(0);
+    if (this.watchers.size === 1) {
+      this.delayMs = this.pollIntervalMs;
+      this.schedule(0);
+    }
     return () => {
       this.watchers.delete(callback);
       if (this.watchers.size === 0) {
@@ -236,23 +264,52 @@ export class CloudTraceProvider implements TraceProvider {
     // watcher starts from rather than news.
     if (this.watchers.size > 0) this.known = current;
     if (!previous || this.watchers.size === 0) return;
+    const events: TraceChangeEvent[] = [];
     for (const [traceId, print] of current) {
       const before = previous.get(traceId);
-      if (before === undefined) this.emit({ type: "add", traceId });
-      else if (before !== print) this.emit({ type: "update", traceId });
+      if (before === undefined) events.push({ type: "add", traceId });
+      else if (before !== print) events.push({ type: "update", traceId });
     }
     for (const traceId of previous.keys()) {
-      if (!current.has(traceId)) this.emit({ type: "remove", traceId });
+      if (!current.has(traceId)) events.push({ type: "remove", traceId });
     }
+    // Something changing is a sign more will: look again soon.
+    if (events.length > 0) this.delayMs = this.pollIntervalMs;
+    for (const event of events) this.emit(event);
+  }
+
+  /**
+   * Someone is looking at the traces: polls at the shortest interval again,
+   * bringing the next poll forward if it's further off than that.
+   */
+  private hurry(): void {
+    this.delayMs = this.pollIntervalMs;
+    // A poll under way schedules the next one itself, with the delay above.
+    if (this.timer === undefined || this.polling) return;
+    if (this.dueAt - Date.now() <= this.pollIntervalMs) return;
+    clearTimeout(this.timer);
+    this.schedule(this.pollIntervalMs);
   }
 
   private schedule(delayMs: number): void {
-    this.timer = setTimeout(async () => {
-      await this.list().catch(() => {});
-      if (this.watchers.size > 0) this.schedule(this.pollIntervalMs);
+    this.dueAt = Date.now() + delayMs;
+    const timer = setTimeout(async () => {
+      this.polling = true;
+      try {
+        await this.list().catch(() => {});
+      } finally {
+        this.polling = false;
+      }
+      // Unless the watchers left, or came back and started polling afresh.
+      if (this.timer !== timer || this.watchers.size === 0) return;
+      // The poll set `delayMs` back if it found a change.
+      const wait = this.delayMs;
+      this.delayMs = Math.min(wait * 2, this.maxPollIntervalMs);
+      this.schedule(wait);
     }, delayMs);
+    this.timer = timer;
     // Polling alone never keeps the process alive.
-    (this.timer as { unref?: () => void }).unref?.();
+    (timer as { unref?: () => void }).unref?.();
   }
 
   private emit(event: TraceChangeEvent): void {
