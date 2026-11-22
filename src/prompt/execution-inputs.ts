@@ -18,6 +18,7 @@ import type { DeclaredInstance } from "./playground/resource-registry.ts";
 
 export {
   collectInputSlots,
+  ELEMENT_SLOT,
   findInputCycle,
   type InputBindings,
   type InputSignature,
@@ -224,6 +225,9 @@ async function resolveWithin(
       );
       return Object.fromEntries(entries);
     }
+
+    case "array":
+      return Promise.all(input.elements.map(element => recurse(element)));
 
     case "instance": {
       if (!resolver) {

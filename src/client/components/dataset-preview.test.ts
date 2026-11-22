@@ -36,6 +36,15 @@ describe("previewCell", () => {
     ).toBe("root.taskId");
   });
 
+  it("counts an array's elements", () => {
+    expect(
+      previewCell({
+        kind: "array",
+        elements: [{ kind: "instance", name: "forge", output: "taskId" }],
+      }),
+    ).toBe("[1]");
+  });
+
   it("shows a stored node of a removed kind as unsupported", () => {
     const legacy = {
       kind: "resource",

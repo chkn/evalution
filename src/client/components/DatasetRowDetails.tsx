@@ -74,7 +74,10 @@ function ValueView({ value }: { value: PropValue }) {
   );
 }
 
-/** Named inputs — an object's properties or a resource instance's arguments. */
+/**
+ * Named inputs — an object's properties, a resource instance's arguments, or
+ * an array's elements by index.
+ */
 function KeyedInputs({ inputs }: { inputs: Record<string, ExecutionInput> }) {
   return (
     <div className="dataset-detail-keys">
@@ -90,7 +93,7 @@ function KeyedInputs({ inputs }: { inputs: Record<string, ExecutionInput> }) {
 
 /**
  * A dataset cell in full: the one-line previews the table has room for,
- * expanded — long text to read, and objects key by key.
+ * expanded — long text to read, and objects and arrays key by key.
  */
 export function InputView({ input }: { input: ExecutionInput }) {
   switch (input.kind) {
@@ -98,6 +101,10 @@ export function InputView({ input }: { input: ExecutionInput }) {
       return <ValueView value={input.value} />;
     case "object":
       return <KeyedInputs inputs={input.properties} />;
+    case "array":
+      return (
+        <KeyedInputs inputs={Object.fromEntries(input.elements.entries())} />
+      );
     case "instance":
       return (
         <span className="dataset-cell-chip">

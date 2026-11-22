@@ -102,6 +102,16 @@ function parseInput(
         ),
       };
     }
+    case "array":
+      if (!Array.isArray(value.elements)) {
+        throw new InvalidCellError(`${path}.elements must be an array`);
+      }
+      return {
+        kind: "array",
+        elements: value.elements.map((v, i) =>
+          recurse(v, `${path}.elements.${i}`),
+        ),
+      };
     case "instance": {
       if (typeof value.name !== "string" || value.name === "") {
         throw new InvalidCellError(`${path}.name must be a non-empty string`);
@@ -139,11 +149,11 @@ function parseInput(
         return { kind: "dataset", field: value.field };
       }
       throw new InvalidCellError(
-        `${path} is a column reference; a dataset cell must hold a value, object, resource, or slot reference`,
+        `${path} is a column reference; a dataset cell must hold a value, object, array, resource, or slot reference`,
       );
     default:
       throw new InvalidCellError(
-        `${path}.kind must be "value", "object", "instance", or "input"`,
+        `${path}.kind must be "value", "object", "array", "instance", or "input"`,
       );
   }
 }

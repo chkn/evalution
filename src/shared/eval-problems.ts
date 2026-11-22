@@ -36,6 +36,8 @@ function columnRefs(input: ExecutionInput): string[] {
       return [input.field];
     case "object":
       return Object.values(input.properties).flatMap(columnRefs);
+    case "array":
+      return input.elements.flatMap(columnRefs);
     default:
       return [];
   }
@@ -50,6 +52,8 @@ function slotRefs(
       return [input];
     case "object":
       return Object.values(input.properties).flatMap(slotRefs);
+    case "array":
+      return input.elements.flatMap(slotRefs);
     default:
       return [];
   }

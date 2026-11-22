@@ -67,6 +67,7 @@ A cell is **not** a raw JSON value. It is the same `ExecutionInput` the panel al
 | --- | --- |
 | `{ kind: "value", value: PropValue }` | a typed-in value — a template stays a template |
 | `{ kind: "object", properties }` | an object with some fields typed in and some filled by resources |
+| `{ kind: "array", elements }` | an array with some elements typed in and some filled by resources (see `execution-inputs.md` §D.1) |
 | `{ kind: "resource", uri, args? }` | "create this resource, from these arguments" — the non-serializable case |
 
 Why this is the right shape rather than "JSON cells, plus a resource column type":

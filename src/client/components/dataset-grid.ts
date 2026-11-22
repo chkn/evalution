@@ -672,6 +672,13 @@ export type CellView =
       text: string;
     };
 
+/** One property or element of an object or array input, as its preview shows it. */
+function previewChild(child: ExecutionInput): string {
+  return child.kind === "instance"
+    ? `◆ ${previewCell(child)}`
+    : previewCell(child);
+}
+
 /** A one-line rendering of an object: `{ db: ◆ db, userId: "u1" }`. */
 function previewObject(
   input: Extract<ExecutionInput, { kind: "object" }>,
@@ -679,11 +686,16 @@ function previewObject(
   const entries = Object.entries(input.properties);
   if (entries.length === 0) return "{}";
   return `{ ${entries
-    .map(
-      ([key, child]) =>
-        `${key}: ${child.kind === "instance" ? `◆ ${previewCell(child)}` : previewCell(child)}`,
-    )
+    .map(([key, child]) => `${key}: ${previewChild(child)}`)
     .join(", ")} }`;
+}
+
+/** A one-line rendering of an array: `[ "tsk_1", ◆ forge.taskId ]`. */
+function previewArray(
+  input: Extract<ExecutionInput, { kind: "array" }>,
+): string {
+  if (input.elements.length === 0) return "[]";
+  return `[ ${input.elements.map(previewChild).join(", ")} ]`;
 }
 
 /** A typed-in object on one line, with its values: `{ title: "Say hi" }`. */
@@ -704,6 +716,8 @@ function inputView(input: ExecutionInput): CellView {
       return { kind: "chip", text: `◆ ${previewCell(input)}` };
     case "object":
       return { kind: "text", text: previewObject(input) };
+    case "array":
+      return { kind: "text", text: previewArray(input) };
     default:
       return {
         kind: "text",

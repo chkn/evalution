@@ -260,7 +260,7 @@ export const providerIdParam = (kind: string) =>
 export const executionInput = z
   .record(z.string(), z.unknown())
   .describe(
-    'An unresolved input: {kind: "value", value: PropValue}, {kind: "object", properties: {...}}, or {kind: "instance", name, output?} naming one of the run\'s resource instances (or an output of it).',
+    'An unresolved input: {kind: "value", value: PropValue}, {kind: "object", properties: {...}}, {kind: "array", elements: [...]}, or {kind: "instance", name, output?} naming one of the run\'s resource instances (or an output of it).',
   );
 
 /** One named resource instance, as a tool parameter. */

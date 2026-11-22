@@ -44,3 +44,16 @@ export const titleGenerator = resource({
   label: "Title generator",
   create: () => ({ value: "Generated title" }),
 });
+
+const isTaskId = (s: string): s is TaskId => s.startsWith("tsk_");
+
+/**
+ * Takes an array of task ids, so each element can be bound to a seeded
+ * task's `taskId` — while a plain string, like `titleGenerator`'s, fits
+ * none of them.
+ */
+export const taskListing = resource({
+  label: "Task listing",
+  inputs: { after: z.array(z.string().refine(isTaskId)).default([]) },
+  create: ({ after }) => ({ value: after }),
+});

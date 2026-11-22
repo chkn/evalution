@@ -269,6 +269,20 @@ describe("resource arguments (specs/resource-arguments.md §G, §H)", () => {
     );
   });
 
+  it("offers what fits an array argument's element on its element slot", async () => {
+    const [prompt] = await project();
+    const slots =
+      prompt.inputSources!.resourceSlots?.[
+        "seeded-task.playground.ts#taskListing"
+      ];
+    expect(slots?.["after.[]"]).toContain(
+      "seeded-task.playground.ts#seededTask.taskId",
+    );
+    expect(slots?.["after.[]"] ?? []).not.toContain(
+      "seeded-task.playground.ts#titleGenerator",
+    );
+  });
+
   it("does not offer a resource as an input to its own arguments", async () => {
     const [prompt] = await project();
     const titleSlot =

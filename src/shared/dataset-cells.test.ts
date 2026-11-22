@@ -35,6 +35,25 @@ describe("parseCell", () => {
       properties: { r: { kind: "instance", name: "db", output: "url" } },
     };
     expect(parseCell(object)).toEqual(object);
+    const array = {
+      kind: "array",
+      elements: [
+        { kind: "value", value: { kind: "primitive", value: "tsk_1" } },
+        { kind: "instance", name: "forge", output: "taskId" },
+      ],
+    };
+    expect(parseCell(array)).toEqual(array);
+  });
+
+  it("names where a problem inside an array is", () => {
+    expect(() => parseCell({ kind: "array", elements: {} })).toThrow(
+      new InvalidCellError("cell.elements must be an array"),
+    );
+    expect(() =>
+      parseCell({ kind: "array", elements: [{ kind: "instance" }] }),
+    ).toThrow(
+      new InvalidCellError("cell.elements.0.name must be a non-empty string"),
+    );
   });
 
   it("names where a nested problem is", () => {
@@ -45,7 +64,7 @@ describe("parseCell", () => {
       }),
     ).toThrow(
       new InvalidCellError(
-        "cell.properties.n is a column reference; a dataset cell must hold a value, object, resource, or slot reference",
+        "cell.properties.n is a column reference; a dataset cell must hold a value, object, array, resource, or slot reference",
       ),
     );
   });

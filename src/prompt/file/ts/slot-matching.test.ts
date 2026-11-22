@@ -92,6 +92,27 @@ describe("collectSlotTypes", () => {
     expect([...slots.keys()].some(k => k.startsWith("root.db."))).toBe(false);
   });
 
+  it("gives an array one slot for its elements, typed as an element", () => {
+    const { type, typeChecker, sourceFile } = rootType(`
+      type TaskId = \`tsk_\${string}\`;
+      export const root: {
+        after: TaskId[];
+        maybe?: readonly { db: string }[];
+      } = null as any;
+    `);
+
+    const slots = collectSlotTypes(
+      new Map([["root", type]]),
+      typeChecker,
+      sourceFile,
+    );
+
+    expect(typeChecker.typeToString(slots.get("root.after.[]")!)).toBe(
+      "`tsk_${string}`",
+    );
+    expect(slots.has("root.maybe.[].db")).toBe(true);
+  });
+
   it("still descends into a genuine nested object", () => {
     const { type, typeChecker, sourceFile } = rootType(`
       export const root: { nested: { field: string } } = null as any;

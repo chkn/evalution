@@ -3,7 +3,7 @@
 
 import { useCallback, useMemo, useRef } from "react";
 import type { EditorPlugin, ItemEditorProps, SlotPath } from "ts-proppy/react";
-import { ItemEditor } from "ts-proppy/react";
+import { ArrayEditsContext, ItemEditor } from "ts-proppy/react";
 import type {
   PromptInputSources,
   PropDefinition,
@@ -11,7 +11,12 @@ import type {
   PropValue,
   ResourceInfo,
 } from "../../shared/types";
-import { SELF, type SlotSelection } from "./execution-input-state";
+import {
+  matchingSlotPath,
+  SELF,
+  type SlotSelection,
+  shiftForRemovedElement,
+} from "./execution-input-state";
 import { isPseudoUri } from "./pseudo-sources";
 import { SourceRow } from "./SourceRow";
 import type { SourceContext } from "./source-context";
@@ -89,6 +94,31 @@ export function ExecutionInputEditor({
     onChangeRef.current({ ...current, resources: next });
   }, []);
 
+  // A source chosen for an array element is keyed by the element's index, so
+  // removing an element moves every later element's source down with it.
+  // `selectionRef` is updated at once: the array's own `onChange` follows
+  // in the same event and must build on the shifted sources, not overwrite
+  // them.
+  const arrayEdits = useMemo(
+    () => ({
+      onRemoveElement: (path: SlotPath, index: number) => {
+        const current = selectionRef.current;
+        if (!current.resources) return;
+        const next = {
+          ...current,
+          resources: shiftForRemovedElement(
+            current.resources,
+            relativePath(path),
+            index,
+          ),
+        };
+        selectionRef.current = next;
+        onChangeRef.current(next);
+      },
+    }),
+    [],
+  );
+
   // Nested slots are handled by a plugin rather than by a bespoke recursive
   // editor: `ItemEditor` already walks the shape correctly, and threading the
   // slot path through it is all that was missing.
@@ -100,11 +130,11 @@ export function ExecutionInputEditor({
   // early here previously let such fields fall through to ts-proppy's
   // generic (resource-unaware) opaque placeholder instead.
   const plugins = useMemo<EditorPlugin[]>(() => {
-    const nestedPaths = new Set(
-      Object.keys(slots).filter(p => p !== propDef.name),
-    );
-    const matches = (type: PropType, path: SlotPath) =>
-      type.kind === "opaque" || nestedPaths.has(fullPath(propDef.name, path));
+    const matches = (type: PropType, path: SlotPath) => {
+      if (type.kind === "opaque") return true;
+      const at = fullPath(propDef.name, path);
+      return at !== propDef.name && matchingSlotPath(slots, at) !== undefined;
+    };
     return [
       {
         match: matches,
@@ -150,22 +180,26 @@ export function ExecutionInputEditor({
   const ownMatches = matchingFor(slots, propDef.name, [propDef.name], byUri);
 
   return (
-    <SourceRow
-      propDef={propDef}
-      resources={resources}
-      matching={ownMatches}
-      chosen={selection.resources?.[SELF]}
-      onChoose={uri => chooseResource(SELF, uri)}
-      context={context}
-    >
-      <ItemEditor
+    <ArrayEditsContext.Provider value={arrayEdits}>
+      <SourceRow
         propDef={propDef}
-        value={selection.value}
-        onChange={(value: PropValue) => onChange({ ...selection, value })}
-        plugins={plugins}
-        path={[propDef.name]}
-      />
-    </SourceRow>
+        resources={resources}
+        matching={ownMatches}
+        chosen={selection.resources?.[SELF]}
+        onChoose={uri => chooseResource(SELF, uri)}
+        context={context}
+      >
+        <ItemEditor
+          propDef={propDef}
+          value={selection.value}
+          onChange={(value: PropValue) =>
+            onChange({ ...selectionRef.current, value })
+          }
+          plugins={plugins}
+          path={[propDef.name]}
+        />
+      </SourceRow>
+    </ArrayEditsContext.Provider>
   );
 }
 
@@ -185,7 +219,8 @@ function matchingFor(
   path: SlotPath | undefined,
   byUri: Map<string, ResourceInfo>,
 ): ResourceInfo[] {
-  const uris = slots[fullPath(rootName, path)] ?? [];
+  const at = matchingSlotPath(slots, fullPath(rootName, path));
+  const uris = at === undefined ? [] : slots[at];
   return uris
     .map(uri => byUri.get(uri))
     .filter((r): r is ResourceInfo => !!r && !r.error);

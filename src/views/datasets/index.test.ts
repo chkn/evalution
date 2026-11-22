@@ -74,6 +74,34 @@ describe("references", () => {
       "cell 2 › create_task › rootTaskId → focus.taskId",
     );
   });
+
+  it("finds a reference in an array element, by its index", () => {
+    expect(
+      references({
+        cells: {},
+        resources: {
+          listing: {
+            uri: TASK,
+            args: {
+              after: {
+                kind: "array",
+                elements: [
+                  text("tsk_1"),
+                  { kind: "instance", name: "forge", output: "taskId" },
+                ],
+              },
+            },
+          },
+        },
+      }),
+    ).toEqual([
+      {
+        from: { instance: "listing", arg: "after", path: ["1"] },
+        to: "forge",
+        output: "taskId",
+      },
+    ]);
+  });
 });
 
 describe("addInstance", () => {

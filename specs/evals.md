@@ -116,8 +116,9 @@ been typed in by hand (`datasets.md` §P) or lifted from production traces as va
 `seededTask` refs, works too: binding `taskId` ← column `taskId` resolves the ref in the cell.
 
 `threadMsgs` is a whole-array column: each cell is a `value` holding the full array. That's how a
-thread varies per row, since an array literal can't hold a column binding (only objects nest in
-`ExecutionInput`). The column's type is copied from the prompt's parameter (`datasets.md` §P.1),
+thread varies per row. (An `array` binding could fill the thread element by element instead,
+`execution-inputs.md` §D.1, but a thread's length varies per row too, so the whole array is the
+column.) The column's type is copied from the prompt's parameter (`datasets.md` §P.1),
 so each cell is edited with the same editor the panel uses.
 
 ## B. Checks are playground exports

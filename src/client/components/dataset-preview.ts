@@ -72,6 +72,8 @@ export function previewCell(input: ExecutionInput): string {
       return truncate(previewPropValue(input.value));
     case "object":
       return "{…}";
+    case "array":
+      return `[${input.elements.length}]`;
     case "instance":
       return input.output === undefined
         ? input.name

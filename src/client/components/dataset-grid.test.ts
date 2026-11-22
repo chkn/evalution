@@ -280,6 +280,26 @@ describe("cellView", () => {
     });
   });
 
+  it("previews an array on one line", () => {
+    const array: ExecutionInput = {
+      kind: "array",
+      elements: [
+        text("tsk_1"),
+        { kind: "instance", name: "forge", output: "taskId" },
+      ],
+    };
+    expect(cellView(row({ "1": array }), byId(columns(), "1"))).toEqual({
+      kind: "text",
+      text: '[ "tsk_1", ◆ forge.taskId ]',
+    });
+    expect(
+      cellView(
+        row({ "1": { kind: "array", elements: [] } }),
+        byId(columns(), "1"),
+      ),
+    ).toEqual({ kind: "text", text: "[]" });
+  });
+
   it("draws a stored inline resource node as unsupported text, not undefined", () => {
     // Rows saved before named instances hold `{ kind: "resource" }` cells,
     // whole and nested; Glide crashes on a text cell with no text.

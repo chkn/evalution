@@ -41,11 +41,29 @@ export interface InputSlot {
 export const MAX_SLOT_DEPTH = 4;
 
 /**
+ * The path segment that stands for every element of an array: `after.[]` is
+ * the slot each of `after`'s elements is matched against. A binding names
+ * one element by its index (`after.0`) instead; see `matchingSlotPath` on
+ * the client.
+ */
+export const ELEMENT_SLOT = "[]";
+
+/**
+ * Whether slot `path` is (or is inside) an array's {@link ELEMENT_SLOT}: a
+ * slot sources are matched against, but not one an `input` reference can
+ * name, since it stands for no one element.
+ */
+export function isElementSlot(path: string): boolean {
+  return path.split(".").includes(ELEMENT_SLOT);
+}
+
+/**
  * Flatten `definitions` into every slot a source could be matched against —
- * each parameter, plus the object properties nested inside it.
+ * each parameter, plus the object properties nested inside it, plus one
+ * element slot (`ELEMENT_SLOT`) per array for all of its elements.
  *
- * Arrays and unions are not descended into: neither has a stable path a
- * saved input selection could still name after the value changes shape.
+ * Unions are not descended into: a union has no one shape for a path to
+ * name.
  *
  * @param definitions - The parameters to flatten.
  * @param prefix - Path prefix, used when recursing.
@@ -59,8 +77,17 @@ export function collectInputSlots(
   for (const def of definitions) {
     const path = prefix ? `${prefix}.${def.name}` : def.name;
     slots.push({ path, name: def.name, type: def.type });
-    if (def.type.kind === "object" && depth + 1 < MAX_SLOT_DEPTH) {
+    if (depth + 1 >= MAX_SLOT_DEPTH) continue;
+    if (def.type.kind === "object") {
       slots.push(...collectInputSlots(def.type.properties, path, depth + 1));
+    } else if (def.type.kind === "array") {
+      slots.push(
+        ...collectInputSlots(
+          [{ ...def.type.element, name: ELEMENT_SLOT }],
+          path,
+          depth + 1,
+        ),
+      );
     }
   }
   return slots;
@@ -145,6 +172,7 @@ const KNOWN_KINDS: ReadonlySet<string> = new Set(
   Object.keys({
     value: true,
     object: true,
+    array: true,
     input: true,
     instance: true,
     dataset: true,
@@ -158,6 +186,8 @@ export function instanceNames(input: ExecutionInput): string[] {
       return [input.name];
     case "object":
       return Object.values(input.properties).flatMap(instanceNames);
+    case "array":
+      return input.elements.flatMap(instanceNames);
     default:
       return [];
   }
@@ -182,6 +212,14 @@ function findRefs(
             "instance" in at ? at : { half: at.half, path: `${at.path}.${k}` },
           );
         }
+        break;
+      case "array":
+        node.elements.forEach((child, i) => {
+          walk(
+            child,
+            "instance" in at ? at : { half: at.half, path: `${at.path}.${i}` },
+          );
+        });
         break;
       case "input":
         found.push({ at, target: { half: node.half, path: node.path } });
@@ -277,16 +315,23 @@ export interface InputSignature {
   executeParameters?: readonly PropDefinition[];
 }
 
-/** Every slot path an `input` reference into `signature` can name, by half. */
+/**
+ * Every slot path an `input` reference into `signature` can name, by half:
+ * every slot but an array's {@link ELEMENT_SLOT}s.
+ */
 export function slotPaths(
   signature: InputSignature,
 ): Record<"function" | "execute", Set<string>> {
   return {
     function: new Set(
-      collectInputSlots(signature.functionParameters).map(s => s.path),
+      collectInputSlots(signature.functionParameters)
+        .map(s => s.path)
+        .filter(p => !isElementSlot(p)),
     ),
     execute: new Set(
-      collectInputSlots(signature.executeParameters ?? []).map(s => s.path),
+      collectInputSlots(signature.executeParameters ?? [])
+        .map(s => s.path)
+        .filter(p => !isElementSlot(p)),
     ),
   };
 }

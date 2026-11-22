@@ -72,6 +72,11 @@ function referencesIn(
         referencesIn(child, [...path, key], site, out);
       }
       break;
+    case "array":
+      input.elements.forEach((child, i) => {
+        referencesIn(child, [...path, String(i)], site, out);
+      });
+      break;
   }
 }
 

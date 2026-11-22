@@ -301,6 +301,25 @@ parameters rather than growing their own rules:
    documented `MemoryFileProvider` situation (`prompt-program.ts`: cross-file types stay
    unresolved and extraction falls back to the syntax tree).
 
+### D.1 Array elements
+
+An array slot gets one more slot for all of its elements, `after.[]`, typed as an element. A
+source that fits an element is offered there, so a seeded task's `taskId` is offered on each
+element of a `TaskId[]` argument. The array slot itself (`after`) is still matched as a whole, so
+a source that produces the entire array is offered too. Both walks (`collectInputSlots` over
+`PropDefinition`s, and `collectSlotTypes` over checker types) produce the element slot, through an
+optional array as well.
+
+On the wire, an array with some elements bound is the `array` variant,
+`{ kind: "array", elements: ExecutionInput[] }`, the counterpart of `object`. The panel names an
+element by its index (`after.1`) and looks up its sources as `after.[]`. Because an index is all
+that ties a chosen source to its element, removing an element would leave every later source one
+element off. ts-proppy's array editor reports each removal through `ArrayEditsContext`, and the
+panel moves the later sources down with their elements.
+
+`after.[]` stands for no one element, so an `input` reference can't name it, and the eval editor
+doesn't offer element slots as slots to reference.
+
 ## E. Execute parameters
 
 `toolsContext` is one instance of a general shape, and the plan should carry the general shape

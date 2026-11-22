@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { unboundRequired } from "../../shared/eval-problems";
+import { ELEMENT_SLOT } from "../../shared/input-references";
 import type {
   ExecutionInput,
   InputLayout,
@@ -124,8 +125,8 @@ export function toExecutionInput(
 
 /**
  * Replace whatever sits at `path` inside `input` with `replacement`,
- * converting the `value` variant into the nestable `object` variant only along
- * the path that needs it.
+ * converting the `value` variant into the nestable `object` (or `array`)
+ * variant only along the path that needs it.
  */
 function overlay(
   input: ExecutionInput,
@@ -135,6 +136,17 @@ function overlay(
   if (path.length === 0) return replacement;
 
   const [head, ...rest] = path;
+  const elements = elementsOf(input);
+  if (elements) {
+    const index = Number(head);
+    const next = [...elements];
+    next[index] = overlay(
+      next[index] ?? { kind: "object", properties: {} },
+      rest,
+      replacement,
+    );
+    return { kind: "array", elements: next };
+  }
   const properties = { ...propertiesOf(input) };
   properties[head] = overlay(
     properties[head] ?? { kind: "object", properties: {} },
@@ -142,6 +154,19 @@ function overlay(
     replacement,
   );
   return { kind: "object", properties };
+}
+
+/** The child inputs of `input` when it is an array, by index. */
+function elementsOf(input: ExecutionInput): ExecutionInput[] | undefined {
+  if (input.kind === "array") return input.elements;
+  if (input.kind === "value" && input.value.kind === "array") {
+    // A hand-edited array being partly overridden: lift its elements into
+    // inputs so the untouched ones keep their places beside the resource.
+    return input.value.elements.map(
+      (v): ExecutionInput => ({ kind: "value", value: v }),
+    );
+  }
+  return undefined;
 }
 
 /** The child inputs of `input`, seen as an object. */
@@ -158,6 +183,13 @@ function propertiesOf(input: ExecutionInput): Record<string, ExecutionInput> {
     );
   }
   return {};
+}
+
+/** What a bound array element holds in the value: nothing of its own. */
+const PLACEHOLDER: PropValue = { kind: "primitive", value: undefined };
+
+function isContainer(value: PropValue | undefined): value is PropValue {
+  return value?.kind === "object" || value?.kind === "array";
 }
 
 /**
@@ -181,13 +213,24 @@ export function fromExecutionInput(
   const walk = (node: ExecutionInput, prefix: string) => {
     switch (node.kind) {
       case "value":
-        if (prefix === SELF) value = node.value;
-        else setAtPath(prefix, node.value);
+        setAtPath(prefix, node.value);
         break;
       case "object":
         for (const [key, child] of Object.entries(node.properties)) {
           walk(child, prefix === SELF ? key : `${prefix}.${key}`);
         }
+        break;
+      case "array":
+        // Every element keeps its place in the value — a bound one as a
+        // placeholder — so the editor still shows a row for it, and the
+        // indices `resources` names line up with the value's.
+        setAtPath(prefix, {
+          kind: "array",
+          elements: node.elements.map(() => PLACEHOLDER),
+        });
+        node.elements.forEach((child, i) => {
+          walk(child, prefix === SELF ? String(i) : `${prefix}.${i}`);
+        });
         break;
       case "dataset":
       case "input":
@@ -201,23 +244,35 @@ export function fromExecutionInput(
     }
   };
 
+  // Sets `leaf` at `path` within `value`. Every array on the way was put in
+  // place, at its full length, by the walk before its elements are reached.
   const setAtPath = (path: string, leaf: PropValue) => {
+    if (path === SELF) {
+      value = leaf;
+      return;
+    }
     const segments = path.split(".");
-    if (value?.kind !== "object") {
+    if (value?.kind !== "object" && value?.kind !== "array") {
       value = { kind: "object", properties: {} };
     }
-    let cursor = value as Extract<PropValue, { kind: "object" }>;
-    for (const segment of segments.slice(0, -1)) {
-      const next = cursor.properties[segment];
-      if (next?.kind !== "object") {
-        cursor.properties[segment] = { kind: "object", properties: {} };
+    let cursor: PropValue = value;
+    for (const [i, segment] of segments.entries()) {
+      const last = i === segments.length - 1;
+      if (cursor.kind === "array") {
+        const index = Number(segment);
+        if (last) cursor.elements[index] = leaf;
+        else if (!isContainer(cursor.elements[index])) {
+          cursor.elements[index] = { kind: "object", properties: {} };
+        }
+        if (!last) cursor = cursor.elements[index];
+      } else if (cursor.kind === "object") {
+        if (last) cursor.properties[segment] = leaf;
+        else if (!isContainer(cursor.properties[segment])) {
+          cursor.properties[segment] = { kind: "object", properties: {} };
+        }
+        if (!last) cursor = cursor.properties[segment];
       }
-      cursor = cursor.properties[segment] as Extract<
-        PropValue,
-        { kind: "object" }
-      >;
     }
-    cursor.properties[segments[segments.length - 1]] = leaf;
   };
 
   walk(input, SELF);
@@ -258,4 +313,52 @@ export function missingInputMessage(
     : `Parameter '${path}' is a ${prop.type.syntax}, which can't be typed in. ` +
         `Export a resource() from a *.playground.ts beside the prompt, or from ` +
         `.evalution/playground/, to supply one.`;
+}
+
+/**
+ * `resources` after the element at `index` of the array at `arrayPath` is
+ * removed: that element's sources (its own, and any nested inside it) go,
+ * and every later element's move down one index with it, so each source
+ * stays with the element it was chosen for.
+ *
+ * @param resources - A slot's chosen sources, by path relative to the slot
+ *   (see {@link SlotSelection.resources}).
+ * @param arrayPath - The array's path, relative to the slot the same way:
+ *   {@link SELF} for the slot itself.
+ */
+export function shiftForRemovedElement(
+  resources: Readonly<Record<string, string>>,
+  arrayPath: string,
+  index: number,
+): Record<string, string> {
+  const prefix = arrayPath === SELF ? "" : `${arrayPath}.`;
+  const out: Record<string, string> = {};
+  for (const [path, uri] of Object.entries(resources)) {
+    if (path === SELF || !path.startsWith(prefix)) {
+      out[path] = uri;
+      continue;
+    }
+    const [head, ...rest] = path.slice(prefix.length).split(".");
+    const at = /^\d+$/.test(head) ? Number(head) : undefined;
+    if (at === undefined || at < index) out[path] = uri;
+    else if (at > index) out[[`${prefix}${at - 1}`, ...rest].join(".")] = uri;
+  }
+  return out;
+}
+
+/**
+ * Which of `slots` the slot at `path` is matched as: the path itself, or,
+ * with each element index read as {@link ELEMENT_SLOT}, its array's element
+ * slot (`after.3` → `after.[]`). `undefined` when neither is a slot.
+ */
+export function matchingSlotPath(
+  slots: Readonly<Record<string, readonly string[]>>,
+  path: string,
+): string | undefined {
+  if (Object.hasOwn(slots, path)) return path;
+  const asElement = path
+    .split(".")
+    .map(segment => (/^\d+$/.test(segment) ? ELEMENT_SLOT : segment))
+    .join(".");
+  return Object.hasOwn(slots, asElement) ? asElement : undefined;
 }

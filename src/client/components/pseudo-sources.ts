@@ -16,6 +16,7 @@ import {
   collectInputSlots,
   findInputCycle,
   type InputBindings,
+  isElementSlot,
   overlaps,
 } from "../../shared/input-references";
 import type {
@@ -185,6 +186,19 @@ function targetsOf(
     "functionParameters" | "executeParameters"
   >,
 ): Target[] {
+  return slotsOf(options).filter(t => !isElementSlot(t.path));
+}
+
+/**
+ * Every slot of the prompt a source can fill: each {@link targetsOf}, plus
+ * every array's element slot.
+ */
+function slotsOf(
+  options: Pick<
+    PseudoSourceOptions,
+    "functionParameters" | "executeParameters"
+  >,
+): Target[] {
   return [
     ...collectInputSlots(options.functionParameters).map(s => ({
       half: "function" as const,
@@ -244,6 +258,7 @@ export function withPseudoSources(
   sources: PromptInputSources | undefined,
   options: PseudoSourceOptions,
 ): PromptInputSources {
+  const slots = slotsOf(options);
   const targets = targetsOf(options);
   const fields = options.fields ?? [];
 
@@ -283,11 +298,11 @@ export function withPseudoSources(
     existing: Record<string, string[]> | undefined,
   ) => {
     const out: Record<string, string[]> = { ...existing };
-    for (const target of targets.filter(t => t.half === half)) {
-      const offered = offer(target.type, target);
+    for (const slot of slots.filter(s => s.half === half)) {
+      const offered = offer(slot.type, slot);
       if (options.newColumn) offered.push(NEW_COLUMN_URI);
       if (offered.length > 0) {
-        out[target.path] = [...(out[target.path] ?? []), ...offered];
+        out[slot.path] = [...(out[slot.path] ?? []), ...offered];
       }
     }
     return out;

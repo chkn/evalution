@@ -129,6 +129,18 @@ function bindingFrom(
         ),
       };
     }
+    case "array": {
+      const elements = binding.elements;
+      if (!Array.isArray(elements)) {
+        throw new ToolError(`${path}.elements must be an array`);
+      }
+      return {
+        kind: "array",
+        elements: elements.map((v, i) =>
+          bindingFrom(v, fields, `${path}.elements.${i}`),
+        ),
+      };
+    }
     default:
       // A typed-in value, a slot reference or a resource instance: checked
       // when it's saved.
@@ -157,6 +169,11 @@ function describeBinding(
       return {
         kind: "object",
         properties: describeBindings(input.properties, fields),
+      };
+    case "array":
+      return {
+        kind: "array",
+        elements: input.elements.map(e => describeBinding(e, fields)),
       };
     default:
       return input;
@@ -216,7 +233,7 @@ function checkIdFor(uri: string, taken: Set<string>): string {
 const binding = z
   .record(z.string(), z.unknown())
   .describe(
-    'How to fill a slot: {column: "<dataset field name>"} for the row\'s value (a field sharing its name with an earlier one goes by its query column, e.g. "city#3"), {json: <plain JSON>} for a fixed value, {kind: "value", value: {kind: "primitive"}} for a value left undefined, {kind: "input", half: "function" | "execute", path} for what the run bound to one of the prompt\'s own slots, {kind: "object", properties: {name: binding}} to fill an object property by property, or {kind: "instance", name, output?} for one of the eval\'s (or each row\'s) named resource instances, or an output of it.',
+    'How to fill a slot: {column: "<dataset field name>"} for the row\'s value (a field sharing its name with an earlier one goes by its query column, e.g. "city#3"), {json: <plain JSON>} for a fixed value, {kind: "value", value: {kind: "primitive"}} for a value left undefined, {kind: "input", half: "function" | "execute", path} for what the run bound to one of the prompt\'s own slots, {kind: "object", properties: {name: binding}} to fill an object property by property, {kind: "array", elements: [binding, ...]} to fill an array element by element, or {kind: "instance", name, output?} for one of the eval\'s (or each row\'s) named resource instances, or an output of it.',
   );
 
 const bindings = z

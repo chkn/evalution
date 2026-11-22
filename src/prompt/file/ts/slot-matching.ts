@@ -3,7 +3,7 @@
 
 import { isOpaqueType } from "ts-proppy";
 import ts from "typescript";
-import { MAX_SLOT_DEPTH } from "../../execution-inputs.ts";
+import { ELEMENT_SLOT, MAX_SLOT_DEPTH } from "../../execution-inputs.ts";
 
 /** How many properties one slot tree may contribute, as a runaway guard. */
 const MAX_SLOTS = 500;
@@ -45,9 +45,8 @@ const PRIMITIVE_FLAGS =
  * see {@link PRIMITIVE_FLAGS}), a function, or a type `isOpaqueType` calls
  * unconstructible (a class-instance handle, an all-method interface) — the
  * same {@link isOpaqueType} the `PropDefinition` side uses to decide `kind:
- * 'opaque'` rather than `'object'`. Arrays and unions are not descended into
- * either: neither has a path that stays meaningful once the value changes
- * shape, so a saved selection could not name one reliably.
+ * 'opaque'` rather than `'object'`. Unions are not descended into either;
+ * an array gets one {@link ELEMENT_SLOT} for all its elements.
  */
 export function collectSlotTypes(
   roots: ReadonlyMap<string, ts.Type>,
@@ -60,7 +59,14 @@ export function collectSlotTypes(
     if (slots.size >= MAX_SLOTS) return;
     slots.set(prefix, type);
     if (depth + 1 >= MAX_SLOT_DEPTH) return;
-    if (type.isUnion() || typeChecker.isArrayType(type)) return;
+    // An array, optional or not, has one slot for all its elements.
+    const array = typeChecker.getNonNullableType(type);
+    if (typeChecker.isArrayType(array)) {
+      const [element] = typeChecker.getTypeArguments(array as ts.TypeReference);
+      if (element) walk(`${prefix}.${ELEMENT_SLOT}`, element, depth + 1);
+      return;
+    }
+    if (type.isUnion()) return;
     if (typeChecker.isTupleType(type)) return;
     if (type.flags & PRIMITIVE_FLAGS) return;
     // A branded primitive expressed as an intersection (`string & { __brand

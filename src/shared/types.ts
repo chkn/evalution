@@ -125,10 +125,15 @@ export type ExecutionInput =
   /**
    * An object assembled from per-property inputs, so a resource can fill one
    * field of an otherwise hand-edited object — `toolsContext`'s `db` beside
-   * its typed-in ids. Only objects nest: an array of resources isn't a case
-   * any slot has yet.
+   * its typed-in ids.
    */
   | { kind: "object"; properties: Record<string, ExecutionInput> }
+  /**
+   * An array assembled from per-element inputs, so a resource can fill one
+   * element of an otherwise hand-edited array — a seeded task's `taskId`
+   * beside typed-in ids.
+   */
+  | { kind: "array"; elements: ExecutionInput[] }
   /**
    * One of the run's named resource instances ({@link RunResources}), or one
    * of its outputs — created by the provider at run time, once per run

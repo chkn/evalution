@@ -203,6 +203,33 @@ describe("withPseudoSources", () => {
   });
 });
 
+describe("withPseudoSources: arrays", () => {
+  const tags: PropDefinition = {
+    name: "tags",
+    optional: false,
+    type: { kind: "array", syntax: "string[]", element: def("", "string") },
+  };
+
+  it("offers what fits an element to the array's element slot", () => {
+    const sources = withPseudoSources(undefined, {
+      functionParameters: [def("title", "string"), tags],
+      bindings: NO_BINDINGS,
+    });
+    expect(sources.functionSlots["tags.[]"]).toEqual([
+      inputUri("function", "title"),
+    ]);
+  });
+
+  it("never offers an element slot as a slot to reference", () => {
+    const sources = withPseudoSources(undefined, {
+      functionParameters: [def("title", "string"), tags],
+      bindings: NO_BINDINGS,
+    });
+    expect(sources.functionSlots.title).toBeUndefined();
+    expect(sources.resources.map(r => r.label)).not.toContain("= tags.[]");
+  });
+});
+
 describe("checkParameterSources", () => {
   it("offers every column and slot to each parameter", () => {
     const sources = checkParameterSources([def("expected", "string")], {

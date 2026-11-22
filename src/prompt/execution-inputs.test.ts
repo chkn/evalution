@@ -9,6 +9,7 @@ import type {
 } from "../shared/types.ts";
 import {
   collectInputSlots,
+  ELEMENT_SLOT,
   findInputCycle,
   type InputBindings,
   type InputSource,
@@ -105,6 +106,48 @@ describe("collectInputSlots", () => {
       "toolsContext.list_tasks.db",
       "toolsContext.list_tasks.workspaceId",
     ]);
+  });
+
+  it("gives an array one slot for all its elements", () => {
+    const slots = collectInputSlots([
+      {
+        name: "after",
+        optional: false,
+        type: { kind: "array", syntax: "TaskId[]", element: str("") },
+      },
+      {
+        name: "ctx",
+        optional: false,
+        type: {
+          kind: "object",
+          syntax: "Ctx",
+          properties: [
+            {
+              name: "dbs",
+              optional: false,
+              type: {
+                kind: "array",
+                syntax: "Db[]",
+                element: {
+                  name: "",
+                  optional: false,
+                  type: { kind: "opaque", syntax: "Db" },
+                },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(slots.map(s => [s.path, s.name])).toEqual([
+      ["after", "after"],
+      [`after.${ELEMENT_SLOT}`, ELEMENT_SLOT],
+      ["ctx", "ctx"],
+      ["ctx.dbs", "dbs"],
+      [`ctx.dbs.${ELEMENT_SLOT}`, ELEMENT_SLOT],
+    ]);
+    expect(slots[1].type).toEqual(str("").type);
   });
 });
 
@@ -228,6 +271,22 @@ describe("resolveExecutionInput", () => {
       workspaceId: "ws_1",
       db: { handle: "db" },
     });
+  });
+
+  it("resolves an array element by element, any of which may be a resource", async () => {
+    const { resolver } = fakeResolver(name => ({ taskId: `tsk_${name}` }));
+    await resolver.declare({ forge: { uri: "pg.ts#seededTask" } });
+    const resolved = await resolveExecutionInput(
+      {
+        kind: "array",
+        elements: [
+          { kind: "value", value: { kind: "primitive", value: "tsk_typed" } },
+          { kind: "instance", name: "forge", output: "taskId" },
+        ],
+      },
+      resolver,
+    );
+    expect(resolved).toEqual(["tsk_typed", "tsk_forge"]);
   });
 
   it("materializes a value whose functionCall is bound to an import", async () => {
@@ -591,6 +650,23 @@ describe("findInputCycle", () => {
     ).toEqual(["a.x", "a.x"]);
   });
 
+  it("finds a cycle through an array element", () => {
+    expect(
+      findInputCycle({
+        functionInputs: {
+          a: {
+            kind: "array",
+            elements: [
+              { kind: "value", value: { kind: "primitive", value: "x" } },
+              { kind: "input", half: "function", path: "a" },
+            ],
+          },
+        },
+        executeInputs: {},
+      }),
+    ).toEqual(["a.1", "a.1"]);
+  });
+
   it("follows references in a resource instance's arguments", () => {
     expect(
       findInputCycle({
@@ -685,6 +761,29 @@ describe("inputReferenceProblems", () => {
     expect(problems).toHaveLength(2);
     expect(problems[0]).toMatch(/'missing'/);
     expect(problems[1]).toMatch(/cycle: b → c → b/);
+  });
+
+  it("refuses an input reference to an array's element slot", () => {
+    const problems = inputReferenceProblems(
+      {
+        functionInputs: {
+          a: { kind: "input", half: "function", path: `b.${ELEMENT_SLOT}` },
+        },
+        executeInputs: {},
+      },
+      {
+        functionParameters: [
+          str("a"),
+          {
+            name: "b",
+            optional: false,
+            type: { kind: "array", syntax: "string[]", element: str("") },
+          },
+        ],
+      },
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/which the prompt doesn't have/);
   });
 
   it("refuses the removed inline `resource` input, naming its slot", () => {
