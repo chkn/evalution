@@ -652,6 +652,34 @@ describe("Evalution", () => {
     expect(step?.endTime).toBeDefined();
   });
 
+  it("fail() before onStart records the error on a root span of its own", async () => {
+    // A run that fails before the SDK starts it (a tools context that fails
+    // its schema) has no trace yet: the root span's start is what creates one.
+    const evalution = new VercelAISDKTelemetry();
+    const provider = new MemoryTraceProvider();
+    evalution.addSink(provider);
+    const traceId = "trace-fail-early";
+    const integration = evalution
+      .createTelemetryForPrompt({ id: "mod#x", name: "x" })
+      .withTraceId(traceId, { id: "mod#x", name: "x", version: "c1" });
+
+    await integration.fail(
+      "toolsContext.create_repo.repoProvider: Invalid input",
+    );
+
+    const trace = await provider.getTrace(traceId);
+    expect(trace?.trace.status).toBe("error");
+    expect(trace?.spans).toEqual([
+      expect.objectContaining({
+        id: `${traceId}:root`,
+        name: "mod#x",
+        status: "error",
+        errorMessage: "toolsContext.create_repo.repoProvider: Invalid input",
+        prompt: expect.objectContaining({ id: "mod#x", version: "c1" }),
+      }),
+    ]);
+  });
+
   it("marks a tool span as error when toolOutput.type is tool-error", async () => {
     const evalution = new VercelAISDKTelemetry();
     const provider = new MemoryTraceProvider();

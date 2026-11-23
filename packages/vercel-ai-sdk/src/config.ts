@@ -379,7 +379,7 @@ export class VercelAISDK implements SDKAdapter {
     // respond; the actual generation continues in the background and is
     // recorded via the attached telemetry integration's lifecycle events. A
     // rejection before any event fires (e.g. a bad model id) would otherwise
-    // leave the pre-created trace hanging in `running` forever.
+    // leave the run with no trace at all, so nothing would say why it failed.
     //
     // `done` settles either way, and never rejects: a caller awaiting it (to
     // dispose run-scoped resources, say) only needs to know the run is over,

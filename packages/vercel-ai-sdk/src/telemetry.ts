@@ -323,7 +323,9 @@ export class VercelAISDKTelemetry
           // `onError` already closed the run (and so failed the trace); a
           // second failure would only rewrite it.
           fail: message =>
-            errored ? Promise.resolve() : this.handleFail(traceId, message),
+            errored
+              ? Promise.resolve()
+              : this.handleFail(traceId, message, merged),
           wasStarted: () => started,
         });
       },
@@ -353,19 +355,7 @@ export class VercelAISDKTelemetry
         provider: event.provider,
         model: event.modelId,
       },
-      prompt: identity?.id
-        ? {
-            id: identity.id,
-            functionParameters: identity.functionParameters,
-            functionInputs: identity.functionInputs,
-            executeInputs: identity.executeInputs,
-            resources: identity.resources,
-            parameterDefinitions: identity.parameterDefinitions,
-            executeParameterDefinitions: identity.executeParameterDefinitions,
-            version: identity.version,
-            variation: identity.variation,
-          }
-        : undefined,
+      prompt: promptInfo(identity),
     };
 
     this.runs.set(event.callId, {
@@ -405,18 +395,7 @@ export class VercelAISDKTelemetry
         model: event.modelId,
         input: { state: event.state, questions: event.questions },
       },
-      prompt: identity?.id
-        ? {
-            id: identity.id,
-            functionParameters: identity.functionParameters,
-            functionInputs: identity.functionInputs,
-            executeInputs: identity.executeInputs,
-            resources: identity.resources,
-            parameterDefinitions: identity.parameterDefinitions,
-            version: identity.version,
-            variation: identity.variation,
-          }
-        : undefined,
+      prompt: promptInfo(identity),
     };
     this.runs.set(event.callId, {
       traceId,
@@ -639,18 +618,58 @@ export class VercelAISDKTelemetry
     return true;
   }
 
-  private async handleFail(traceId: string, message: string): Promise<void> {
+  private async handleFail(
+    traceId: string,
+    message: string,
+    identity?: PromptSpanInfo,
+  ): Promise<void> {
     // Find the in-flight run for this trace (the `fail()` caller only knows the
     // traceId). If onStart already opened spans, close them as error — which
-    // also finalizes the trace. If the rejection beat onStart, there are no
-    // spans yet, so just fail the trace the route pre-created.
+    // also finalizes the trace.
     const entry = [...this.runs].find(([, run]) => run.traceId === traceId);
     if (entry) {
       const [callId, run] = entry;
       this.runs.delete(callId);
       await this.endOpenSpansAsError(run, message);
-    } else {
-      await this.failTrace(traceId, message);
+      return;
     }
+    // The rejection beat onStart (a tools context that fails its schema, say),
+    // so there is no trace yet — it's created by the root span's start. Record
+    // a root span that starts and fails at once: failing a trace that doesn't
+    // exist would drop the message, and whoever waits on the trace (an eval
+    // row) would find nothing to say why the run failed.
+    const now = Date.now();
+    const root: Span = {
+      id: `${traceId}:root`,
+      traceId,
+      name: identity?.id ?? "generation",
+      kind: "AGENT",
+      startTime: now,
+      prompt: promptInfo(identity),
+    };
+    await this.recordSpanStart(root);
+    await this.recordSpanEnd({
+      ...root,
+      endTime: now,
+      status: "error",
+      errorMessage: message,
+    });
   }
+}
+
+/** A root span's link back to the prompt that ran, from its identity. */
+function promptInfo(identity?: PromptSpanInfo): Span["prompt"] {
+  return identity?.id
+    ? {
+        id: identity.id,
+        functionParameters: identity.functionParameters,
+        functionInputs: identity.functionInputs,
+        executeInputs: identity.executeInputs,
+        resources: identity.resources,
+        parameterDefinitions: identity.parameterDefinitions,
+        executeParameterDefinitions: identity.executeParameterDefinitions,
+        version: identity.version,
+        variation: identity.variation,
+      }
+    : undefined;
 }

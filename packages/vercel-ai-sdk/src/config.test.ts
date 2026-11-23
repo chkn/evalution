@@ -295,14 +295,6 @@ describe("VercelAISDK", () => {
       });
       const provider = new MemoryTraceProvider();
       telemetry!.addSink(provider);
-      // The route pre-creates the trace the run is recorded into.
-      await provider.recordSpanStart({
-        id: "old-ai:root",
-        traceId: "old-ai",
-        name: "route",
-        kind: "LLM",
-        startTime: Date.now(),
-      });
 
       // An `ai` before 7.0.111: evaluates, but sends no telemetry events.
       const handle = await sdk.executeConfig(config, {
@@ -313,9 +305,7 @@ describe("VercelAISDK", () => {
 
       const trace = await provider.getTrace("old-ai");
       expect(trace?.trace.status).toBe("error");
-      expect((trace?.trace as any).attributes?.errorMessage).toMatch(
-        /7\.0\.111/,
-      );
+      expect(trace?.spans[0]?.errorMessage).toMatch(/7\.0\.111/);
     });
   });
 });
