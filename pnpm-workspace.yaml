@@ -14,3 +14,6 @@ allowBuilds:
   esbuild: true
   "@google/genai": false
   protobufjs: false
+
+minimumReleaseAgeExclude:
+  - ts-proppy@0.3.4

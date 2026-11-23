@@ -221,8 +221,8 @@ importers:
         specifier: ^4.0.0
         version: 4.0.0
       ts-proppy:
-        specifier: 0.3.3
-        version: 0.3.3(react@19.2.7)(typescript@6.0.3)
+        specifier: ^0.3.4
+        version: 0.3.4(react@19.2.7)(typescript@6.0.3)
       ws:
         specifier: ^8.21.0
         version: 8.21.0
@@ -3374,6 +3374,15 @@ packages:
 
   ts-proppy@0.3.3:
     resolution: {integrity: sha512-FSwgeEaRNy3ZNJ6uBcPZTWrM0LXAFkcbf37FSz5Flp5dBQw5qmlIOAcm8vmylCz8NdWpSyao1kfOjMlTtlFFKw==}
+    peerDependencies:
+      react: '>=18.0.0'
+      typescript: '>=5.0.0-0 <7.0.0-0'
+    peerDependenciesMeta:
+      react:
+        optional: true
+
+  ts-proppy@0.3.4:
+    resolution: {integrity: sha512-NjSJR6edhxH8XO0REQyZKd0ztcKzgPvV7SLzqk/0LwTFPhwaXJsChz0vi01rSdstahODAoHyITnJkrcZIFC11Q==}
     peerDependencies:
       react: '>=18.0.0'
       typescript: '>=5.0.0-0 <7.0.0-0'
@@ -6678,7 +6687,7 @@ snapshots:
     optionalDependencies:
       react: 19.2.7
 
-  ts-proppy@0.3.3(react@19.2.7)(typescript@6.0.3):
+  ts-proppy@0.3.4(react@19.2.7)(typescript@6.0.3):
     dependencies:
       typescript: 6.0.3
     optionalDependencies:
