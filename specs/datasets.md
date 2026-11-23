@@ -801,6 +801,15 @@ A dataset has no `inputSources` of its own (§J), so the pane borrows them from 
   from the same sources as the slot it resembles, whatever its name: an `expectedTitle: string`
   from whatever fills a `string` parameter, or a field copied from a resource's `parentTaskId`
   input from the resource that fills that input.
+- **From the linked prompt, by the checker** (added 2026-11-23). A field's type can fit sources
+  without reading the same as any slot's: an `expectedParentTaskId: TaskId | null | undefined`
+  that no parameter or argument shares. So the pane also asks the linked prompt's provider
+  (`PromptProvider.matchFieldSources`, `POST /api/prompts/:providerId/:id/field-sources`) which
+  of the prompt's in-scope sources are assignable to each field's slots. Each field's type syntax
+  is a root slot, evaluated in the prompt's own file, where a field copied from its parameters
+  names its types. A type that doesn't resolve there matches nothing. The answer is added to the
+  two above. It arrives after the dataset does, and until then (or for a provider without the
+  method, or with no link) the fields are offered just those two.
 - **Resources** are the union of those prompts' (the linked prompt's first), so a dataset with no
   link still has some to offer.
 

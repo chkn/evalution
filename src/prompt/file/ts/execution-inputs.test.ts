@@ -458,3 +458,74 @@ describe("probe batching", () => {
     }
   });
 });
+
+describe("dataset field sources (specs/datasets.md §P.2)", () => {
+  function provider() {
+    return new FilePromptProvider({
+      rootDir: fixturesDir,
+      includePatterns: ["seeded-task.prompt.ts"],
+      playgroundIncludePatterns: ["seeded-task.playground.ts"],
+      sdk: new VercelAISDK(),
+    });
+  }
+
+  const field = (
+    name: string,
+    syntax: string,
+    base: "string" | "number" = "string",
+  ): PropDefinition => ({
+    name,
+    type: { kind: "primitive", syntax, base },
+    optional: true,
+  });
+
+  it("offers a source on a field its type is assignable to, though no slot's type reads the same", async () => {
+    const slots = await provider().matchFieldSources(
+      "seeded-task.prompt.ts#orchestrate",
+      [field("expectedParentTaskId", "`tsk_${string}` | null | undefined")],
+    );
+    expect(slots.expectedParentTaskId).toContain(
+      "seeded-task.playground.ts#seededTask.taskId",
+    );
+  });
+
+  it("does not offer a source whose type doesn't fit the field", async () => {
+    const slots = await provider().matchFieldSources(
+      "seeded-task.prompt.ts#orchestrate",
+      [field("expectedParentTaskId", "`tsk_${string}` | null | undefined")],
+    );
+    expect(slots.expectedParentTaskId ?? []).not.toContain(
+      "seeded-task.playground.ts#titleGenerator",
+    );
+    expect(slots.expectedParentTaskId ?? []).not.toContain(
+      "seeded-task.playground.ts#statusPicker",
+    );
+  });
+
+  it("evaluates a field's type in the linked prompt's file, so it can name types in scope there", async () => {
+    const slots = await provider().matchFieldSources(
+      "seeded-task.prompt.ts#orchestrate",
+      [field("expectedTaskId", "TaskId")],
+    );
+    expect(slots.expectedTaskId).toContain(
+      "seeded-task.playground.ts#seededTask.taskId",
+    );
+  });
+
+  it("reports only the fields' slots, not the prompt's own parameters", async () => {
+    const slots = await provider().matchFieldSources(
+      "seeded-task.prompt.ts#orchestrate",
+      [field("count", "number", "number")],
+    );
+    expect(Object.keys(slots)).toEqual(["count"]);
+    expect(slots.count).toContain("seeded-task.playground.ts#statusPicker");
+  });
+
+  it("matches nothing for a field whose type doesn't resolve", async () => {
+    const slots = await provider().matchFieldSources(
+      "seeded-task.prompt.ts#orchestrate",
+      [field("broken", "NoSuchType")],
+    );
+    expect(slots).toEqual({});
+  });
+});

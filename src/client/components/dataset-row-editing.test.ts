@@ -137,6 +137,24 @@ describe("datasetInputSources", () => {
     });
   });
 
+  it("adds the checker's matches for the fields to those by type syntax", () => {
+    const fields: DatasetField[] = [
+      { id: "0", def: TASK },
+      // A type no slot reads the same as: only the checker can match it.
+      { id: "1", def: def("expectedParent", "TaskId | null") },
+    ];
+    const sources = datasetInputSources(fields, prompt(), [], {
+      taskId: [SEEDED_ID.uri, "checked"],
+      expectedParent: [SEEDED_ID.uri],
+      // A slot of no field is dropped.
+      other: ["stray"],
+    });
+    expect(sources?.fieldSlots).toEqual({
+      "0": { taskId: [SEEDED_ID.uri, "checked"] },
+      "1": { expectedParent: [SEEDED_ID.uri] },
+    });
+  });
+
   it("is undefined without a prompt or its sources", () => {
     expect(datasetInputSources([], undefined)).toBeUndefined();
     expect(

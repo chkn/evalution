@@ -1048,8 +1048,9 @@ function matchSlots(
 
   // Root slots: the prompt function's own parameters, plus any extra roots the
   // caller named (execute parameters, whose types are nowhere in the
-  // signature). An extra root that doesn't resolve, or resolves to `never`,
-  // contributes no slots.
+  // signature). An extra root that doesn't resolve, resolves to `never`, or
+  // names something not in scope — which the checker reads as its error type,
+  // an `any` every source would fit — contributes no slots.
   const roots = new Map<string, ts.Type>();
   const fn = findPromptFunctionLike(sourceFile, request.promptName);
   for (const parameter of fn?.parameters ?? []) {
@@ -1058,7 +1059,9 @@ function matchSlots(
   }
   for (const name of Object.keys(request.extraSlots ?? {})) {
     const type = resolve(slotAlias(name));
-    if (type && !(type.flags & ts.TypeFlags.Never)) roots.set(name, type);
+    if (type && !(type.flags & ts.TypeFlags.Never) && !isErrorType(type)) {
+      roots.set(name, type);
+    }
   }
 
   const sourceTypes = new Map<string, ts.Type>();
@@ -1077,6 +1080,19 @@ function matchSlots(
     collectSlotTypes(roots, typeChecker, sourceFile),
     sourceTypes,
     typeChecker,
+  );
+}
+
+/**
+ * Whether `type` is the checker's error type: what a reference to a name not
+ * in scope resolves to. It reads as `any`, but unlike a declared `any` it says
+ * nothing about what fits. `intrinsicName` is internal, but has been stable
+ * across releases.
+ */
+function isErrorType(type: ts.Type): boolean {
+  return (
+    !!(type.flags & ts.TypeFlags.Any) &&
+    (type as { intrinsicName?: string }).intrinsicName === "error"
   );
 }
 

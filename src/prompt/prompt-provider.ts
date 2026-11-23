@@ -399,6 +399,25 @@ export interface PromptProvider<
   listChecks?(): Promise<CheckInfo[]>;
 
   /**
+   * Which of the prompt's in-scope sources can fill each slot of `fields` —
+   * dataset fields, which may be typed unlike any of the prompt's own slots —
+   * decided by the checker's assignability, with each field's type read in
+   * the prompt's own scope. See `specs/datasets.md` §P.2.
+   *
+   * Optional — without it, a field is offered only what fits a slot whose
+   * type reads the same.
+   *
+   * @param promptId - The prompt whose scope the fields are read in.
+   * @param fields - The fields, as their definitions.
+   * @returns Slot path (rooted at a field's name) → URIs of the sources that
+   *   fit it. A slot nothing fits has no entry.
+   */
+  matchFieldSources?(
+    promptId: string,
+    fields: readonly PropDefinition[],
+  ): Promise<Record<string, string[]>>;
+
+  /**
    * Performs whatever process-global setup this provider's tracing mechanism
    * needs and returns the resulting {@link TraceIngestor}.
    *

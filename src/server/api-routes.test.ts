@@ -1609,3 +1609,58 @@ describe("GET /api/sync", () => {
     expect(await res.json()).toEqual({ adopting: [] });
   });
 });
+
+describe("POST /api/prompts/:providerId/:id/field-sources", () => {
+  function appWith(provider: PromptProvider) {
+    const app = new Hono();
+    setupRoutes({
+      app,
+      hotReloadSubscribers: new Set(),
+      hasConfig: true,
+      context: createApiContext({
+        promptProviders: new Map([[PROVIDER_ID, provider]]),
+        traceProviders: new Map(),
+        promptRegistry: new PromptRegistry(),
+        rootPath: "/demo",
+        tracer: trace.getTracer("test"),
+        defaultTraceProviderId: TRACE_PROVIDER_ID,
+      }),
+    });
+    return app;
+  }
+
+  const request = (fields: unknown) =>
+    new Request("http://localhost/api/prompts/fake/cCN0ZXN0/field-sources", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ fields }),
+    });
+
+  const fields = [{ name: "expected", optional: true, type: STRING }];
+
+  it("answers with the provider's matches for the fields, asked about the prompt", async () => {
+    const asked: unknown[] = [];
+    const app = appWith({
+      ...fakeProvider(),
+      async matchFieldSources(promptId, f) {
+        asked.push([promptId, f]);
+        return { expected: ["r.ts#res"] };
+      },
+    });
+    const res = await app.request(request(fields));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ expected: ["r.ts#res"] });
+    expect(asked).toEqual([["p#test", fields]]);
+  });
+
+  it("answers with no matches when the provider can't match fields", async () => {
+    const res = await appWith(fakeProvider()).request(request(fields));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({});
+  });
+
+  it("rejects a body without a fields array", async () => {
+    const res = await appWith(fakeProvider()).request(request("nope"));
+    expect(res.status).toBe(400);
+  });
+});

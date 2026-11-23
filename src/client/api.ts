@@ -218,6 +218,24 @@ export async function getModelParameters(
   return res.json();
 }
 
+/**
+ * Which of `prompt`'s sources fit each slot of the dataset `fields`, as the
+ * provider's checker decides: slot path (rooted at a field's name) → URIs.
+ * Empty when the provider can't tell.
+ */
+export async function getFieldSources(
+  prompt: Pick<NormalizedPrompt, "id" | "providerId">,
+  fields: readonly PropDefinition[],
+): Promise<Record<string, string[]>> {
+  const res = await fetch(promptUrl(prompt, "field-sources"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fields }),
+  });
+  await throwIfError(res);
+  return res.json();
+}
+
 export async function renamePrompt(
   prompt: NormalizedPrompt,
   newName: string,

@@ -1327,6 +1327,49 @@ export class FilePromptProvider
   }
 
   /**
+   * Asks the checker which of `promptId`'s in-scope resources fit each
+   * field's slots, with every field a root slot whose type expression is its
+   * type syntax, evaluated in the prompt's own file. That's where a field
+   * copied from one of its parameters names its types. A field whose type
+   * doesn't resolve there matches nothing. See `specs/datasets.md` §P.2.
+   */
+  async matchFieldSources(
+    promptId: string,
+    fields: readonly PropDefinition[],
+  ): Promise<Record<string, string[]>> {
+    if (fields.length === 0) return {};
+    const [filePath, promptName] = this.parsePromptId(promptId);
+    const inScope = await this.resources.inScopeFor(filePath);
+    if (inScope.length === 0) return {};
+
+    const { slotMatches } = await this.resolveTypes(
+      [],
+      [
+        {
+          filePath,
+          promptName,
+          sources: inScope.map(r => ({
+            key: r.uri,
+            expression: resourceTypeExpression(filePath, r),
+          })),
+          extraSlots: Object.fromEntries(
+            fields.map(f => [f.name, f.type.syntax]),
+          ),
+        },
+      ],
+    );
+    // The answer covers the prompt's own parameters too, which are roots of
+    // the same request; only the fields' slots are asked for.
+    const names = new Set(fields.map(f => f.name));
+    return Object.fromEntries(
+      Object.entries(slotMatches?.[0] ?? {}).filter(
+        ([slotPath, uris]) =>
+          uris.length > 0 && names.has(slotPath.split(".")[0]),
+      ),
+    );
+  }
+
+  /**
    * The built-in checks, plus every `check()` exported from a playground
    * module, with each one's schema inputs probed for their types the same
    * way a resource's arguments are (`specs/evals.md` §B.4). A module that

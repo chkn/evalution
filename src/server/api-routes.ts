@@ -690,6 +690,28 @@ export function setupRoutes({
     }
   });
 
+  // POST /api/prompts/:providerId/:id/field-sources - Which of the prompt's
+  // sources fit each slot of the given dataset fields, by the checker
+  app.post("/api/prompts/:providerId/:id/field-sources", async c => {
+    try {
+      const { providerId, id } = c.req.param();
+      const provider = promptProviders.get(providerId);
+      if (!provider) {
+        return c.json({ error: "Provider not found" }, 404);
+      }
+      const { fields } = (await c.req.json()) as { fields?: unknown };
+      if (!Array.isArray(fields)) {
+        return c.json({ error: "`fields` must be an array" }, 400);
+      }
+      if (!provider.matchFieldSources) return c.json({});
+      return c.json(
+        await provider.matchFieldSources(decodePromptId(id), fields),
+      );
+    } catch (error: any) {
+      return errorResponse(c, error, 400);
+    }
+  });
+
   // POST /api/prompts/:providerId/:id/execute - Execute prompt
   //
   // Returns immediately with a trace reference. The actual execution runs in

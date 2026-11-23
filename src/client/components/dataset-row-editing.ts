@@ -103,11 +103,16 @@ function sourcesByType(
  *
  * @param prompts - Other loaded prompts to borrow slots and resources from.
  *   Only those of the linked prompt's provider are used, when it has one.
+ * @param checked - The linked prompt's provider's own answer for these
+ *   fields, by the checker's assignability (slot path, rooted at a field's
+ *   name → URIs), added to the rest. It catches a field whose type fits
+ *   sources without reading the same as any slot's, like a wider union.
  */
 export function datasetInputSources(
   fields: readonly DatasetField[],
   prompt: NormalizedPrompt | undefined,
   prompts: readonly NormalizedPrompt[] = [],
+  checked: Record<string, string[]> = {},
 ): DatasetInputSources | undefined {
   const pool = [
     ...(prompt ? [prompt] : []),
@@ -144,10 +149,17 @@ export function datasetInputSources(
           ),
         )
       : {};
+    const add = (path: string, uris: readonly string[]) => {
+      slots[path] = [...new Set([...(slots[path] ?? []), ...uris])];
+    };
     for (const slot of collectInputSlots([field.def])) {
       const typed = byType.get(slot.type.syntax);
-      if (!typed) continue;
-      slots[slot.path] = [...new Set([...(slots[slot.path] ?? []), ...typed])];
+      if (typed) add(slot.path, typed);
+    }
+    for (const [path, uris] of Object.entries(checked)) {
+      if (uris.length > 0 && (path === name || path.startsWith(`${name}.`))) {
+        add(path, uris);
+      }
     }
     if (Object.keys(slots).length > 0) fieldSlots[field.id] = slots;
   }

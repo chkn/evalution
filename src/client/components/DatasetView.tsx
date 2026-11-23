@@ -74,6 +74,7 @@ import {
   EvalRunRefused,
   getDataset,
   getDatasetRows,
+  getFieldSources,
   renameDataset,
   renameDatasetField,
   setDatasetColumns,
@@ -405,6 +406,55 @@ function toGridCell(view: CellView, theme: Partial<Theme>): GridCell {
 }
 
 /**
+ * The linked prompt's provider's answer for which sources fit `fields`, by
+ * its checker (see `getFieldSources`). Empty until it arrives, or if asking
+ * fails, so the fields are offered what fits by type syntax in the meantime.
+ * Asked again when the fields or the prompt's sources change, but not when a
+ * refetch only hands back equal ones.
+ */
+function useCheckedFieldSources(
+  prompt: NormalizedPrompt | undefined,
+  fields: readonly DatasetField[] | undefined,
+): Record<string, string[]> {
+  const [answer, setAnswer] = useState<{
+    key: string;
+    sources: Record<string, string[]>;
+  }>();
+  const defs = fields?.map(f => f.def);
+  const key =
+    prompt?.providerId && prompt.inputSources && defs?.length
+      ? JSON.stringify([
+          prompt.providerId,
+          prompt.id,
+          prompt.inputSources.resources.map(r => r.uri),
+          defs,
+        ])
+      : undefined;
+  const latest = useRef({ prompt, defs });
+  latest.current = { prompt, defs };
+
+  useEffect(() => {
+    if (!key) return;
+    const { prompt, defs } = latest.current;
+    let cancelled = false;
+    getFieldSources(prompt!, defs!).then(
+      sources => {
+        if (!cancelled) setAnswer({ key, sources });
+      },
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [key]);
+
+  return useMemo(
+    () => (answer && answer.key === key ? answer.sources : {}),
+    [answer, key],
+  );
+}
+
+/**
  * A dataset's rows as a virtualized grid, paged in from the server as they
  * scroll into view. A field whose cells hold resources or objects can be
  * expanded, from its group header, into a column per argument or property.
@@ -607,9 +657,18 @@ function DatasetView({
   // the linked prompt isn't loaded, rather than every provider's: the row's
   // resources would read as gone. Stable while their content is, so typing in
   // the details pane doesn't remount its editors.
+  const checkedFieldSources = useCheckedFieldSources(
+    linkedPrompt,
+    shownDataset?.fields,
+  );
   const rowSources = useStructurallyStable(
     shownDataset && (!shownDataset.prompt || linkedPrompt)
-      ? datasetInputSources(shownDataset.fields, linkedPrompt, prompts)
+      ? datasetInputSources(
+          shownDataset.fields,
+          linkedPrompt,
+          prompts,
+          checkedFieldSources,
+        )
       : undefined,
   );
 
