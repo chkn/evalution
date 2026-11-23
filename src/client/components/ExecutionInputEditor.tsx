@@ -4,6 +4,7 @@
 import { useCallback, useMemo, useRef } from "react";
 import type { EditorPlugin, ItemEditorProps, SlotPath } from "ts-proppy/react";
 import { ArrayEditsContext, ItemEditor } from "ts-proppy/react";
+import { matchingSlotPath } from "../../shared/input-references";
 import type {
   PromptInputSources,
   PropDefinition,
@@ -12,7 +13,6 @@ import type {
   ResourceInfo,
 } from "../../shared/types";
 import {
-  matchingSlotPath,
   SELF,
   type SlotSelection,
   shiftForRemovedElement,
@@ -96,15 +96,16 @@ export function ExecutionInputEditor({
 
   // A source chosen for an array element is keyed by the element's index, so
   // removing an element moves every later element's source down with it.
-  // `selectionRef` is updated at once: the array's own `onChange` follows
-  // in the same event and must build on the shifted sources, not overwrite
-  // them.
+  // Only `selectionRef` changes here: the array's own `onChange` follows in
+  // the same event and reports the shifted sources along with the shorter
+  // value, so the host sees one consistent change rather than sources that
+  // no longer line up with the value.
   const arrayEdits = useMemo(
     () => ({
       onRemoveElement: (path: SlotPath, index: number) => {
         const current = selectionRef.current;
         if (!current.resources) return;
-        const next = {
+        selectionRef.current = {
           ...current,
           resources: shiftForRemovedElement(
             current.resources,
@@ -112,8 +113,6 @@ export function ExecutionInputEditor({
             index,
           ),
         };
-        selectionRef.current = next;
-        onChangeRef.current(next);
       },
     }),
     [],

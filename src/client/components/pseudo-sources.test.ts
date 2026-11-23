@@ -228,6 +228,19 @@ describe("withPseudoSources: arrays", () => {
     expect(sources.functionSlots.title).toBeUndefined();
     expect(sources.resources.map(r => r.label)).not.toContain("= tags.[]");
   });
+
+  it("offers a new column for the whole array, never for one element", () => {
+    const sources = withPseudoSources(undefined, {
+      functionParameters: [def("title", "string"), tags],
+      bindings: NO_BINDINGS,
+      offerMismatches: true,
+      newColumn: true,
+    });
+    expect(sources.functionSlots.tags).toContain(NEW_COLUMN_URI);
+    expect(sources.functionSlots["tags.[]"]).toEqual([
+      inputUri("function", "title"),
+    ]);
+  });
 });
 
 describe("checkParameterSources", () => {
@@ -238,6 +251,21 @@ describe("checkParameterSources", () => {
     });
     expect(sources.functionSlots.expected).toHaveLength(5);
     expect(sources.functionSlots.expected).toContain(NEW_COLUMN_URI);
+  });
+
+  it("offers a new column for an array parameter, never for one element", () => {
+    const expected: PropDefinition = {
+      name: "expected",
+      optional: false,
+      type: { kind: "array", syntax: "string[]", element: def("", "string") },
+    };
+    const sources = checkParameterSources([expected], {
+      functionParameters,
+      fields: [{ id: "0", def: def("question", "string") }],
+    });
+    expect(sources.functionSlots.expected).toContain(NEW_COLUMN_URI);
+    expect(sources.functionSlots["expected.[]"]).toHaveLength(4);
+    expect(sources.functionSlots["expected.[]"]).not.toContain(NEW_COLUMN_URI);
   });
 });
 

@@ -259,7 +259,7 @@ export function withPseudoSources(
   options: PseudoSourceOptions,
 ): PromptInputSources {
   const slots = slotsOf(options);
-  const targets = targetsOf(options);
+  const targets = slots.filter(s => !isElementSlot(s.path));
   const fields = options.fields ?? [];
 
   /** The pseudo-sources to offer a slot of `type` at `self`. */
@@ -300,7 +300,10 @@ export function withPseudoSources(
     const out: Record<string, string[]> = { ...existing };
     for (const slot of slots.filter(s => s.half === half)) {
       const offered = offer(slot.type, slot);
-      if (options.newColumn) offered.push(NEW_COLUMN_URI);
+      // A column holds a whole array (`specs/evals.md` §A), not one element.
+      if (options.newColumn && !isElementSlot(slot.path)) {
+        offered.push(NEW_COLUMN_URI);
+      }
       if (offered.length > 0) {
         out[slot.path] = [...(out[slot.path] ?? []), ...offered];
       }
@@ -343,8 +346,9 @@ export function withPseudoSources(
 /**
  * Sources for a check's parameters in the eval editor, as the `slots` an
  * `ExecutionInputEditor` takes (rooted at each parameter's name): every
- * column and prompt slot, plus "＋ New column". Nothing references a check's
- * parameters, so no choice here can close a cycle.
+ * column and prompt slot, plus "＋ New column" (but not for one element of an
+ * array). Nothing references a check's parameters, so no choice here can
+ * close a cycle.
  */
 export function checkParameterSources(
   parameters: readonly PropDefinition[],
@@ -360,10 +364,14 @@ export function checkParameterSources(
     "＋ New column from this parameter",
   );
   const uris = resources.map(r => r.uri);
+  const elementUris = uris.filter(uri => uri !== NEW_COLUMN_URI);
   return {
     resources,
     functionSlots: Object.fromEntries(
-      collectInputSlots(parameters).map(slot => [slot.path, uris]),
+      collectInputSlots(parameters).map(slot => [
+        slot.path,
+        isElementSlot(slot.path) ? elementUris : uris,
+      ]),
     ),
     executeSlots: {},
   };

@@ -43,10 +43,14 @@ export const MAX_SLOT_DEPTH = 4;
 /**
  * The path segment that stands for every element of an array: `after.[]` is
  * the slot each of `after`'s elements is matched against. A binding names
- * one element by its index (`after.0`) instead; see `matchingSlotPath` on
- * the client.
+ * one element by its index (`after.0`) instead; see {@link matchingSlotPath}.
  */
 export const ELEMENT_SLOT = "[]";
+
+/** Whether path segment `segment` is an array index, like the `0` of `after.0`. */
+export function isIndexSegment(segment: string): boolean {
+  return /^\d+$/.test(segment);
+}
 
 /**
  * Whether slot `path` is (or is inside) an array's {@link ELEMENT_SLOT}: a
@@ -55,6 +59,23 @@ export const ELEMENT_SLOT = "[]";
  */
 export function isElementSlot(path: string): boolean {
   return path.split(".").includes(ELEMENT_SLOT);
+}
+
+/**
+ * Which of `slots` the slot at `path` is matched as: the path itself, or,
+ * with each element index read as {@link ELEMENT_SLOT}, its array's element
+ * slot (`after.3` → `after.[]`). `undefined` when neither is a slot.
+ */
+export function matchingSlotPath(
+  slots: Readonly<Record<string, readonly string[]>>,
+  path: string,
+): string | undefined {
+  if (Object.hasOwn(slots, path)) return path;
+  const asElement = path
+    .split(".")
+    .map(segment => (isIndexSegment(segment) ? ELEMENT_SLOT : segment))
+    .join(".");
+  return Object.hasOwn(slots, asElement) ? asElement : undefined;
 }
 
 /**
@@ -322,17 +343,15 @@ export interface InputSignature {
 export function slotPaths(
   signature: InputSignature,
 ): Record<"function" | "execute", Set<string>> {
+  const referenceable = (params: readonly PropDefinition[]) =>
+    new Set(
+      collectInputSlots(params)
+        .map(s => s.path)
+        .filter(p => !isElementSlot(p)),
+    );
   return {
-    function: new Set(
-      collectInputSlots(signature.functionParameters)
-        .map(s => s.path)
-        .filter(p => !isElementSlot(p)),
-    ),
-    execute: new Set(
-      collectInputSlots(signature.executeParameters ?? [])
-        .map(s => s.path)
-        .filter(p => !isElementSlot(p)),
-    ),
+    function: referenceable(signature.functionParameters),
+    execute: referenceable(signature.executeParameters ?? []),
   };
 }
 

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alexander Corrado
 
 import { unboundRequired } from "../../shared/eval-problems";
-import { ELEMENT_SLOT } from "../../shared/input-references";
+import { isIndexSegment } from "../../shared/input-references";
 import type {
   ExecutionInput,
   InputLayout,
@@ -139,12 +139,12 @@ function overlay(
   const elements = elementsOf(input);
   if (elements) {
     const index = Number(head);
+    // A source for an element the array no longer has stands for nothing.
+    if (!Number.isInteger(index) || index < 0 || index >= elements.length) {
+      return input;
+    }
     const next = [...elements];
-    next[index] = overlay(
-      next[index] ?? { kind: "object", properties: {} },
-      rest,
-      replacement,
-    );
+    next[index] = overlay(next[index], rest, replacement);
     return { kind: "array", elements: next };
   }
   const properties = { ...propertiesOf(input) };
@@ -190,6 +190,19 @@ const PLACEHOLDER: PropValue = { kind: "primitive", value: undefined };
 
 function isContainer(value: PropValue | undefined): value is PropValue {
   return value?.kind === "object" || value?.kind === "array";
+}
+
+/** `container`'s child at path segment `key`: an element by index, or a property. */
+function childAt(container: PropValue, key: string): PropValue | undefined {
+  if (container.kind === "array") return container.elements[Number(key)];
+  if (container.kind === "object") return container.properties[key];
+  return undefined;
+}
+
+/** Put `child` in `container` at path segment `key`, in place. */
+function setChildAt(container: PropValue, key: string, child: PropValue): void {
+  if (container.kind === "array") container.elements[Number(key)] = child;
+  else if (container.kind === "object") container.properties[key] = child;
 }
 
 /**
@@ -251,28 +264,19 @@ export function fromExecutionInput(
       value = leaf;
       return;
     }
+    if (!isContainer(value)) value = { kind: "object", properties: {} };
     const segments = path.split(".");
-    if (value?.kind !== "object" && value?.kind !== "array") {
-      value = { kind: "object", properties: {} };
-    }
+    const last = segments.pop()!;
     let cursor: PropValue = value;
-    for (const [i, segment] of segments.entries()) {
-      const last = i === segments.length - 1;
-      if (cursor.kind === "array") {
-        const index = Number(segment);
-        if (last) cursor.elements[index] = leaf;
-        else if (!isContainer(cursor.elements[index])) {
-          cursor.elements[index] = { kind: "object", properties: {} };
-        }
-        if (!last) cursor = cursor.elements[index];
-      } else if (cursor.kind === "object") {
-        if (last) cursor.properties[segment] = leaf;
-        else if (!isContainer(cursor.properties[segment])) {
-          cursor.properties[segment] = { kind: "object", properties: {} };
-        }
-        if (!last) cursor = cursor.properties[segment];
+    for (const segment of segments) {
+      let next = childAt(cursor, segment);
+      if (!isContainer(next)) {
+        next = { kind: "object", properties: {} };
+        setChildAt(cursor, segment, next);
       }
+      cursor = next;
     }
+    setChildAt(cursor, last, leaf);
   };
 
   walk(input, SELF);
@@ -339,26 +343,9 @@ export function shiftForRemovedElement(
       continue;
     }
     const [head, ...rest] = path.slice(prefix.length).split(".");
-    const at = /^\d+$/.test(head) ? Number(head) : undefined;
+    const at = isIndexSegment(head) ? Number(head) : undefined;
     if (at === undefined || at < index) out[path] = uri;
     else if (at > index) out[[`${prefix}${at - 1}`, ...rest].join(".")] = uri;
   }
   return out;
-}
-
-/**
- * Which of `slots` the slot at `path` is matched as: the path itself, or,
- * with each element index read as {@link ELEMENT_SLOT}, its array's element
- * slot (`after.3` → `after.[]`). `undefined` when neither is a slot.
- */
-export function matchingSlotPath(
-  slots: Readonly<Record<string, readonly string[]>>,
-  path: string,
-): string | undefined {
-  if (Object.hasOwn(slots, path)) return path;
-  const asElement = path
-    .split(".")
-    .map(segment => (/^\d+$/.test(segment) ? ELEMENT_SLOT : segment))
-    .join(".");
-  return Object.hasOwn(slots, asElement) ? asElement : undefined;
 }

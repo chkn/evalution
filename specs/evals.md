@@ -548,7 +548,8 @@ confident wrong binding is worse than an obvious empty one.
 When no column fits, the picker offers **"＋ New column from this slot"** (or from this check
 parameter). It adds a field to the dataset with the slot's own `PropDefinition` (`datasets.md`
 §P.1) and binds to it. That's how `expectedTitle` and `threadMsgs` would normally come to exist:
-from the eval editor, with the types already right.
+from the eval editor, with the types already right. An array's element slot (`after.[]`) never
+offers it: a column holds the whole array (§A), not one element.
 
 Pre-filling runs only when something is set up: when the eval is created, when its prompt or
 dataset is changed in the editor, and for a check's parameters when the check is added. Opening an

@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import type { ExecutionInput, PropDefinition } from "../../shared/types";
 import {
   fromExecutionInput,
-  matchingSlotPath,
   missingInputMessage,
   SELF,
   type SlotSelection,
@@ -91,6 +90,17 @@ describe("toExecutionInput", () => {
           elements: [{ kind: "instance", name: "forge", output: "taskId" }],
         },
       },
+    });
+  });
+
+  it("leaves out a source for an element the array no longer has", () => {
+    const selection: SlotSelection = {
+      value: { kind: "array", elements: [{ kind: "primitive", value: "a" }] },
+      resources: { "3": instanceUri("forge", "taskId") },
+    };
+    expect(toExecutionInput(selection)).toEqual({
+      kind: "value",
+      value: selection.value,
     });
   });
 
@@ -193,29 +203,6 @@ describe("shiftForRemovedElement", () => {
         0,
       ),
     ).toEqual({ "0": instanceUri("b") });
-  });
-});
-
-describe("matchingSlotPath", () => {
-  const slots = {
-    after: ["pg.ts#seededTaskDependency"],
-    "after.[]": ["pg.ts#seededTask.taskId"],
-    "ctx.list.[].db": ["pg.ts#db"],
-    "ctx.list.[]": [],
-  };
-
-  it("finds an element's slot from its index", () => {
-    expect(matchingSlotPath(slots, "after.3")).toBe("after.[]");
-    expect(matchingSlotPath(slots, "ctx.list.0.db")).toBe("ctx.list.[].db");
-  });
-
-  it("prefers a slot named exactly", () => {
-    expect(matchingSlotPath(slots, "after")).toBe("after");
-  });
-
-  it("is undefined when there's no such slot", () => {
-    expect(matchingSlotPath(slots, "label")).toBeUndefined();
-    expect(matchingSlotPath(slots, "after.x")).toBeUndefined();
   });
 });
 
