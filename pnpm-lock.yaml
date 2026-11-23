@@ -352,8 +352,8 @@ importers:
         version: 2.10.0(supports-color@8.1.1)
     devDependencies:
       ts-proppy:
-        specifier: 0.3.3
-        version: 0.3.3(react@19.2.7)(typescript@5.9.3)
+        specifier: ^0.3.4
+        version: 0.3.4(react@19.2.7)(typescript@5.9.3)
       tsdown:
         specifier: ^0.22.1
         version: 0.22.3(typescript@5.9.3)
@@ -367,8 +367,8 @@ importers:
         specifier: ^1.9.0
         version: 1.9.1
       ts-proppy:
-        specifier: 0.3.3
-        version: 0.3.3(react@19.2.7)(typescript@5.9.3)
+        specifier: ^0.3.4
+        version: 0.3.4(react@19.2.7)(typescript@5.9.3)
       tsdown:
         specifier: ^0.22.1
         version: 0.22.3(typescript@5.9.3)
@@ -392,8 +392,8 @@ importers:
         specifier: ^0.6.0
         version: 0.6.0
       ts-proppy:
-        specifier: 0.3.3
-        version: 0.3.3(react@19.2.7)(typescript@5.9.3)
+        specifier: ^0.3.4
+        version: 0.3.4(react@19.2.7)(typescript@5.9.3)
       tsdown:
         specifier: ^0.22.1
         version: 0.22.3(typescript@5.9.3)
@@ -516,8 +516,8 @@ importers:
         specifier: ^7.0.112
         version: 7.0.112(zod@4.6.5)
       ts-proppy:
-        specifier: 0.3.3
-        version: 0.3.3(react@19.2.7)(typescript@5.9.3)
+        specifier: ^0.3.4
+        version: 0.3.4(react@19.2.7)(typescript@5.9.3)
       tsdown:
         specifier: ^0.22.1
         version: 0.22.3(typescript@5.9.3)
@@ -3371,15 +3371,6 @@ packages:
   ts-invariant@0.10.3:
     resolution: {integrity: sha512-uivwYcQaxAucv1CzRp2n/QdYPo4ILf9VXgH19zEIjFx2EJufV16P0JtJVpYHy89DItG6Kwj2oIUjrcK5au+4tQ==}
     engines: {node: '>=8'}
-
-  ts-proppy@0.3.3:
-    resolution: {integrity: sha512-FSwgeEaRNy3ZNJ6uBcPZTWrM0LXAFkcbf37FSz5Flp5dBQw5qmlIOAcm8vmylCz8NdWpSyao1kfOjMlTtlFFKw==}
-    peerDependencies:
-      react: '>=18.0.0'
-      typescript: '>=5.0.0-0 <7.0.0-0'
-    peerDependenciesMeta:
-      react:
-        optional: true
 
   ts-proppy@0.3.4:
     resolution: {integrity: sha512-NjSJR6edhxH8XO0REQyZKd0ztcKzgPvV7SLzqk/0LwTFPhwaXJsChz0vi01rSdstahODAoHyITnJkrcZIFC11Q==}
@@ -6681,7 +6672,7 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  ts-proppy@0.3.3(react@19.2.7)(typescript@5.9.3):
+  ts-proppy@0.3.4(react@19.2.7)(typescript@5.9.3):
     dependencies:
       typescript: 5.9.3
     optionalDependencies:

@@ -25,7 +25,7 @@
   "peerDependencies": {
     "@google/genai": ">=2.0.0-0",
     "typescript": ">=5.3.3-0 <7.0.0-0",
-    "ts-proppy": "0.3.3"
+    "ts-proppy": "^0.3.4"
   },
   "peerDependenciesMeta": {
     "typescript": {
@@ -36,7 +36,7 @@
     }
   },
   "devDependencies": {
-    "ts-proppy": "0.3.3",
+    "ts-proppy": "^0.3.4",
     "tsdown": "^0.22.1",
     "typescript": "^5.3.3"
   },
