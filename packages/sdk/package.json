@@ -1,6 +1,6 @@
 {
   "name": "@evalution/sdk",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "The base of Evalution's SDK packages: the trace model and API client",
   "type": "module",
   "files": [
