@@ -11,7 +11,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CHECK_ATTRIBUTE } from "@evalution/sdk";
-import type { Database } from "@tursodatabase/sync";
+import { connect, type Database } from "@tursodatabase/sync";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import { afterEach, describe, expect, it } from "vitest";
 import { createLocalTursoClient } from "./db/local-turso-client.ts";
@@ -622,5 +622,61 @@ describe("TursoTraceProvider query", () => {
         );
       }
     }
+  });
+});
+
+describe("TursoTraceProvider with another connection writing", () => {
+  const opened: Database[] = [];
+
+  afterEach(async () => {
+    await Promise.all(opened.splice(0).map(c => c.close()));
+  });
+
+  it("records a span whose read went stale before its write", async () => {
+    const client = await makeMigratedClient();
+    // A second connection to the same file, as the sync engine or another
+    // process has: what it commits leaves an open read snapshot stale.
+    const other = await connect({ path: join(dirs.at(-1)!, "trace.db") });
+    opened.push(other);
+    // Once armed, the other connection commits once: between the span
+    // upsert's read of the existing row and its write.
+    let interleave: (() => Promise<unknown>) | undefined;
+    const beforeSpanWrite = async (sql: unknown) => {
+      if (typeof sql !== "string" || !sql.startsWith('insert into "spans"')) {
+        return;
+      }
+      const write = interleave;
+      interleave = undefined;
+      await write?.();
+    };
+    const racing = new Proxy(client, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (typeof value !== "function") return value;
+        if (key !== "prepare" && key !== "run" && key !== "all") {
+          return value.bind(target);
+        }
+        return async (sql: unknown, ...rest: unknown[]) => {
+          await beforeSpanWrite(sql);
+          return value.call(target, sql, ...rest);
+        };
+      },
+    });
+    const provider = new TursoTraceProvider({ client: racing });
+    const span = {
+      id: "t1:check",
+      traceId: "t1",
+      name: "check",
+      kind: "CHECK" as const,
+      startTime: 1,
+    };
+
+    await provider.recordSpanStart(span);
+    interleave = () => other.exec("CREATE TABLE elsewhere (x)");
+    await provider.recordSpanEnd({ ...span, endTime: 2, status: "ok" });
+
+    expect(interleave).toBeUndefined();
+    const loaded = await provider.getTrace("t1");
+    expect(loaded?.spans).toMatchObject([{ endTime: 2, status: "ok" }]);
   });
 });

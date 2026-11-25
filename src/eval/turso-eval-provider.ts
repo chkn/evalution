@@ -12,6 +12,7 @@ import type { Database } from "@tursodatabase/sync";
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/tursodatabase-sync";
 import type { ExecutionInput, RunResources } from "../shared/types.ts";
+import { transaction } from "../trace/db/stale-snapshot.ts";
 import {
   evalCheckResults,
   evalRowResults,
@@ -308,7 +309,7 @@ export class TursoEvalProvider implements EvalProvider {
 
   async deleteEval(id: string): Promise<void> {
     const deleted = await this.serialize(() =>
-      this.db.transaction(async tx => {
+      transaction(this.db, async tx => {
         // `ON DELETE CASCADE` covers this on a client with foreign keys on;
         // deleting explicitly means one that didn't still can't strand rows.
         const runIds = (
@@ -453,7 +454,7 @@ export class TursoEvalProvider implements EvalProvider {
 
   async deleteRun(runId: string): Promise<void> {
     const evalId = await this.serialize(() =>
-      this.db.transaction(async tx => {
+      transaction(this.db, async tx => {
         // As in `deleteEval`: explicit, so a client without foreign keys
         // still can't strand results.
         await tx

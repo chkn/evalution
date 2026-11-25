@@ -17,6 +17,7 @@ import type {
   VariationId,
   VersionId,
 } from "../../shared/types.ts";
+import { transaction } from "../../trace/db/stale-snapshot.ts";
 import { serializeFieldValues, serializeUpdates } from "./canonical-updates.ts";
 import { variationNames, variations } from "./db/schema.ts";
 import type {
@@ -209,7 +210,7 @@ export class TursoVariationStore implements VariationStore {
     return this.serialize(async () => {
       const now = Date.now();
       const id = mintVariationId();
-      await this.db.transaction(async tx => {
+      await transaction(this.db, async tx => {
         // Whatever WIP held the slot this one takes is replaced by it.
         await tx
           .delete(variations)

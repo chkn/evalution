@@ -32,6 +32,7 @@ import {
   type SqlQueryResult,
 } from "./db/read-only-query.ts";
 import { annotations, spans, traces } from "./db/schema.ts";
+import { transaction } from "./db/stale-snapshot.ts";
 import { mergeSpans } from "./span-merge.ts";
 
 function parseJson<T>(v: string | null): T | undefined {
@@ -464,7 +465,7 @@ export class TursoTraceProvider extends BaseTraceProvider {
    */
   protected async addOrUpdateSpan(span: Span): Promise<Span> {
     return this.serializeWrite(() =>
-      this.db.transaction(async tx => {
+      transaction(this.db, async tx => {
         const [existingRow] = await tx
           .select()
           .from(spans)

@@ -35,6 +35,7 @@ import {
   type SqlQueryOptions,
   type SqlQueryResult,
 } from "../trace/db/read-only-query.ts";
+import { transaction } from "../trace/db/stale-snapshot.ts";
 import {
   fieldIdFor,
   mintRowId,
@@ -495,7 +496,7 @@ export class TursoDatasetProvider implements DatasetProvider {
 
   async deleteDataset(datasetId: string): Promise<void> {
     const deleted = await this.serializeWrite(() =>
-      this.db.transaction(async tx => {
+      transaction(this.db, async tx => {
         // `ON DELETE CASCADE` covers this on a client with foreign keys on
         // (`createLocalTursoClient` turns them on); deleting explicitly means
         // a client that didn't still can't strand rows.
@@ -517,7 +518,7 @@ export class TursoDatasetProvider implements DatasetProvider {
     rows: NewDatasetRow[],
   ): Promise<DatasetRow[]> {
     const added = await this.serializeWrite(() =>
-      this.db.transaction(async tx => {
+      transaction(this.db, async tx => {
         const [row] = await tx
           .select({ fields: datasets.fields })
           .from(datasets)
@@ -587,7 +588,7 @@ export class TursoDatasetProvider implements DatasetProvider {
         Object.keys(u.resources ?? {}).length > 0,
     );
     await this.serializeWrite(() =>
-      this.db.transaction(async tx => {
+      transaction(this.db, async tx => {
         const [row] = await tx
           .select({ fields: datasets.fields })
           .from(datasets)
@@ -669,7 +670,7 @@ export class TursoDatasetProvider implements DatasetProvider {
   ): Promise<number> {
     if (rowIds.length === 0) return 0;
     const deleted = await this.serializeWrite(() =>
-      this.db.transaction(async tx => {
+      transaction(this.db, async tx => {
         const removed = await tx
           .delete(datasetRows)
           .where(
@@ -696,7 +697,7 @@ export class TursoDatasetProvider implements DatasetProvider {
     def: PropDefinition,
   ): Promise<DatasetField> {
     const field = await this.serializeWrite(() =>
-      this.db.transaction(async tx => {
+      transaction(this.db, async tx => {
         const [row] = await tx
           .select({
             fields: datasets.fields,
@@ -740,11 +741,14 @@ export class TursoDatasetProvider implements DatasetProvider {
     name: string,
   ): Promise<DatasetField> {
     const field = await this.serializeWrite(() =>
-      this.db.transaction(async tx => {
+      transaction(this.db, async tx => {
         const fields = await this.fieldsIn(tx, datasetId);
         const field = fields.find(f => f.id === fieldId);
         if (!field) throw noSuchField(datasetId, fieldId);
-        const renamed: DatasetField = { ...field, def: { ...field.def, name } };
+        const renamed: DatasetField = {
+          ...field,
+          def: { ...field.def, name },
+        };
         const clash = fields.some(
           f => f.id !== fieldId && matchKey(f.def) === matchKey(renamed.def),
         );
@@ -771,7 +775,7 @@ export class TursoDatasetProvider implements DatasetProvider {
 
   async deleteField(datasetId: string, fieldId: string): Promise<void> {
     await this.serializeWrite(() =>
-      this.db.transaction(async tx => {
+      transaction(this.db, async tx => {
         const [row] = await tx
           .select({ fields: datasets.fields, layout: datasets.layout })
           .from(datasets)
