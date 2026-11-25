@@ -77,6 +77,10 @@ export class OverlayFileProvider implements FileProvider {
     return this.inner.importSource(filePath, source);
   }
 
+  async moduleGeneration(): Promise<unknown> {
+    return this.inner.moduleGeneration?.();
+  }
+
   glob(pattern: string, options?: GlobOptions): AsyncIterableIterator<string> {
     return this.inner.glob(pattern, options);
   }

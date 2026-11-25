@@ -104,6 +104,18 @@ export interface FileProvider {
   importSource?(filePath: string, source: string): Promise<any>;
 
   /**
+   * Names the module instances a fresh {@link import} would now hand back,
+   * starting a new set first if any module in the current one has changed.
+   * The value changes whenever a fresh import would re-evaluate modules that
+   * earlier imports share — including ones nobody imported fresh, such as a
+   * class a prompt and a playground module both import.
+   *
+   * Optional. A provider without it shares no modules between fresh imports,
+   * so there is no set to change.
+   */
+  moduleGeneration?(): Promise<unknown>;
+
+  /**
    * Returns an async iterator that yields paths matching `pattern`.
    * @param pattern - A glob pattern (e.g. `'**\/*.prompt.ts'`).
    * @param options - See {@link GlobOptions}.

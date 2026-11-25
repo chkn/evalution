@@ -676,8 +676,29 @@ export interface ResourceLease {
  */
 type InstancesByKey = Map<string, Promise<Instance> | Instance>;
 
+/**
+ * The `scope: 'server'` instances made from one load of the playground
+ * modules, and the leases that may still be using them. Retired when the
+ * modules are loaded again; disposed once retired and no lease holds them, so
+ * a run under way when a file changes keeps what it started with.
+ */
+interface ServerInstances {
+  instances: Map<Resource<unknown>, InstancesByKey>;
+  leases: number;
+  retired: boolean;
+}
+
+function serverInstances(): ServerInstances {
+  return { instances: new Map(), leases: 0, retired: false };
+}
+
 /** One lease's own state, threaded through instantiation. */
 interface LeaseState {
+  /**
+   * The server-scoped instances this lease uses, once it has checked the
+   * modules are current — see {@link ResourceRegistry.lease}.
+   */
+  server: ServerInstances | null;
   runInstances: Map<Resource<unknown>, InstancesByKey>;
   resetLocks: LeaseResetLocks;
   /** The run's declared instances, by name, with their registrations. */
@@ -715,6 +736,20 @@ async function disposeAll(
       }
     }),
   );
+}
+
+/**
+ * Disposes `server`'s instances if it has been retired and no lease is using
+ * it. Idempotent: what it disposes is removed, and anything a lease still open
+ * creates afterwards is disposed when that lease releases.
+ */
+async function disposeIfIdle(server: ServerInstances): Promise<void> {
+  if (!server.retired || server.leases > 0) return;
+  const pending = [...server.instances.values()].flatMap(byKey => [
+    ...byKey.values(),
+  ]);
+  server.instances.clear();
+  await disposeAll(pending);
 }
 
 /** A stable id per resource object, for {@link nodeId}. */
@@ -798,9 +833,15 @@ export class ResourceRegistry {
    */
   private loadedModules = new Map<string, LoadedModule>();
   /** Memoized `scope: 'server'` instances, by resource object then argument key. */
-  private serverInstances = new Map<Resource<unknown>, InstancesByKey>();
+  private server = serverInstances();
   /** The scan in flight, so concurrent callers don't each re-import. */
   private scanning: Promise<void> | null = null;
+  /**
+   * The {@link FileProvider.moduleGeneration} the discovered resources were
+   * loaded in: `undefined` before the first scan, or always with a provider
+   * that has no generations.
+   */
+  private generation: unknown;
   /** Serializes leases' first use of a resettable server-scoped instance. See {@link ResetLockRegistry}. */
   private resetLocks = new ResetLockRegistry();
 
@@ -933,25 +974,45 @@ export class ResourceRegistry {
 
   /** The memoized no-argument instance for `target`, if one has already settled. */
   private peekInstance(target: Resource<unknown>): Instance | undefined {
-    const cached = this.serverInstances.get(target)?.get("");
+    const cached = this.server.instances.get(target)?.get("");
     return cached && !(cached instanceof Promise) ? cached : undefined;
   }
 
   /**
-   * Forgets everything discovered so far and disposes memoized server-scoped
-   * instances, so the next call re-imports.
+   * Forgets everything discovered so far, so the next call re-imports, and
+   * retires the memoized server-scoped instances: they are disposed as soon
+   * as no lease opened before now is still running.
    *
    * Called when a playground module changes: a server-scoped value created by
-   * the old code must not outlive it.
+   * the old code must not outlive it — but nor must it be disposed under a
+   * run still using it.
    */
   async invalidate(): Promise<void> {
     this.resources = null;
     this.moduleErrors = [];
-    const pending = [...this.serverInstances.values()].flatMap(byKey => [
-      ...byKey.values(),
-    ]);
-    this.serverInstances = new Map();
-    await disposeAll(pending);
+    const retired = this.server;
+    retired.retired = true;
+    this.server = serverInstances();
+    await disposeIfIdle(retired);
+  }
+
+  /**
+   * Rescans if a prompt imported now would be imported in a newer module
+   * generation than the resources were — see
+   * {@link FileProvider.moduleGeneration}.
+   *
+   * A run's resources are made before its prompt is imported, and that
+   * import starts a new generation whenever anything it loaded has changed:
+   * a prompt, or any file it imports, not only a playground module. Every
+   * module is evaluated again in it, so resources from the previous one would
+   * be built from other copies of the prompt's own classes and fail its
+   * `instanceof` checks.
+   */
+  private async current(): Promise<void> {
+    const generation = await this.fileProvider.moduleGeneration?.();
+    // Unscanned, or a scan is under way: it reads the generation itself.
+    if (!this.resources || generation === this.generation) return;
+    await this.invalidate();
   }
 
   /**
@@ -961,6 +1022,7 @@ export class ResourceRegistry {
    */
   lease(): ResourceLease {
     const state: LeaseState = {
+      server: null,
       runInstances: new Map(),
       resetLocks: this.resetLocks.forLease(),
       declared: new Map(),
@@ -970,9 +1032,22 @@ export class ResourceRegistry {
       labels: new Map(),
     };
 
+    // Everything the lease makes comes from modules as current as the
+    // prompt it is for, and from server-scoped instances that stay alive
+    // until it is released.
+    const ready = this.current().then(() => {
+      if (state.released) return;
+      state.server = this.server;
+      state.server.leases++;
+    });
+    // Reported by whichever call awaits it; a lease never used has nothing
+    // to report it to.
+    ready.catch(() => {});
+
     const declare = async (
       instances: Record<string, DeclaredInstance>,
     ): Promise<void> => {
+      await ready;
       const byUri = await this.byUri();
       const sharedBy = new Map<Resource<unknown>, string>();
       for (const [name, decl] of Object.entries(instances)) {
@@ -1008,6 +1083,7 @@ export class ResourceRegistry {
     };
 
     const acquire = async (name: string, output?: string): Promise<unknown> => {
+      await ready;
       await this.byUri();
       const instance = await this.instantiateDeclared(
         name,
@@ -1027,6 +1103,7 @@ export class ResourceRegistry {
       label: string,
       args: () => Promise<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> => {
+      await ready;
       const { deps, params } = partitionInputs({ inputs, label }, "Check");
       const resolved = await this.resolveDeps(
         deps,
@@ -1058,6 +1135,12 @@ export class ResourceRegistry {
         state.runInstances.clear();
         state.resetLocks.releaseAll();
         await disposeAll(pending);
+        // After the run's own instances, which may depend on these.
+        const server = state.server;
+        if (server) {
+          server.leases--;
+          await disposeIfIdle(server);
+        }
       },
     };
   }
@@ -1140,8 +1223,12 @@ export class ResourceRegistry {
     }
 
     const scope = target.scope ?? defaultScope(target);
+    // A lease under way when the modules moved on keeps using the
+    // server-scoped instances it started with.
     const cache =
-      scope === "server" ? this.serverInstances : state.runInstances;
+      scope === "server"
+        ? (state.server ?? this.server).instances
+        : state.runInstances;
 
     let byKey = cache.get(target);
     if (!byKey) {
@@ -1185,14 +1272,13 @@ export class ResourceRegistry {
       // Once a server-scoped create settles, replace the pending promise with
       // the instance itself so `describe()` can peek it synchronously without
       // re-running `create()` — that's the whole point of memoizing it.
-      // Guarded on still being the cached entry: `invalidate()` may have
-      // swapped in a fresh map while this was in flight, and the old value
-      // must not leak into it.
+      // Guarded on still being the cached entry: the instances may have been
+      // disposed while this was in flight, and must stay that way.
       if (scope === "server") {
         pending
           .then(instance => {
-            if (this.serverInstances.get(target)?.get(key) === pending) {
-              this.serverInstances.get(target)!.set(key, instance);
+            if (cache.get(target)?.get(key) === pending) {
+              cache.get(target)!.set(key, instance);
             }
           })
           // A rejection is already handled by the `.catch` above, on the same
@@ -1375,6 +1461,8 @@ export class ResourceRegistry {
     const identities = new Map<Resource<unknown>, RegisteredResource>();
     const errors: PlaygroundModuleError[] = [];
     const loaded = new Map<string, LoadedModule>();
+    // Read before importing, so a change made during the scan reads as newer.
+    const generation = await this.fileProvider.moduleGeneration?.();
 
     for (const modulePath of await this.findModules()) {
       let module: LoadedModule;
@@ -1441,7 +1529,7 @@ export class ResourceRegistry {
         const alias = shared[key];
         if (isResource(alias)) identities.set(alias, registered);
         if ("value" in value) {
-          this.serverInstances.set(value, new Map([["", value]]));
+          this.server.instances.set(value, new Map([["", value]]));
         }
       }
     }
@@ -1451,6 +1539,7 @@ export class ResourceRegistry {
     this.identities = identities;
     this.moduleErrors = errors;
     this.loadedModules = loaded;
+    this.generation = generation;
   }
 
   private async findModules(): Promise<string[]> {

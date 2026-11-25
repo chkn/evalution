@@ -110,6 +110,19 @@ export class LocalFileProvider implements FileProvider {
   }
 
   /**
+   * The fresh-import hook's current generation, after starting a new one if
+   * anything loaded in it has changed — the generation a fresh import made
+   * now would use. Without the hook, a fresh import re-evaluates only the
+   * module itself, so there is no generation to report.
+   */
+  async moduleGeneration(): Promise<number | undefined> {
+    if (this.#cacheBustingUnsupported || !isFreshImportHookRegistered()) {
+      return undefined;
+    }
+    return importGeneration(true);
+  }
+
+  /**
    * Imports `source` under the real file's URL plus `?evalution-src=<sha256>`,
    * which the variation load hook answers with `source` (see
    * `registerVariationLoaderHook`). Node resolves the module's relative

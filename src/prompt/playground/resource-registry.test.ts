@@ -902,6 +902,115 @@ describe("duplicate module instances", () => {
 });
 
 /**
+ * A provider whose modules are evaluated once per *generation*, the way the
+ * fresh-import hook evaluates them: every import within a generation shares
+ * one instance, and `bump()` starts a new one — as a fresh import of a prompt
+ * does when anything it loaded has changed, playground module or not.
+ */
+function generationalProvider(
+  modules: Record<string, (generation: number) => Record<string, any>>,
+) {
+  let generation = 0;
+  const loaded = new Map<string, Record<string, any>>();
+  const provider = {
+    async *glob() {
+      yield* Object.keys(modules);
+    },
+    async import(filePath: string) {
+      const key = `${filePath}?gen=${generation}`;
+      if (!loaded.has(key)) loaded.set(key, modules[filePath](generation));
+      return loaded.get(key)!;
+    },
+    async moduleGeneration() {
+      return generation;
+    },
+  } as unknown as MemoryFileProvider;
+  return {
+    provider,
+    bump: () => {
+      generation++;
+    },
+  };
+}
+
+describe("module generations", () => {
+  it("hands a run resources from the module generation its prompt is imported in", async () => {
+    // The prompt is imported after its resources are made, and that import
+    // starts a new generation when any file it loaded has changed — a prompt
+    // edit, not just a playground one. Resources from the old generation
+    // would then be built from other evaluations of the very modules the
+    // prompt uses: another class, failing the prompt's `instanceof`.
+    const { provider, bump } = generationalProvider({
+      [p("x.playground.ts")]: generation => ({
+        thing: resource({ create: () => ({ value: `gen-${generation}` }) }),
+      }),
+    });
+    const reg = new ResourceRegistry({ fileProvider: provider, rootDir: ROOT });
+
+    const first = reg.lease();
+    expect(await acquireUri(first, "x.playground.ts#thing")).toBe("gen-0");
+    await first.release();
+
+    bump();
+    const second = reg.lease();
+    expect(await acquireUri(second, "x.playground.ts#thing")).toBe("gen-1");
+    await second.release();
+  });
+
+  it("disposes an old generation's server-scoped instances once the runs using them finish", async () => {
+    // An edit while an eval is running moves the generation on under the
+    // rows still in flight: they keep the instances they started with.
+    const disposed: number[] = [];
+    const { provider, bump } = generationalProvider({
+      [p("x.playground.ts")]: generation => ({
+        db: resource({
+          scope: "server",
+          create: () => ({
+            value: generation,
+            dispose: () => {
+              disposed.push(generation);
+            },
+          }),
+        }),
+      }),
+    });
+    const reg = new ResourceRegistry({ fileProvider: provider, rootDir: ROOT });
+
+    const inFlight = reg.lease();
+    expect(await acquireUri(inFlight, "x.playground.ts#db")).toBe(0);
+
+    bump();
+    const next = reg.lease();
+    expect(await acquireUri(next, "x.playground.ts#db")).toBe(1);
+    expect(disposed).toEqual([]);
+
+    await inFlight.release();
+    expect(disposed).toEqual([0]);
+    await next.release();
+    expect(disposed).toEqual([0]);
+  });
+
+  it("keeps server-scoped instances while the generation stays the same", async () => {
+    let creates = 0;
+    const { provider } = generationalProvider({
+      [p("x.playground.ts")]: () => ({
+        db: resource({
+          scope: "server",
+          create: () => ({ value: ++creates }),
+        }),
+      }),
+    });
+    const reg = new ResourceRegistry({ fileProvider: provider, rootDir: ROOT });
+
+    for (let i = 0; i < 2; i++) {
+      const lease = reg.lease();
+      expect(await acquireUri(lease, "x.playground.ts#db")).toBe(1);
+      await lease.release();
+    }
+  });
+});
+
+/**
  * A minimal inline Standard Schema, embedded as source text so fixture
  * modules can declare arguments without depending on a real validator
  * library — `MemoryFileProvider` imports through a `data:` URL, which cannot

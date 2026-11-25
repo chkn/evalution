@@ -247,8 +247,9 @@ there is no key-collision problem across the many files a `.evalution/playground
 may hold. Dependencies are resolved as a DAG per run; a cycle is a load-time error.
 
 **Lifecycle.** `scope: 'run'` (default) creates per execution and disposes when the run
-settles; `scope: 'server'` memoizes and disposes at shutdown or when the defining module
-changes. Run-scoped teardown requires `executeConfig` to return a completion handle — see §G.
+settles; `scope: 'server'` memoizes and disposes at shutdown, or when its module is loaded
+again — on an edit to it, or when a run's prompt is imported in a new generation (§G) — once
+no run that started with it is still using it. Run-scoped teardown requires `executeConfig` to return a completion handle — see §G.
 
 ## C. What does not belong here: authored data
 

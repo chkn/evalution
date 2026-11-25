@@ -203,6 +203,51 @@ describe("fresh import hook", () => {
     expect(result).toEqual(["edited", true]);
   });
 
+  it("gives a run resources made from the classes its prompt imports, after an edit to the prompt", async () => {
+    // A prompt's tool schema checks `instanceof Provider`, and a resource
+    // hands it a subclass. Editing the prompt starts a new generation when it
+    // is next imported — after the run's resources are made — so the registry
+    // has to make them in that generation too, or they extend the previous
+    // evaluation of `Provider` and fail the check.
+    const result = await run(
+      {
+        "base.ts": "export class Provider {}\n",
+        ".evalution/playground/provider.ts": [
+          `import { resource } from ${JSON.stringify(src("prompt/playground/resource.ts"))};`,
+          "import { Provider } from '../../base.ts';",
+          "class MockProvider extends Provider {}",
+          "export const provider = resource({ create: () => ({ value: new MockProvider() }) });",
+          "",
+        ].join("\n"),
+        "prompt.ts": [
+          "import { Provider } from './base.ts';",
+          "export const accepts = value => value instanceof Provider;",
+          "export const v = 1;",
+          "",
+        ].join("\n"),
+      },
+      `
+      const reg = new ResourceRegistry({ fileProvider: local, rootDir: root });
+      const runPrompt = async () => {
+        const lease = reg.lease();
+        await lease.declare({ provider: { uri: ".evalution/playground/provider.ts#provider" } });
+        const value = await lease.acquire("provider");
+        const prompt = await local.import(at("prompt.ts"), { fresh: true });
+        await lease.release();
+        return prompt.accepts(value);
+      };
+      const before = await runPrompt();
+      write("prompt.ts", fs.readFileSync(at("prompt.ts"), "utf8").replace("v = 1", "v = 2"));
+      const after = await runPrompt();
+      return { before, after };
+      `,
+      {
+        preamble: `import { ResourceRegistry } from ${JSON.stringify(src("prompt/playground/resource-registry.ts"))};`,
+      },
+    );
+    expect(result).toEqual({ before: true, after: true });
+  });
+
   it("falls back to plain imports, with a warning, when the host rejects the query", async () => {
     // Stands in for a transform pipeline that reads the extension off the
     // whole specifier and chokes on the query.
