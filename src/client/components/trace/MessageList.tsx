@@ -10,6 +10,8 @@
  */
 
 import type { SpanContentPart, SpanMessage } from "../../../shared/types";
+import { CopyButton } from "../CopyButton.tsx";
+import { messageText } from "./copy-text.ts";
 import { toSafeImageSrc } from "./imageSrc.ts";
 import { JsonView } from "./JsonView.tsx";
 import { Markdown } from "./Markdown.tsx";
@@ -103,7 +105,15 @@ export function MessageList({
     <div className={rootClass}>
       {messages.map((msg, i) => (
         <div key={i} className={`${itemClass} ${itemClass}-role-${msg.role}`}>
-          <div className={roleClass}>{msg.role}</div>
+          <div className={roleClass}>
+            {msg.role}
+            {variant === "bubble" && (
+              <CopyButton
+                text={messageText(msg.content)}
+                label="Copy message"
+              />
+            )}
+          </div>
           <div className={contentClass}>
             <MessageContent content={msg.content} />
           </div>

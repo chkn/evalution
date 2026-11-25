@@ -6055,6 +6055,10 @@ pre {
 }
 
 .chat-bubble-role {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -6086,6 +6090,47 @@ pre {
 
 .chat-turn-error .chat-bubble {
   border: 1px solid var(--error-border);
+}
+
+/* ── Copy button (a details row's label, a chat bubble's role line) ──
+ * Hidden until its row or bubble is hovered, so a column of them doesn't
+ * clutter the pane; keyboard focus and a just-copied check show it too. */
+
+/* A label with a copy button keeps the button beside its text. */
+.span-details-row-label-copyable {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin: -3px 0;
+  padding: 3px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--trace-text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.copy-btn svg {
+  width: 12px;
+  height: 12px;
+}
+.copy-btn:hover {
+  color: var(--panel-text);
+  background: rgba(127, 127, 127, 0.18);
+}
+.span-details-row:hover .copy-btn,
+.chat-bubble:hover .copy-btn,
+.copy-btn:focus-visible,
+.copy-btn.copied {
+  opacity: 1;
 }
 
 /* ─── Welcome / onboarding wizard ───────────────────────────────────────────── */

@@ -24,7 +24,9 @@ import type {
   LLMSpanDetails,
   SpanMessage,
 } from "../../../shared/types";
+import { CopyButton } from "../CopyButton.tsx";
 import { AnnotationCountBadges } from "./AnnotationChip.tsx";
+import { copyText } from "./copy-text.ts";
 import { formatDuration } from "./format.ts";
 import { ChevronIcon, StopwatchIcon, WrenchIcon } from "./icons.tsx";
 import { JsonView } from "./JsonView.tsx";
@@ -67,7 +69,10 @@ function OutputBubble({
   return (
     <div className="message-list-bubble">
       <div className="chat-bubble chat-bubble-role-assistant">
-        <div className="chat-bubble-role">assistant</div>
+        <div className="chat-bubble-role">
+          assistant
+          <CopyButton text={copyText(output)} label="Copy message" />
+        </div>
         <div className="chat-bubble-content">{renderOutput(output, input)}</div>
       </div>
     </div>
@@ -117,7 +122,10 @@ function ChatLLMBlock({
       {jsonInput && (
         <div className="message-list-bubble">
           <div className="chat-bubble chat-bubble-role-user">
-            <div className="chat-bubble-role">input</div>
+            <div className="chat-bubble-role">
+              input
+              <CopyButton text={copyText(input)} label="Copy message" />
+            </div>
             <div className="chat-bubble-content">
               <JsonView data={input} />
             </div>

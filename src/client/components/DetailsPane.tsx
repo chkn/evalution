@@ -9,6 +9,7 @@
  */
 
 import { useCallback } from "react";
+import { CopyButton } from "./CopyButton.tsx";
 import { useContentRectTest } from "./use-content-rect-test";
 
 /**
@@ -147,11 +148,14 @@ export function DetailRow({
   label,
   children,
   className,
+  copyText,
   "data-field-id": fieldId,
 }: {
   label: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  /** When set, the label carries a button that copies this text. */
+  copyText?: string;
   /** Marks the row as a dataset field's, for `scrollToField` to find. */
   "data-field-id"?: string;
 }) {
@@ -160,7 +164,21 @@ export function DetailRow({
       className={`span-details-row${className ? ` ${className}` : ""}`}
       data-field-id={fieldId}
     >
-      <div className="span-details-row-label">{label}</div>
+      <div
+        className={`span-details-row-label${copyText !== undefined ? " span-details-row-label-copyable" : ""}`}
+      >
+        {label}
+        {copyText !== undefined && (
+          <CopyButton
+            text={copyText}
+            label={
+              typeof label === "string"
+                ? `Copy ${label.toLowerCase()}`
+                : "Copy to clipboard"
+            }
+          />
+        )}
+      </div>
       <div className="span-details-row-value">{children}</div>
     </div>
   );

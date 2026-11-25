@@ -1184,6 +1184,75 @@ test("tool span details render args/result as an expandable JSON tree", async ({
   await expect(details.locator(".json-key", { hasText: "query" })).toBeHidden();
 });
 
+/** The text on the page's clipboard. */
+function readClipboard(page: Page) {
+  return page.evaluate(() => navigator.clipboard.readText());
+}
+
+test("a conversation bubble's copy button copies its message without selecting the turn", async ({
+  mount,
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await mockTraceApi(page);
+  const component = await mount(<TraceViewHarness />);
+  await openConversationTab(component);
+
+  const turn = component.locator(".chat-turn");
+  const bubbles = turn.locator(".chat-bubble");
+  await bubbles.first().hover();
+  await bubbles.first().getByRole("button", { name: "Copy message" }).click();
+  // The message's source, not its rendered Markdown.
+  await expect.poll(() => readClipboard(page)).toBe("Hello **world**");
+  await expect(
+    bubbles.first().getByRole("button", { name: "Copied" }),
+  ).toBeVisible();
+  await expect(turn).not.toHaveClass(/chat-turn-selected/);
+
+  await bubbles.last().hover();
+  await bubbles.last().getByRole("button", { name: "Copy message" }).click();
+  await expect.poll(() => readClipboard(page)).toBe("Hi there!");
+});
+
+test("span details copy an LLM span's input and output, and a tool's arguments and result", async ({
+  mount,
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await mockTraceApi(page);
+  const component = await mount(<TraceViewHarness />);
+  await openSpansTab(component);
+  const details = component.locator(".trace-details-pane");
+  const copy = async (name: string) => {
+    await details.locator(".span-details-row", { hasText: name }).hover();
+    await details.getByRole("button", { name: `Copy ${name}` }).click();
+    return readClipboard(page);
+  };
+
+  await component
+    .locator(".trace-row", { hasText: "step: 0" })
+    .locator(".trace-row-main")
+    .click();
+  // Hidden until its row is hovered.
+  await expect(details.getByRole("button", { name: "Copy input" })).toHaveCSS(
+    "opacity",
+    "0",
+  );
+  expect(JSON.parse(await copy("input"))).toEqual([
+    { role: "user", content: "Hello **world**" },
+  ]);
+  expect(await copy("output")).toBe("Hi there!");
+
+  await component
+    .locator(".trace-row", { hasText: "tool: search" })
+    .locator(".trace-row-main")
+    .click();
+  expect(JSON.parse(await copy("arguments"))).toEqual({ query: "cats" });
+  expect(JSON.parse(await copy("result"))).toEqual({ count: 3 });
+});
+
 test("the header meta row hides the model, then the token count, as the header narrows, without any items overlapping", async ({
   mount,
   page,

@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { Annotation, AnnotationKind, Span } from "../../../shared/types";
 import { DetailRow, type Fact, FactGroup, FactsGrid } from "../DetailsPane.tsx";
 import { AnnotationChip } from "./AnnotationChip.tsx";
+import { copyText } from "./copy-text.ts";
 import {
   formatCost,
   formatDuration,
@@ -120,7 +121,7 @@ export function SpanDetails({
     });
   }
 
-  const rows: { label: string; value: React.ReactNode }[] = [];
+  const rows: { label: string; value: React.ReactNode; copy?: string }[] = [];
   // A tool's arguments sit inside the first group, ahead of any error, so
   // what was asked reads before what went wrong.
   let argumentsValue: React.ReactNode | undefined;
@@ -131,6 +132,7 @@ export function SpanDetails({
     const messages = spanMessages(llm);
     rows.push({
       label: "Input",
+      copy: copyText(llm.input),
       value: messages ? (
         <MessageList messages={messages} />
       ) : (
@@ -148,6 +150,7 @@ export function SpanDetails({
     const outMessages = outputMessages(llm);
     rows.push({
       label: "Output",
+      copy: copyText(llm?.output),
       value: outMessages ? (
         <MessageList messages={outMessages} />
       ) : (
@@ -168,6 +171,7 @@ export function SpanDetails({
     if (tool.output !== undefined) {
       rows.push({
         label: "Result",
+        copy: copyText(tool.output),
         value: <JsonView data={tool.output} />,
       });
     }
@@ -190,6 +194,7 @@ export function SpanDetails({
               <DetailRow
                 label="Arguments"
                 className="span-details-row-in-group"
+                copyText={copyText(tool?.input)}
               >
                 {argumentsValue}
               </DetailRow>
@@ -202,7 +207,7 @@ export function SpanDetails({
         </FactsGrid>
 
         {rows.map(r => (
-          <DetailRow key={r.label} label={r.label}>
+          <DetailRow key={r.label} label={r.label} copyText={r.copy}>
             {r.value}
           </DetailRow>
         ))}
