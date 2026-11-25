@@ -35,9 +35,7 @@ const FORMER_CATALOG = [
   ["Anthropic", "Claude Sonnet 5", "anthropic", "claude-sonnet-5"],
   ["Anthropic", "Claude Opus 4.8", "anthropic", "claude-opus-4-8"],
   ["Anthropic", "Claude Haiku 4.5", "anthropic", "claude-haiku-4-5"],
-  ["Google", "Gemini 3.7 Flash", "google", "gemini-3.7-flash"],
   ["Google", "Gemini 3.6 Flash", "google", "gemini-3.6-flash"],
-  ["Google", "Gemini 3.5 Flash", "google", "gemini-3.5-flash"],
   ["Google", "Gemini 3.5 Flash-Lite", "google", "gemini-3.5-flash-lite"],
   ["Google", "Gemini 3.1 Pro Preview", "google", "gemini-3.1-pro-preview"],
   ["Google", "Gemini 3.1 Flash-Lite", "google", "gemini-3.1-flash-lite"],
@@ -185,7 +183,7 @@ export default prompts({ id: 'triage' }, ({ openai }) => ({
   it("writes a provider preset and reads it back as the same preset", async () => {
     const preset = presets(def.catalogs![0], "Anthropic")[0];
     const { updated, text } = await edit(preset.value);
-    expect(text).toContain(`anthropic("claude-fable-5-1")`);
+    expect(text).toContain(`anthropic("claude-fable-5-2")`);
     expect(text).toContain("({ openai, anthropic })");
     expect(findPreset(def.catalogs!, updated.model)?.preset).toBe(preset);
     expect(activeCatalogIndex(def.catalogs!, def, updated.model)).toBe(0);
@@ -194,7 +192,7 @@ export default prompts({ id: 'triage' }, ({ openai }) => ({
   it("writes a gateway preset and reads it back as the same preset", async () => {
     const preset = presets(def.catalogs![1], "OpenAI")[0];
     const { updated, text } = await edit(preset.value);
-    expect(text).toContain(`model: "openai/gpt-6-astra"`);
+    expect(text).toContain(`model: "openai/gpt-6.2-astra"`);
     expect(findPreset(def.catalogs!, updated.model)?.preset).toBe(preset);
     expect(activeCatalogIndex(def.catalogs!, def, updated.model)).toBe(1);
   });

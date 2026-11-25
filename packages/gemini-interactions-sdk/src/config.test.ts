@@ -532,10 +532,10 @@ describe("GeminiInteractionsSDK", () => {
       const presets = (catalog: ValueCatalog) =>
         catalog.groups.flatMap(g => g.presets ?? []);
       expect(
-        presets(models).find(p => p.label === "Gemini 3.7 Flash")?.value,
+        presets(models).find(p => p.label === "Gemini 3.8 Flash")?.value,
       ).toMatchObject({
         kind: "object",
-        properties: { model: { kind: "primitive", value: "gemini-3.7-flash" } },
+        properties: { model: { kind: "primitive", value: "gemini-3.8-flash" } },
       });
       expect(
         presets(agents).find(p => p.label === "Deep Research Preview")?.value,

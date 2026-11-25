@@ -135,16 +135,16 @@ interface CuratedID {
  * lineup. See https://ai.google.dev/gemini-api/docs/interactions
  */
 const CURATED_MODELS: readonly CuratedID[] = [
+  { label: "Gemini 4 Carbon", id: "gemini-4-carbon" },
+  { label: "Gemini 4 Neon", id: "gemini-4-neon" },
+  { label: "Gemini 4 Hydrogen", id: "gemini-4-hydrogen" },
+  { label: "Gemini 4 Argon", id: "gemini-4-argon" },
   { label: "Gemini 3.8 Flash", id: "gemini-3.8-flash" },
-  { label: "Gemini 3.7 Flash", id: "gemini-3.7-flash" },
   { label: "Gemini 3.6 Flash", id: "gemini-3.6-flash" },
-  { label: "Gemini 3.5 Flash", id: "gemini-3.5-flash" },
   { label: "Gemini 3.5 Flash-Lite", id: "gemini-3.5-flash-lite" },
   { label: "Gemini 3.1 Pro Preview", id: "gemini-3.1-pro-preview" },
   { label: "Gemini 3.1 Flash-Lite", id: "gemini-3.1-flash-lite" },
   { label: "Gemini 3 Flash Preview", id: "gemini-3-flash-preview" },
-  { label: "Gemini 2.5 Pro", id: "gemini-2.5-pro" },
-  { label: "Gemini 2.5 Flash", id: "gemini-2.5-flash" },
   { label: "Gemini 2.5 Flash-Lite", id: "gemini-2.5-flash-lite" },
 ];
 

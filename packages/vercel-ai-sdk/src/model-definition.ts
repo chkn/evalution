@@ -125,8 +125,11 @@ function model(provider: string, label: string, modelId: string): CuratedModel {
  * when typing a custom one. Newest first within a provider.
  */
 export const CURATED_MODELS: readonly CuratedModel[] = [
-  model("openai", "GPT-6 Astra", "gpt-6-astra"),
+  model("openai", "GPT-6.2 Astra", "gpt-6.2-astra"),
+  model("openai", "GPT-6.2 Sol", "gpt-6.2-sol"),
   model("openai", "GPT-6.1 Sol", "gpt-6.1-sol"),
+  model("openai", "GPT-6.1 Terra", "gpt-6.1-terra"),
+  model("openai", "GPT-6 Astra", "gpt-6-astra"),
   model("openai", "GPT-6 Sol", "gpt-6-sol"),
   model("openai", "GPT-6 Luna", "gpt-6-luna"),
   model("openai", "GPT-5.6 Sol", "gpt-5.6-sol"),
@@ -138,25 +141,27 @@ export const CURATED_MODELS: readonly CuratedModel[] = [
   model("openai", "GPT-5.4", "gpt-5.4"),
   model("openai", "GPT-5.4 mini", "gpt-5.4-mini"),
 
-  model("anthropic", "Claude Fable 5.1", "claude-fable-5-1"),
+  model("anthropic", "Claude Fable 5.2", "claude-fable-5-2"),
   model("anthropic", "Claude Opus 5.5", "claude-opus-5-5"),
   model("anthropic", "Claude Sonnet 5.5", "claude-sonnet-5-5"),
+  model("anthropic", "Claude Haiku 5.5", "claude-haiku-5-5"),
+  model("anthropic", "Claude Fable 5.1", "claude-fable-5-1"),
   model("anthropic", "Claude Sonnet 5", "claude-sonnet-5"),
   model("anthropic", "Claude Haiku 4.5", "claude-haiku-4-5"),
   model("anthropic", "Claude Fable 5", "claude-fable-5"),
   model("anthropic", "Claude Opus 5", "claude-opus-5"),
   model("anthropic", "Claude Opus 4.8", "claude-opus-4-8"),
 
+  model("google", "Gemini 4 Carbon", "gemini-4-carbon"),
+  model("google", "Gemini 4 Neon", "gemini-4-neon"),
+  model("google", "Gemini 4 Hydrogen", "gemini-4-hydrogen"),
+  model("google", "Gemini 4 Argon", "gemini-4-argon"),
   model("google", "Gemini 3.8 Flash", "gemini-3.8-flash"),
-  model("google", "Gemini 3.7 Flash", "gemini-3.7-flash"),
   model("google", "Gemini 3.6 Flash", "gemini-3.6-flash"),
-  model("google", "Gemini 3.5 Flash", "gemini-3.5-flash"),
   model("google", "Gemini 3.5 Flash-Lite", "gemini-3.5-flash-lite"),
   model("google", "Gemini 3.1 Pro Preview", "gemini-3.1-pro-preview"),
   model("google", "Gemini 3.1 Flash-Lite", "gemini-3.1-flash-lite"),
   model("google", "Gemini 3 Flash Preview", "gemini-3-flash-preview"),
-  model("google", "Gemini 2.5 Pro", "gemini-2.5-pro"),
-  model("google", "Gemini 2.5 Flash", "gemini-2.5-flash"),
   model("google", "Gemini 2.5 Flash-Lite", "gemini-2.5-flash-lite"),
 ];
 
